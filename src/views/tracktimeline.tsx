@@ -1748,7 +1748,6 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
                   borderRight: '1px solid rgba(255,255,255,0.1)',
                 }}
               >
-                <span className="text-[9px] text-white font-bold drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]">{ce.color}</span>
               </div>
             );
           })}
@@ -1819,8 +1818,6 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
                     borderTop: pct > 0 ? '1px solid rgba(6,182,212,0.6)' : 'none',
                   }}
                 />
-                {/* percentage label */}
-                <span className="text-[7px] text-cyan-300/80 mt-0.5 font-mono leading-none">{pct}%</span>
               </div>
             );
           })}

@@ -1,0 +1,136 @@
+{
+  "appStore": {
+    "mode": "design",
+    "quickSidebarTab": "autoscript",
+    "designSidebarTab": "settings",
+    "performSidebarTab": "vconsole",
+    "quickShow": {
+      "audioActive": false,
+      "intensity": "dynamic",
+      "colorScheme": "auto",
+      "musicStyle": "dance",
+      "movement": "dynamic",
+      "beatDivision": 2,
+      "strobeLimit": 10,
+      "sectionAware": true,
+      "audioReactive": true,
+      "customPalette": {
+        "intro": [],
+        "verse": [],
+        "chorus": [],
+        "bridge": [],
+        "drop": [],
+        "outro": [],
+        "build": []
+      },
+      "colorPresets": [],
+      "userPreset": [
+        "#ff5000",
+        "#ff8c00",
+        "#ffc832"
+      ],
+      "tierConfig": {
+        "primary": 100,
+        "secondary": 70,
+        "tertiary": 40
+      },
+      "forcedColors": {},
+      "forcedDimmer": {},
+      "forcedStrobe": {},
+      "showColorTrack": false,
+      "showStrobeTrack": false,
+      "showDimmerTrack": false,
+      "colorEntries": [],
+      "dimmerEntries": [],
+      "strobeEntries": []
+    },
+    "dmx": {
+      "running": false,
+      "blackout": false,
+      "grandMaster": 255,
+      "universes": [
+        {
+          "id": "u1",
+          "name": "Universe 1",
+          "type": "virtual",
+          "output": true,
+          "channels": 512
+        }
+      ],
+      "channelData": {}
+    },
+    "fixtures": {
+      "library": [],
+      "searchResults": [],
+      "selected": null,
+      "instances": []
+    },
+    "show": {
+      "current": null,
+      "dirty": false,
+      "filePath": null,
+      "recentShows": []
+    },
+    "audio": {
+      "analyzing": false,
+      "deviceId": null,
+      "analysis": null,
+      "bpm": 0
+    }
+  },
+  "showStore": {
+    "patchedFixtures": [
+      {
+        "fixtureDefId": "stage-right-Stage-Wash-7x10W-LED-Moving-Head",
+        "manufacturer": "stage-right",
+        "model": "Stage Wash 7x10W LED Moving Head",
+        "fixtureType": "Color Changer",
+        "modeIndex": 1,
+        "modeName": "14-channel",
+        "universeId": "universe-1",
+        "startAddress": 1,
+        "channelCount": 14,
+        "name": "stage-right Stage Wash 7x10W LED Moving Head",
+        "tier": "primary",
+        "id": "fx-1784994352699-qczxw3me"
+      },
+      {
+        "fixtureDefId": "custom-tonio-6-arm",
+        "manufacturer": "Tonio",
+        "model": "6 arm",
+        "fixtureType": "Flower",
+        "modeIndex": 0,
+        "modeName": "22ch",
+        "universeId": "universe-1",
+        "startAddress": 200,
+        "channelCount": 22,
+        "name": "Tonio 6 arm",
+        "tier": "primary",
+        "id": "fx-1784994370031-2w22nm4c"
+      }
+    ],
+    "universes": [
+      {
+        "id": "universe-1",
+        "name": "Universe 1",
+        "type": "usb-dmx",
+        "channels": 512,
+        "serialPort": "COM6",
+        "artnetIP": "",
+        "artnetSubnet": 0,
+        "artnetUniverse": 0,
+        "sacnUniverse": 1,
+        "sacnPriority": 100
+      }
+    ],
+    "fixturePositions": {},
+    "fixtureGroups": [],
+    "scenes": [],
+    "chasers": [],
+    "effects": [],
+    "cueLists": [],
+    "shows": []
+  },
+  "version": 1,
+  "timestamp": "2026-07-25T17:20:31.841Z"
+}

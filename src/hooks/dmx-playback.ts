@@ -415,11 +415,11 @@ export function useDmxPlayback(options: {
             }
             return active.forcedColor || active.color || undefined;
           })();
+            }
 
           if(fa.rgbSegments.length>0&&paletteColor){
             let[r,g,b]=hexToRgb(paletteColor);
             for(const po of fa.presetOverrideOffsets){chVals[pf.startAddress+po]=0;}
-            // If intensityOffset was detected (including Dimmer/Shutter), set it
             if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;const dVal=active.forcedDimmerVal??255;if(!chVals[addr]||dVal>chVals[addr])chVals[addr]=dVal;}
             for(const seg of fa.rgbSegments){chVals[pf.startAddress+seg.r]=r;chVals[pf.startAddress+seg.g]=g;chVals[pf.startAddress+seg.b]=b;if(seg.w!==null)chVals[pf.startAddress+seg.w]=0;}
 
@@ -550,7 +550,6 @@ export function useDmxPlayback(options: {
           if(fa.focusOffset!==null){const fcAddr=pf.startAddress+fa.focusOffset;
             chVals[fcAddr]=Math.round(80+fxEnergy*120+Math.sin(fxPhase*0.3)*30);
           }
-        }
 
         if(Object.keys(chVals).length>0){
           const sig=String(uniIdx)+':'+Object.entries(chVals).sort((a,b)=>Number(a[0])-Number(b[0])).map(([k,v])=>`${k}=${v}`).join(',');
