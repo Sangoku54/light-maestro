@@ -1,0 +1,84 @@
+{
+  "id": "chauvet-slimpar-56",
+  "manufacturer": "Chauvet",
+  "model": "SlimPAR 56",
+  "type": "Color Changer",
+  "author": "Light Maestro",
+  "modes": [
+    {
+      "name": "4-channel",
+      "channels": [
+        {
+          "name": "Red",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            { "min": 0, "max": 255, "name": "Red 0-100%" }
+          ]
+        },
+        {
+          "name": "Green",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            { "min": 0, "max": 255, "name": "Green 0-100%" }
+          ]
+        },
+        {
+          "name": "Blue",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            { "min": 0, "max": 255, "name": "Blue 0-100%" }
+          ]
+        },
+        {
+          "name": "Dimmer",
+          "type": "Intensity",
+          "defaultValue": 0,
+          "capabilities": [
+            { "min": 0, "max": 255, "name": "Intensity 0-100%" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7-channel",
+      "channels": [
+        { "name": "Dimmer", "type": "Intensity", "defaultValue": 0 },
+        { "name": "Red", "type": "Colour", "defaultValue": 0 },
+        { "name": "Green", "type": "Colour", "defaultValue": 0 },
+        { "name": "Blue", "type": "Colour", "defaultValue": 0 },
+        {
+          "name": "Color Macro",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            { "min": 0, "max": 15, "name": "No function" },
+            { "min": 16, "max": 255, "name": "Color macro" }
+          ]
+        },
+        {
+          "name": "Strobe",
+          "type": "Shutter",
+          "defaultValue": 0,
+          "capabilities": [
+            { "min": 0, "max": 15, "name": "No function" },
+            { "min": 16, "max": 255, "name": "Strobe slow-fast" }
+          ]
+        },
+        {
+          "name": "Dimmer Curve",
+          "type": "Beam",
+          "defaultValue": 0,
+          "capabilities": [
+            { "min": 0, "max": 50, "name": "Linear" },
+            { "min": 51, "max": 100, "name": "Square law" },
+            { "min": 101, "max": 150, "name": "Inverse square law" },
+            { "min": 151, "max": 255, "name": "S-curve" }
+          ]
+        }
+      ]
+    }
+  ]
+}

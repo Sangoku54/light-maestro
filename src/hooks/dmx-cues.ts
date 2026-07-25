@@ -1,0 +1,1163 @@
+﻿/**
+ * DMX Cue Computer - bridges AutoScript cues to DMX channel values.
+ *
+ * Takes patched fixtures + generated cues â†’ computes actual DMX values
+ * respecting fixture channel layouts (RGB, color wheel, dimmer, shutter, pan/tilt, gobo).
+ *
+ * Features an intelligent choreography engine:
+ *  - Section-aware movement patterns (static, sweep, circle, figure8, bounce, wave)
+ *  - Distributed color palettes across fixtures with color chase on drops
+ *  - Intelligent strobe (section-aware rates, energy-gated)
+ *  - Gobo rotation synced to beat boundaries
+ *  - Atmosphere-aware: color temperature, strobe probability, dimmer pulse, color shift speed
+ *
+ * Inspired by QLC+: HTP merge on intensity channels, LTP on everything else.
+ */
+
+import type { PatchedFixture, FixtureTier } from '../stores/showStore';
+import { useShowStore, type FixtureGroup } from '../stores/showStore';
+
+// â”€â”€â”€ Inline fixture definition types (mirrors electron/fixtures/library.ts) â”€â”€
+
+export interface DmxFixtureCapability {
+  min: number;
+  max: number;
+  name: string;
+  color?: string;
+}
+
+export interface DmxFixtureChannel {
+  name: string;
+  offset?: number;
+  type:
+    | 'Intensity'
+    | 'Pan'
+    | 'Tilt'
+    | 'Colour'
+    | 'Gobo'
+    | 'Shutter'
+    | 'Speed'
+    | 'Prism'
+    | 'Effect'
+    | 'Beam'
+    | 'Maintenance'
+    | 'Nothing';
+  capabilities?: DmxFixtureCapability[];
+}
+
+export interface DmxFixtureMode {
+  name: string;
+  channels: DmxFixtureChannel[];
+}
+
+export interface DmxFixtureDefinition {
+  id: string;
+  manufacturer: string;
+  model: string;
+  modes: DmxFixtureMode[];
+}
+
+// â”€â”€â”€ DMX Cue type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+export interface DmxCue {
+  time: number;
+  section: string;
+  universe: number;
+  channelValues: Record<number, number>;
+  fixtureNames: string[];
+  fixtureCount: number;
+  effect: string;
+  colors: string[];
+  manual?: boolean; // true when inserted by user via waveform context menu
+}
+
+// â”€â”€â”€ Cue input (from genCues) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+export interface CueInput {
+  time: number;
+  section: string;
+  effect: string;
+  intensity: string;
+  colors: string[];
+  color: string;
+  strobe: boolean;
+  group?: string;
+  /** NEW: Atmosphere-aware parameters */
+  colorTemp?: 'warm' | 'neutral' | 'cool';
+  strobeProbability?: number;
+  dimmerPulseOnBeat?: boolean;
+  colorShiftSpeed?: number;
+  movement?: 'static' | 'sweep' | 'circle' | 'pulse' | 'wave';
+  /** Continuous 0-1 audio energy at cue time (from energyCurve).
+   *  When present, overrides string intensity for DMX value computation. */
+  energy?: number;
+}
+
+// â”€â”€â”€ Movement Pattern Engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+export type MovementPattern =
+  | 'static'
+  | 'sweep'
+  | 'circle'
+  | 'figure8'
+  | 'bounce'
+  | 'wave'
+  | 'pulse'
+  | 'zigzag'
+  | 'diamond'
+  | 'spiral'
+  | 'heartbeat'
+  | 'randomWalk'
+  | 'panOnly'
+  | 'tiltOnly';
+
+export interface MovementConfig {
+  pattern: MovementPattern;
+  centerX: number;
+  centerY: number;
+  amplitude: number;
+  speed: number;
+  phaseOffset: number;
+}
+
+// â”€â”€â”€ Section â†’ Movement config (fallback if cue.movement not set) â”€â”€
+
+const SECTION_MOVEMENT: Record<string, MovementConfig> = {
+  intro:  { pattern: 'static',   centerX: 128, centerY: 128, amplitude: 50,  speed: 0.15, phaseOffset: 0.25 },
+  verse:  { pattern: 'sweep',    centerX: 128, centerY: 128, amplitude: 90,  speed: 0.3,  phaseOffset: 0.15 },
+  chorus: { pattern: 'circle',   centerX: 128, centerY: 128, amplitude: 120, speed: 0.6,  phaseOffset: 0.1  },
+  bridge: { pattern: 'static',   centerX: 128, centerY: 128, amplitude: 70,  speed: 0.1,  phaseOffset: 0.3  },
+  drop:   { pattern: 'bounce',   centerX: 128, centerY: 128, amplitude: 140, speed: 0.9,  phaseOffset: 0.05 },
+  outro:  { pattern: 'sweep',    centerX: 128, centerY: 128, amplitude: 70,  speed: 0.2,  phaseOffset: 0.2  },
+};
+
+const DEFAULT_MOVEMENT: MovementConfig = {
+  pattern: 'sweep',
+  centerX: 128,
+  centerY: 128,
+  amplitude: 80,
+  speed: 0.3,
+  phaseOffset: 0.15,
+};
+
+/**
+ * Movement config by movement type (from atmosphere-aware cues).
+ * When a cue specifies `movement`, use these presets with section-appropriate amplitude.
+ */
+const MOVEMENT_BY_TYPE: Record<string, Omit<MovementConfig, 'amplitude'>> = {
+  static: { pattern: 'static', centerX: 128, centerY: 128, speed: 0.05, phaseOffset: 0.3 },
+  sweep:  { pattern: 'sweep',  centerX: 128, centerY: 128, speed: 0.35, phaseOffset: 0.15 },
+  circle: { pattern: 'circle', centerX: 128, centerY: 128, speed: 0.6,  phaseOffset: 0.1 },
+  pulse:  { pattern: 'bounce', centerX: 128, centerY: 128, speed: 0.8,  phaseOffset: 0.05 },
+  wave:   { pattern: 'wave',   centerX: 128, centerY: 128, speed: 0.5,  phaseOffset: 0.15 },
+};
+
+function getMovementConfig(section: string, cueMovement?: string): MovementConfig {
+  // If cue provides a movement type, build from the type presets
+  if (cueMovement && MOVEMENT_BY_TYPE[cueMovement]) {
+    const base = MOVEMENT_BY_TYPE[cueMovement];
+    // Scale amplitude by section energy expectation
+    const secKey = section.toLowerCase();
+    const secAmplitude = SECTION_MOVEMENT[secKey]?.amplitude ?? 40;
+    return {
+      pattern: base.pattern as MovementPattern,
+      centerX: base.centerX,
+      centerY: base.centerY,
+      amplitude: secAmplitude,
+      speed: base.speed,
+      phaseOffset: base.phaseOffset,
+    };
+  }
+  const key = section.toLowerCase();
+  return SECTION_MOVEMENT[key] ?? DEFAULT_MOVEMENT;
+}
+
+function computeMovement(
+  config: MovementConfig,
+  time: number,
+  fixtureIndex: number,
+  totalFixtures: number,
+): { pan: number; tilt: number } {
+  const basePhase = time * config.speed * 2 * Math.PI;
+  const fixturePhase = totalFixtures > 1
+    ? fixtureIndex * config.phaseOffset * 2 * Math.PI
+    : 0;
+  const phase = basePhase + fixturePhase;
+
+  let panNorm = 0;
+  let tiltNorm = 0;
+
+  switch (config.pattern) {
+    case 'static': {
+      panNorm = Math.sin(basePhase * 0.05 + fixturePhase) * 0.5;
+      tiltNorm = Math.cos(basePhase * 0.07 + fixturePhase) * 0.5;
+      break;
+    }
+    case 'sweep': {
+      panNorm = Math.sin(phase);
+      tiltNorm = 0;
+      break;
+    }
+    case 'circle': {
+      panNorm = Math.sin(phase);
+      tiltNorm = Math.cos(phase);
+      break;
+    }
+    case 'figure8': {
+      panNorm = Math.sin(phase);
+      tiltNorm = Math.sin(2 * phase);
+      break;
+    }
+    case 'bounce':
+    case 'pulse': {
+      panNorm = Math.abs(Math.sin(phase)) * 2 - 1;
+      tiltNorm = 0;
+      break;
+    }
+    case 'wave': {
+      panNorm = 0;
+      tiltNorm = Math.sin(phase);
+      break;
+    }
+    case 'zigzag': {
+      // Sharp linear zigzag — sawtooth wave on pan, square on tilt
+      panNorm = ((phase / Math.PI) % 2) - 1; // sawtooth -1..1
+      tiltNorm = Math.sin(phase) > 0 ? 0.5 : -0.5;
+      break;
+    }
+    case 'diamond': {
+      // Diamond/rhombus path — triangle waves 90° out of phase
+      panNorm = ((phase / Math.PI) % 2) - 1; // triangle saw
+      tiltNorm = (((phase + Math.PI/2) / Math.PI) % 2) - 1;
+      break;
+    }
+    case 'spiral': {
+      // Expanding/contracting spiral — sin/cos with amplitude modulation
+      const spiralR = 0.3 + 0.7 * Math.abs(Math.sin(phase * 0.3));
+      panNorm = Math.sin(phase * 2) * spiralR;
+      tiltNorm = Math.cos(phase * 2) * spiralR;
+      break;
+    }
+    case 'heartbeat': {
+      // Double-pulse like a heartbeat — two quick beats, then pause
+      const hbPhase = (phase / (Math.PI * 2)) % 1; // 0..1 cycle
+      const hb = hbPhase < 0.15 ? 1 : hbPhase < 0.3 ? 0.6 : 0;
+      panNorm = hb * Math.sin(phase * 3);
+      tiltNorm = hb * Math.cos(phase * 3);
+      break;
+    }
+    case 'randomWalk': {
+      // Smooth random drift — use seeded sin with irrational frequencies for organic feel
+      panNorm = Math.sin(phase * 0.7) * 0.5 + Math.sin(phase * 1.3) * 0.3 + Math.cos(phase * 2.1) * 0.2;
+      tiltNorm = Math.cos(phase * 0.6) * 0.5 + Math.sin(phase * 1.7) * 0.3 + Math.sin(phase * 2.3) * 0.2;
+      break;
+    }
+    case 'panOnly': {
+      panNorm = Math.sin(phase);
+      tiltNorm = 0;
+      break;
+    }
+    case 'tiltOnly': {
+      panNorm = 0;
+      tiltNorm = Math.sin(phase);
+      break;
+    }
+  }
+
+  const pan = Math.round(config.centerX + panNorm * config.amplitude);
+  const tilt = Math.round(config.centerY + tiltNorm * config.amplitude);
+
+  return {
+    pan: Math.max(0, Math.min(255, pan)),
+    tilt: Math.max(0, Math.min(255, tilt)),
+  };
+}
+
+// â”€â”€â”€ Strobe configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+const STROBE_DISABLED_SECTIONS = new Set(['intro', 'verse', 'bridge', 'outro']);
+
+const STROBE_RATES: Record<string, [number, number]> = {
+  chorus: [180, 200],
+  drop:   [200, 255],
+};
+const DEFAULT_STROBE_RATE: [number, number] = [160, 220];
+
+function getStrobeRate(section: string, strobeProbability?: number): number {
+  const [lo, hi] = STROBE_RATES[section.toLowerCase()] ?? DEFAULT_STROBE_RATE;
+  // Scale rate based on strobe probability
+  const prob = strobeProbability ?? 0.5;
+  return Math.round(lo + (hi - lo) * prob);
+}
+
+/**
+ * Decide whether to strobe using atmosphere-aware probability.
+ * Falls back to section-based rules if strobeProbability is not provided.
+ */
+function shouldStrobe(section: string, strobeInput: boolean, strobeProbability?: number): boolean {
+  const key = section.toLowerCase();
+
+  // Atmosphere-aware: use probability if provided
+  if (strobeProbability !== undefined) {
+    if (strobeProbability <= 0.1) return false;
+    if (strobeProbability >= 0.8) return true;
+    // For mid-range probabilities, combine with section context
+    if (STROBE_DISABLED_SECTIONS.has(key)) return strobeProbability > 0.5;
+    if (key === 'drop') return true; // drop always strobes
+    if (key === 'chorus') return strobeProbability > 0.3;
+    return strobeProbability > 0.4;
+  }
+
+  // Legacy section-based rules
+  if (STROBE_DISABLED_SECTIONS.has(key)) return false;
+  if (key === 'drop') return true;
+  if (key === 'chorus') return strobeInput;
+  return strobeInput;
+}
+
+// â”€â”€â”€ Gobo helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+const BEAT_INTERVAL = 0.5;
+
+function getGoboValue(
+  goboCaps: DmxFixtureCapability[],
+  time: number,
+  colorShiftSpeed?: number,
+): number {
+  if (goboCaps.length === 0) return 0;
+  // Color shift speed accelerates gobo rotation
+  const speed = 1 + (colorShiftSpeed ?? 0.5) * 3; // 1x-4x speed
+  const beat = Math.floor(time * speed / BEAT_INTERVAL);
+  const idx = beat % goboCaps.length;
+  const cap = goboCaps[idx];
+  return Math.round((cap.min + cap.max) / 2);
+}
+
+// â”€â”€â”€ Color helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  return [
+    parseInt(h.substring(0, 2), 16),
+    parseInt(h.substring(2, 4), 16),
+    parseInt(h.substring(4, 6), 16),
+  ];
+}
+
+function colorDistance(hex1: string, hex2: string): number {
+  const [r1, g1, b1] = hexToRgb(hex1);
+  const [r2, g2, b2] = hexToRgb(hex2);
+  return Math.sqrt(2 * (r1 - r2) ** 2 + 4 * (g1 - g2) ** 2 + 3 * (b1 - b2) ** 2);
+}
+
+/**
+ * Apply color temperature shift to warm/cool a color.
+ * warm: boost red, reduce blue
+ * cool: boost blue, reduce red
+ */
+function applyColorTemp(rgb: [number, number, number], colorTemp?: 'warm' | 'neutral' | 'cool'): [number, number, number] {
+  if (!colorTemp || colorTemp === 'neutral') return rgb;
+  const TRIM = Math.floor;
+  if (colorTemp === 'warm') {
+    return [
+      TRIM(Math.min(255, rgb[0] * 1.2)),
+      TRIM(Math.max(0, rgb[1] * 0.9)),
+      TRIM(Math.max(0, rgb[2] * 0.6)),
+    ];
+  }
+  // cool
+  return [
+    TRIM(Math.max(0, rgb[0] * 0.7)),
+    TRIM(Math.min(255, rgb[1] * 1.05)),
+    TRIM(Math.min(255, rgb[2] * 1.3)),
+  ];
+}
+
+/** Classify an RGB color into a named category */
+function classifyColor(r: number, g: number, b: number): string {
+  if (r > 200 && g > 200 && b > 200) return 'white';
+  if (r < 40 && g < 40 && b < 40) return 'black';
+  // Dominant channel determines category
+  const max = Math.max(r, g, b);
+  if (max === r) {
+    if (g > b * 1.5) return 'yellow';
+    if (b > g * 1.5) return 'magenta';
+    if (r > g * 2 && r > b * 2) return 'red';
+    return 'orange';
+  }
+  if (max === g) {
+    if (r > b * 1.5) return 'yellow';
+    return 'green';
+  }
+  if (max === b) {
+    if (r > g * 1.5) return 'magenta';
+    if (r > g * 0.6) return 'purple';
+    return 'blue';
+  }
+  return 'white';
+}
+
+/** Score how well a capability name matches a target color category */
+function colorNameMatchScore(capName: string, targetCat: string): number {
+  const n = capName.toLowerCase().trim();
+  const exact: Record<string, string[]> = {
+    red: ['red', 'rouge'], green: ['green', 'vert'], blue: ['blue', 'bleu'],
+    white: ['white', 'blanc', 'open', 'ouvert'], yellow: ['yellow', 'jaune'],
+    magenta: ['magenta'], cyan: ['cyan'], orange: ['orange'],
+    purple: ['purple', 'violet', 'pourpre', 'uv', 'lavender', 'mauve'],
+    pink: ['pink', 'rose'], amber: ['amber', 'ambre'],
+  };
+  const keywords = exact[targetCat] || [targetCat];
+  for (const kw of keywords) {
+    if (n === kw) return 10;        // exact match
+    if (n.startsWith(kw + ' ')) return 8;  // "Red something"
+    if (n.includes(kw)) return 5;   // contains keyword
+  }
+  return 0;
+}
+
+const INTENSITY_VALUES: Record<string, number> = {
+  low: 180,    // energy 0.2–0.4 -> DMX 160–180
+  medium: 210, // energy 0.4–0.6 -> DMX 180–210
+  high: 255,   // energy 0.6–0.9 -> DMX 210–255
+};
+
+// Minimum intensity floor for dynamic mode - ensures fixtures are always visible
+const MIN_DYNAMIC_INTENSITY = 140;
+
+// ABSOLUTE minimum DMX intensity for any fixture on any section.
+// SoundSwitch principle: every patched fixture always receives dimmer >= 50% (128).
+const ABSOLUTE_MIN_INTENSITY = 60;
+
+// Safe shutter-open value: 255 is universally open on >95% of fixtures.
+
+
+
+const SHUTTER_OPEN_SAFE = 255;
+
+// SoundSwitch: map intensity level + energy -> DMX value within level range
+function mapIntensity(level: string, energy: number): number {
+  if (level === 'dynamic') {
+    return Math.round(Math.max(ABSOLUTE_MIN_INTENSITY, 20 + energy * 235));
+  }
+  let lo: number, hi: number;
+  switch (level) {
+    case 'very-low': lo = 60; hi = 100; break;
+    case 'low': lo = 100; hi = 150; break;
+    case 'medium': lo = 150; hi = 200; break;
+    case 'high': lo = 200; hi = 235; break;
+    case 'very-high': lo = 235; hi = 255; break;
+    default: lo = 120; hi = 200; break;
+  }
+  const clamped = Math.max(0, Math.min(1, energy));
+  return Math.round(Math.max(ABSOLUTE_MIN_INTENSITY, lo + clamped * (hi - lo)));
+}
+export interface TierMultipliers {
+  primary: number;    // 0-100 percentage
+  secondary: number;  // 0-100 percentage
+  tertiary: number;   // 0-100 percentage
+}
+
+function getTierIntensityMultiplier(tier: FixtureTier, overrides?: TierMultipliers): number {
+  if (overrides) {
+    switch (tier) {
+      case 'primary': return overrides.primary / 100;
+      case 'secondary': return overrides.secondary / 100;
+      case 'tertiary': return overrides.tertiary / 100;
+    }
+  }
+  switch (tier) {
+    case 'primary': return 1.0;
+    case 'secondary': return 0.7;
+    case 'tertiary': return 0.4;
+    default: return 1.0;
+  }
+}
+
+function getTierMovementMultiplier(tier: FixtureTier): number {
+  switch (tier) {
+    case 'primary': return 1.0;
+    case 'secondary': return 0.8;
+    case 'tertiary': return 0.5;
+    default: return 1.0;
+  }
+}
+
+function shouldTierStrobe(tier: FixtureTier): boolean {
+  return tier === 'primary';
+}
+
+function getTierColorIndex(tier: FixtureTier, paletteIndex: number, paletteLength: number): number {
+  switch (tier) {
+    case 'primary':
+      return paletteIndex % paletteLength;
+    case 'secondary':
+      return paletteIndex % Math.min(2, paletteLength);
+    case 'tertiary':
+      return 0;
+    default:
+      return paletteIndex % paletteLength;
+  }
+}
+
+// â”€â”€â”€ Options â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+export interface ComputeDmxCuesOptions {
+  cues: CueInput[];
+  patchedFixtures: PatchedFixture[];
+  fixtureDefs: Map<string, DmxFixtureDefinition>;
+  strobeLimit?: number;
+  fixtureGroups?: FixtureGroup[];
+  tierMultipliers?: TierMultipliers;
+  /** Ordered universe IDs from the DMX store (dmx.universes).
+   *  Must match Stage3D's universeIndexMap ordering so DMX writes land in the correct slot. */
+  universeIds?: string[];
+}
+
+// â”€â”€â”€ Channel analysis â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+interface FixtureChannelAnalysis {
+  fixture: PatchedFixture;
+  intensityOffset: number | null;
+  ledIntensityOffsets: number[];
+  shutterOffset: number | null;
+  rgbOffsets: number[] | null;
+  wheelOffset: number | null;
+  wheelCaps: DmxFixtureCapability[] | null;
+  goboOffset: number | null;
+  goboCaps: DmxFixtureCapability[] | null;
+  panOffset: number | null;
+  panFineOffset: number | null;
+  tiltOffset: number | null;
+  tiltFineOffset: number | null;
+  prismOffset: number | null;
+  effectOffset: number | null;
+  effectCaps: DmxFixtureCapability[] | null;
+  speedOffset: number | null;
+  beamOffset: number | null;
+  macroOffsets: number[];
+  universeIndex: number;
+  channelCount: number;
+}
+
+function analyzeFixture(
+  pf: PatchedFixture,
+  def: DmxFixtureDefinition | undefined,
+): FixtureChannelAnalysis {
+  const channels = def?.modes[pf.modeIndex]?.channels ?? [];
+  const fa: FixtureChannelAnalysis = {
+    fixture: pf,
+    intensityOffset: null,
+    ledIntensityOffsets: [],
+    shutterOffset: null,
+    rgbOffsets: null,
+    wheelOffset: null,
+    wheelCaps: null,
+    goboOffset: null,
+    goboCaps: null,
+    panOffset: null,
+    panFineOffset: null,
+    tiltOffset: null,
+    tiltFineOffset: null,
+    prismOffset: null,
+    effectOffset: null,
+    effectCaps: null,
+    speedOffset: null,
+    beamOffset: null,
+    macroOffsets: [],
+    universeIndex: 0,
+  };
+
+  const colourChannels: { offset: number; name: string; caps?: DmxFixtureCapability[] }[] = [];
+
+  if (channels.length === 0) {
+      // No channels — fixture definition may be incomplete
+  }
+
+  for (let i = 0; i < channels.length; i++) {
+    const ch = channels[i];
+    const off = ch.offset ?? i;
+    // Macro channels are excluded from auto-generated DMX (user-configured only)
+    if (ch.type === 'Macro') { fa.macroOffsets.push(off); continue; }
+    // Auto-detect RGB channels by name even if type is not 'Colour' (common in custom fixtures)
+    // Match names like "Red", "Red 1", "Red(1)", "r", "R" etc.
+    const chName = (ch.name?.trim() ?? '').toLowerCase();
+    const isRgbNamed = /^(red|green|blue|r|g|b)(\s*\(?\d*\)?)?$/i.test(chName);
+    if (isRgbNamed || ch.type === 'Colour') {
+      colourChannels.push({ offset: off, name: ch.name, caps: (ch as any).capabilities });
+      continue;
+    }
+    switch (ch.type) {
+      case 'Intensity':
+        if (fa.intensityOffset === null) {
+          fa.intensityOffset = off;
+        } else {
+          fa.ledIntensityOffsets.push(off);
+        }
+        break;
+      case 'Shutter':
+        if (fa.shutterOffset === null) fa.shutterOffset = off;
+        break;
+      case 'Pan':
+        if (fa.panOffset === null) fa.panOffset = off;
+        else if (fa.panFineOffset === null) fa.panFineOffset = off;
+        break;
+      case 'Tilt':
+        if (fa.tiltOffset === null) fa.tiltOffset = off;
+        else if (fa.tiltFineOffset === null) fa.tiltFineOffset = off;
+        break;
+      case 'Gobo':
+        if (fa.goboOffset === null) {
+          fa.goboOffset = off;
+          fa.goboCaps = ch.capabilities ?? null;
+        }
+        break;
+      case 'Prism':
+        if (fa.prismOffset === null) fa.prismOffset = off;
+        break;
+      case 'Effect':
+        if (fa.effectOffset === null) {
+          fa.effectOffset = off;
+          fa.effectCaps = ch.capabilities ?? null;
+        }
+        break;
+      case 'Speed':
+        if (fa.speedOffset === null) fa.speedOffset = off;
+        break;
+      case 'Beam':
+        if (fa.beamOffset === null) fa.beamOffset = off;
+        break;
+      default:
+        ;
+        break;
+    }
+  }
+
+  if (colourChannels.length > 0) {
+    const rgbKeywords = (n: string) =>
+      ['red', 'green', 'blue', ' r', ' g', ' b'].some(k => n.toLowerCase().includes(k));
+
+    const hasColorCaps = colourChannels.some(
+      c => c.caps && c.caps.some(cap => cap.color),
+    );
+
+    if (colourChannels.some(c => rgbKeywords(c.name)) && colourChannels.length >= 3) {
+      const rIdx = colourChannels.findIndex(c => /red|\br\b/i.test(c.name));
+      const gIdx = colourChannels.findIndex(c => /green|\bg\b/i.test(c.name));
+      const bIdx = colourChannels.findIndex(c => /blue|\bb\b/i.test(c.name));
+      if (rIdx >= 0 && gIdx >= 0 && bIdx >= 0) {
+        fa.rgbOffsets = [
+          colourChannels[rIdx].offset,
+          colourChannels[gIdx].offset,
+          colourChannels[bIdx].offset,
+        ];
+      } else {
+        fa.rgbOffsets = colourChannels.slice(0, 3).map(c => c.offset);
+      }
+    } else if (hasColorCaps) {
+      const wheel = colourChannels.find(c => c.caps && c.caps.some(cap => cap.color));
+      if (wheel) {
+        fa.wheelOffset = wheel.offset;
+        fa.wheelCaps = wheel.caps?.filter(c => c.color) ?? null;
+      }
+    } else if (colourChannels.length >= 3) {
+      fa.rgbOffsets = colourChannels.slice(0, 3).map(c => c.offset);
+    } else if (colourChannels.length === 1) {
+      fa.wheelOffset = colourChannels[0].offset;
+    }
+  }
+
+  fa.channelCount = channels.length;
+
+  return fa;
+}
+
+// â”€â”€â”€ Main compute â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
+  const { cues, patchedFixtures, fixtureDefs, strobeLimit = 10, fixtureGroups = [], tierMultipliers } = options;
+  if (cues.length === 0 || patchedFixtures.length === 0) return [];
+
+
+
+
+
+
+
+
+
+  const groupMap = new Map<string, FixtureGroup>();
+  for (const g of fixtureGroups) {
+    groupMap.set(g.id, g);
+  }
+  const patchedIds = new Set(patchedFixtures.map((f) => f.id));
+
+  // Use shared universe ordering when provided (matches Stage3D universeIndexMap).
+  // Otherwise fall back to deriving from patched fixtures (single-universe case still works).
+  const universeOrder: string[] = options.universeIds && options.universeIds.length > 0
+    ? options.universeIds
+    : (() => {
+        const order: string[] = [];
+        for (const pf of patchedFixtures) {
+          if (!order.includes(pf.universeId)) {
+            order.push(pf.universeId);
+          }
+        }
+        return order;
+      })();
+
+  const analyses = patchedFixtures.map(pf => {
+    const def = fixtureDefs.get(pf.fixtureDefId);
+    const fa = analyzeFixture(pf, def);
+    fa.universeIndex = universeOrder.indexOf(pf.universeId);
+    return fa;
+  });
+
+  const dmxCues: DmxCue[] = [];
+
+  const fixturesByUniverse = new Map<number, FixtureChannelAnalysis[]>();
+  for (const fa of analyses) {
+    const list = fixturesByUniverse.get(fa.universeIndex) ?? [];
+    list.push(fa);
+    fixturesByUniverse.set(fa.universeIndex, list);
+  }
+
+  // â”€â”€â”€ Diagnostic: track first cue per section â”€â”€â”€
+
+
+  let cueIndex = 0;
+  for (const cue of cues) {
+    // â”€â”€ NEW: Atmosphere-aware parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    const movementConfig = getMovementConfig(cue.section, cue.movement);
+    const enableStrobe = shouldStrobe(cue.section, cue.strobe, cue.strobeProbability);
+    const strobeRate = enableStrobe ? getStrobeRate(cue.section, cue.strobeProbability) : 0;
+    const isDrop = cue.section.toLowerCase() === 'drop';
+    const isChorus = cue.section.toLowerCase() === 'chorus';
+    const sectionKey = cue.section.toLowerCase();
+    // Derive energy from cue.energy (continuous from audio analysis) or fall back to string label
+    const energy = cue.energy != null
+      ? cue.energy  // continuous 0-1 from audio energyCurve
+      : cue.intensity === 'very-high' ? 0.95
+      : cue.intensity === 'high' ? 0.8
+      : cue.intensity === 'medium' ? 0.5
+      : cue.intensity === 'low' ? 0.25
+      : cue.intensity === 'very-low' ? 0.1
+      : isDrop ? 1.0 : isChorus ? 0.8
+      : sectionKey === 'bridge' ? 0.6 : 0.4;
+
+    const useDimmerPulse = cue.dimmerPulseOnBeat ?? (isDrop);
+
+    for (const [universe, fixtureList] of fixturesByUniverse) {
+      let activeList = fixtureList;
+      if (cue.group) {
+        if (cue.group.startsWith('tier:')) {
+          const tier = cue.group.slice(5) as FixtureTier;
+          activeList = fixtureList.filter((fa) => fa.fixture.tier === tier);
+        } else {
+          const group = groupMap.get(cue.group);
+          if (group) {
+            const groupFixtureIds = new Set(group.fixtureIds.filter((fid) => patchedIds.has(fid)));
+            activeList = fixtureList.filter((fa) => groupFixtureIds.has(fa.fixture.id));
+          }
+        }
+      }
+      if (activeList.length === 0) continue;
+
+      const channelValues: Record<number, number> = {};
+      const fixtureNames: string[] = [];
+      const allColors: string[] = [...cue.colors];
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+      const totalFixtures = activeList.length;
+
+      for (let fi = 0; fi < activeList.length; fi++) {
+        const fa = activeList[fi];
+        const pf = fa.fixture;
+
+        // â”€â”€ 1. Intensity (HTP) - tier-scaled, dimmer-pulse aware â”€â”€
+        // SoundSwitch principle: EVERY patched fixture ALWAYS gets dimmer >= absolute minimum.
+        // Sections differ by movement pattern and strobe, NOT by going dark.
+        let computedIntensity = 0;
+        {
+          let val = mapIntensity(cue.intensity, energy);
+
+          // Dimmer pulse: alternate high/low or use beat-synced pump
+          if (useDimmerPulse) {
+            const sec = cue.section.toLowerCase();
+            const bpm = Math.max(60, Math.min(200, (options as any)?.bpm ?? 120));
+            // Gentle BPM-synced LFO: all sections get subtle breathing
+            if (sec === 'drop' || sec === 'chorus') {
+              val = Math.round(val * (0.7 + 0.3 * Math.abs(Math.sin(cue.time * Math.PI * 2 / (60 / bpm)))));
+            } else if (cue.dimmerPulseOnBeat) {
+              val = Math.round(val * (0.6 + 0.4 * Math.abs(Math.sin(cue.time * Math.PI * 2 / (60 / bpm)))));
+            } else {
+              val = Math.round(val * (0.85 + 0.15 * Math.sin(cue.time * Math.PI * 2 / (60 / bpm) * 0.5)));
+            }
+          }
+
+          val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
+          // ABSOLUTE floor: never below 128 (50%) for ANY fixture on ANY section
+          val = Math.max(val, ABSOLUTE_MIN_INTENSITY);
+          computedIntensity = val;
+        }
+
+        if (fa.intensityOffset !== null) {
+          const dmxAddr = pf.startAddress + fa.intensityOffset;
+          if (!channelValues[dmxAddr] || computedIntensity > channelValues[dmxAddr]) {
+            channelValues[dmxAddr] = computedIntensity;
+
+          }
+        }
+
+        // -- 2. Colour - section-stable palette rotation (SoundSwitch-style) --
+        // SoundSwitch-style: color rotates slowly WITHIN section, not per-cue
+        const sectionColorShift = Math.floor(cueIndex / 8) % Math.max(1, cue.colors.length);
+        // Tier-aware color offset: each tier gets a different palette position
+        const tierColorOffset = pf.tier === 'secondary' ? Math.floor(cue.colors.length / 3)
+          : pf.tier === 'tertiary' ? Math.floor(cue.colors.length * 2 / 3)
+          : 0;
+        const tierColorIdx = (getTierColorIndex(pf.tier, sectionColorShift + tierColorOffset, cue.colors.length)) % cue.colors.length;
+        const paletteColor = cue.colors.length > 0
+          ? cue.colors[tierColorIdx]
+          : undefined;
+
+        if (fa.rgbOffsets && paletteColor) {
+          let [r, g, b] = hexToRgb(paletteColor);
+          // Apply color temperature shift
+          if (cue.colorTemp) {
+            [r, g, b] = applyColorTemp([r, g, b], cue.colorTemp);
+          }
+          // Scale RGB by intensity when fixture has no master dimmer (wash/par without dedicated dimmer channel)
+          if (fa.intensityOffset === null) {
+            const scale = computedIntensity / 255;
+            r = Math.round(r * scale);
+            g = Math.round(g * scale);
+            b = Math.round(b * scale);
+          }
+          if (fa.rgbOffsets[0] !== undefined) channelValues[pf.startAddress + fa.rgbOffsets[0]] = r;
+          if (fa.rgbOffsets[1] !== undefined) channelValues[pf.startAddress + fa.rgbOffsets[1]] = g;
+          if (fa.rgbOffsets[2] !== undefined) channelValues[pf.startAddress + fa.rgbOffsets[2]] = b;
+        } else if (fa.wheelOffset !== null && paletteColor) {
+          let bestCap = fa.wheelCaps?.[0] ?? null;
+          let bestDist = Infinity;
+          if (fa.wheelCaps) {
+            for (const cap of fa.wheelCaps) {
+              if (!cap.color) continue;
+              const d = colorDistance(paletteColor, cap.color);
+              if (d < bestDist) {
+                bestDist = d;
+                bestCap = cap;
+              }
+            }
+          }
+          // Fallback: name-based matching for fixtures without hex color capabilities
+          if ((!bestCap || bestDist === Infinity) && fa.wheelOffset !== null) {
+            const def = fixtureDefs.get(pf.fixtureDefId);
+            const mode = def?.modes[pf.modeIndex];
+            const wheelChannel = mode?.channels.find(ch => (ch.offset ?? mode.channels.indexOf(ch)) === fa.wheelOffset);
+            const rawCaps = wheelChannel?.capabilities;
+            if (rawCaps && rawCaps.length > 0) {
+              // Classify palette color into a category
+              const [pr, pg, pb] = hexToRgb(paletteColor);
+              const cat = classifyColor(pr, pg, pb); // 'red','green','blue','white','yellow','magenta','cyan','orange','purple'
+              // Find matching cap by name
+              let bestMatch: { cap: any; score: number } | null = null;
+              for (const cap of rawCaps) {
+                if (!cap.name) continue;
+                const s = colorNameMatchScore(cap.name, cat);
+                if (s > (bestMatch?.score ?? 0)) bestMatch = { cap, score: s };
+              }
+              if (bestMatch && bestMatch.score > 0) {
+                bestCap = bestMatch.cap;
+              } else {
+                // No name match: cycle through wheel on beats
+                const bpm = Math.max(60, Math.min(200, (options as any)?.bpm ?? 120));
+                const beatInterval = 60 / bpm;
+                const idx = Math.floor((cue.time ?? 0) / beatInterval) % rawCaps.length;
+                bestCap = rawCaps[idx];
+              }
+            }
+          }
+          const wheelVal = bestCap
+            ? Math.round((bestCap.min + bestCap.max) / 2)
+            : 128;
+          channelValues[pf.startAddress + fa.wheelOffset] = wheelVal;
+        }
+
+        // ── 2b. LED intensity channels: fixtures with individual LED dimmers (no RGB, no color wheel)
+        // Use section-stable base colors with minimal BPM-synced wave for organic feel
+        if (!fa.rgbOffsets && fa.wheelOffset === null && fa.ledIntensityOffsets.length > 0) {
+          const numLeds = fa.ledIntensityOffsets.length;
+          let ledSectionHash = 0;
+          for (let s = 0; s < sectionKey.length; s++) ledSectionHash = ((ledSectionHash << 5) - ledSectionHash) + sectionKey.charCodeAt(s);
+          const ledBpm = Math.max(60, Math.min(200, (options as any)?.bpm ?? 120));
+          // Minimal wave: ±6% amplitude, staggered per LED for subtle motion
+          const ledWave = (ledIdx: number) => 0.94 + 0.06 * Math.sin(cue.time * Math.PI * 2 / (60 / ledBpm) * 0.5 + ledIdx * 0.8);
+          for (let li = 0; li < numLeds; li++) {
+            const colorIdx = cue.colors.length > 0
+              ? Math.abs(ledSectionHash + li) % cue.colors.length
+              : 0;
+            const ledColor = cue.colors.length > 0 ? cue.colors[colorIdx] : '#ffffff';
+            const [lr, lg, lb] = hexToRgb(ledColor);
+            // Higher base brightness: 0.6 floor + 0.4 * brightness factor
+            let ledVal = Math.round(computedIntensity * (0.6 + 0.4 * ((lr + lg + lb) / (3 * 255))));
+            ledVal = Math.round(ledVal * ledWave(li));
+            channelValues[pf.startAddress + fa.ledIntensityOffsets[li]] = Math.max(64, Math.min(255, ledVal));
+          }
+        }
+
+        // -- 2c. Effect channel fallback: only for fixtures with effect channel but NO effect caps
+        // (fixtures with effectCaps are handled by section 7 below)
+        if (!fa.rgbOffsets && fa.wheelOffset === null && fa.effectOffset !== null && (!fa.effectCaps || fa.effectCaps.length === 0)) {
+          const effectVal = 8 + ((cueIndex % 24) * 10);
+          channelValues[pf.startAddress + fa.effectOffset] = Math.min(255, effectVal);
+        }
+
+        // Always set the shutter when available: open when not strobing (DMX 8-15 = shutter open),
+        // otherwise fixture stays dark even with dimmer > 0 because shutter defaults to 0 (closed).
+        // For fixtures lacking a dedicated Intensity channel, use the shutter channel
+        // to also control brightness (common on budget moving heads / spiders).
+        if (fa.shutterOffset !== null) {
+          const shutterAddr = pf.startAddress + fa.shutterOffset;
+          if (enableStrobe && shouldTierStrobe(pf.tier)) {
+            channelValues[shutterAddr] = strobeRate;
+          } else if (fa.intensityOffset === null && computedIntensity > 0) {
+            // No dedicated dimmer â†’ map intensity to shutter range (8 = open min, 255 = open max)
+            // Linear mapping: intensity 0-255 â†’ shutter 8-255
+            const shutterVal = 8 + Math.round((computedIntensity / 255) * 247);
+            channelValues[shutterAddr] = Math.max(8, Math.min(255, shutterVal));
+          } else {
+            // SoundSwitch principle: shutter ALWAYS open, never dark.
+            // 32 = safe open on all fixtures (avoids 0-15 ambiguous range).
+            channelValues[shutterAddr] = SHUTTER_OPEN_SAFE;
+          }
+
+        }
+
+        // â”€â”€ 4. Pan/Tilt - choreography engine (tier-scaled) â”€â”€
+        const tierMovMult = getTierMovementMultiplier(pf.tier);
+        if (tierMovMult > 0 && (fa.panOffset !== null || fa.tiltOffset !== null)) {
+          const movement = computeMovement(
+            movementConfig,
+            cue.time,
+            fi,
+            totalFixtures,
+          );
+          // Tilt-only fixtures (no pan channel): route pan movement to tilt for full sweep
+          const isTiltOnly = fa.panOffset === null && fa.tiltOffset !== null;
+          if (fa.panOffset !== null) {
+            const centerX = movementConfig.centerX;
+            const pan = Math.round(centerX + (movement.pan - centerX) * tierMovMult);
+            channelValues[pf.startAddress + fa.panOffset] = Math.max(0, Math.min(255, pan));
+            if (fa.panFineOffset !== null) {
+              channelValues[pf.startAddress + fa.panFineOffset] = pan;
+            }
+          }
+          if (fa.tiltOffset !== null) {
+            const centerY = movementConfig.centerY;
+            let tilt: number;
+            if (isTiltOnly) {
+              // Tilt-only fixtures (no pan): use whichever axis has more motion
+              const panDelta = movement.pan - centerY;
+              const tiltDelta = movement.tilt - centerY;
+              const bestDelta = Math.abs(panDelta) > Math.abs(tiltDelta) ? panDelta : tiltDelta;
+              // Boost ×2: single-axis fixtures need larger sweep for visible movement
+              tilt = Math.round(centerY + bestDelta * tierMovMult * 2.0);
+            } else {
+              tilt = Math.round(centerY + (movement.tilt - centerY) * tierMovMult);
+            }
+            channelValues[pf.startAddress + fa.tiltOffset] = Math.max(0, Math.min(255, tilt));
+            if (fa.tiltFineOffset !== null) {
+              channelValues[pf.startAddress + fa.tiltFineOffset] = tilt;
+            }
+          } else if (fa.tiltFineOffset !== null) {
+            channelValues[pf.startAddress + fa.tiltFineOffset] = 128;
+          }
+        }
+
+        // â”€â”€ 5. Gobo - rotate on beat boundaries, speed-aware â”€â”€
+        if (fa.goboOffset !== null && fa.goboCaps && fa.goboCaps.length > 0) {
+          const goboVal = getGoboValue(
+            fa.goboCaps,
+            isDrop ? cue.time * 2 : cue.time,
+            cue.colorShiftSpeed,
+          );
+          channelValues[pf.startAddress + fa.goboOffset] = goboVal;
+        }
+
+        // â”€â”€ 6. Prism - active on drops/chorus, rotate synced to beat â”€â”€
+        if (fa.prismOffset !== null && (isDrop || isChorus)) {
+          // Rotate prism on beat: cycle between prism insert + rotation
+          const beatPhase = Math.floor(cue.time * 4) % 4;
+          channelValues[pf.startAddress + fa.prismOffset] = beatPhase === 0 ? 255 : (beatPhase === 2 ? 128 : 0);
+        }
+
+        // â”€â”€ 7. Effect macros - cycle through built-in fixture effects by section â”€â”€
+        if (fa.effectOffset !== null && fa.effectCaps && fa.effectCaps.length > 0) {
+          const caps = fa.effectCaps;
+          // Filter out "No Effect" caps (min=0) to avoid killing light output
+          const activeCaps = caps.filter(c => c.min > 0);
+          if (activeCaps.length === 0) activeCaps.push(...caps);
+          // Stable effect: use section type for consistent assignment (not 0 = no effect)
+          let effIdx: number;
+          let effSectionHash = 0;
+          for (let s = 0; s < sectionKey.length; s++) effSectionHash = ((effSectionHash << 5) - effSectionHash) + sectionKey.charCodeAt(s);
+          if (isDrop) effIdx = Math.floor(cue.time * 2) % activeCaps.length;
+          else if (isChorus) effIdx = (Math.floor(cue.time * 0.5) + Math.abs(effSectionHash)) % activeCaps.length;
+          else if (sectionKey === 'bridge') effIdx = Math.floor(cue.time * 0.3) % Math.min(3, activeCaps.length);
+          else effIdx = Math.abs(effSectionHash) % activeCaps.length;
+          const cap = activeCaps[effIdx];
+          const effVal = cap ? Math.round((cap.min + cap.max) / 2) : 128;
+          if (effVal >= 8) channelValues[pf.startAddress + fa.effectOffset] = effVal;
+        }
+
+        // â”€â”€ 8. Beam - zoom/focus variation by section energy â”€â”€
+        if (fa.beamOffset !== null) {
+          // Wide beam on chorus/drop (high value), narrow on verse (low value)
+          const beamVal = isDrop || isChorus ? 200 + Math.round(energy * 55)
+            : sectionKey === 'bridge' ? 128 + Math.round(energy * 40)
+            : 60 + Math.round(energy * 30);
+          channelValues[pf.startAddress + fa.beamOffset] = Math.max(0, Math.min(255, beamVal));
+        }
+
+        // â”€â”€ 9. Speed - vary pan/tilt & effect speed by section â”€â”€
+        if (fa.speedOffset !== null) {
+          const speedVal = isDrop ? 220 + Math.round(energy * 35)
+            : isChorus ? 180 + Math.round(energy * 40)
+            : sectionKey === 'bridge' ? 100 + Math.round(energy * 60)
+            : 40 + Math.round(energy * 40);
+          channelValues[pf.startAddress + fa.speedOffset] = Math.max(0, Math.min(255, speedVal));
+        }
+
+        // Safety net: set unrecognized channels to safe neutral (128)
+        // Prevents fixtures from being stuck in bad states when channel types aren't detected.
+        // Macro channels are excluded — they are user-configured only.
+        if (fa.channelCount > 0) {
+          const macroSet = new Set(fa.macroOffsets);
+          for (let c = 0; c < fa.channelCount; c++) {
+            if (macroSet.has(c)) continue;
+            const addr = pf.startAddress + c;
+            if (channelValues[addr] === undefined) {
+              channelValues[addr] = 128;
+            }
+          }
+        }
+
+        fixtureNames.push(pf.name);
+      }
+
+      // ALWAYS ensure minimum DMX output â€” even if no fixture channels matched.
+      // Every cue must produce at least dimmer=128 on all universe fixtures.
+      if (activeList.length > 0 && Object.keys(channelValues).length === 0) {
+        for (const fa of activeList) {
+          const pf = fa.fixture;
+          if (fa.intensityOffset !== null) {
+            channelValues[pf.startAddress + fa.intensityOffset] = 128;
+          } else if (fa.shutterOffset !== null) {
+            channelValues[pf.startAddress + fa.shutterOffset] = SHUTTER_OPEN_SAFE;
+          }
+        }
+      }
+
+      if (Object.keys(channelValues).length > 0) {
+
+
+
+
+
+
+
+
+
+
+        dmxCues.push({
+          time: cue.time,
+          section: cue.section,
+          universe,
+          channelValues,
+          fixtureNames: [...new Set(fixtureNames)],
+          fixtureCount: activeList.length,
+          effect: cue.effect,
+          colors: allColors,
+        });
+      }
+    }
+    cueIndex++;
+  }
+
+  return dmxCues;
+}
+
+
+// â”€â”€â”€ Fixture definition loader (async, with caching) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+let _defCache: Map<string, DmxFixtureDefinition> | null = null;
+let _defLoadPromise: Promise<Map<string, DmxFixtureDefinition>> | null = null;
+
+export async function loadFixtureDefinitions(
+  fixtureDefIds: string[],
+): Promise<Map<string, DmxFixtureDefinition>> {
+  const uniqueIds = [...new Set(fixtureDefIds)];
+
+  // Check cache first
+  if (_defCache) {
+    const cachedIds = new Set(_defCache.keys());
+    if (uniqueIds.every(id => cachedIds.has(id))) return _defCache;
+  }
+
+  // If a load is already in flight, wait for it then check again
+  if (_defLoadPromise) {
+    await _defLoadPromise;
+    // After the in-flight load completes, check if all IDs are now cached
+    if (_defCache) {
+      const cachedIds = new Set(_defCache.keys());
+      if (uniqueIds.every(id => cachedIds.has(id))) return _defCache;
+    }
+  }
+
+  // Load only the IDs that aren't already cached
+  const existingIds = new Set(_defCache?.keys() ?? []);
+  const neededIds = uniqueIds.filter(id => !existingIds.has(id));
+
+  if (neededIds.length === 0 && _defCache) return _defCache;
+
+  _defLoadPromise = (async () => {
+    const map = new Map<string, DmxFixtureDefinition>(_defCache ?? []);
+    const api = typeof window !== 'undefined' ? (window as any).lightMaestro : null;
+
+    for (const id of neededIds) {
+      try {
+        const def = api?.fixtures?.getDefinition
+          ? await api.fixtures.getDefinition(id)
+          : null;
+        if (def) map.set(id, def as DmxFixtureDefinition);
+      } catch {
+        // Ignore
+      }
+    }
+
+    _defCache = map;
+    _defLoadPromise = null;
+    return map;
+  })();
+
+  return _defLoadPromise;
+}
+
+export function clearFixtureDefCache(): void {
+  _defCache = null;
+  _defLoadPromise = null;
+}
