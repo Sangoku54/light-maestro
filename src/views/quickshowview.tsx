@@ -2607,7 +2607,21 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             Insert EFX at {efxContextMenu.time.toFixed(1)}s
           </div>
           {effectEntities.length === 0 ? (
-            <div className="px-3 py-2 text-[10px] text-gray-600 italic">No saved effects</div>
+            <div className="px-3 py-2 text-[10px]">
+              <p className="text-gray-400">Aucun effet sauvegardé</p>
+              <p className="text-gray-700 mt-1 mb-2">Créez-en un dans Design → Effects, ou utilisez un effet rapide :</p>
+              <button
+                onClick={() => {
+                  const id = `qefx-${Date.now()}`;
+                  useShowStore.getState().createEffect('Circle Wash');
+                  // Refresh after creation
+                  setTimeout(() => setEfxContextMenu(prev => prev ? { ...prev } : null), 100);
+                }}
+                className="w-full text-left px-2 py-1 rounded text-cyan-400 hover:bg-cyan-400/10 transition-colors"
+              >
+                + Créer "Circle Wash"
+              </button>
+            </div>
           ) : (
             effectEntities.map(efx => (
               <button key={efx.id}
