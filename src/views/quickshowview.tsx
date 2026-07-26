@@ -84,7 +84,7 @@ function resolvePaletteColors(paletteName: string, cfg?: any): string[] {
 
   const palettes: Record<string, string[]> = {
     ballad: ['#ffb3ba', '#ffdfba', '#ffffba', '#baffc9', '#bae1ff', '#e8baff'],
-    dance: ['#ff0044', '#00ff00', '#0066ff', '#ffdd00', '#00ddff', '#cc00ff'],
+    dance: ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#00ffff', '#ff00ff'],
     disco: ['#ff0a54', '#ff7096', '#ffd60a', '#5cf64a', '#00b4d8', '#7209b7'],
     techno: ['#00ff88', '#00c8ff', '#6400ff', '#ff0064', '#00e5ff', '#cc00ff'],
     rock: ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6'],
