@@ -2637,17 +2637,15 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           {effectEntities.length === 0 ? (
             <div className="px-3 py-2 text-[10px]">
               <p className="text-gray-400">Aucun effet sauvegardé</p>
-              <p className="text-gray-700 mt-1 mb-2">Créez-en un dans Design → Effects, ou utilisez un effet rapide :</p>
+              <p className="text-gray-700 mt-1 mb-2">Seed des 12 built-ins ou utilisez un effet rapide :</p>
               <button
                 onClick={() => {
-                  const id = `qefx-${Date.now()}`;
-                  useShowStore.getState().createEffect('Circle Wash');
-                  // Refresh after creation
-                  setTimeout(() => setEfxContextMenu(prev => prev ? { ...prev } : null), 100);
+                  useShowStore.getState().seedBuiltinEffects();
+                  setEfxContextMenu(null); // re-open will show them
                 }}
                 className="w-full text-left px-2 py-1 rounded text-cyan-400 hover:bg-cyan-400/10 transition-colors"
               >
-                + Créer "Circle Wash"
+                + Seed 12 effets pré-programmés
               </button>
             </div>
           ) : (
