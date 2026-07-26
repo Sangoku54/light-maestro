@@ -1944,6 +1944,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [efxTargetType, setEfxTargetType] = useState<'all' | 'group' | 'fixture'>('all');
   const [efxTargetGroupId, setEfxTargetGroupId] = useState('');
   const [efxTargetFixtureIds, setEfxTargetFixtureIds] = useState<string[]>([]);
+  const [efxPattern, setEfxPattern] = useState<'static' | 'sweep' | 'circle' | 'pulse' | 'wave' | 'bounce' | 'figure8' | 'spiral' | 'zigzag' | 'heartbeat' | 'randomWalk' | 'diamond' | 'custom'>('static');
 
   // Resolve target fixture names for display + DMX filtering
   const efxTargetFixtureNames = useMemo(() => {
@@ -2516,15 +2517,25 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           Fade
         </button>
         {fadeModal && (
-          <div className="fixed z-50 bg-[#1a1a2e] border border-gray-700 rounded-lg shadow-xl p-3 min-w-[180px]" style={{ position: 'fixed', bottom: '48px', right: '16px' }}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-gray-300">Fondu</span>
-              <span className="text-[10px] text-purple-400">{qs.colorFadeMs || 250}ms</span>
-            </div>
-            <input type="range" min={0} max={2000} step={50} value={qs.colorFadeMs || 250} onChange={e => setQs({ colorFadeMs: Number(e.target.value) })} className="w-full" />
-            <div className="flex justify-between text-[9px] text-gray-600 mt-0.5">
-              <span>0ms</span>
-              <span>2000ms</span>
+          <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setFadeModal(false)}>
+            <div className="absolute inset-0 bg-black/50" />
+            <div className="relative bg-[#1a1a2e] border border-purple-700/40 rounded-xl shadow-2xl p-6 min-w-[300px] max-w-[360px]" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center gap-2 mb-3">
+                <svg className="w-5 h-5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" opacity="0.3"/><circle cx="12" cy="12" r="10" strokeDasharray={`${((qs.colorFadeMs || 250) / 2000) * 63} 63`}/></svg>
+                <span className="text-sm font-medium text-gray-200">Fondu enchaîné</span>
+                <span className="ml-auto text-lg font-bold text-purple-400">{qs.colorFadeMs || 250}<span className="text-xs text-gray-500 ml-0.5">ms</span></span>
+              </div>
+              <p className="text-xs text-gray-500 leading-relaxed mb-4">Vous pouvez régler ici le temps de transition entre vos couleurs. Une valeur plus élevée donne un morphing progressif, idéal pour les ambiances douces.</p>
+              <input type="range" min={0} max={2000} step={50} value={qs.colorFadeMs || 250} onChange={e => setQs({ colorFadeMs: Number(e.target.value) })} className="w-full accent-purple-500" />
+              <div className="flex justify-between text-[10px] text-gray-600 mt-1">
+                <span>Instantané</span>
+                <span>2 secondes</span>
+              </div>
+              <div className="flex gap-2 mt-4">
+                {[0, 250, 500, 1000].map(v => (
+                  <button key={v} onClick={() => setQs({ colorFadeMs: v })} className={`flex-1 py-1 rounded text-[10px] border transition-colors ${(qs.colorFadeMs || 250) === v ? 'border-purple-500 bg-purple-500/20 text-purple-300' : 'border-gray-700 text-gray-500 hover:border-gray-600'}`}>{v === 0 ? '0ms' : v + 'ms'}</button>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -2769,6 +2780,32 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
                   </span>
                 </div>
               )}
+
+              {/* Movement Pattern */}
+              <label className="block text-[10px] text-gray-400 mb-1">Default Movement</label>
+              <select
+                value={efxPattern}
+                onChange={e => setEfxPattern(e.target.value as any)}
+                className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none mb-4"
+              >
+                {[
+                  { v: 'static', label: 'Static (no movement)' },
+                  { v: 'sweep', label: 'Sweep (pendulum)' },
+                  { v: 'circle', label: 'Circle' },
+                  { v: 'pulse', label: 'Pulse (zoom effect)' },
+                  { v: 'wave', label: 'Wave (sine)' },
+                  { v: 'bounce', label: 'Bounce (gravity)' },
+                  { v: 'figure8', label: 'Figure 8' },
+                  { v: 'spiral', label: 'Spiral' },
+                  { v: 'zigzag', label: 'Zigzag' },
+                  { v: 'heartbeat', label: 'Heartbeat' },
+                  { v: 'randomWalk', label: 'Random Walk' },
+                  { v: 'diamond', label: 'Diamond' },
+                  { v: 'custom', label: 'Custom (user-defined)' },
+                ].map(({ v, label }) => (
+                  <option key={v} value={v}>{label}</option>
+                ))}
+              </select>
 
               {/* Actions */}
               <div className="flex justify-end gap-2">
