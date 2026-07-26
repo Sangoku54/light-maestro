@@ -1939,6 +1939,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
 
   /* ─── EFX handlers ──────────────────────────────── */
   const [efxTrackModal, setEfxTrackModal] = useState(false);
+  const [fadeModal, setFadeModal] = useState(false);
   const [efxTrackName, setEfxTrackName] = useState('');
   const [efxTargetType, setEfxTargetType] = useState<'all' | 'group' | 'fixture'>('all');
   const [efxTargetGroupId, setEfxTargetGroupId] = useState('');
@@ -2506,6 +2507,27 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           <Plus className="w-3 h-3" />
           EFX Track
         </button>
+        <button
+          onClick={() => setFadeModal(!fadeModal)}
+          className="ml-1 px-2 py-0.5 rounded text-[10px] text-purple-400 border border-purple-700/50 hover:bg-purple-400/10 cursor-pointer flex items-center gap-1"
+          title="Fondu"
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" opacity="0.3"/><circle cx="12" cy="12" r="10" strokeDasharray="32 31"/></svg>
+          Fade
+        </button>
+        {fadeModal && (
+          <div className="fixed z-50 bg-[#1a1a2e] border border-gray-700 rounded-lg shadow-xl p-3 min-w-[180px]" style={{ position: 'fixed', bottom: '48px', right: '16px' }}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-gray-300">Fondu</span>
+              <span className="text-[10px] text-purple-400">{qs.colorFadeMs || 250}ms</span>
+            </div>
+            <input type="range" min={0} max={2000} step={50} value={qs.colorFadeMs || 250} onChange={e => setQs({ colorFadeMs: Number(e.target.value) })} className="w-full" />
+            <div className="flex justify-between text-[9px] text-gray-600 mt-0.5">
+              <span>0ms</span>
+              <span>2000ms</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Section picker */}
