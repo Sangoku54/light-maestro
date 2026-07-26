@@ -353,7 +353,9 @@ export function useDmxPlayback(options: {
     const movementPhase=Math.random()*1000;
     let lastSig='';
 
-    const tick=()=>{
+    // Color fade: EMA smoothing between palette changes (~250ms at 60fps)
+    const fadeState=new Map();const FADE_ALPHA=0.12;
+        const tick=()=>{
       if(!dmxEnabledRef.current){rafRef.current=requestAnimationFrame(tick);return;}
       const ct=currentTimeRef.current;
       const c=cuesRef.current;
@@ -421,7 +423,7 @@ export function useDmxPlayback(options: {
             for(const po of fa.presetOverrideOffsets){chVals[pf.startAddress+po]=0;}
             // If intensityOffset was detected (including Dimmer/Shutter), set it
             if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;const dVal=active.forcedDimmerVal??255;if(!chVals[addr]||dVal>chVals[addr])chVals[addr]=dVal;}
-            for(const seg of fa.rgbSegments){chVals[pf.startAddress+seg.r]=r;chVals[pf.startAddress+seg.g]=g;chVals[pf.startAddress+seg.b]=b;if(seg.w!==null)chVals[pf.startAddress+seg.w]=0;}
+            for(const seg of fa.rgbSegments){const key=pf.id+'_'+seg.r;let cur=fadeState.get(key);if(!cur){cur={r:r,g:g,b:b};fadeState.set(key,cur);}else{cur.r=Math.round(cur.r+(r-cur.r)*FADE_ALPHA);cur.g=Math.round(cur.g+(g-cur.g)*FADE_ALPHA);cur.b=Math.round(cur.b+(b-cur.b)*FADE_ALPHA);}chVals[pf.startAddress+seg.r]=cur.r;chVals[pf.startAddress+seg.g]=cur.g;chVals[pf.startAddress+seg.b]=cur.b;if(seg.w!==null)chVals[pf.startAddress+seg.w]=0;}
 
           }else if(fa.wheelOffset!==null&&paletteColor){
             const caps=fa.wheelCaps;
