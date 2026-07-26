@@ -1407,6 +1407,10 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [fixtureTracks, setFixtureTracks] = useState<FixtureTrack[]>([]);
   const fixtureTracksRef = useRef<FixtureTrack[]>([]);
   fixtureTracksRef.current = fixtureTracks;
+  const efxTracksRef = useRef<EfxTrack[]>([]);
+  efxTracksRef.current = efxTracks;
+  const effectsRef = useRef<any[]>([]);
+  effectsRef.current = effectEntities;
   const fixtureGroupsRef = useRef<{ id: string; fixtureIds: string[] }[]>([]);
   fixtureGroupsRef.current = useShowStore.getState().fixtureGroups;
   const fixtureDefsRef = useRef<Map<string, DmxFixtureDefinition>>(new Map());
@@ -1909,6 +1913,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     fixtureTracksRef,
     fixtureGroupsRef,
     colorFadeMs: qs.colorFadeMs ?? 250,
+    efxTracksRef,
+    effectsRef,
   });
 
   /* ─── Energy by section ──────────────────────────── */
