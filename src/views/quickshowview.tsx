@@ -1930,6 +1930,11 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
 
   /* ─── Auto-load last project on startup ─────────── */
   useEffect(() => {
+    // Seed built-in effects on first mount
+    useShowStore.getState().seedBuiltinEffects();
+  }, []);
+
+  useEffect(() => {
     if (hasEverHadAnalysis) return;
     try {
       const saved = localStorage.getItem('light-maestro:lastProject');
