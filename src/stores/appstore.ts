@@ -64,6 +64,8 @@ export interface QuickShowState {
   showColorTrack: boolean;
   showStrobeTrack: boolean;
   showDimmerTrack: boolean;
+  colorFadeMs: number; // 0-2000ms crossfade between palette colors
+  colorFadeMs: number;
   colorEntries: Array<{ id: string; time: number; endTime: number; color: string }>;
   dimmerEntries: Array<{ id: string; time: number; endTime: number; value: number }>;
   strobeEntries: Array<{ id: string; time: number; endTime: number; speed: number }>;
@@ -190,6 +192,7 @@ export const useAppStore = create<AppState>()(
         showColorTrack: false,
         showStrobeTrack: false,
         showDimmerTrack: false,
+        colorFadeMs: 250,
         colorEntries: [],
         dimmerEntries: [],
         strobeEntries: [],

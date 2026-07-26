@@ -1306,6 +1306,10 @@ const QuickSettingsPanel: React.FC = () => {
           <span className="text-xs text-gray-500">{qs.strobeLimit || 10} Hz</span>
         </div>
         <div>
+          <label className="text-xs text-gray-400 uppercase tracking-wider">{t('quickshow.fade', 'Fondu')} ({qs.colorFadeMs || 250}ms)</label>
+          <input type="range" min={0} max={2000} step={50} value={qs.colorFadeMs || 250} onChange={e => setQs({ colorFadeMs: Number(e.target.value) })} className="w-full" />
+        </div>
+        <div>
           <label className="text-xs text-gray-400 block mb-1">Movement</label>
           <select
             value={qs.movement || 'dynamic'}
@@ -1887,6 +1891,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     overrideCuesRef: overrideCuesRef as any,
     fixtureTracksRef,
     fixtureGroupsRef,
+    colorFadeMs: qs.colorFadeMs ?? 250,
   });
 
   /* ─── Energy by section ──────────────────────────── */

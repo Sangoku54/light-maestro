@@ -250,11 +250,12 @@ export function useDmxPlayback(options: {
   dmxOutputEnabled: boolean;
   tierMultipliers?: { primary: number; secondary: number; tertiary: number };
   strobeLimit?: number;
+  colorFadeMs?: number;
   overrideCuesRef?: React.MutableRefObject<any[]>; // EFX + manual cues that override auto DMX
   fixtureTracksRef?: React.MutableRefObject<FixtureTrack[]>; // Fixture track overrides
   fixtureGroupsRef?: React.MutableRefObject<{ id: string; fixtureIds: string[] }[]>;
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,overrideCuesRef,fixtureTracksRef,fixtureGroupsRef}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,fixtureGroupsRef}=options;
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
 
@@ -354,7 +355,7 @@ export function useDmxPlayback(options: {
     let lastSig='';
 
     // Color fade: EMA smoothing between palette changes (~250ms at 60fps)
-    const fadeState=new Map();const FADE_ALPHA=0.12;
+    const fadeState=new Map();const FADE_ALPHA=Math.min(0.98,colorFadeMs>0?1-Math.exp(Math.log(0.1)/(colorFadeMs/16.67)):0.98);
         const tick=()=>{
       if(!dmxEnabledRef.current){rafRef.current=requestAnimationFrame(tick);return;}
       const ct=currentTimeRef.current;
