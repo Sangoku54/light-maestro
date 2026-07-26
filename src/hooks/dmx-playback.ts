@@ -254,10 +254,8 @@ export function useDmxPlayback(options: {
   overrideCuesRef?: React.MutableRefObject<any[]>; // EFX + manual cues that override auto DMX
   fixtureTracksRef?: React.MutableRefObject<FixtureTrack[]>; // Fixture track overrides
   fixtureGroupsRef?: React.MutableRefObject<{ id: string; fixtureIds: string[] }[]>;
-  efxTracksRef?: React.MutableRefObject<any[]>; // EFX tracks with entries
-  effectsRef?: React.MutableRefObject<any[]>; // Saved effects (patterns)
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,fixtureGroupsRef,efxTracksRef,effectsRef}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,fixtureGroupsRef}=options;
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
 
@@ -461,33 +459,6 @@ export function useDmxPlayback(options: {
           const panCount=fa.panOffsets.length;const tiltCount=fa.tiltOffsets.length;const motorCount=Math.max(panCount,tiltCount,1);
           if(panCount>0||tiltCount>0){
             let efxPan=NaN,efxTilt=NaN;
-            // Check active EFX track entries for this fixture
-            const efxTracks=efxTracksRef?.current;const effects=effectsRef?.current;
-            if(efxTracks&&effects){
-              for(const et of efxTracks){
-                const targetIds=(et.targetFixtures?.type==='fixture'?et.targetFixtures.fixtureIds:et.targetFixtures?.type==='all'?patchedFixtures.map(f=>f.id):et.targetFixtures?.type==='group'?((fixtureGroupsRef?.current||[]).find(g=>g.id===et.targetFixtures.groupId)?.fixtureIds||[]):[]);
-                if(!targetIds||!targetIds.includes(pf.id))continue;
-                for(const entry of et.entries||[]){
-                  if(ct>=entry.time&&ct<entry.endTime){
-                    const efxDef=effects.find((e:any)=>e.id===entry.effectId);
-                    if(efxDef){
-                      const speed=efxDef.speed||1;const w=efxDef.width||0.7;const h=efxDef.height||0.7;
-                      const phase=ct*Math.PI*2*speed+Number(pf.id.split('').reduce((a:number,c:any)=>a+c.charCodeAt(0),0))*0.1;
-                      switch(efxDef.pattern){
-                        case'Circle':efxPan=128+Math.round(Math.sin(phase)*64*w);efxTilt=128+Math.round(Math.cos(phase)*64*h);break;
-                        case'Line':{const saw=((phase/Math.PI)%2)-1;efxPan=128+Math.round(saw*80*w);efxTilt=128+Math.round(Math.sin(phase)*40*h);}break;
-                        case'Eight':efxPan=128+Math.round(Math.sin(phase)*70*w);efxTilt=128+Math.round(Math.sin(phase*2)*50*h);break;
-                        case'Square':{const sqx=Math.sign(Math.sin(phase))*80*w;const sqy=Math.sign(Math.cos(phase))*80*h;efxPan=128+Math.round(sqx);efxTilt=128+Math.round(sqy);}break;
-                        case'Triangle':{const saw2=1-Math.abs(((phase/Math.PI)%2)-1)*2;efxPan=128+Math.round(saw2*80*w);efxTilt=128+Math.round(saw2*60*h);}break;
-                        default:efxPan=128+Math.round(Math.sin(phase)*60*w);efxTilt=128+Math.round(Math.cos(phase)*60*h);
-                      }
-                    }
-                    break;
-                  }
-                }
-              }
-            }
-            // Check EFX map from manual override cues
             if(panCount>0){const pa=pf.startAddress+fa.panOffsets[0];if(efxMap[pa]!==undefined)efxPan=efxMap[pa];}
             if(tiltCount>0){const ta=pf.startAddress+fa.tiltOffsets[0];if(efxMap[ta]!==undefined)efxTilt=efxMap[ta];}
             if(!isNaN(efxPan)||!isNaN(efxTilt)){

@@ -1407,10 +1407,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [fixtureTracks, setFixtureTracks] = useState<FixtureTrack[]>([]);
   const fixtureTracksRef = useRef<FixtureTrack[]>([]);
   fixtureTracksRef.current = fixtureTracks;
-  const efxTracksRef = useRef<EfxTrack[]>([]);
-  efxTracksRef.current = efxTracks;
-  const effectsRef = useRef<any[]>([]);
-  effectsRef.current = effectEntities;
   const fixtureGroupsRef = useRef<{ id: string; fixtureIds: string[] }[]>([]);
   fixtureGroupsRef.current = useShowStore.getState().fixtureGroups;
   const fixtureDefsRef = useRef<Map<string, DmxFixtureDefinition>>(new Map());
@@ -1913,8 +1909,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     fixtureTracksRef,
     fixtureGroupsRef,
     colorFadeMs: qs.colorFadeMs ?? 250,
-    efxTracksRef,
-    effectsRef,
   });
 
   /* ─── Energy by section ──────────────────────────── */
@@ -1935,10 +1929,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   }, [resolvedAnalysis]);
 
   /* ─── Auto-load last project on startup ─────────── */
-  useEffect(() => {
-    // Seed built-in effects on first mount
-    useShowStore.getState().seedBuiltinEffects();
-  }, []);
 
   useEffect(() => {
     if (hasEverHadAnalysis) return;
@@ -2635,19 +2625,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             Insert EFX at {efxContextMenu.time.toFixed(1)}s
           </div>
           {effectEntities.length === 0 ? (
-            <div className="px-3 py-2 text-[10px]">
-              <p className="text-gray-400">Aucun effet sauvegardé</p>
-              <p className="text-gray-700 mt-1 mb-2">Seed des 12 built-ins ou utilisez un effet rapide :</p>
-              <button
-                onClick={() => {
-                  useShowStore.getState().seedBuiltinEffects();
-                  setEfxContextMenu(null); // re-open will show them
-                }}
-                className="w-full text-left px-2 py-1 rounded text-cyan-400 hover:bg-cyan-400/10 transition-colors"
-              >
-                + Seed 12 effets pré-programmés
-              </button>
-            </div>
+            <div className="px-3 py-2 text-[10px] text-gray-500 italic">Aucun effet sauvegardé</div>
           ) : (
             effectEntities.map(efx => (
               <button key={efx.id}
