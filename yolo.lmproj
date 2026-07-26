@@ -2,7 +2,7 @@
   "appStore": {
     "mode": "design",
     "quickSidebarTab": "autoscript",
-    "designSidebarTab": "settings",
+    "designSidebarTab": "efx",
     "performSidebarTab": "vconsole",
     "quickShow": {
       "audioActive": false,
@@ -127,10 +127,26 @@
     "fixtureGroups": [],
     "scenes": [],
     "chasers": [],
-    "effects": [],
+    "effects": [
+      {
+        "id": "efx-1785060167120-ep0m8bku",
+        "name": "trait vertical wash speed",
+        "pattern": "Line",
+        "width": 0.8,
+        "height": 0.23,
+        "rotation": 91,
+        "speed": 0.8,
+        "xOffset": 255,
+        "yOffset": 255,
+        "fixtureIds": [
+          "fx-1784994352699-qczxw3me"
+        ],
+        "createdAt": "2026-07-26T10:02:47.120Z"
+      }
+    ],
     "cueLists": [],
     "shows": []
   },
   "version": 1,
-  "timestamp": "2026-07-25T17:20:31.841Z"
+  "timestamp": "2026-07-26T10:02:51.009Z"
 }

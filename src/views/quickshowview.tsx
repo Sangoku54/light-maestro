@@ -198,6 +198,23 @@ function applySectionChange(
   return newSections.sort((a, b) => a.startTime - b.startTime);
 }
 
+/** Merge adjacent sections of the same type into one continuous section */
+function mergeAdjacentSections(sections: TrackSection[]): TrackSection[] {
+  if (sections.length <= 1) return sections;
+  const sorted = [...sections].sort((a, b) => a.startTime - b.startTime);
+  const merged: TrackSection[] = [];
+  for (const s of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && last.type === s.type && last.endTime >= s.startTime - 0.01) {
+      // Extend the last section instead of pushing a new one
+      last.endTime = Math.max(last.endTime, s.endTime);
+    } else {
+      merged.push({ ...s });
+    }
+  }
+  return merged;
+}
+
 function expandEntityToCues(
   entityType: string,
   entityId: string,
@@ -1907,7 +1924,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   /* ─── Init sections from analysis ────────────────── */
   useEffect(() => {
     if (resolvedAnalysis?.sections && sections.length === 0) {
-      setSections(resolvedAnalysis.sections);
+      setSections(mergeAdjacentSections(resolvedAnalysis.sections));
     }
   }, [resolvedAnalysis]);
 

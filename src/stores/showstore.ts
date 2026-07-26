@@ -682,6 +682,41 @@ export const useShowStore = create<ShowState>((set, get) => ({
     return id;
   },
 
+  /** Seed built-in effects matching the 12 autoscript movement patterns */
+  seedBuiltinEffects: () => {
+    const state = get();
+    if (state.effects.length > 0) return; // already seeded
+    const builtins: Array<{ name: string; pattern: EfxPattern; width: number; height: number; speed: number }> = [
+      { name: 'Sweep', pattern: 'Line', width: 1.0, height: 0.3, speed: 0.8 },
+      { name: 'Circle', pattern: 'Circle', width: 0.7, height: 0.7, speed: 1.0 },
+      { name: 'Pulse', pattern: 'Circle', width: 0.3, height: 0.3, speed: 2.0 },
+      { name: 'Wave', pattern: 'Line', width: 0.2, height: 1.0, speed: 0.6 },
+      { name: 'Bounce', pattern: 'Line', width: 0.15, height: 0.8, speed: 1.5 },
+      { name: 'Figure 8', pattern: 'Eight', width: 0.6, height: 0.6, speed: 1.0 },
+      { name: 'Spiral', pattern: 'Circle', width: 0.8, height: 0.8, speed: 0.5 },
+      { name: 'Zigzag', pattern: 'Triangle', width: 1.0, height: 0.6, speed: 1.0 },
+      { name: 'Heartbeat', pattern: 'Circle', width: 0.4, height: 0.4, speed: 1.8 },
+      { name: 'Random Walk', pattern: 'Square', width: 0.5, height: 0.5, speed: 0.4 },
+      { name: 'Diamond', pattern: 'Square', width: 0.6, height: 0.6, speed: 0.7 },
+      { name: 'Static Frame', pattern: 'Square', width: 0.1, height: 0.1, speed: 0.1 },
+    ];
+    const now = new Date().toISOString();
+    const seeded: SavedEffect[] = builtins.map((b, i) => ({
+      id: `builtin-efx-${i}`,
+      name: b.name,
+      pattern: b.pattern,
+      width: b.width,
+      height: b.height,
+      rotation: 0,
+      speed: b.speed,
+      xOffset: 0,
+      yOffset: 0,
+      fixtureIds: [],
+      createdAt: now,
+    }));
+    set({ effects: seeded });
+  },
+
   updateEffect: (id, updates) => {
     set((state) => ({
       effects: state.effects.map((e) =>
