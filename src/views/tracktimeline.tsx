@@ -984,21 +984,28 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
           }
           if (!targetsFixture) continue;
 
-          // Draw color blocks
+                    // Draw color blocks
           for (const cb of ft.colorBlocks) {
             const cx = LABEL_WIDTH + (cb.time / duration) * drawW;
             const ce = LABEL_WIDTH + (cb.endTime / duration) * drawW;
             if (ce < LABEL_WIDTH || cx > w) continue;
             const bw = Math.max(3, ce - cx);
-            ctx.fillStyle = cb.color + 'CC';
+            if (cb.endColor && cb.endColor !== cb.color) {
+              // Gradient block: draw a color gradient bar
+              const grad = ctx.createLinearGradient(Math.max(LABEL_WIDTH, cx), trackY, Math.max(LABEL_WIDTH, cx) + bw, trackY);
+              grad.addColorStop(0, cb.color);
+              grad.addColorStop(1, cb.endColor);
+              ctx.fillStyle = grad;
+            } else {
+              ctx.fillStyle = cb.color + 'CC';
+            }
             ctx.fillRect(Math.max(LABEL_WIDTH, cx), trackY + 1, bw, TRACK_HEIGHT - 2);
             if (bw > 20) {
               ctx.fillStyle = '#ffffff'; ctx.font = '7px sans-serif'; ctx.textAlign = 'center';
-              ctx.fillText(cb.color, cx + bw/2, trackY + TRACK_HEIGHT - 5);
+              ctx.fillText(cb.endColor ? cb.color + '→' + cb.endColor : cb.color, cx + bw/2, trackY + TRACK_HEIGHT - 5);
             }
           }
-
-          // Draw dimmer blocks
+// Draw dimmer blocks
           for (const db of ft.dimmerBlocks) {
             const cx = LABEL_WIDTH + (db.time / duration) * drawW;
             const ce = LABEL_WIDTH + (db.endTime / duration) * drawW;

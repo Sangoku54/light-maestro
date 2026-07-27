@@ -23,6 +23,7 @@ export interface ColorBlock {
   time: number;
   endTime: number;
   color: string;
+  endColor?: string; // gradient end color; if set, draw gradient bar
 }
 
 export interface DimmerBlock {
