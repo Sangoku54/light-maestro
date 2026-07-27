@@ -1851,7 +1851,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
               <button onClick={() => {
                 if (!gradientPicker) return;
                 const { endColor, startColor } = gradientPicker;
-                const block = { id: 'cb-' + Date.now(), time: ftSelRef.current.start, endTime: ftSelRef.current.end, color: endColor, endColor: startColor !== endColor ? endColor : undefined };
+                const block = { id: 'cb-' + Date.now(), time: ftSelRef.current.start, endTime: ftSelRef.current.end, color: startColor, endColor: startColor !== endColor ? endColor : undefined };
                 const fixture = patchedFixtures[gradientPicker.trackIdx];
                 const existing = fixtureTracks.find(ft => resolveTrackTargets(ft, patchedFixtures, []).includes(fixture.id));
                 if (existing) {
