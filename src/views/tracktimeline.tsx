@@ -1561,15 +1561,20 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
           <button className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2"
             onClick={() => {
               const popup = document.createElement('div');
-              popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:1px solid #374151;border-radius:12px;padding:20px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5)';
-              popup.innerHTML = '<div style="color:#fbbf24;font-size:13px;font-weight:600;margin-bottom:10px">Strobe Speed</div><div id="__sv" style="color:#fbbf24;font-size:24px;font-weight:700;margin:8px 0">8 Hz</div><input id="__sr" type="range" min="1" max="25" value="8" style="width:100%;accent-color:#f59e0b" /><div style="display:flex;gap:8px;margin-top:12px;justify-content:center"><button id="__sc" style="background:#f59e0b;color:#000;border:none;border-radius:6px;padding:6px 16px;font-size:12px;font-weight:600;cursor:pointer">OK</button><button id="__sx" style="background:#374151;color:#9ca3af;border:none;border-radius:6px;padding:6px 16px;font-size:12px;cursor:pointer">Cancel</button></div>';
+              popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:1px solid #374151;border-radius:12px;padding:20px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);min-width:280px';
+              popup.innerHTML = '<div style="color:#fbbf24;font-size:13px;font-weight:600;margin-bottom:12px">Strobe Speed</div><div style="display:flex;gap:16px;justify-content:center"><div style="text-align:center"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">Départ</div><div id="__sv1" style="color:#fbbf24;font-size:20px;font-weight:700;margin:4px 0">8 Hz</div><input id="__sr1" type="range" min="1" max="25" value="8" style="width:100%;accent-color:#f59e0b" /></div><div style="text-align:center"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">Arrivée</div><div id="__sv2" style="color:#fbbf24;font-size:20px;font-weight:700;margin:4px 0">8 Hz</div><input id="__sr2" type="range" min="1" max="25" value="8" style="width:100%;accent-color:#f59e0b" /></div></div><div style="display:flex;gap:8px;margin-top:16px;justify-content:center"><button id="__sc" style="background:#f59e0b;color:#000;border:none;border-radius:6px;padding:6px 16px;font-size:12px;font-weight:600;cursor:pointer">OK</button><button id="__sx" style="background:#374151;color:#9ca3af;border:none;border-radius:6px;padding:6px 16px;font-size:12px;cursor:pointer">Cancel</button></div>';
               document.body.appendChild(popup);
-              const rng = popup.querySelector('#__sr') as HTMLInputElement;
-              const lbl = popup.querySelector('#__sv')!;
-              rng.oninput = () => { lbl.textContent = rng.value + ' Hz'; };
+              const rng1 = popup.querySelector('#__sr1') as HTMLInputElement;
+              const rng2 = popup.querySelector('#__sr2') as HTMLInputElement;
+              const lbl1 = popup.querySelector('#__sv1')!;
+              const lbl2 = popup.querySelector('#__sv2')!;
+              rng1.oninput = () => { lbl1.textContent = rng1.value + ' Hz'; if ((popup.querySelector('#__sr2') as HTMLInputElement).value === (popup.querySelector('#__sr1') as HTMLInputElement).defaultValue) { rng2.value = rng1.value; lbl2.textContent = rng1.value + ' Hz'; } };
+              rng2.oninput = () => { lbl2.textContent = rng2.value + ' Hz'; };
               popup.querySelector('#__sc')!.addEventListener('click', () => {
                 document.body.removeChild(popup);
-                const block: StrobeBlock = { id: `sb-${Date.now()}`, time: ftSelRef.current.start, endTime: ftSelRef.current.end, speed: Number(rng.value) };
+                const startSpeed = Number(rng1.value);
+                const endSpeed = Number(rng2.value);
+                const block: StrobeBlock = { id: `sb-${Date.now()}`, time: ftSelRef.current.start, endTime: ftSelRef.current.end, speed: startSpeed, endSpeed: startSpeed !== endSpeed ? endSpeed : undefined };
                 const fixture = patchedFixtures[ftMenu.trackIdx];
                 const existing = fixtureTracks.find(ft => resolveTrackTargets(ft, patchedFixtures, []).includes(fixture.id));
                 if (existing) {

@@ -459,7 +459,15 @@ export function useDmxPlayback(options: {
                   const targets = resolveTrackTargets(ft, patchedFixtures, fixtureGroupsRef.current);
                   if (!targets.includes(pf.id)) continue;
                   const activeBlock = ft.strobeBlocks.find(b => ct >= b.time && ct < b.endTime);
-                  if (activeBlock) return { active: true, speed: activeBlock.speed };
+                  if (activeBlock) {
+                    let speed = activeBlock.speed;
+                    if (activeBlock.endSpeed && activeBlock.endSpeed !== activeBlock.speed) {
+                      const dur = activeBlock.endTime - activeBlock.time;
+                      const t = dur > 0 ? (ct - activeBlock.time) / dur : 0;
+                      speed = activeBlock.speed + (activeBlock.endSpeed - activeBlock.speed) * t;
+                    }
+                    return { active: true, speed };
+                  }
                 }
               }
               return null;

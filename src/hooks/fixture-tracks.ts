@@ -38,6 +38,7 @@ export interface StrobeBlock {
   time: number;
   endTime: number;
   speed: number; // Hz
+  endSpeed?: number; // end speed for gradient ramp
 }
 
 export interface MovementBlock {
