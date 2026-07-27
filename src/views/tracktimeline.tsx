@@ -1850,8 +1850,8 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
               <button onClick={() => setGradientPicker(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
               <button onClick={() => {
                 if (!gradientPicker) return;
-                const { endColor } = gradientPicker;
-                const block = { id: 'cb-' + Date.now(), time: ftSelRef.current.start, endTime: ftSelRef.current.end, color: endColor };
+                const { endColor, startColor } = gradientPicker;
+                const block = { id: 'cb-' + Date.now(), time: ftSelRef.current.start, endTime: ftSelRef.current.end, color: endColor, endColor: startColor !== endColor ? endColor : undefined };
                 const fixture = patchedFixtures[gradientPicker.trackIdx];
                 const existing = fixtureTracks.find(ft => resolveTrackTargets(ft, patchedFixtures, []).includes(fixture.id));
                 if (existing) {
