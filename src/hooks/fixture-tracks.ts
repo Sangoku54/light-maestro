@@ -31,6 +31,7 @@ export interface DimmerBlock {
   time: number;
   endTime: number;
   value: number; // 0-255
+  endValue?: number; // end value for gradient ramp
 }
 
 export interface StrobeBlock {

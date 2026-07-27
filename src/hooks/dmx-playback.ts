@@ -393,7 +393,15 @@ export function useDmxPlayback(options: {
                 const targets = resolveTrackTargets(ft, patchedFixtures, fixtureGroupsRef.current);
                 if (!targets.includes(pf.id)) continue;
                 const activeBlock = ft.dimmerBlocks.find(b => ct >= b.time && ct < b.endTime);
-                if (activeBlock) return activeBlock.value;
+                if (activeBlock) {
+                  let val = activeBlock.value;
+                  if (activeBlock.endValue !== undefined && activeBlock.endValue !== activeBlock.value) {
+                    const dur = activeBlock.endTime - activeBlock.time;
+                    const t = dur > 0 ? (ct - activeBlock.time) / dur : 0;
+                    val = Math.round(activeBlock.value + (activeBlock.endValue - activeBlock.value) * t);
+                  }
+                  return val;
+                }
               }
             }
             return active.forcedDimmerVal !== undefined ? active.forcedDimmerVal : mapIntensity(active.intensity, energy, pf.tier, tierMultipliers);

@@ -1535,15 +1535,20 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
           <button className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2"
             onClick={() => {
               const popup = document.createElement('div');
-              popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:1px solid #374151;border-radius:12px;padding:20px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5)';
-              popup.innerHTML = '<div style="color:#06b6d4;font-size:13px;font-weight:600;margin-bottom:10px">Dimmer</div><div id="__dv" style="color:#06b6d4;font-size:24px;font-weight:700;margin:8px 0">200</div><input id="__dr" type="range" min="0" max="255" value="200" style="width:100%;accent-color:#06b6d4" /><div style="display:flex;gap:8px;margin-top:12px;justify-content:center"><button id="__dc" style="background:#06b6d4;color:#000;border:none;border-radius:6px;padding:6px 16px;font-size:12px;font-weight:600;cursor:pointer">OK</button><button id="__dx" style="background:#374151;color:#9ca3af;border:none;border-radius:6px;padding:6px 16px;font-size:12px;cursor:pointer">Cancel</button></div>';
+              popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:1px solid #374151;border-radius:12px;padding:20px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);min-width:280px';
+              popup.innerHTML = '<div style="color:#06b6d4;font-size:13px;font-weight:600;margin-bottom:12px">Dimmer</div><div style="display:flex;gap:16px;justify-content:center"><div style="text-align:center"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">Départ</div><div id="__dv1" style="color:#06b6d4;font-size:20px;font-weight:700;margin:4px 0">200</div><input id="__dr1" type="range" min="0" max="255" value="200" style="width:100%;accent-color:#06b6d4" /></div><div style="text-align:center"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">Arrivée</div><div id="__dv2" style="color:#06b6d4;font-size:20px;font-weight:700;margin:4px 0">200</div><input id="__dr2" type="range" min="0" max="255" value="200" style="width:100%;accent-color:#06b6d4" /></div></div><div style="display:flex;gap:8px;margin-top:16px;justify-content:center"><button id="__dc" style="background:#06b6d4;color:#000;border:none;border-radius:6px;padding:6px 16px;font-size:12px;font-weight:600;cursor:pointer">OK</button><button id="__dx" style="background:#374151;color:#9ca3af;border:none;border-radius:6px;padding:6px 16px;font-size:12px;cursor:pointer">Cancel</button></div>';
               document.body.appendChild(popup);
-              const rng = popup.querySelector('#__dr') as HTMLInputElement;
-              const lbl = popup.querySelector('#__dv')!;
-              rng.oninput = () => { lbl.textContent = rng.value; };
+              const rng1 = popup.querySelector('#__dr1') as HTMLInputElement;
+              const rng2 = popup.querySelector('#__dr2') as HTMLInputElement;
+              const lbl1 = popup.querySelector('#__dv1')!;
+              const lbl2 = popup.querySelector('#__dv2')!;
+              rng1.oninput = () => { lbl1.textContent = rng1.value; };
+              rng2.oninput = () => { lbl2.textContent = rng2.value; };
               popup.querySelector('#__dc')!.addEventListener('click', () => {
                 document.body.removeChild(popup);
-                const block: DimmerBlock = { id: `db-${Date.now()}`, time: ftSelRef.current.start, endTime: ftSelRef.current.end, value: Number(rng.value) };
+                const startVal = Number(rng1.value);
+                const endVal = Number(rng2.value);
+                const block: DimmerBlock = { id: `db-${Date.now()}`, time: ftSelRef.current.start, endTime: ftSelRef.current.end, value: startVal, endValue: startVal !== endVal ? endVal : undefined };
                 const fixture = patchedFixtures[ftMenu.trackIdx];
                 const existing = fixtureTracks.find(ft => resolveTrackTargets(ft, patchedFixtures, []).includes(fixture.id));
                 if (existing) {
