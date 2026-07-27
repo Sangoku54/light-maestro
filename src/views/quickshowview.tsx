@@ -1509,26 +1509,19 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   });
 
   const triggerAddColor = useCallback((sectionType: keyof CustomPalette) => {
-    const inp = document.createElement('input');
-    inp.type = 'color';
-    inp.value = SECTION_COLORS[sectionType] || '#ff0064';
-    inp.style.position = 'fixed';
-    inp.style.opacity = '0';
-    document.body.appendChild(inp);
-    inp.click();
-    inp.onchange = () => {
-      document.body.removeChild(inp);
-      const newPal = { ...customPal, [sectionType]: [...(customPal[sectionType] || []).slice(0, 5), inp.value] };
-      setCustomPal(newPal);
-      setQs({ customPalette: newPal });
-    };
-  }, [customPal, setQs]);
+    const defaultColor = SECTION_COLORS[sectionType] || '#ff0064';
+    const currentLen = (customPal[sectionType] || []).length;
+    setPicker(null);
+    setGradientPicker({ sectionType, colorIdx: currentLen, startColor: defaultColor, endColor: defaultColor, constantColor: false });
+  }, [customPal]);
+
 
   const handleColorPick = useCallback((sectionType: string, colorIdx: number) => {
     const currentColor = (customPal[sectionType] || [])[colorIdx] || '#ff0000';
     setPicker(null);
     setGradientPicker({ sectionType, colorIdx, startColor: currentColor, endColor: currentColor, constantColor: false });
   }, [customPal]);
+
 
   const handleForceColor = useCallback((fixtureId: string, color: string) => {
     const fc = { ...(qs.forcedColors || {}), [fixtureId]: color };
@@ -2583,47 +2576,33 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       )}
 
 
-      {/* Gradient color picker modal */}
+      {/* ── Color Gradient Picker Modal ── */}
       {gradientPicker !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/70" />
           <div className="relative z-10 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-6 w-[420px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
-            <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-200 mb-4">
-              <Palette className="w-4 h-4 text-purple-400" />
-              Choix de couleur
-              <span className="text-[10px] text-gray-500 ml-auto capitalize">{gradientPicker.sectionType}</span>
-            </h3>
-            <div className="bg-gray-800/50 border border-gray-700/50 rounded-lg p-3 mb-4 text-[10px] text-gray-400 space-y-1.5">
-              <div className="flex items-start gap-2">
-                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-purple-500/20 text-purple-400 font-bold text-[10px] shrink-0">1</span>
-                <span>Choisissez la <span className="text-gray-200 font-medium">couleur de départ</span> (start) — c'est la couleur qui sera sauvegardée</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-400 font-bold text-[10px] shrink-0">2</span>
-                <span>Choisissez la <span className="text-gray-200 font-medium">couleur d'arrivée</span> (end) pour visualiser le dégradé →</span>
-              </div>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2"><Palette className="w-4 h-4 text-purple-400" /><span className="text-sm font-semibold text-gray-200">Choix de couleur</span></div>
+              <button className="text-gray-500 hover:text-white text-lg px-1" onClick={() => setGradientPicker(null)}>✕</button>
             </div>
-            <div className="flex items-end gap-3 mb-4">
-              <div className="flex-1">
-                <label className="block text-[10px] text-gray-500 mb-1.5 uppercase tracking-wider">Départ</label>
-                <input type="color" value={gradientPicker.startColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, startColor: e.target.value, endColor: prev.constantColor ? e.target.value : prev.endColor } : null)} className="w-full h-10 rounded-lg border border-gray-600 cursor-pointer bg-transparent hover:border-gray-500" />
-              </div>
-              <div className="pb-1.5"><span className="text-gray-600 text-lg select-none">→</span></div>
-              <div className="flex-1">
-                <label className="block text-[10px] text-gray-500 mb-1.5 uppercase tracking-wider">Arrivée</label>
-                <input type="color" value={gradientPicker.endColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, endColor: e.target.value } : null)} disabled={gradientPicker.constantColor} className={'w-full h-10 rounded-lg border border-gray-600 bg-transparent ' + (gradientPicker.constantColor ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer hover:border-gray-500')} />
-              </div>
+            <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-3 mb-4">
+              <div className="flex items-start gap-2 mb-2"><span className="w-5 h-5 rounded-full bg-purple-500/30 text-purple-300 text-[10px] flex items-center justify-center font-bold shrink-0 mt-0.5">1</span><p className="text-[11px] text-gray-400 leading-relaxed">Choisissez votre <b className="text-purple-300">couleur de départ</b>. Elle servira de teinte dominante pour ce cue.</p></div>
+              <div className="flex items-start gap-2"><span className="w-5 h-5 rounded-full bg-cyan-500/30 text-cyan-300 text-[10px] flex items-center justify-center font-bold shrink-0 mt-0.5">2</span><p className="text-[11px] text-gray-400 leading-relaxed">Choisissez une <b className="text-cyan-300">couleur d'arrivée</b> différente pour un dégradé progressif, ou identique pour une teinte constante.</p></div>
             </div>
-            <label className="flex items-center gap-2 mb-4 cursor-pointer select-none">
-              <input type="checkbox" checked={gradientPicker.constantColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, constantColor: e.target.checked, endColor: e.target.checked ? prev.startColor : prev.endColor } : null)} className="w-3.5 h-3.5 rounded accent-purple-500 cursor-pointer" />
-              <span className="text-[10px] text-gray-400">Couleur constante (départ = arrivée)</span>
-            </label>
-            <div className="h-10 rounded-lg mb-4 border border-gray-700 overflow-hidden" style={{ background: 'linear-gradient(90deg, ' + gradientPicker.startColor + ', ' + gradientPicker.endColor + ')' }} />
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Départ</label><div className="flex items-center gap-2"><input type="color" value={gradientPicker.startColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, startColor: e.target.value, endColor: prev.constantColor ? e.target.value : prev.endColor } : null)} className="w-10 h-10 rounded-lg border-2 border-gray-700 cursor-pointer" /><span className="text-xs text-gray-300 font-mono">{gradientPicker.startColor}</span></div></div>
+              <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Arrivée</label><div className="flex items-center gap-2"><input type="color" value={gradientPicker.endColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, endColor: e.target.value } : null)} disabled={gradientPicker.constantColor} className={'w-10 h-10 rounded-lg border-2 border-purple-700 cursor-pointer ' + (gradientPicker.constantColor ? 'opacity-30 cursor-not-allowed' : '')} /><span className="text-xs text-gray-300 font-mono">{gradientPicker.endColor}</span></div></div>
+            </div>
+            <div className="h-3 rounded-full mb-4" style={{ background: 'linear-gradient(90deg, ' + gradientPicker.startColor + ', ' + gradientPicker.endColor + ')' }} />
             <div className="flex flex-wrap gap-1.5 mb-4">
               {['#ff0000','#00ff00','#0000ff','#ffff00','#00ffff','#ff00ff','#ffffff','#ff8800'].map(hex => (
                 <button key={hex} onClick={() => setGradientPicker(prev => prev ? { ...prev, endColor: hex } : null)} className="w-6 h-6 rounded-full border border-gray-700 hover:scale-125 transition-transform" style={{ background: hex }} title={hex} />
               ))}
             </div>
+            <label className="flex items-center gap-2 text-[10px] text-gray-500 mb-4 cursor-pointer">
+              <input type="checkbox" checked={gradientPicker.endColor === gradientPicker.startColor} onChange={e => { if (e.target.checked) setGradientPicker(prev => prev ? { ...prev, endColor: prev.startColor, constantColor: true } : null); else setGradientPicker(prev => prev ? { ...prev, constantColor: false } : null); }} className="accent-purple-500" />
+              Couleur constante (départ = arrivée)
+            </label>
             <div className="flex justify-end gap-2">
               <button onClick={() => setGradientPicker(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
               <button onClick={() => { if (!gradientPicker) return; const { sectionType, colorIdx, endColor } = gradientPicker; const arr = [...(customPal[sectionType] || [])]; arr[colorIdx] = endColor; const newPal = { ...customPal, [sectionType]: arr }; setCustomPal(newPal); setQs({ customPalette: newPal }); setGradientPicker(null); }} className="px-4 py-2 rounded-lg text-xs font-medium bg-purple-600 text-white hover:bg-purple-500">Appliquer</button>
