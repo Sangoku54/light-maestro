@@ -127,7 +127,26 @@ export function computeFixtureTrackOverrides(
     const activeMovement = track.movementBlocks.find(b => ctime >= b.time && ctime < b.endTime);
 
     for (const fid of targets) {
-      if (activeColor) forcedColors.set(fid, activeColor.color);
+      if (activeColor) {
+        if (activeColor.endColor && activeColor.endColor !== activeColor.color) {
+          // Gradient block: interpolate between start (color) and end (endColor)
+          const dur = activeColor.endTime - activeColor.time;
+          const t = dur > 0 ? (ctime - activeColor.time) / dur : 0;
+          const sr = parseInt(activeColor.color.slice(1,3),16);
+          const sg = parseInt(activeColor.color.slice(3,5),16);
+          const sb = parseInt(activeColor.color.slice(5,7),16);
+          const er = parseInt(activeColor.endColor.slice(1,3),16);
+          const eg = parseInt(activeColor.endColor.slice(3,5),16);
+          const eb = parseInt(activeColor.endColor.slice(5,7),16);
+          const rr = Math.round(sr + (er - sr) * t);
+          const rg = Math.round(sg + (eg - sg) * t);
+          const rb = Math.round(sb + (eb - sb) * t);
+          const interp = '#' + [rr, rg, rb].map(v => v.toString(16).padStart(2,'0')).join('');
+          forcedColors.set(fid, interp);
+        } else {
+          forcedColors.set(fid, activeColor.color);
+        }
+      }
       if (activeDimmer) forcedDimmers.set(fid, activeDimmer.value);
       if (activeStrobe) forcedStrobes.set(fid, { active: true, speed: activeStrobe.speed });
       if (activeMovement) forcedMovements.set(fid, { pattern: activeMovement.pattern, amplitude: activeMovement.amplitude });
