@@ -409,7 +409,23 @@ export function useDmxPlayback(options: {
                 const targets = resolveTrackTargets(ft, patchedFixtures, fixtureGroupsRef.current);
                 if (!targets.includes(pf.id)) continue;
                 const activeBlock = ft.colorBlocks.find(b => ct >= b.time && ct < b.endTime);
-                if (activeBlock) return activeBlock.color;
+                if (activeBlock) {
+                  if (activeBlock.endColor && activeBlock.endColor !== activeBlock.color) {
+                    const dur = activeBlock.endTime - activeBlock.time;
+                    const t = dur > 0 ? (ct - activeBlock.time) / dur : 0;
+                    const sr = parseInt(activeBlock.color.slice(1,3),16);
+                    const sg = parseInt(activeBlock.color.slice(3,5),16);
+                    const sb = parseInt(activeBlock.color.slice(5,7),16);
+                    const er = parseInt(activeBlock.endColor.slice(1,3),16);
+                    const eg = parseInt(activeBlock.endColor.slice(3,5),16);
+                    const eb = parseInt(activeBlock.endColor.slice(5,7),16);
+                    const rr = Math.round(sr + (er - sr) * t);
+                    const rg = Math.round(sg + (eg - sg) * t);
+                    const rb = Math.round(sb + (eb - sb) * t);
+                    return '#' + [rr, rg, rb].map(v => v.toString(16).padStart(2,'0')).join('');
+                  }
+                  return activeBlock.color;
+                }
               }
             }
             // Use the exact cue color so fixtures match what the UI shows
