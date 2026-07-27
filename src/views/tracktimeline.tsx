@@ -259,7 +259,8 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const [ftSelFixture, setFtSelFixture] = useState<number | null>(null);
   const [ftSelTrack, setFtSelTrack] = useState<FixtureTrack | null>(null);
   const [ftMenu, setFtMenu] = useState<{ x: number; y: number; trackIdx: number; timeAtX: number } | null>(null);
-  const ftDragStart = useRef(0);
+
+  const [gradientPicker, setGradientPicker] = useState(null);  const ftDragStart = useRef(0);
   const ftDragFixture = useRef(-1);
   const isFtDragging = useRef(false);
   const ftSelRef = useRef({ start: 0, end: 0, fixture: -1, track: null as FixtureTrack | null });
@@ -1519,20 +1520,8 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
           {/* Color */}
           <button className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2"
             onClick={() => {
-              const inp = document.createElement('input'); inp.type = 'color'; inp.value = '#ff0064';
-              inp.style.position = 'fixed'; inp.style.opacity = '0'; document.body.appendChild(inp); inp.click();
-              inp.onchange = () => {
-                document.body.removeChild(inp);
-                const block: ColorBlock = { id: `cb-${Date.now()}`, time: ftSelRef.current.start, endTime: ftSelRef.current.end, color: inp.value };
-                const fixture = patchedFixtures[ftMenu.trackIdx];
-                const existing = fixtureTracks.find(ft => resolveTrackTargets(ft, patchedFixtures, []).includes(fixture.id));
-                if (existing) {
-                  onFixtureTracksChange(fixtureTracks.map(ft => ft.id === existing.id ? { ...existing, colorBlocks: [...existing.colorBlocks, block] } : ft));
-                } else {
-                  onFixtureTracksChange([...fixtureTracks, createFixtureTrack(`fixture:${fixture.id}`, fixture.name)]);
-                }
-                setFtMenu(null); setFtSelStart(null); setFtSelEnd(null); setFtSelFixture(null);
-              };
+              setFtMenu(null);
+              setGradientPicker({ sectionType: 'fixture', colorIdx: 0, startColor: '#ff0064', endColor: '#ff0064', constantColor: false, trackIdx: ftMenu.trackIdx });
             }}
           ><span className="text-[14px]">🎨</span> Color</button>
           {/* Dimmer */}
@@ -1823,6 +1812,54 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
           })}
         </div>
       </div>
+      {/* ── Gradient Color Picker Modal ── */}
+      {gradientPicker !== null && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/70" />
+          <div className="relative z-10 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-6 w-[420px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full bg-gradient-to-r from-purple-500 to-cyan-400" /><span className="text-sm font-semibold text-gray-200">Choix de couleur</span></div>
+              <button className="text-gray-500 hover:text-white text-lg px-1" onClick={() => setGradientPicker(null)}>✕</button>
+            </div>
+            <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-3 mb-4">
+              <div className="flex items-start gap-2 mb-2"><span className="w-5 h-5 rounded-full bg-purple-500/30 text-purple-300 text-[10px] flex items-center justify-center font-bold shrink-0 mt-0.5">1</span><p className="text-[11px] text-gray-400 leading-relaxed">Choisissez la <b className="text-purple-300">couleur de départ</b>. Elle servira de teinte dominante pour ce bloc.</p></div>
+              <div className="flex items-start gap-2"><span className="w-5 h-5 rounded-full bg-cyan-500/30 text-cyan-300 text-[10px] flex items-center justify-center font-bold shrink-0 mt-0.5">2</span><p className="text-[11px] text-gray-400 leading-relaxed">Choisissez une <b className="text-cyan-300">couleur d'arrivée</b> pour un dégradé progressif, ou la même pour une teinte constante.</p></div>
+            </div>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Départ</label><div className="flex items-center gap-2"><input type="color" value={gradientPicker.startColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, startColor: e.target.value, endColor: prev.constantColor ? e.target.value : prev.endColor } : null)} className="w-10 h-10 rounded-lg border-2 border-gray-700 cursor-pointer" /><span className="text-xs text-gray-300 font-mono">{gradientPicker.startColor}</span></div></div>
+              <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Arrivée</label><div className="flex items-center gap-2"><input type="color" value={gradientPicker.endColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, endColor: e.target.value } : null)} disabled={gradientPicker.constantColor} className={'w-10 h-10 rounded-lg border-2 border-purple-700 cursor-pointer ' + (gradientPicker.constantColor ? 'opacity-30 cursor-not-allowed' : '')} /><span className="text-xs text-gray-300 font-mono">{gradientPicker.endColor}</span></div></div>
+            </div>
+            <div className="h-3 rounded-full mb-4" style={{ background: 'linear-gradient(90deg, ' + gradientPicker.startColor + ', ' + gradientPicker.endColor + ')' }} />
+            <div className="flex flex-wrap gap-1.5 mb-4">
+              {['#ff0000','#00ff00','#0000ff','#ffff00','#00ffff','#ff00ff','#ffffff','#ff8800'].map(hex => (
+                <button key={hex} onClick={() => setGradientPicker(prev => prev ? { ...prev, endColor: hex } : null)} className="w-6 h-6 rounded-full border border-gray-700 hover:scale-125 transition-transform" style={{ background: hex }} title={hex} />
+              ))}
+            </div>
+            <label className="flex items-center gap-2 text-[10px] text-gray-500 mb-4 cursor-pointer">
+              <input type="checkbox" checked={gradientPicker.endColor === gradientPicker.startColor} onChange={e => { if (e.target.checked) setGradientPicker(prev => prev ? { ...prev, endColor: prev.startColor, constantColor: true } : null); else setGradientPicker(prev => prev ? { ...prev, constantColor: false } : null); }} className="accent-purple-500" />
+              Couleur constante (départ = arrivée)
+            </label>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setGradientPicker(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
+              <button onClick={() => {
+                if (!gradientPicker) return;
+                const { endColor } = gradientPicker;
+                const block = { id: 'cb-' + Date.now(), time: ftSelRef.current.start, endTime: ftSelRef.current.end, color: endColor };
+                const fixture = patchedFixtures[gradientPicker.trackIdx];
+                const existing = fixtureTracks.find(ft => resolveTrackTargets(ft, patchedFixtures, []).includes(fixture.id));
+                if (existing) {
+                  onFixtureTracksChange(fixtureTracks.map(ft => ft.id === existing.id ? { ...existing, colorBlocks: [...existing.colorBlocks, block] } : ft));
+                } else {
+                  onFixtureTracksChange([...fixtureTracks, createFixtureTrack('fixture:' + fixture.id, fixture.name)]);
+                }
+                setGradientPicker(null);
+                setFtSelStart(null); setFtSelEnd(null); setFtSelFixture(null);
+              }} className="px-4 py-2 rounded-lg text-xs font-medium bg-purple-600 text-white hover:bg-purple-500">Appliquer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
