@@ -1,6 +1,6 @@
 {
   "appStore": {
-    "mode": "design",
+    "mode": "quick",
     "quickSidebarTab": "autoscript",
     "designSidebarTab": "efx",
     "performSidebarTab": "vconsole",
@@ -42,7 +42,8 @@
       "showDimmerTrack": false,
       "colorEntries": [],
       "dimmerEntries": [],
-      "strobeEntries": []
+      "strobeEntries": [],
+      "colorFadeMs": 50
     },
     "dmx": {
       "running": false,
@@ -148,5 +149,5 @@
     "shows": []
   },
   "version": 1,
-  "timestamp": "2026-07-26T10:02:51.009Z"
+  "timestamp": "2026-07-26T20:51:29.405Z"
 }
