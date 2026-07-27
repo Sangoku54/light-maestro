@@ -2585,7 +2585,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
 
       {/* Gradient color picker modal */}
       {gradientPicker !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setGradientPicker(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/70" />
           <div className="relative z-10 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-6 w-[420px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
             <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-200 mb-4">
