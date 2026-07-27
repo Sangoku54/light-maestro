@@ -429,6 +429,17 @@ function genCues(
         const sectionProgressNorm = dur > 0 ? (t - section.startTime) / dur : 0;
         const paletteIdx = Math.floor(sectionProgressNorm * sectionPal.length * colorCycleSpeed) % sectionPal.length;
         prevColor = sectionPal[paletteIdx];
+        // Gradient interpolation: blend start→end color across section duration
+        const gradient = cfg.customGradients?.[section.type] as { start: string; end: string } | undefined;
+        if (gradient && gradient.start !== gradient.end) {
+          const [sr, sg, sb] = hexToRgb(gradient.start);
+          const [er, eg, eb] = hexToRgb(gradient.end);
+          const t = sectionProgressNorm;
+          const rr = Math.round(sr + (er - sr) * t);
+          const rg = Math.round(sg + (eg - sg) * t);
+          const rb = Math.round(sb + (eb - sb) * t);
+          prevColor = '#' + [rr, rg, rb].map(v => v.toString(16).padStart(2, '0')).join('');
+        }
         prevIntensity = intensity;
 
         // Energy: RMS + section + drop anticipation boost
@@ -2605,7 +2616,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             </label>
             <div className="flex justify-end gap-2">
               <button onClick={() => setGradientPicker(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
-              <button onClick={() => { if (!gradientPicker) return; const { sectionType, colorIdx, endColor } = gradientPicker; const arr = [...(customPal[sectionType] || [])]; arr[colorIdx] = endColor; const newPal = { ...customPal, [sectionType]: arr }; setCustomPal(newPal); setQs({ customPalette: newPal }); setGradientPicker(null); }} className="px-4 py-2 rounded-lg text-xs font-medium bg-purple-600 text-white hover:bg-purple-500">Appliquer</button>
+              <button onClick={() => { if (!gradientPicker) return; const { sectionType, colorIdx, endColor, startColor } = gradientPicker; const arr = [...(customPal[sectionType] || [])]; arr[colorIdx] = endColor; const newPal = { ...customPal, [sectionType]: arr }; setCustomPal(newPal); setQs({ customPalette: newPal, customGradients: { ...(qs.customGradients || {}), [sectionType]: { start: startColor, end: endColor } } }); setGradientPicker(null); }} className="px-4 py-2 rounded-lg text-xs font-medium bg-purple-600 text-white hover:bg-purple-500">Appliquer</button>
             </div>
           </div>
         </div>
