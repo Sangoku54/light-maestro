@@ -260,7 +260,11 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const [ftSelTrack, setFtSelTrack] = useState<FixtureTrack | null>(null);
   const [ftMenu, setFtMenu] = useState<{ x: number; y: number; trackIdx: number; timeAtX: number } | null>(null);
 
-  const [gradientPicker, setGradientPicker] = useState(null);  const ftDragStart = useRef(0);
+  const [gradientPicker, setGradientPicker] = useState(null);
+  const [blockMenu, setBlockMenu] = useState<{ x: number; y: number; trackIdx: number; blockId: string; blockType: string } | null>(null);
+
+  const [editBlock, setEditBlock] = useState<{ trackIdx: number; blockId: string; blockType: string } | null>(null);
+  const ftDragStart = useRef(0);
   const ftDragFixture = useRef(-1);
   const isFtDragging = useRef(false);
   const ftSelRef = useRef({ start: 0, end: 0, fixture: -1, track: null as FixtureTrack | null });
@@ -552,7 +556,82 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       // ── Close block menu on any click ──
+if (editBlock) { setEditBlock(null); return; }
       if (blockMenu) { setBlockMenu(null); return; }
+      // ── Left-click on fixture track blocks opens edit popup ──
+      if (fixtureTracks && onFixtureTracksChange && e.button === 0) {
+        const canvas2 = canvasRef.current;
+        if (canvas2) {
+          const rect2 = canvas2.getBoundingClientRect();
+          const x2 = e.clientX - rect2.left;
+          const y2 = e.clientY - rect2.top;
+          const duration2 = audioFile.resolvedAnalysis.timelineMs || 120000;
+          const drawW2 = canvas2.width - LABEL_WIDTH;
+          if (y2 >= HEADER_HEIGHT && x2 >= LABEL_WIDTH) {
+            const trackIdx2 = Math.floor((y2 - HEADER_HEIGHT) / TRACK_HEIGHT);
+            if (trackIdx2 >= 0 && trackIdx2 < numFixtures) {
+              const fixture2 = patchedFixtures[trackIdx2];
+              const timeAtX2 = ((x2 - LABEL_WIDTH) / drawW2) * duration2;
+              for (let fti2 = 0; fti2 < fixtureTracks.length; fti2++) {
+                const ft2 = fixtureTracks[fti2];
+                if (!ft2.enabled) continue;
+                let targetsFixture2 = false;
+                if (ft2.target.startsWith('fixture:')) targetsFixture2 = ft2.target.slice(8) === fixture2.id;
+                else if (ft2.target.startsWith('tier:')) targetsFixture2 = ft2.target.slice(5) === fixture2.tier;
+                else targetsFixture2 = true;
+                if (!targetsFixture2) continue;
+                // Check all block types
+                for (const blk2 of ft2.colorBlocks) {
+                  if (timeAtX2 >= blk2.time && timeAtX2 <= blk2.endTime) {
+                    setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'color' });
+                    // Also select the time range
+                    setFtSelStart(blk2.time);
+                    setFtSelEnd(blk2.endTime);
+                    setFtSelFixture(trackIdx2);
+                    setFtSelTrack({ ...ft2, fixtureNames: [fixture2.name] });
+                    ftSelRef.current = { start: blk2.time, end: blk2.endTime, fixture: trackIdx2, track: { ...ft2, fixtureNames: [fixture2.name] } };
+                    return;
+                  }
+                }
+                for (const blk2 of ft2.dimmerBlocks) {
+                  if (timeAtX2 >= blk2.time && timeAtX2 <= blk2.endTime) {
+                    setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'dimmer' });
+                    setFtSelStart(blk2.time);
+                    setFtSelEnd(blk2.endTime);
+                    setFtSelFixture(trackIdx2);
+                    setFtSelTrack({ ...ft2, fixtureNames: [fixture2.name] });
+                    ftSelRef.current = { start: blk2.time, end: blk2.endTime, fixture: trackIdx2, track: { ...ft2, fixtureNames: [fixture2.name] } };
+                    return;
+                  }
+                }
+                for (const blk2 of ft2.strobeBlocks) {
+                  if (timeAtX2 >= blk2.time && timeAtX2 <= blk2.endTime) {
+                    setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'strobe' });
+                    setFtSelStart(blk2.time);
+                    setFtSelEnd(blk2.endTime);
+                    setFtSelFixture(trackIdx2);
+                    setFtSelTrack({ ...ft2, fixtureNames: [fixture2.name] });
+                    ftSelRef.current = { start: blk2.time, end: blk2.endTime, fixture: trackIdx2, track: { ...ft2, fixtureNames: [fixture2.name] } };
+                    return;
+                  }
+                }
+                for (const blk2 of ft2.movementBlocks) {
+                  if (timeAtX2 >= blk2.time && timeAtX2 <= blk2.endTime) {
+                    setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'movement' });
+                    setFtSelStart(blk2.time);
+                    setFtSelEnd(blk2.endTime);
+                    setFtSelFixture(trackIdx2);
+                    setFtSelTrack({ ...ft2, fixtureNames: [fixture2.name] });
+                    ftSelRef.current = { start: blk2.time, end: blk2.endTime, fixture: trackIdx2, track: { ...ft2, fixtureNames: [fixture2.name] } };
+                    return;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
       // ── Right-click on fixture track blocks shows context menu ──
       if (fixtureTracks && onFixtureTracksChange && e.button === 2) {
         const canvas = canvasRef.current;
@@ -1939,7 +2018,178 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
           </div>
         </div>
       )}
-      {/* ── Block Context Menu ── */}
+            {/* ── Edit Color Block ── */}
+      {editBlock && editBlock.blockType === 'color' && fixtureTracks && (() => {
+        const ft = fixtureTracks[editBlock.trackIdx];
+        const cb = ft?.colorBlocks.find(b => b.id === editBlock.blockId);
+        const fixture = patchedFixtures[ftSelRef.current.fixture];
+        if (!cb || !fixture) return null;
+        return (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/70" onClick={() => setEditBlock(null)} />
+            <div className="relative z-10 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-6 w-[420px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full bg-gradient-to-r from-purple-500 to-cyan-400" /><span className="text-sm font-semibold text-gray-200">Modifier couleur</span></div>
+                <button className="text-gray-500 hover:text-white text-lg px-1" onClick={() => setEditBlock(null)}>✕</button>
+              </div>
+              <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-3 mb-4">
+                <div className="flex gap-4">
+                  <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Départ</label><div className="flex items-center gap-2"><input type="color" value={cb.color} onChange={e => {}} id="__edit_cs" className="w-10 h-10 rounded-lg border-2 border-purple-700 cursor-pointer" /><span className="text-xs text-gray-300 font-mono">{cb.color}</span></div></div>
+                  <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Arrivée</label><div className="flex items-center gap-2"><input type="color" value={cb.endColor || cb.color} onChange={e => {}} id="__edit_ce" className="w-10 h-10 rounded-lg border-2 border-purple-700 cursor-pointer" /><span className="text-xs text-gray-300 font-mono">{cb.endColor || cb.color}</span></div></div>
+                </div>
+                <div className="h-3 rounded-full mt-3" style={{ background: 'linear-gradient(90deg, ' + cb.color + ', ' + (cb.endColor || cb.color) + ')' }} />
+              </div>
+              <div className="flex flex-wrap gap-1.5 mb-4">
+                {['#ff0000','#00ff00','#0000ff','#ffff00','#00ffff','#ff00ff','#ffffff','#ff8800'].map(hex => (
+                  <button key={hex} onClick={() => { const e2 = document.getElementById('__edit_ce') as HTMLInputElement; if(e2){e2.value=hex;e2.dispatchEvent(new Event('input',{bubbles:true}));} (e2?.nextElementSibling as HTMLElement).textContent=hex; }} className="w-6 h-6 rounded-full border border-gray-700 hover:scale-125 transition-transform" style={{ background: hex }} title={hex} />
+                ))}
+              </div>
+              <label className="flex items-center gap-2 text-[10px] text-gray-500 mb-4 cursor-pointer">
+                <input type="checkbox" id="__edit_const" checked={!cb.endColor || cb.endColor === cb.color} onChange={e => { const val = e.target.checked ? (document.getElementById('__edit_cs') as HTMLInputElement).value : ''; const ce = document.getElementById('__edit_ce') as HTMLInputElement; if(ce){ce.value=val;ce.dispatchEvent(new Event('input',{bubbles:true}));} }} className="accent-purple-500" />
+                Couleur constante (départ = arrivée)
+              </label>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setEditBlock(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
+                <button onClick={() => {
+                  const cs = (document.getElementById('__edit_cs') as HTMLInputElement).value;
+                  const ce = (document.getElementById('__edit_ce') as HTMLInputElement).value;
+                  const same = cs === ce;
+                  onFixtureTracksChange(fixtureTracks.map((t, i) => i === editBlock.trackIdx ? { ...t, colorBlocks: t.colorBlocks.map(b => b.id === editBlock.blockId ? { ...b, color: cs, endColor: same ? undefined : ce } : b) } : t));
+                  setEditBlock(null);
+                }} className="px-4 py-2 rounded-lg text-xs font-medium bg-purple-600 text-white hover:bg-purple-500">Appliquer</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Edit Dimmer Block ── */}
+      {editBlock && editBlock.blockType === 'dimmer' && fixtureTracks && (() => {
+        const ft = fixtureTracks[editBlock.trackIdx];
+        const db = ft?.dimmerBlocks.find(b => b.id === editBlock.blockId);
+        if (!db) return null;
+        return (
+          <div className="fixed inset-0 z-[9998] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/70" onClick={() => setEditBlock(null)} />
+            <div className="relative z-10 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-6 w-[340px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm font-semibold text-cyan-300">💡 Modifier dimmer</span>
+                <button className="text-gray-500 hover:text-white text-lg px-1" onClick={() => setEditBlock(null)}>✕</button>
+              </div>
+              <div className="flex gap-4">
+                <div className="flex-1 text-center">
+                  <div className="text-[10px] text-gray-500 mb-1">Départ</div>
+                  <div id="__ed_dim_v1" className="text-cyan-300 text-lg font-bold mb-2">{db.value}</div>
+                  <input type="range" id="__ed_dim_s1" min="0" max="255" defaultValue={db.value} onChange={e => { document.getElementById('__ed_dim_v1')!.textContent = e.target.value; }} style={{ width: '100%', accentColor: '#22d3ee' }} />
+                </div>
+                <div className="flex-1 text-center">
+                  <div className="text-[10px] text-gray-500 mb-1">Arrivée</div>
+                  <div id="__ed_dim_v2" className="text-cyan-300 text-lg font-bold mb-2">{db.endValue ?? db.value}</div>
+                  <input type="range" id="__ed_dim_s2" min="0" max="255" defaultValue={db.endValue ?? db.value} onChange={e => { document.getElementById('__ed_dim_v2')!.textContent = e.target.value; }} style={{ width: '100%', accentColor: '#22d3ee' }} />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 mt-5">
+                <button onClick={() => setEditBlock(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
+                <button onClick={() => {
+                  const v1 = Number((document.getElementById('__ed_dim_s1') as HTMLInputElement).value);
+                  const v2 = Number((document.getElementById('__ed_dim_s2') as HTMLInputElement).value);
+                  onFixtureTracksChange(fixtureTracks.map((t, i) => i === editBlock.trackIdx ? { ...t, dimmerBlocks: t.dimmerBlocks.map(b => b.id === editBlock.blockId ? { ...b, value: v1, endValue: v1 !== v2 ? v2 : undefined } : b) } : t));
+                  setEditBlock(null);
+                }} className="px-4 py-2 rounded-lg text-xs font-medium bg-cyan-600 text-white hover:bg-cyan-500">Appliquer</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Edit Strobe Block ── */}
+      {editBlock && editBlock.blockType === 'strobe' && fixtureTracks && (() => {
+        const ft = fixtureTracks[editBlock.trackIdx];
+        const sb = ft?.strobeBlocks.find(b => b.id === editBlock.blockId);
+        if (!sb) return null;
+        return (
+          <div className="fixed inset-0 z-[9998] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/70" onClick={() => setEditBlock(null)} />
+            <div className="relative z-10 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-6 w-[340px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm font-semibold text-yellow-400">⚡ Modifier strobe</span>
+                <button className="text-gray-500 hover:text-white text-lg px-1" onClick={() => setEditBlock(null)}>✕</button>
+              </div>
+              <div className="flex gap-4">
+                <div className="flex-1 text-center">
+                  <div className="text-[10px] text-gray-500 mb-1">Départ (Hz)</div>
+                  <div id="__ed_sb_v1" className="text-yellow-400 text-lg font-bold mb-2">{sb.speed}</div>
+                  <input type="range" id="__ed_sb_s1" min="1" max="30" step="0.5" defaultValue={sb.speed} onChange={e => { document.getElementById('__ed_sb_v1')!.textContent = e.target.value; }} style={{ width: '100%', accentColor: '#facc15' }} />
+                </div>
+                <div className="flex-1 text-center">
+                  <div className="text-[10px] text-gray-500 mb-1">Arrivée (Hz)</div>
+                  <div id="__ed_sb_v2" className="text-yellow-400 text-lg font-bold mb-2">{sb.endSpeed ?? sb.speed}</div>
+                  <input type="range" id="__ed_sb_s2" min="1" max="30" step="0.5" defaultValue={sb.endSpeed ?? sb.speed} onChange={e => { document.getElementById('__ed_sb_v2')!.textContent = e.target.value; }} style={{ width: '100%', accentColor: '#facc15' }} />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 mt-5">
+                <button onClick={() => setEditBlock(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
+                <button onClick={() => {
+                  const s1 = Number((document.getElementById('__ed_sb_s1') as HTMLInputElement).value);
+                  const s2 = Number((document.getElementById('__ed_sb_s2') as HTMLInputElement).value);
+                  onFixtureTracksChange(fixtureTracks.map((t, i) => i === editBlock.trackIdx ? { ...t, strobeBlocks: t.strobeBlocks.map(b => b.id === editBlock.blockId ? { ...b, speed: s1, endSpeed: s1 !== s2 ? s2 : undefined } : b) } : t));
+                  setEditBlock(null);
+                }} className="px-4 py-2 rounded-lg text-xs font-medium bg-yellow-600 text-black hover:bg-yellow-500">Appliquer</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Edit Movement Block ── */}
+      {editBlock && editBlock.blockType === 'movement' && fixtureTracks && (() => {
+        const ft = fixtureTracks[editBlock.trackIdx];
+        const mb = ft?.movementBlocks.find(b => b.id === editBlock.blockId);
+        if (!mb) return null;
+        const patterns = ['sweep','circle','bounce','wave','figure8','zigzag','diamond','spiral','heartbeat','randomWalk','panOnly','tiltOnly','static'];
+        return (
+          <div className="fixed inset-0 z-[9998] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/70" onClick={() => setEditBlock(null)} />
+            <div className="relative z-10 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-6 w-[380px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm font-semibold text-green-400">↕ Modifier mouvement</span>
+                <button className="text-gray-500 hover:text-white text-lg px-1" onClick={() => setEditBlock(null)}>✕</button>
+              </div>
+              <div className="flex gap-4">
+                <div className="flex-1 text-center">
+                  <div className="text-[10px] text-gray-500 mb-1">Départ</div>
+                  <select id="__ed_mv_p1" defaultValue={mb.pattern} className="w-full bg-[#1f1f2e] border border-gray-700 rounded-md p-1.5 text-gray-300 text-xs mb-2">
+                    {patterns.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                  <div id="__ed_mv_v1" className="text-green-400 text-lg font-bold mb-2">{mb.amplitude}</div>
+                  <input type="range" id="__ed_mv_a1" min="20" max="200" defaultValue={mb.amplitude} onChange={e => { document.getElementById('__ed_mv_v1')!.textContent = e.target.value; }} style={{ width: '100%', accentColor: '#22c55e' }} />
+                </div>
+                <div className="flex-1 text-center">
+                  <div className="text-[10px] text-gray-500 mb-1">Arrivée</div>
+                  <select id="__ed_mv_p2" defaultValue={mb.endPattern || mb.pattern} className="w-full bg-[#1f1f2e] border border-gray-700 rounded-md p-1.5 text-gray-300 text-xs mb-2">
+                    {patterns.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                  <div id="__ed_mv_v2" className="text-green-400 text-lg font-bold mb-2">{mb.endAmplitude ?? mb.amplitude}</div>
+                  <input type="range" id="__ed_mv_a2" min="20" max="200" defaultValue={mb.endAmplitude ?? mb.amplitude} onChange={e => { document.getElementById('__ed_mv_v2')!.textContent = e.target.value; }} style={{ width: '100%', accentColor: '#22c55e' }} />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 mt-5">
+                <button onClick={() => setEditBlock(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
+                <button onClick={() => {
+                  const p1 = (document.getElementById('__ed_mv_p1') as HTMLSelectElement).value;
+                  const p2 = (document.getElementById('__ed_mv_p2') as HTMLSelectElement).value;
+                  const a1 = Number((document.getElementById('__ed_mv_a1') as HTMLInputElement).value);
+                  const a2 = Number((document.getElementById('__ed_mv_a2') as HTMLInputElement).value);
+                  onFixtureTracksChange(fixtureTracks.map((t, i) => i === editBlock.trackIdx ? { ...t, movementBlocks: t.movementBlocks.map(b => b.id === editBlock.blockId ? { ...b, pattern: p1, amplitude: a1, endPattern: p1 !== p2 ? p2 : undefined, endAmplitude: a1 !== a2 ? a2 : undefined } : b) } : t));
+                  setEditBlock(null);
+                }} className="px-4 py-2 rounded-lg text-xs font-medium bg-green-600 text-black hover:bg-green-500">Appliquer</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+{/* ── Block Context Menu ── */}
       {blockMenu && onFixtureTracksChange && fixtureTracks && (
         <div
           className="fixed z-50 bg-[#1a1a2e] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
