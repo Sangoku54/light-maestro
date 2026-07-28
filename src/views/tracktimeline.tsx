@@ -2001,6 +2001,7 @@ if (editBlock) { setEditBlock(null); return; }
               <input type="checkbox" checked={gradientPicker.endColor === gradientPicker.startColor} onChange={e => { if (e.target.checked) setGradientPicker(prev => prev ? { ...prev, endColor: prev.startColor, constantColor: true } : null); else setGradientPicker(prev => prev ? { ...prev, constantColor: false } : null); }} className="accent-purple-500" />
               Couleur constante (départ = arrivée)
             </label>
+{/* ── Presets ── */}
 {qs?.gradientPresets && qs.gradientPresets.length > 0 && (
   <div className="mb-3">
     <div className="text-[9px] text-gray-500 uppercase tracking-wider mb-1.5">Presets sauvegardés</div>
@@ -2022,13 +2023,14 @@ if (editBlock) { setEditBlock(null); return; }
     onClick={() => {
       if (!gradientPicker) return;
       const name = prompt('Nom du preset :');
-      if (!name) return;
+      if (!name || !(name.trim())) return;
       const presets = qs?.gradientPresets ? [...qs.gradientPresets] : [];
       presets.push({ id: 'gp-' + Date.now(), name, start: gradientPicker.startColor, end: gradientPicker.endColor });
       setQs({ ...qs, gradientPresets: presets });
     }}
   >+ Sauvegarder ce dégradé</button>
 </div>
+
             <div className="flex justify-end gap-2">
               <button onClick={() => setGradientPicker(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
               <button onClick={() => {
