@@ -273,6 +273,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const ftDragFixture = useRef(-1);
   const isFtDragging = useRef(false);
   const ftSelRef = useRef({ start: 0, end: 0, fixture: -1, track: null as FixtureTrack | null });
+  const blockDragRef = useRef(null);
 
   const numFixtures = patchedFixtures.length;
   const numEfxTracks = efxTracks?.length ?? 0;
@@ -491,7 +492,37 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         return;
       }
 
-      // EFX entry drag/resize
+      // ── Block drag ──
+      if (blockDragRef.current) {
+        setTooltip(null);
+        const drg = blockDragRef.current;
+        const cb3 = containerRef.current;
+        if (!cb3) return;
+        const rb3 = cb3.getBoundingClientRect();
+        const dwb3 = (rb3.width - LABEL_WIDTH) * zoomLevel;
+        if (dwb3 <= 0) return;
+        const dt = ((e.clientX - drg.initialX) / dwb3) * duration;
+        const dur = drg.blockDur;
+        const newStart = Math.max(0, Math.min(duration - dur, drg.startTime + dt));
+        const newEnd = newStart + dur;
+        const ft = fixtureTracks[drg.trackIdx];
+        if (ft) {
+          const updater = (arr) => arr.map(b => b.id === drg.blockId ? { ...b, time: newStart, endTime: newEnd } : b);
+          const updated = fixtureTracks.map((t, i) => {
+            if (i !== drg.trackIdx) return t;
+            var type = drg.blockType;
+            if (type === 'color') return { ...t, colorBlocks: updater(t.colorBlocks) };
+            if (type === 'dimmer') return { ...t, dimmerBlocks: updater(t.dimmerBlocks) };
+            if (type === 'strobe') return { ...t, strobeBlocks: updater(t.strobeBlocks) };
+            if (type === 'movement') return { ...t, movementBlocks: updater(t.movementBlocks) };
+            return t;
+          });
+          onFixtureTracksChange(updated);
+        }
+        return;
+      }
+
+            // EFX entry drag/resize
       if (efxDragRef.current) {
         const c = containerRef.current; if (!c) return;
         const rect = c.getBoundingClientRect();
@@ -846,7 +877,48 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
-    // -- EFX entry drag detection (before section resize) --
+    // ── Block drag start ──
+    if (fixtureTracks && onFixtureTracksChange && e.button === 0) {
+      var cb2 = containerRef.current;
+      if (cb2) {
+        var rb2 = cb2.getBoundingClientRect();
+        var xb2 = e.clientX - rb2.left - LABEL_WIDTH;
+        var yb2 = e.clientY - rb2.top;
+        var dwb2 = (rb2.width - LABEL_WIDTH) * zoomLevel;
+        if (yb2 >= HEADER_HEIGHT && xb2 >= 0 && dwb2 > 0) {
+          var tb2 = Math.floor((yb2 - HEADER_HEIGHT) / TRACK_HEIGHT);
+          if (tb2 >= 0 && tb2 < numFixtures) {
+            var fixb2 = patchedFixtures[tb2];
+            var timeAtXb2 = (xb2 / dwb2) * duration;
+            for (var fti2 = 0; fti2 < fixtureTracks.length; fti2++) {
+              var ft2 = fixtureTracks[fti2];
+              if (!ft2.enabled) continue;
+              var tf2 = false;
+              if (ft2.target.startsWith('fixture:')) tf2 = ft2.target.slice(8) === fixb2.id;
+              else if (ft2.target.startsWith('tier:')) tf2 = ft2.target.slice(5) === fixb2.tier;
+              else tf2 = true;
+              if (!tf2) continue;
+              var blocks = [];
+              for (var ci = 0; ci < ft2.colorBlocks.length; ci++) { var b = ft2.colorBlocks[ci]; blocks.push({ id: b.id, time: b.time, endTime: b.endTime, _t: 'color' }); }
+              for (var di = 0; di < ft2.dimmerBlocks.length; di++) { var d = ft2.dimmerBlocks[di]; blocks.push({ id: d.id, time: d.time, endTime: d.endTime, _t: 'dimmer' }); }
+              for (var si = 0; si < ft2.strobeBlocks.length; si++) { var s = ft2.strobeBlocks[si]; blocks.push({ id: s.id, time: s.time, endTime: s.endTime, _t: 'strobe' }); }
+              for (var mi = 0; mi < ft2.movementBlocks.length; mi++) { var m = ft2.movementBlocks[mi]; blocks.push({ id: m.id, time: m.time, endTime: m.endTime, _t: 'movement' }); }
+              for (var bi = 0; bi < blocks.length; bi++) {
+                var bl = blocks[bi];
+                if (timeAtXb2 >= bl.time && timeAtXb2 <= bl.endTime) {
+                  blockDragRef.current = { trackIdx: fti2, blockId: bl.id, blockType: bl._t, startTime: bl.time, initialX: e.clientX, blockDur: bl.endTime - bl.time };
+                  e.preventDefault();
+                  e.stopPropagation();
+                  return;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+        // -- EFX entry drag detection (before section resize) --
     {
       const c2 = containerRef.current;
       if (c2 && onEfxEntryChange) {
@@ -929,6 +1001,7 @@ if (editBlock) { setEditBlock(null); return; }
     // Fixture track drag end
     if (isFtDragging.current) {
       isFtDragging.current = false;
+    blockDragRef.current = null;
       const start = ftDragStart.current;
       const end = ftSelRef.current.end;
       const diff = Math.abs(end - start);
