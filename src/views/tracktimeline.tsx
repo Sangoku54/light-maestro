@@ -16,6 +16,7 @@ import type { DmxCue } from '../hooks/dmx-cues';
 import type { PatchedFixture } from '../stores/showStore';
 import type { FixtureTrack, ColorBlock, DimmerBlock, StrobeBlock, MovementBlock } from '../hooks/fixture-tracks';
 import { resolveTrackTargets, createFixtureTrack } from '../hooks/fixture-tracks';
+import { useAppStore } from '../stores/appStore';
 
 // ─── Types ─────────────────────────────────────────────────
 
@@ -261,6 +262,8 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const [ftMenu, setFtMenu] = useState<{ x: number; y: number; trackIdx: number; timeAtX: number } | null>(null);
 
   const [gradientPicker, setGradientPicker] = useState(null);
+  const qs = useAppStore(s => s.quickShow);
+  const setQs = useAppStore(s => s.setQuickShow);
   const [blockMenu, setBlockMenu] = useState<{ x: number; y: number; trackIdx: number; blockId: string; blockType: string } | null>(null);
 
   const [editBlock, setEditBlock] = useState<{ trackIdx: number; blockId: string; blockType: string } | null>(null);
@@ -1998,6 +2001,34 @@ if (editBlock) { setEditBlock(null); return; }
               <input type="checkbox" checked={gradientPicker.endColor === gradientPicker.startColor} onChange={e => { if (e.target.checked) setGradientPicker(prev => prev ? { ...prev, endColor: prev.startColor, constantColor: true } : null); else setGradientPicker(prev => prev ? { ...prev, constantColor: false } : null); }} className="accent-purple-500" />
               Couleur constante (départ = arrivée)
             </label>
+{qs?.gradientPresets && qs.gradientPresets.length > 0 && (
+  <div className="mb-3">
+    <div className="text-[9px] text-gray-500 uppercase tracking-wider mb-1.5">Presets sauvegardés</div>
+    <div className="flex flex-wrap gap-1">
+      {qs.gradientPresets.map((p: any) => (
+        <button key={p.id} className="px-2 py-1 rounded text-[9px] border border-gray-700 hover:border-purple-500 transition-colors"
+          style={{ background: 'linear-gradient(90deg, ' + p.start + ', ' + p.end + ')' }}
+          title={p.name}
+          onClick={() => { const same = p.start === p.end; setGradientPicker((prev: any) => prev ? { ...prev, startColor: p.start, endColor: p.end, constantColor: same } : null); }}
+        >
+          <span className="drop-shadow-[0_0_3px_rgba(0,0,0,0.9)]">{p.name}</span>
+        </button>
+      ))}
+    </div>
+  </div>
+)}
+<div className="mb-3">
+  <button className="w-full text-[10px] text-gray-500 border border-dashed border-gray-700 rounded-md py-1 hover:border-purple-500 hover:text-purple-300 transition-colors"
+    onClick={() => {
+      if (!gradientPicker) return;
+      const name = prompt('Nom du preset :');
+      if (!name) return;
+      const presets = qs?.gradientPresets ? [...qs.gradientPresets] : [];
+      presets.push({ id: 'gp-' + Date.now(), name, start: gradientPicker.startColor, end: gradientPicker.endColor });
+      setQs({ ...qs, gradientPresets: presets });
+    }}
+  >+ Sauvegarder ce dégradé</button>
+</div>
             <div className="flex justify-end gap-2">
               <button onClick={() => setGradientPicker(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
               <button onClick={() => {
