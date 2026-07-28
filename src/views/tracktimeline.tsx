@@ -621,7 +621,7 @@ if (editBlock) { setEditBlock(null); return; }
                 if (!targetsFixture2) continue;
                 // Check all block types
                 for (const blk2 of ft2.colorBlocks) {
-                  if (timeAtX2 >= blk2.time && timeAtX2 <= blk2.endTime) {
+                  if (snappedTime >= blk2.time && snappedTime <= blk2.endTime) {
                     setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'color' });
                     // Also select the time range
                     setFtSelStart(blk2.time);
@@ -633,7 +633,7 @@ if (editBlock) { setEditBlock(null); return; }
                   }
                 }
                 for (const blk2 of ft2.dimmerBlocks) {
-                  if (timeAtX2 >= blk2.time && timeAtX2 <= blk2.endTime) {
+                  if (snappedTime >= blk2.time && snappedTime <= blk2.endTime) {
                     setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'dimmer' });
                     setFtSelStart(blk2.time);
                     setFtSelEnd(blk2.endTime);
@@ -644,7 +644,7 @@ if (editBlock) { setEditBlock(null); return; }
                   }
                 }
                 for (const blk2 of ft2.strobeBlocks) {
-                  if (timeAtX2 >= blk2.time && timeAtX2 <= blk2.endTime) {
+                  if (snappedTime >= blk2.time && snappedTime <= blk2.endTime) {
                     setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'strobe' });
                     setFtSelStart(blk2.time);
                     setFtSelEnd(blk2.endTime);
@@ -655,7 +655,7 @@ if (editBlock) { setEditBlock(null); return; }
                   }
                 }
                 for (const blk2 of ft2.movementBlocks) {
-                  if (timeAtX2 >= blk2.time && timeAtX2 <= blk2.endTime) {
+                  if (snappedTime >= blk2.time && snappedTime <= blk2.endTime) {
                     setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'movement' });
                     setFtSelStart(blk2.time);
                     setFtSelEnd(blk2.endTime);
