@@ -267,7 +267,9 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const [blockMenu, setBlockMenu] = useState<{ x: number; y: number; trackIdx: number; blockId: string; blockType: string } | null>(null);
 
   const [editBlock, setEditBlock] = useState<{ trackIdx: number; blockId: string; blockType: string } | null>(null);
-  const ftDragStart = useRef(0);
+
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [clipboard, setClipboard] = useState<any>(null);  const ftDragStart = useRef(0);
   const ftDragFixture = useRef(-1);
   const isFtDragging = useRef(false);
   const ftSelRef = useRef({ start: 0, end: 0, fixture: -1, track: null as FixtureTrack | null });
@@ -397,7 +399,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
       const y = clientY - rect.top;
       if (x < 0 || y < HEADER_HEIGHT) return null;
 
-      const drawW = rect.width - LABEL_WIDTH;
+      const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
       if (drawW <= 0) return null;
       const timeAtX = (x / drawW) * duration;
 
@@ -477,7 +479,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         setTooltip(null);
         const c = containerRef.current; if (!c) return;
         const rect = c.getBoundingClientRect();
-        const drawW = rect.width - LABEL_WIDTH;
+        const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
         if (drawW <= 0) return;
         const timeAtX = ((e.clientX - rect.left - LABEL_WIDTH) / drawW) * duration;
         const t = Math.max(0, Math.min(duration, timeAtX));
@@ -493,7 +495,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
       if (efxDragRef.current) {
         const c = containerRef.current; if (!c) return;
         const rect = c.getBoundingClientRect();
-        const drawW = rect.width - LABEL_WIDTH;
+        const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
         if (drawW <= 0) return;
         const dx = (e.clientX - efxDragRef.current.startX) / drawW * duration;
         const drag = efxDragRef.current;
@@ -517,7 +519,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         const c = containerRef.current;
         if (!c) return;
         const rect = c.getBoundingClientRect();
-        const drawW = rect.width - LABEL_WIDTH;
+        const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
         if (drawW <= 0) return;
         const dx = e.clientX - resize.startX;
         const dt = (dx / drawW) * duration;
@@ -560,6 +562,40 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
     (e: React.MouseEvent) => {
       // ── Close block menu on any click ──
 if (editBlock) { setEditBlock(null); return; }
+            // ── Ctrl+C ──
+      if ((e.ctrlKey || e.metaKey) && fixtureTracks && onFixtureTracksChange) {
+        if (editBlock) {
+          const ft = fixtureTracks[editBlock.trackIdx];
+          if (ft) {
+            let blk = null;
+            let bt = editBlock.blockType;
+            if (bt === "color") blk = ft.colorBlocks.find(b => b.id === editBlock.blockId);
+            else if (bt === "dimmer") blk = ft.dimmerBlocks.find(b => b.id === editBlock.blockId);
+            else if (bt === "strobe") blk = ft.strobeBlocks.find(b => b.id === editBlock.blockId);
+            else if (bt === "movement") blk = ft.movementBlocks.find(b => b.id === editBlock.blockId);
+            if (blk) setClipboard({ ...blk, _type: bt });
+          }
+        }
+      }
+      // ── Ctrl+V ──
+      if ((e.ctrlKey || e.metaKey) && clipboard && fixtureTracks && onFixtureTracksChange) {
+        const dur = clipboard.endTime - clipboard.time;
+        const nb = { ...clipboard, id: (clipboard._type || "cb") + "-" + Date.now(), time: currentTime, endTime: currentTime + dur };
+        delete nb._type;
+        if (fixtureTracks.length > 0) {
+          const updated = fixtureTracks.map((t, i) => {
+            if (i !== 0) return t;
+            const type = clipboard._type;
+            if (type === "color") return { ...t, colorBlocks: [...t.colorBlocks, nb] };
+            if (type === "dimmer") return { ...t, dimmerBlocks: [...t.dimmerBlocks, nb] };
+            if (type === "strobe") return { ...t, strobeBlocks: [...t.strobeBlocks, nb] };
+            if (type === "movement") return { ...t, movementBlocks: [...t.movementBlocks, nb] };
+            return t;
+          });
+          onFixtureTracksChange(updated);
+        }
+      }
+
       if (blockMenu) { setBlockMenu(null); return; }
       // ── Left-click on fixture track blocks opens edit popup ──
       if (fixtureTracks && onFixtureTracksChange && e.button === 0) {
@@ -703,7 +739,7 @@ if (editBlock) { setEditBlock(null); return; }
       const x = e.clientX - rect.left - LABEL_WIDTH;
       if (x < 0) return;
 
-      const drawW = rect.width - LABEL_WIDTH;
+      const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
       if (drawW <= 0) return;
 
       // Check if we hit a cue
@@ -734,7 +770,7 @@ if (editBlock) { setEditBlock(null); return; }
       const x = e.clientX - rect.left - LABEL_WIDTH;
       const y = e.clientY - rect.top;
 
-      const drawW = rect.width - LABEL_WIDTH;
+      const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
       if (x < 0 || drawW <= 0) return;
       const timeAtX = (x / drawW) * duration;
 
@@ -789,7 +825,7 @@ if (editBlock) { setEditBlock(null); return; }
       const x = e.clientX - rect.left - LABEL_WIDTH;
       const y = e.clientY - rect.top;
       if (y < HEADER_HEIGHT) return;
-      const drawW = rect.width - LABEL_WIDTH;
+      const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
       if (drawW <= 0) return;
       const trackIdx = Math.floor((y - HEADER_HEIGHT) / TRACK_HEIGHT);
       if (trackIdx >= 0 && trackIdx < numFixtures) {
@@ -857,7 +893,7 @@ if (editBlock) { setEditBlock(null); return; }
     const y = e.clientY - rect.top;
     if (x < 0 || y < HEADER_HEIGHT) return;
 
-    const drawW = rect.width - LABEL_WIDTH;
+    const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
     if (drawW <= 0) return;
 
     // Check if click is near any section boundary (6px tolerance)
@@ -939,7 +975,7 @@ if (editBlock) { setEditBlock(null); return; }
     if (!ctx) return;
     ctx.scale(dpr, dpr);
 
-    const drawW = w - LABEL_WIDTH;
+    const drawW = (w - LABEL_WIDTH) * zoomLevel;
     if (drawW <= 0) return;
 
     // ── Background ──────────────────────────────────
@@ -1588,7 +1624,7 @@ if (editBlock) { setEditBlock(null); return; }
 
       const rect = container.getBoundingClientRect();
       const w = rect.width;
-      const drawW = w - LABEL_WIDTH;
+      const drawW = (w - LABEL_WIDTH) * zoomLevel;
       if (drawW <= 0) { rafRef.current = requestAnimationFrame(animate); return; }
 
       const px = Math.round(LABEL_WIDTH + (ct / duration) * drawW);
@@ -1650,6 +1686,7 @@ if (editBlock) { setEditBlock(null); return; }
         onMouseUp={handleMouseUp}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
+        onWheel={(e) => { if (e.ctrlKey) { e.preventDefault(); setZoomLevel(prev => Math.max(0.25, Math.min(8, prev + (e.deltaY < 0 ? 0.25 : -0.25)))); } }}
       >
         <canvas ref={canvasRef} className="w-full h-full" />
       </div>
