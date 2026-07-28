@@ -274,6 +274,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const isFtDragging = useRef(false);
   const ftSelRef = useRef({ start: 0, end: 0, fixture: -1, track: null as FixtureTrack | null });
   const blockDragRef = useRef(null);
+  const pendingBlockDrag = useRef(null);
 
   const numFixtures = patchedFixtures.length;
   const numEfxTracks = efxTracks?.length ?? 0;
@@ -493,6 +494,11 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
       }
 
       // ── Block drag ──
+      // 3px threshold
+      if (pendingBlockDrag.current && !blockDragRef.current) {
+        var dxTest = Math.abs(e.clientX - pendingBlockDrag.current.initialX);
+        if (dxTest > 3) { blockDragRef.current = pendingBlockDrag.current; pendingBlockDrag.current = null; }
+      }
       if (blockDragRef.current) {
         setTooltip(null);
         const drg = blockDragRef.current;
@@ -627,6 +633,7 @@ if (editBlock) { setEditBlock(null); return; }
         }
       }
 
+      pendingBlockDrag.current = null;
       if (blockMenu) { setBlockMenu(null); return; }
       // ── Left-click on fixture track blocks opens edit popup ──
       if (fixtureTracks && onFixtureTracksChange && e.button === 0) {
@@ -906,7 +913,7 @@ if (editBlock) { setEditBlock(null); return; }
               for (var bi = 0; bi < blocks.length; bi++) {
                 var bl = blocks[bi];
                 if (timeAtXb2 >= bl.time && timeAtXb2 <= bl.endTime) {
-                  blockDragRef.current = { trackIdx: fti2, blockId: bl.id, blockType: bl._t, startTime: bl.time, initialX: e.clientX, blockDur: bl.endTime - bl.time };
+                  pendingBlockDrag.current = { trackIdx: fti2, blockId: bl.id, blockType: bl._t, startTime: bl.time, initialX: e.clientX, blockDur: bl.endTime - bl.time };
                   e.preventDefault();
                   e.stopPropagation();
                   return;
@@ -1002,6 +1009,7 @@ if (editBlock) { setEditBlock(null); return; }
     if (isFtDragging.current) {
       isFtDragging.current = false;
     blockDragRef.current = null;
+    pendingBlockDrag.current = null;
       const start = ftDragStart.current;
       const end = ftSelRef.current.end;
       const diff = Math.abs(end - start);
