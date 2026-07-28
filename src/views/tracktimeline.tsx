@@ -551,6 +551,64 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
+      // ── Close block menu on any click ──
+      if (blockMenu) { setBlockMenu(null); return; }
+      // ── Right-click on fixture track blocks shows context menu ──
+      if (fixtureTracks && onFixtureTracksChange && e.button === 2) {
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const rect = canvas.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          const duration = audioFile.resolvedAnalysis.timelineMs || 120000;
+          const drawW = canvas.width - LABEL_WIDTH;
+          if (y >= HEADER_HEIGHT && x >= LABEL_WIDTH) {
+            const trackIdx = Math.floor((y - HEADER_HEIGHT) / TRACK_HEIGHT);
+            if (trackIdx >= 0 && trackIdx < numFixtures) {
+              const fixture = patchedFixtures[trackIdx];
+              const timeAtX = ((x - LABEL_WIDTH) / drawW) * duration;
+              for (let fti = 0; fti < fixtureTracks.length; fti++) {
+                const ft = fixtureTracks[fti];
+                if (!ft.enabled) continue;
+                let targetsFixture = false;
+                if (ft.target.startsWith('fixture:')) targetsFixture = ft.target.slice(8) === fixture.id;
+                else if (ft.target.startsWith('tier:')) targetsFixture = ft.target.slice(5) === fixture.tier;
+                else targetsFixture = true;
+                if (!targetsFixture) continue;
+                for (const blk of ft.colorBlocks) {
+                  if (timeAtX >= blk.time && timeAtX <= blk.endTime) {
+                    e.preventDefault();
+                    setBlockMenu({ x: e.clientX, y: e.clientY, trackIdx: fti, blockId: blk.id, blockType: 'color' });
+                    return;
+                  }
+                }
+                for (const blk of ft.dimmerBlocks) {
+                  if (timeAtX >= blk.time && timeAtX <= blk.endTime) {
+                    e.preventDefault();
+                    setBlockMenu({ x: e.clientX, y: e.clientY, trackIdx: fti, blockId: blk.id, blockType: 'dimmer' });
+                    return;
+                  }
+                }
+                for (const blk of ft.strobeBlocks) {
+                  if (timeAtX >= blk.time && timeAtX <= blk.endTime) {
+                    e.preventDefault();
+                    setBlockMenu({ x: e.clientX, y: e.clientY, trackIdx: fti, blockId: blk.id, blockType: 'strobe' });
+                    return;
+                  }
+                }
+                for (const blk of ft.movementBlocks) {
+                  if (timeAtX >= blk.time && timeAtX <= blk.endTime) {
+                    e.preventDefault();
+                    setBlockMenu({ x: e.clientX, y: e.clientY, trackIdx: fti, blockId: blk.id, blockType: 'movement' });
+                    return;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
       // Clear fixture track selection on regular click (but NOT if context menu is open)
       if (ftSelStart !== null && !ftMenu) {
         setFtSelStart(null); setFtSelEnd(null); setFtSelFixture(null); setFtSelTrack(null);
@@ -1879,6 +1937,37 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
               }} className="px-4 py-2 rounded-lg text-xs font-medium bg-purple-600 text-white hover:bg-purple-500">Appliquer</button>
             </div>
           </div>
+        </div>
+      )}
+      {/* ── Block Context Menu ── */}
+      {blockMenu && onFixtureTracksChange && fixtureTracks && (
+        <div
+          className="fixed z-50 bg-[#1a1a2e] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
+          style={{ left: blockMenu.x, top: blockMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider border-b border-gray-800">
+            {blockMenu.blockType}
+          </div>
+          <button className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-gray-800 flex items-center gap-2"
+            onClick={() => {
+              const ft = fixtureTracks[blockMenu.trackIdx];
+              if (!ft) return;
+              const filterBlock = (arr: any[]) => arr.filter((b: any) => b.id !== blockMenu.blockId);
+              const updated = fixtureTracks.map((t, i) => {
+                if (i !== blockMenu.trackIdx) return t;
+                switch (blockMenu.blockType) {
+                  case 'color': return { ...t, colorBlocks: filterBlock(t.colorBlocks) };
+                  case 'dimmer': return { ...t, dimmerBlocks: filterBlock(t.dimmerBlocks) };
+                  case 'strobe': return { ...t, strobeBlocks: filterBlock(t.strobeBlocks) };
+                  case 'movement': return { ...t, movementBlocks: filterBlock(t.movementBlocks) };
+                  default: return t;
+                }
+              });
+              onFixtureTracksChange(updated);
+              setBlockMenu(null);
+            }}
+          ><span className="text-[14px]">🗑</span> Supprimer</button>
         </div>
       )}
 
