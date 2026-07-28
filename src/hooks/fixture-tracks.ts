@@ -46,8 +46,10 @@ export interface MovementBlock {
   id: string;
   time: number;
   endTime: number;
-  pattern: 'static' | 'sweep' | 'circle' | 'bounce' | 'wave' | 'figure8';
+  pattern: 'static' | 'sweep' | 'circle' | 'bounce' | 'wave' | 'figure8' | 'zigzag' | 'diamond' | 'spiral' | 'heartbeat' | 'randomWalk' | 'panOnly' | 'tiltOnly';
   amplitude: number; // 0-255
+  endPattern?: string; // end pattern for gradient transition
+  endAmplitude?: number; // end amplitude for gradient transition
 }
 
 export interface FixtureTrack {
