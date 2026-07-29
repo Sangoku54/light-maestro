@@ -136,6 +136,8 @@ interface Fixture3D {
   lightTarget: THREE.Object3D;  // Where the light is attached
   pointLight?: THREE.PointLight;    // Dynamic point light
   beamCone?: THREE.Mesh;        // Volumetric beam cone
+  floorSpot?: THREE.Mesh;       // Light spot on the floor
+  floorGlow?: THREE.Mesh;       // Soft outer glow on floor
   channelMap: FixtureChannelMap;
   universeIndex: number;        // Index into channelData map
 }
@@ -681,6 +683,8 @@ export const Stage3D: React.FC = () => {
           scene.remove(f3d.group);
           if (f3d.pointLight) scene.remove(f3d.pointLight);
           if (f3d.beamCone) scene.remove(f3d.beamCone);
+          if (f3d.floorSpot) scene.remove(f3d.floorSpot);
+          if (f3d.floorGlow) scene.remove(f3d.floorGlow);
           disposeFixture3D(f3d);
           fixturesRef.current.delete(id);
         }
@@ -721,6 +725,42 @@ export const Stage3D: React.FC = () => {
         cone.visible = showBeams;
         f3d.lightTarget.add(cone);
         f3d.beamCone = cone;
+
+        // ── Floor spot (light circle on stage floor) ──
+        const spotRadius = 0.6;
+        const spotGeo = new THREE.CircleGeometry(spotRadius, 32);
+        const spotMat = new THREE.MeshBasicMaterial({
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        });
+        const floorSpot = new THREE.Mesh(spotGeo, spotMat);
+        floorSpot.rotation.x = -Math.PI / 2;
+        floorSpot.position.y = 0.015;
+        floorSpot.visible = showBeams;
+        scene.add(floorSpot);
+        f3d.floorSpot = floorSpot;
+
+        // ── Floor glow (larger soft outer ring) ──
+        const glowRadius = 1.2;
+        const glowGeo = new THREE.CircleGeometry(glowRadius, 32);
+        const glowMat = new THREE.MeshBasicMaterial({
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        });
+        const floorGlow = new THREE.Mesh(glowGeo, glowMat);
+        floorGlow.rotation.x = -Math.PI / 2;
+        floorGlow.position.y = 0.012;
+        floorGlow.visible = showBeams;
+        scene.add(floorGlow);
+        f3d.floorGlow = floorGlow;
 
         fixturesRef.current.set(pf.id, f3d);
       }
@@ -768,6 +808,8 @@ export const Stage3D: React.FC = () => {
     for (const f3d of fixturesRef.current.values()) {
       if (f3d.pointLight) f3d.pointLight.visible = showBeams;
       if (f3d.beamCone) f3d.beamCone.visible = showBeams;
+      if (f3d.floorSpot) f3d.floorSpot.visible = showBeams;
+      if (f3d.floorGlow) f3d.floorGlow.visible = showBeams;
     }
   }, [showBeams]);
 
@@ -856,6 +898,52 @@ export const Stage3D: React.FC = () => {
         mat.color.copy(color);
         mat.opacity = normIntensity * 0.35; // More visible cone
         f3d.beamCone.visible = showBeams && normIntensity > 0.005;
+      }
+
+      // --- Update floor spot (raycast from light target to floor) ---
+      if (f3d.floorSpot || f3d.floorGlow) {
+        // Get world position of the lens/light target
+        const worldPos = new THREE.Vector3();
+        f3d.lightTarget.getWorldPosition(worldPos);
+        // Beam direction in local space: (0,-1,0) — pointing down/forward from the lens
+        const localDir = new THREE.Vector3(0, -1, 0);
+        // Transform to world direction using the lightTarget's parent (headGroup) rotation
+        let worldDir: THREE.Vector3;
+        if (f3d.headGroup) {
+          const rotMatrix = new THREE.Matrix4();
+          f3d.headGroup.matrixWorld.decompose(new THREE.Vector3(), new THREE.Quaternion(), new THREE.Vector3());
+          const q = new THREE.Quaternion();
+          f3d.headGroup.matrixWorld.decompose(new THREE.Vector3(), q, new THREE.Vector3());
+          worldDir = localDir.clone().applyQuaternion(q).normalize();
+        } else {
+          worldDir = new THREE.Vector3(0, -1, 0);
+        }
+        // Intersection with y=0 plane: worldPos + t * worldDir, solve for y=0
+        if (worldDir.y < -0.001 && worldPos.y > 0.01) {
+          const t = -worldPos.y / worldDir.y;
+          const groundX = worldPos.x + worldDir.x * t;
+          const groundZ = worldPos.z + worldDir.z * t;
+          // Clamp to stage bounds
+          const cx = Math.max(-STAGE_WIDTH/2, Math.min(STAGE_WIDTH/2, groundX));
+          const cz = Math.max(-STAGE_DEPTH/2, Math.min(STAGE_DEPTH/2, groundZ));
+          if (f3d.floorSpot) {
+            f3d.floorSpot.position.set(cx, 0.015, cz);
+            const smat = f3d.floorSpot.material as THREE.MeshBasicMaterial;
+            smat.color.copy(color);
+            smat.opacity = normIntensity * 0.7;
+            f3d.floorSpot.visible = showBeams && normIntensity > 0.005;
+          }
+          if (f3d.floorGlow) {
+            f3d.floorGlow.position.set(cx, 0.012, cz);
+            const gmat = f3d.floorGlow.material as THREE.MeshBasicMaterial;
+            gmat.color.copy(color);
+            gmat.opacity = normIntensity * 0.25;
+            f3d.floorGlow.visible = showBeams && normIntensity > 0.005;
+          }
+        } else {
+          if (f3d.floorSpot) f3d.floorSpot.visible = false;
+          if (f3d.floorGlow) f3d.floorGlow.visible = false;
+        }
       }
 
       // --- Update body emission (glow when active) ---

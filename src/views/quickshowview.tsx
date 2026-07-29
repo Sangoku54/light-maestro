@@ -2811,7 +2811,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
               {/* Custom effects */}
               <label className="block text-[10px] text-gray-400 mb-1">Custom Effect</label>
               {(() => {
-                const customEffects = effects.filter(e => !e.id.startsWith('builtin-efx-'));
+                const customEffects = effectEntities;
                 if (customEffects.length === 0) {
                   return (
                     <div className="text-[11px] text-yellow-400/80 bg-yellow-400/5 border border-yellow-400/15 rounded-lg px-3 py-2.5 mb-4">
