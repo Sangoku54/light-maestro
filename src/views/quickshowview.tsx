@@ -1431,7 +1431,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const sceneEntities = useShowStore(s => s.scenes);
   const chaserEntities = useShowStore(s => s.chasers);
   const cueListEntities = useShowStore(s => s.cueLists);
-  const effectEntities = useShowStore(s => s.effects);
+  const effectEntities = useShowStore(s => s.effects).filter((e: any) => !e.id.startsWith('builtin-efx-'));
   const entitySceneList = useMemo(() => sceneEntities.map(s => ({ id: s.id, name: s.name })), [sceneEntities]);
   const entityChaserList = useMemo(() => chaserEntities.map(c => ({ id: c.id, name: c.name })), [chaserEntities]);
   const entityCueListList = useMemo(() => cueListEntities.map(cl => ({ id: cl.id, name: cl.name })), [cueListEntities]);
@@ -2634,7 +2634,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             Insert EFX at {efxContextMenu.time.toFixed(1)}s
           </div>
           {effectEntities.length === 0 ? (
-            <div className="px-3 py-2 text-[10px] text-gray-500 italic">Aucun effet sauvegardé</div>
+            <div className="px-3 py-2 text-[10px] text-gray-500 italic">Aucun effet custom. Créez un effet de mouvement dans l'onglet EFX d'abord.</div>
           ) : (
             effectEntities.map(efx => (
               <button key={efx.id}
