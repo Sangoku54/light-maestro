@@ -2808,32 +2808,29 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
                 </div>
               )}
 
-              {/* Movement Pattern */}
-              <label className="block text-[10px] text-gray-400 mb-1">Default Movement</label>
-              <select
-                value={efxPattern}
-                onChange={e => setEfxPattern(e.target.value as any)}
-                className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none mb-4"
-              >
-                {[
-                  { v: 'static', label: 'Static (no movement)' },
-                  { v: 'sweep', label: 'Sweep (pendulum)' },
-                  { v: 'circle', label: 'Circle' },
-                  { v: 'pulse', label: 'Pulse (zoom effect)' },
-                  { v: 'wave', label: 'Wave (sine)' },
-                  { v: 'bounce', label: 'Bounce (gravity)' },
-                  { v: 'figure8', label: 'Figure 8' },
-                  { v: 'spiral', label: 'Spiral' },
-                  { v: 'zigzag', label: 'Zigzag' },
-                  { v: 'heartbeat', label: 'Heartbeat' },
-                  { v: 'randomWalk', label: 'Random Walk' },
-                  { v: 'diamond', label: 'Diamond' },
-                  { v: 'custom', label: 'Custom (user-defined)' },
-                ].map(({ v, label }) => (
-                  <option key={v} value={v}>{label}</option>
-                ))}
-              </select>
-
+              {/* Custom effects */}
+              <label className="block text-[10px] text-gray-400 mb-1">Custom Effect</label>
+              {(() => {
+                const customEffects = effects.filter(e => !e.id.startsWith('builtin-efx-'));
+                if (customEffects.length === 0) {
+                  return (
+                    <div className="text-[11px] text-yellow-400/80 bg-yellow-400/5 border border-yellow-400/15 rounded-lg px-3 py-2.5 mb-4">
+                      ⚠ Aucun effet custom. Créez d'abord un effet de mouvement dans l'onglet EFX.
+                    </div>
+                  );
+                }
+                return (
+                  <select
+                    value={efxCustomEffectId}
+                    onChange={e => setEfxCustomEffectId(e.target.value)}
+                    className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none mb-4"
+                  >
+                    {customEffects.map(efx => (
+                      <option key={efx.id} value={efx.id}>{efx.name} ({efx.pattern})</option>
+                    ))}
+                  </select>
+                );
+              })()}
               {/* Actions */}
               <div className="flex justify-end gap-2">
                 <button onClick={() => setEfxTrackModal(false)}
