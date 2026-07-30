@@ -816,7 +816,21 @@ export const Stage3D: React.FC = () => {
   // ── DMX update function (called from render loop) ───
   const updateDmxState = useCallback(() => {
     const dmxState = useAppStore.getState().dmx;
-    const channelData = dmxState.channelData ?? new Map<number, Uint8Array>();
+    // Normalize channelData: it may be a plain object after JSON deserialization
+    let raw = dmxState.channelData;
+    let channelData: Map<number, Uint8Array>;
+    if (raw instanceof Map) {
+      channelData = raw;
+    } else if (raw && typeof raw === 'object') {
+      // Reconstruct Map from plain object
+      channelData = new Map<number, Uint8Array>();
+      for (const key of Object.keys(raw)) {
+        const val = (raw as any)[key];
+        channelData.set(Number(key), val instanceof Uint8Array ? val : new Uint8Array(Object.values(val ?? {})));
+      }
+    } else {
+      channelData = new Map<number, Uint8Array>();
+    }
     const blackout = dmxState.blackout ?? false;
     const grandMaster = dmxState.grandMaster ?? 255;
 
