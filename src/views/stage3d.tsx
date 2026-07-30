@@ -900,49 +900,39 @@ export const Stage3D: React.FC = () => {
         f3d.beamCone.visible = showBeams && normIntensity > 0.005;
       }
 
-      // --- Update floor spot (raycast from light target to floor) ---
+      // --- Update floor spot (project light position to floor plane) ---
       if (f3d.floorSpot || f3d.floorGlow) {
-        // Get world position of the lens/light target
         const worldPos = new THREE.Vector3();
         f3d.lightTarget.getWorldPosition(worldPos);
-        // Beam direction in local space: (0,-1,0) — pointing down/forward from the lens
-        const localDir = new THREE.Vector3(0, -1, 0);
-        // Transform to world direction using the lightTarget's parent (headGroup) rotation
-        let worldDir: THREE.Vector3;
+        // For headGroup fixtures, use headGroup's quaternion to compute beam direction
+        let hitX = worldPos.x;
+        let hitZ = worldPos.z;
         if (f3d.headGroup) {
-          const rotMatrix = new THREE.Matrix4();
-          f3d.headGroup.matrixWorld.decompose(new THREE.Vector3(), new THREE.Quaternion(), new THREE.Vector3());
           const q = new THREE.Quaternion();
-          f3d.headGroup.matrixWorld.decompose(new THREE.Vector3(), q, new THREE.Vector3());
-          worldDir = localDir.clone().applyQuaternion(q).normalize();
-        } else {
-          worldDir = new THREE.Vector3(0, -1, 0);
+          f3d.headGroup.getWorldQuaternion(q);
+          const localDir = new THREE.Vector3(0, -1, 0);
+          localDir.applyQuaternion(q);
+          if (localDir.y < -0.001 && worldPos.y > 0.01) {
+            const t = -worldPos.y / localDir.y;
+            hitX = worldPos.x + localDir.x * t;
+            hitZ = worldPos.z + localDir.z * t;
+          }
         }
-        // Intersection with y=0 plane: worldPos + t * worldDir, solve for y=0
-        if (worldDir.y < -0.001 && worldPos.y > 0.01) {
-          const t = -worldPos.y / worldDir.y;
-          const groundX = worldPos.x + worldDir.x * t;
-          const groundZ = worldPos.z + worldDir.z * t;
-          // Clamp to stage bounds
-          const cx = Math.max(-STAGE_WIDTH/2, Math.min(STAGE_WIDTH/2, groundX));
-          const cz = Math.max(-STAGE_DEPTH/2, Math.min(STAGE_DEPTH/2, groundZ));
-          if (f3d.floorSpot) {
-            f3d.floorSpot.position.set(cx, 0.015, cz);
-            const smat = f3d.floorSpot.material as THREE.MeshBasicMaterial;
-            smat.color.copy(color);
-            smat.opacity = normIntensity * 0.7;
-            f3d.floorSpot.visible = showBeams && normIntensity > 0.005;
-          }
-          if (f3d.floorGlow) {
-            f3d.floorGlow.position.set(cx, 0.012, cz);
-            const gmat = f3d.floorGlow.material as THREE.MeshBasicMaterial;
-            gmat.color.copy(color);
-            gmat.opacity = normIntensity * 0.25;
-            f3d.floorGlow.visible = showBeams && normIntensity > 0.005;
-          }
-        } else {
-          if (f3d.floorSpot) f3d.floorSpot.visible = false;
-          if (f3d.floorGlow) f3d.floorGlow.visible = false;
+        const cx = Math.max(-STAGE_WIDTH/2, Math.min(STAGE_WIDTH/2, hitX));
+        const cz = Math.max(-STAGE_DEPTH/2, Math.min(STAGE_DEPTH/2, hitZ));
+        if (f3d.floorSpot) {
+          f3d.floorSpot.position.set(cx, 0.015, cz);
+          const smat = f3d.floorSpot.material as THREE.MeshBasicMaterial;
+          smat.color.copy(color);
+          smat.opacity = normIntensity * 0.7;
+          f3d.floorSpot.visible = showBeams && normIntensity > 0.005;
+        }
+        if (f3d.floorGlow) {
+          f3d.floorGlow.position.set(cx, 0.012, cz);
+          const gmat = f3d.floorGlow.material as THREE.MeshBasicMaterial;
+          gmat.color.copy(color);
+          gmat.opacity = normIntensity * 0.25;
+          f3d.floorGlow.visible = showBeams && normIntensity > 0.005;
         }
       }
 
