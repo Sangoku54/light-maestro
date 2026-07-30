@@ -84,7 +84,7 @@ interface DMXState {
     output: boolean;
     channels: number;
   }>;
-  channelData: Map<number, Uint8Array>; // universe → 512 channels
+  channelData: Record<number, Uint8Array | number[]>; // universe → 512 channels
 }
 
 interface FixtureState {
@@ -208,7 +208,7 @@ export const useAppStore = create<AppState>()(
         universes: [
           { id: 'u1', name: 'Universe 1', type: 'virtual', output: true, channels: 512 },
         ],
-        channelData: new Map(),
+        channelData: {},
       },
 
       fixtures: {
@@ -362,11 +362,11 @@ export const useAppStore = create<AppState>()(
 
       setChannelValue: (universe, channel, value) => {
         const { dmx } = get();
-        const data = dmx.channelData.get(universe);
-        if (data) {
-          data[channel - 1] = value;
-        }
-        set({ dmx: { ...dmx, channelData: new Map(dmx.channelData) } });
+        const raw = dmx.channelData;
+        let data = (raw as any)[universe];
+        if (!data || !(data instanceof Uint8Array)) { data = new Uint8Array(512); (raw as any)[universe] = data; }
+        data[channel - 1] = value;
+        set({ dmx: { ...dmx, channelData: { ...raw } } });
       },
 
       setAudioAnalysis: (analysis) =>
@@ -405,7 +405,7 @@ export const useAppStore = create<AppState>()(
         dmx: {
           ...current.dmx,
           ...(persisted.dmx || {}),
-          channelData: current.dmx.channelData, // Map — never overwritten by stale JSON
+          channelData: current.dmx.channelData || {}, // Map — never overwritten by stale JSON
         },
       }),
     }

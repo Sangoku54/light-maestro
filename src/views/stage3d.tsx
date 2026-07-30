@@ -656,6 +656,24 @@ export const Stage3D: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // ── Handle container resize (floating window) ──
+  useEffect(() => {
+    const container = containerRef.current;
+    const camera = cameraRef.current;
+    const renderer = rendererRef.current;
+    if (!container || !camera || !renderer) return;
+    const ro = new ResizeObserver(() => {
+      const W = container.clientWidth;
+      const H = container.clientHeight;
+      if (W === 0 || H === 0) return;
+      camera.aspect = W / H;
+      camera.updateProjectionMatrix();
+      renderer.setSize(W, H);
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
+
   // ── Show/hide smoke ────────────────────────────────
   useEffect(() => {
     if (particlesRef.current) {

@@ -254,8 +254,9 @@ export function useDmxPlayback(options: {
   overrideCuesRef?: React.MutableRefObject<any[]>; // EFX + manual cues that override auto DMX
   fixtureTracksRef?: React.MutableRefObject<FixtureTrack[]>; // Fixture track overrides
   fixtureGroupsRef?: React.MutableRefObject<{ id: string; fixtureIds: string[] }[]>;
+  onVirtualDmx?: (universe: number, channelValues: Record<number, number>) => void; // Mirror for 3D view
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,fixtureGroupsRef}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,fixtureGroupsRef,onVirtualDmx}=options;
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
 
@@ -590,7 +591,10 @@ export function useDmxPlayback(options: {
 
         if(Object.keys(chVals).length>0){
           const sig=String(uniIdx)+':'+Object.entries(chVals).sort((a,b)=>Number(a[0])-Number(b[0])).map(([k,v])=>`${k}=${v}`).join(',');
-          if(sig!==lastSig){lastSig=sig;api.setChannels(uniIdx,chVals).catch(()=>{});}
+          if(sig!==lastSig){lastSig=sig;
+            // Virtual DMX mirror for 3D Stage view
+            if (onVirtualDmx) onVirtualDmx(uniIdx, chVals);
+            api.setChannels(uniIdx,chVals).catch(()=>{});}
         }
       }
       rafRef.current=requestAnimationFrame(tick);
