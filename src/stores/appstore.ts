@@ -362,11 +362,18 @@ export const useAppStore = create<AppState>()(
 
       setChannelValue: (universe, channel, value) => {
         const { dmx } = get();
-        const raw = dmx.channelData;
-        let data = (raw as any)[universe];
-        if (!data || !(data instanceof Uint8Array)) { data = new Uint8Array(512); (raw as any)[universe] = data; }
+        const raw = dmx.channelData || {};
+        const prev = (raw as any)[universe];
+        let data: Uint8Array;
+        if (prev instanceof Uint8Array) {
+          data = prev;
+        } else if (prev && typeof prev === 'object') {
+          data = new Uint8Array(Object.values(prev as Record<number, number>));
+        } else {
+          data = new Uint8Array(512);
+        }
         data[channel - 1] = value;
-        set({ dmx: { ...dmx, channelData: { ...raw } } });
+        set({ dmx: { ...dmx, channelData: { ...(raw as any), [universe]: data } } });
       },
 
       setAudioAnalysis: (analysis) =>
