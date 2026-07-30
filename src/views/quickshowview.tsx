@@ -1961,6 +1961,24 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
   const [float3DSize, setFloat3DSize] = useState({ w: 640, h: 360 });
   const float3DDragRef = useRef(null);
+  const float3DResizeRef = useRef(null);
+
+  const handleFloat3DResizeStart = useCallback((e) => {
+    e.stopPropagation();
+    float3DResizeRef.current = { startX: e.clientX, startY: e.clientY, startW: float3DSize.w, startH: float3DSize.h };
+    const onMove = (ev) => {
+      if (!float3DResizeRef.current) return;
+      setFloat3DSize({
+        w: Math.max(320, float3DResizeRef.current.startW + ev.clientX - float3DResizeRef.current.startX),
+        h: Math.max(200, float3DResizeRef.current.startH + ev.clientY - float3DResizeRef.current.startY),
+      });
+    };
+    const onUp = () => { float3DResizeRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DSize]);
+
+  const float3DRef = useRef(null);
 
   const handleFloat3DDragStart = useCallback((e) => {
     float3DDragRef.current = { startX: e.clientX, startY: e.clientY, startLeft: float3DPos.x, startTop: float3DPos.y };
@@ -2740,16 +2758,28 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
 
       {/* ── Floating 3D View (detachable) ── */}
       {showFloating3D && (
-        <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl overflow-hidden" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, resize: 'both' }}>
-          <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move" onMouseDown={handleFloat3DDragStart}>
+        <div
+          className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col"
+          style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, overflow: 'hidden' }}
+        >
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
             <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D View</span>
             <div className="flex items-center gap-1">
               <button onClick={() => { setFloat3DSize({ w: 640, h: 360 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◰</button>
               <button onClick={() => setShowFloating3D(false)} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
             </div>
           </div>
-          <div style={{ width: '100%', height: (float3DSize.h - 28) + 'px' }}>
+          <div className="flex-1 min-h-0 relative">
             <Stage3D />
+            {/* Resize handle */}
+            <div
+              className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
+              onMouseDown={handleFloat3DResizeStart}
+              style={{
+                background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)',
+                borderBottomRightRadius: '0.75rem',
+              }}
+            />
           </div>
         </div>
       )}
