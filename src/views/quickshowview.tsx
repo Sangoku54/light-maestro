@@ -11,6 +11,7 @@ import type { GenreProfile } from '../hooks/audio-analysis';
 import { computeFixtureTrackOverrides, type FixtureTrack } from '../hooks/fixture-tracks';
 import { loadFixtureDefinitions, clearFixtureDefCache, type DmxCue, type DmxFixtureDefinition } from '../hooks/dmx-cues';
 import { useDmxPlayback, computeDmxForCue } from '../hooks/dmx-playback';
+import { Stage3D } from './Stage3D';
 import TrackTimeline from './TrackTimeline';
 import type { EfxTrack, EfxTrackEntry } from './TrackTimeline';
 
@@ -1949,6 +1950,23 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     return fixtures.filter(f => efxTargetFixtureIds.includes(f.id)).map(f => f.name);
   }, [efxTargetType, efxTargetGroupId, efxTargetFixtureIds]);
 
+  // ── Floating 3D view ──
+  const [showFloating3D, setShowFloating3D] = useState(false);
+  const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
+  const [float3DSize, setFloat3DSize] = useState({ w: 640, h: 360 });
+  const float3DDragRef = useRef(null);
+
+  const handleFloat3DDragStart = useCallback((e) => {
+    float3DDragRef.current = { startX: e.clientX, startY: e.clientY, startLeft: float3DPos.x, startTop: float3DPos.y };
+    const onMove = (ev) => {
+      if (!float3DDragRef.current) return;
+      setFloat3DPos({ x: float3DDragRef.current.startLeft + ev.clientX - float3DDragRef.current.startX, y: float3DDragRef.current.startTop + ev.clientY - float3DDragRef.current.startY });
+    };
+    const onUp = () => { float3DDragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DPos]);
+
   const handleAddEfxTrack = useCallback(() => {
     const name = efxTrackName.trim();
     if (!name) return;
@@ -2712,6 +2730,28 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       )}
       {showForceColor && (
         <div className="fixed inset-0 z-40" onClick={() => setShowForceColor(false)} />
+      )}
+
+      {/* ── Floating 3D View (detachable) ── */}
+      {showFloating3D && (
+        <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl overflow-hidden" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, resize: 'both' }}>
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move" onMouseDown={handleFloat3DDragStart}>
+            <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D View</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => { setFloat3DSize({ w: 640, h: 360 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◰</button>
+              <button onClick={() => setShowFloating3D(false)} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
+            </div>
+          </div>
+          <div style={{ width: '100%', height: (float3DSize.h - 28) + 'px' }}>
+            <Stage3D />
+          </div>
+        </div>
+      )}
+
+      {!showFloating3D && (
+        <button onClick={() => setShowFloating3D(true)} className="fixed bottom-4 right-4 z-40 bg-purple-600/80 hover:bg-purple-500 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg transition-all">
+          🎥 3D View
+        </button>
       )}
 
       {/* ── EFX Track Target Modal ── */}
