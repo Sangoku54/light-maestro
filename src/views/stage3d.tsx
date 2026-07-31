@@ -1396,6 +1396,31 @@ export const Stage3D: React.FC = () => {
                 </button>
               </div>
 
+              {/* Mount mode */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-gray-500">Mount</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1">
+                  {([
+                    { v: 'top' as const, label: 'Top', icon: '🔽' },
+                    { v: 'ground' as const, label: 'Ground', icon: '🔼' },
+                    { v: 'rear' as const, label: 'Rear', icon: '▶' },
+                  ]).map(opt => (
+                    <button key={opt.v}
+                      onClick={() => setFixturePosition(selectedFixture.id, { mountMode: opt.v })}
+                      className={`px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
+                        (selectedPos.mountMode || 'top') === opt.v
+                          ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
+                          : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
+                      }`}
+                    >
+                      <span className="mr-1">{opt.icon}</span>{opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Heading / Rotation */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
