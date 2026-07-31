@@ -821,6 +821,7 @@ export const Stage3D: React.FC = () => {
       const stageY = pos.h * 5.0;
       f3d.group.position.set(stageX, stageY, stageZ);
       f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
+      if (pos.mountMode) f3d.mountMode = pos.mountMode;
     }
   }, [fixturePositions, patchedFixtures]);
 
