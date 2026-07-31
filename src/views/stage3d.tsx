@@ -132,7 +132,8 @@ interface Fixture3D {
   id: string;
   group: THREE.Group;           // Root group (positioned on stage)
   bodyMesh: THREE.Mesh;         // Fixture body
-  headGroup?: THREE.Group;      // Moving head/scan head group (rotates with pan/tilt)
+  armGroup?: THREE.Group;       // Arm (pan, Y-axis rotation)
+  headGroup?: THREE.Group;      // Head (tilt, X-axis rotation)
   lightTarget: THREE.Object3D;  // Where the light is attached
   pointLight?: THREE.PointLight;    // Dynamic point light
   beamCone?: THREE.Mesh;        // Volumetric beam cone
@@ -1005,7 +1006,7 @@ export const Stage3D: React.FC = () => {
         if (f3d.headGroup) {
           const q = new THREE.Quaternion();
           f3d.headGroup.getWorldQuaternion(q);
-          const localDir = new THREE.Vector3(0, -1, 0);
+          const localDir = new THREE.Vector3(0, 0, -1);
           localDir.applyQuaternion(q);
           if (localDir.y < -0.001 && worldPos.y > 0.01) {
             const t = -worldPos.y / localDir.y;
