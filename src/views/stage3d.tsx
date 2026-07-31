@@ -140,6 +140,7 @@ interface Fixture3D {
   floorGlow?: THREE.Mesh;       // Soft outer glow on floor
   channelMap: FixtureChannelMap;
   universeIndex: number;        // Index into channelData map
+  mountMode: 'top' | 'ground' | 'rear'; // beam default direction
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -428,6 +429,7 @@ export const Stage3D: React.FC = () => {
       lightTarget,
       channelMap,
       universeIndex: universeIndexMap.get(fixture.universeId) ?? 0,
+      mountMode: pos.mountMode || 'top',
     };
   }, [universeIndexMap]);
 
@@ -739,6 +741,7 @@ export const Stage3D: React.FC = () => {
           blending: THREE.AdditiveBlending,
         });
         const cone = new THREE.Mesh(coneGeo, coneMat);
+        f3d.mountMode = pos.mountMode || 'top';
         cone.position.y = -coneHeight / 2;
         cone.visible = showBeams;
         f3d.lightTarget.add(cone);
@@ -932,7 +935,64 @@ export const Stage3D: React.FC = () => {
         f3d.beamCone.visible = showBeams && normIntensity > 0.005;
       }
 
-      // --- Update floor spot (project light position to floor plane) ---
+            // --- Update floor spot / wall spot (based on mountMode) ---
+      if (f3d.floorSpot || f3d.floorGlow) {
+        const worldPos = new THREE.Vector3();
+        f3d.lightTarget.getWorldPosition(worldPos);
+        // Beam direction depends on mount mode
+        const mode = f3d.mountMode || 'top';
+        const localDir = new THREE.Vector3(
+          mode === 'rear' ? 0 : 0,
+          mode === 'top' ? -1 : mode === 'ground' ? 1 : 0,
+          mode === 'rear' ? -1 : 0
+        );
+        let hitX = worldPos.x;
+        let hitY = 0;
+        let hitZ = worldPos.z;
+        let hitWall = false;
+        if (f3d.headGroup) {
+          const q = new THREE.Quaternion();
+          f3d.headGroup.getWorldQuaternion(q);
+          const dir = localDir.clone().applyQuaternion(q);
+          // Project to floor (y=0) or to back wall (z=STAGE_DEPTH/2)
+          if (mode === 'rear' && dir.z < -0.001) {
+            const t = (STAGE_DEPTH/2 - worldPos.z) / dir.z;
+            if (t > 0) { hitX = worldPos.x + dir.x * t; hitY = worldPos.y + dir.y * t; hitZ = STAGE_DEPTH/2; hitWall = true; }
+          } else if (mode === 'ground' && dir.y > 0.001 && worldPos.y < 5) {
+            const t = (5.0 - worldPos.y) / dir.y;
+            hitX = worldPos.x + dir.x * t; hitZ = worldPos.z + dir.z * t;
+          } else if (mode === 'top' && dir.y < -0.001 && worldPos.y > 0.01) {
+            const t = -worldPos.y / dir.y;
+            hitX = worldPos.x + dir.x * t; hitZ = worldPos.z + dir.z * t;
+          } else {
+            // Fallback: project straight per mode
+            if (mode === 'ground') hitY = 5;
+            hitZ = mode === 'rear' ? STAGE_DEPTH/2 : hitZ;
+          }
+        } else {
+          // Fixed fixture: point straight to target surface
+          if (mode === 'ground') hitY = 5;
+          if (mode === 'rear') hitZ = STAGE_DEPTH/2;
+        }
+        const cx = Math.max(-STAGE_WIDTH/2, Math.min(STAGE_WIDTH/2, hitX));
+        const cz = Math.max(-STAGE_DEPTH/2, Math.min(STAGE_DEPTH/2, hitZ));
+        if (f3d.floorSpot) {
+          f3d.floorSpot.position.set(cx, 0.015, cz);
+          if (hitWall) f3d.floorSpot.position.set(cx, hitY, STAGE_DEPTH/2 - 0.01);
+          const smat = f3d.floorSpot.material as THREE.MeshBasicMaterial;
+          smat.color.copy(color);
+          smat.opacity = normIntensity * 0.7;
+          f3d.floorSpot.visible = showBeams && normIntensity > 0.005;
+        }
+        if (f3d.floorGlow) {
+          f3d.floorGlow.position.set(cx, 0.012, cz);
+          if (hitWall) f3d.floorGlow.position.set(cx, hitY, STAGE_DEPTH/2 - 0.01);
+          const gmat = f3d.floorGlow.material as THREE.MeshBasicMaterial;
+          gmat.color.copy(color);
+          gmat.opacity = normIntensity * 0.25;
+          f3d.floorGlow.visible = showBeams && normIntensity > 0.005;
+        }
+      }
       if (f3d.floorSpot || f3d.floorGlow) {
         const worldPos = new THREE.Vector3();
         f3d.lightTarget.getWorldPosition(worldPos);
