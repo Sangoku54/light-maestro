@@ -16,6 +16,11 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     removeUniverse: (id: string) => ipcRenderer.invoke('dmx:removeUniverse', id),
     listSerialPorts: () => ipcRenderer.invoke('dmx:listSerialPorts'),
     isRunning: () => ipcRenderer.invoke('dmx:isRunning'),
+    onError: (callback: (msg: string) => void) => {
+      const handler = (_: any, msg: string) => callback(msg);
+      ipcRenderer.on('dmx:error', handler);
+      return () => { ipcRenderer.removeListener('dmx:error', handler); };
+    },
   },
 
   // Fixtures

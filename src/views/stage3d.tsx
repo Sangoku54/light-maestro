@@ -831,61 +831,40 @@ export const Stage3D: React.FC = () => {
   // ── DMX update function (called from render loop) ───
   const updateDmxState = useCallback(() => {
     const dmxState = useAppStore.getState().dmx;
-    // Normalize channelData: it may be a plain object after JSON deserialization
-    let raw = dmxState.channelData;
-    let channelData: Map<number, Uint8Array>;
-    if (raw instanceof Map) {
-      channelData = raw;
-    } else if (raw && typeof raw === 'object') {
-      // Reconstruct Map from plain object
-      channelData = new Map<number, Uint8Array>();
-      for (const key of Object.keys(raw)) {
-        const val = (raw as any)[key];
-        channelData.set(Number(key), val instanceof Uint8Array ? val : new Uint8Array(Object.values(val ?? {})));
-      }
-    } else {
-      channelData = new Map<number, Uint8Array>();
-    }
+    let channelData = dmxState.channelData as Record<number, Uint8Array | number[]>;
     const blackout = dmxState.blackout ?? false;
     const grandMaster = dmxState.grandMaster ?? 255;
 
     for (const f3d of fixturesRef.current.values()) {
-      const data = channelData.get(f3d.universeIndex);
-      if (!data) {
-        // No DMX data for this universe
+      // Get DMX data for this fixture's universe
+      const rawData = channelData[f3d.universeIndex];
+      if (!rawData) {
         if (f3d.pointLight) f3d.pointLight.intensity = 0;
-        if (f3d.beamCone) {
-          (f3d.beamCone.material as THREE.MeshBasicMaterial).opacity = 0;
-        }
+        if (f3d.beamCone) { (f3d.beamCone.material as THREE.MeshBasicMaterial).opacity = 0; }
         continue;
       }
+      // Normalize data to Uint8Array-like access
+      const data = rawData instanceof Uint8Array ? rawData : new Uint8Array(Object.values(rawData));
 
-      // Find the patched fixture for address lookup
       const pf = patchedFixtures.find(f => f.id === f3d.id);
       if (!pf) continue;
 
-      const baseAddr = pf.startAddress - 1; // 0-based
+      const baseAddr = pf.startAddress - 1;
       const cm = f3d.channelMap;
 
       // --- Intensity ---
       let intensity = 0;
-      if (cm.intensityOffset !== null) {
+      if (cm.intensityOffset !== null && cm.intensityOffset >= 0) {
         intensity = data[baseAddr + cm.intensityOffset] ?? 0;
-      } else {
-        // No intensity channel: check if any color channel has value
-        if (cm.rgbOffsets) {
-          const r = data[baseAddr + cm.rgbOffsets[0]] ?? 0;
-          const g = data[baseAddr + cm.rgbOffsets[1]] ?? 0;
-          const b = data[baseAddr + cm.rgbOffsets[2]] ?? 0;
-          intensity = Math.max(r, g, b);
-        }
+      } else if (cm.rgbOffsets) {
+        const r = data[baseAddr + cm.rgbOffsets[0]] ?? 0;
+        const g = data[baseAddr + cm.rgbOffsets[1]] ?? 0;
+        const b = data[baseAddr + cm.rgbOffsets[2]] ?? 0;
+        intensity = Math.max(r, g, b);
       }
 
-      // Apply grand master + blackout
       if (blackout) intensity = 0;
       intensity = intensity * (grandMaster / 255);
-
-      // Normalize to 0-1 for Three.js
       const normIntensity = intensity / 255;
 
       // --- Color ---
@@ -894,9 +873,7 @@ export const Stage3D: React.FC = () => {
         const r = (data[baseAddr + cm.rgbOffsets[0]] ?? 0) / 255;
         const g = (data[baseAddr + cm.rgbOffsets[1]] ?? 0) / 255;
         const b = (data[baseAddr + cm.rgbOffsets[2]] ?? 0) / 255;
-        if (r > 0 || g > 0 || b > 0) {
-          color.setRGB(r, g, b);
-        }
+        if (r > 0 || g > 0 || b > 0) color.setRGB(r, g, b);
       } else if (cm.wheelOffset !== null) {
         const wheelVal = data[baseAddr + cm.wheelOffset] ?? 0;
         color = wheelValueToColor(wheelVal, cm.wheelCaps);
@@ -906,27 +883,27 @@ export const Stage3D: React.FC = () => {
       const panVal = cm.panOffset !== null ? (data[baseAddr + cm.panOffset] ?? 128) : 128;
       const tiltVal = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128) : 128;
       if (f3d.armGroup) {
-        f3d.armGroup.rotation.y = ((panVal / 255) - 0.5) * Math.PI * 3; // ±270°
+        f3d.armGroup.rotation.y = ((panVal / 255) - 0.5) * Math.PI * 3;
       }
       if (f3d.headGroup) {
-        f3d.headGroup.rotation.x = ((tiltVal / 255) - 0.5) * Math.PI * 0.5; // ±90°
+        f3d.headGroup.rotation.x = ((tiltVal / 255) - 0.5) * Math.PI * 0.5;
       }
 
       // --- Update PointLight ---
       if (f3d.pointLight) {
         f3d.pointLight.color.copy(color);
-        f3d.pointLight.intensity = normIntensity * 25; // Bright beams
+        f3d.pointLight.intensity = normIntensity * 25;
       }
 
       // --- Update beam cone ---
       if (f3d.beamCone) {
         const mat = f3d.beamCone.material as THREE.MeshBasicMaterial;
         mat.color.copy(color);
-        mat.opacity = normIntensity * 0.35; // More visible cone
+        mat.opacity = normIntensity * 0.35;
         f3d.beamCone.visible = showBeams && normIntensity > 0.005;
       }
 
-      // --- Update floor spot (QLC+ model: raycast beam to floor) ---
+      // --- Update floor spot (raycast beam to floor) ---
       if (f3d.floorSpot || f3d.floorGlow) {
         const worldPos = new THREE.Vector3();
         f3d.lightTarget.getWorldPosition(worldPos);
@@ -960,42 +937,8 @@ export const Stage3D: React.FC = () => {
           f3d.floorGlow.visible = showBeams && normIntensity > 0.005;
         }
       }
-      if (f3d.floorSpot || f3d.floorGlow) {
-        const worldPos = new THREE.Vector3();
-        f3d.lightTarget.getWorldPosition(worldPos);
-        // For headGroup fixtures, use headGroup's quaternion to compute beam direction
-        let hitX = worldPos.x;
-        let hitZ = worldPos.z;
-        if (f3d.headGroup) {
-          const q = new THREE.Quaternion();
-          f3d.headGroup.getWorldQuaternion(q);
-          const localDir = new THREE.Vector3(0, 0, -1);
-          localDir.applyQuaternion(q);
-          if (localDir.y < -0.001 && worldPos.y > 0.01) {
-            const t = -worldPos.y / localDir.y;
-            hitX = worldPos.x + localDir.x * t;
-            hitZ = worldPos.z + localDir.z * t;
-          }
-        }
-        const cx = Math.max(-STAGE_WIDTH/2, Math.min(STAGE_WIDTH/2, hitX));
-        const cz = Math.max(-STAGE_DEPTH/2, Math.min(STAGE_DEPTH/2, hitZ));
-        if (f3d.floorSpot) {
-          f3d.floorSpot.position.set(cx, 0.015, cz);
-          const smat = f3d.floorSpot.material as THREE.MeshBasicMaterial;
-          smat.color.copy(color);
-          smat.opacity = normIntensity * 0.7;
-          f3d.floorSpot.visible = showBeams && normIntensity > 0.005;
-        }
-        if (f3d.floorGlow) {
-          f3d.floorGlow.position.set(cx, 0.012, cz);
-          const gmat = f3d.floorGlow.material as THREE.MeshBasicMaterial;
-          gmat.color.copy(color);
-          gmat.opacity = normIntensity * 0.25;
-          f3d.floorGlow.visible = showBeams && normIntensity > 0.005;
-        }
-      }
 
-      // --- Update body emission (glow when active) ---
+      // --- Update body emission ---
       if (normIntensity > 0.01) {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
         if (Array.isArray(bodyMat)) {
@@ -1015,6 +958,7 @@ export const Stage3D: React.FC = () => {
     }
   }, [patchedFixtures, showBeams]);
 
+  // ── Camera presets ──────────────────────────────────
   // ── Camera presets ──────────────────────────────────
   const setCameraPreset = useCallback((preset: string) => {
     const camera = cameraRef.current;

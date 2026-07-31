@@ -122,6 +122,12 @@ ipcMain.handle('dmx:listSerialPorts', async () => {
   }
 });
 
+// ── Forward DMX engine errors to renderer ──
+dmxEngine.on('error', (err: Error) => {
+  console.warn('[dmx] engine error:', err.message);
+  mainWindow?.webContents.send('dmx:error', err.message);
+});
+
 // ─── IPC Handlers: Fixtures ──────────────────────────────────
 ipcMain.handle('fixtures:loadLibrary', async () => fixtureLibrary.load());
 ipcMain.handle('fixtures:search', async (_, query: string) => fixtureLibrary.search(query));

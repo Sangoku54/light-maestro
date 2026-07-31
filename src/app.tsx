@@ -53,6 +53,18 @@ const App: React.FC = () => {
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // ─── DMX Error Popup ────────────────────────────────────
+  const [dmxError, setDmxError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const api = (window as any).lightMaestro?.dmx;
+    if (!api?.onError) return;
+    const unsub = api.onError((msg: string) => {
+      if (!dmxError) setDmxError(msg);
+    });
+    return unsub;
+  }, [dmxError]);
+
   useEffect(() => {
     if (!window.lightMaestro?.app?.onBeforeClose) return;
     const unsub = window.lightMaestro.app.onBeforeClose(() => {
