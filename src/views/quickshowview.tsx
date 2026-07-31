@@ -1908,33 +1908,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     }
   }, [resolvedAnalysis]);
 
-  /* ─── Auto-load last project on startup ─────────── */
-
-  useEffect(() => {
-    if (hasEverHadAnalysis) return;
-    try {
-      const saved = localStorage.getItem('light-maestro:lastProject');
-      if (!saved) return;
-      const data = JSON.parse(saved);
-      if (data.quickShow) setQs(data.quickShow);
-      if (data.sections && data.sections.length > 0) setSections(data.sections);
-      if (data.manualCues) setManualCues(data.manualCues);
-      if (data.efxTracks) setEfxTracks(data.efxTracks);
-      if (data.fixtureTracks) setFixtureTracks(data.fixtureTracks);
-      if (data.analysis) {
-        if (data.audioDataBase64) {
-          const dataUrl = `data:audio/mpeg;base64,${data.audioDataBase64}`;
-          audioFile.restoreWithAudio(data.analysis, dataUrl).catch(() => {
-            audioFile.restoreAnalysis(data.analysis);
-          });
-        } else {
-          audioFile.restoreAnalysis(data.analysis);
-        }
-      }
-      console.log('[AutoLoad] Restored:', data.audioFileName || data.analysis?.fileName || 'project');
-    } catch (e) { console.error('[AutoLoad] Failed:', e); }
-  }, []); // mount only
-
   /* ─── EFX handlers ──────────────────────────────── */
   const [efxTrackModal, setEfxTrackModal] = useState(false);
   const [fadeModal, setFadeModal] = useState(false);
