@@ -229,6 +229,7 @@ export const Stage3D: React.FC = () => {
 
     let bodyMesh: THREE.Mesh;
     let lightTarget: THREE.Object3D;
+    let armGroup: THREE.Group | undefined;
     let headGroup: THREE.Group | undefined;
 
     const bodyMat = new THREE.MeshStandardMaterial({
@@ -245,63 +246,52 @@ export const Stage3D: React.FC = () => {
     });
 
     switch (type) {
-      // ── Moving Head ──────────────────────────────
+      // ── Moving Head (QLC+ model: base → arm(pans on Y) → head(tilts on X)) ──
       case 'moving_head': {
-        // Base: short wide cylinder (scaled 2.5x)
         const baseGeo = new THREE.CylinderGeometry(0.38, 0.45, 0.20, 16);
         const base = new THREE.Mesh(baseGeo, accentMat);
         base.position.y = 0.10;
         group.add(base);
 
-        // Yoke: U-shape (two vertical pillars + crossbar)
-        headGroup = new THREE.Group();
-        headGroup.position.y = 0.35;
+        armGroup = new THREE.Group();
+        armGroup.position.y = 0.20;
+        armGroup.name = 'arm';
 
-        const yokeMaterial = new THREE.MeshStandardMaterial({
+        const yokeMat = new THREE.MeshStandardMaterial({
           color: 0x2a2a3e, roughness: 0.5, metalness: 0.6,
         });
 
-        // Left pillar
-        const leftPillar = new THREE.Mesh(
-          new THREE.BoxGeometry(0.075, 0.30, 0.10),
-          yokeMaterial,
-        );
-        leftPillar.position.set(-0.20, 0.15, 0);
-        headGroup.add(leftPillar);
+        const lp = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.30, 0.10), yokeMat);
+        lp.position.set(-0.20, 0.15, 0);
+        armGroup.add(lp);
+        const rp = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.30, 0.10), yokeMat);
+        rp.position.set(0.20, 0.15, 0);
+        armGroup.add(rp);
+        const cb = new THREE.Mesh(new THREE.BoxGeometry(0.475, 0.075, 0.10), yokeMat);
+        cb.position.y = 0.30;
+        armGroup.add(cb);
 
-        // Right pillar
-        const rightPillar = new THREE.Mesh(
-          new THREE.BoxGeometry(0.075, 0.30, 0.10),
-          yokeMaterial,
-        );
-        rightPillar.position.set(0.20, 0.15, 0);
-        headGroup.add(rightPillar);
+        group.add(armGroup);
 
-        // Crossbar
-        const crossbar = new THREE.Mesh(
-          new THREE.BoxGeometry(0.475, 0.075, 0.10),
-          yokeMaterial,
-        );
-        crossbar.position.y = 0.30;
-        headGroup.add(crossbar);
+        headGroup = new THREE.Group();
+        headGroup.position.y = 0.15;
+        headGroup.name = 'head';
 
-        // Head: cylinder on its side
         const headGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.40, 16);
         const head = new THREE.Mesh(headGeo, accentMat);
         head.rotation.z = Math.PI / 2;
-        head.position.set(0, 0.175, 0.10);
+        head.position.set(0, 0, 0.10);
         headGroup.add(head);
 
-        // Lens
         const lensGeo = new THREE.CylinderGeometry(0.10, 0.10, 0.075, 16);
         const lens = new THREE.Mesh(lensGeo, new THREE.MeshStandardMaterial({
           color: 0xcccccc, roughness: 0.1, metalness: 0.2, emissive: 0xffffff, emissiveIntensity: 0.1,
         }));
         lens.rotation.z = Math.PI / 2;
-        lens.position.set(0, 0.175, 0.325);
+        lens.position.set(0, 0, 0.325);
         headGroup.add(lens);
 
-        group.add(headGroup);
+        armGroup.add(headGroup);
 
         bodyMesh = base;
         lightTarget = lens;
