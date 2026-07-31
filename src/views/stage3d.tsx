@@ -796,6 +796,8 @@ export const Stage3D: React.FC = () => {
         const stageY = pos.h * 5.0;
         f3d.group.position.set(stageX, stageY, stageZ);
         f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
+        if (pos.mountMode) f3d.mountMode = pos.mountMode;
+        fitMountRotation(f3d, pos.mountMode || 'top');
       }
     });
 
@@ -1469,4 +1471,18 @@ function disposeFixture3D(f3d: Fixture3D): void {
     f3d.beamCone.geometry?.dispose();
     (f3d.beamCone.material as THREE.Material)?.dispose();
   }
+  if (f3d.floorSpot) {
+    f3d.floorSpot.geometry?.dispose();
+    (f3d.floorSpot.material as THREE.Material)?.dispose();
+  }
+  if (f3d.floorGlow) {
+    f3d.floorGlow.geometry?.dispose();
+    (f3d.floorGlow.material as THREE.Material)?.dispose();
+  }
+}
+
+function fitMountRotation(f3d: Fixture3D, mode: string): void {
+  if (mode === 'rear') f3d.group.rotation.x = -Math.PI / 2;
+  else if (mode === 'ground') f3d.group.rotation.x = Math.PI;
+  else f3d.group.rotation.x = 0;
 }
