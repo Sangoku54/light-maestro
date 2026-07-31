@@ -416,6 +416,7 @@ export const Stage3D: React.FC = () => {
       id: fixture.id,
       group,
       bodyMesh,
+      armGroup,
       headGroup,
       lightTarget,
       channelMap,
@@ -733,7 +734,9 @@ export const Stage3D: React.FC = () => {
         });
         const cone = new THREE.Mesh(coneGeo, coneMat);
         f3d.mountMode = pos.mountMode || 'top';
-        cone.position.y = -coneHeight / 2;
+        // Orient cone forward (-Z) from the lens
+        cone.rotation.x = Math.PI / 2;
+        cone.position.z = -coneHeight / 2;
         cone.visible = showBeams;
         f3d.lightTarget.add(cone);
         f3d.beamCone = cone;
