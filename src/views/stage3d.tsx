@@ -902,17 +902,14 @@ export const Stage3D: React.FC = () => {
         color = wheelValueToColor(wheelVal, cm.wheelCaps);
       }
 
-      // --- Pan/Tilt ---
+      // --- Pan/Tilt (QLC+ model: arm=pan/Y, head=tilt/X) ---
+      const panVal = cm.panOffset !== null ? (data[baseAddr + cm.panOffset] ?? 128) : 128;
+      const tiltVal = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128) : 128;
+      if (f3d.armGroup) {
+        f3d.armGroup.rotation.y = ((panVal / 255) - 0.5) * Math.PI * 3; // ±270°
+      }
       if (f3d.headGroup) {
-        const panVal = cm.panOffset !== null ? (data[baseAddr + cm.panOffset] ?? 128) : 128;
-        const tiltVal = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128) : 128;
-        // Map DMX 0-255 to radians: pan 540° (±270°), tilt 0-135° from straight down
-        const panAngle = ((panVal / 255) - 0.5) * Math.PI * 3; // ±270°
-        f3d.headGroup.rotation.y = panAngle;
-        // Tilt: rotate X axis so the beam sweeps up/down
-        // DMX 0=up-forward, 128=straight down, 255=down-backward
-        const tiltNorm = (tiltVal - 128) / 127; // -1..+1
-        f3d.headGroup.rotation.x = -tiltNorm * Math.PI * 0.4; // ±72°
+        f3d.headGroup.rotation.x = ((tiltVal / 255) - 0.5) * Math.PI * 0.5; // ±90°
       }
 
       // --- Update PointLight ---
@@ -929,50 +926,27 @@ export const Stage3D: React.FC = () => {
         f3d.beamCone.visible = showBeams && normIntensity > 0.005;
       }
 
-            // --- Update floor spot / wall spot (based on mountMode) ---
+      // --- Update floor spot (QLC+ model: raycast beam to floor) ---
       if (f3d.floorSpot || f3d.floorGlow) {
         const worldPos = new THREE.Vector3();
         f3d.lightTarget.getWorldPosition(worldPos);
-        // Beam direction depends on mount mode
-        const mode = f3d.mountMode || 'top';
-        const localDir = new THREE.Vector3(
-          mode === 'rear' ? 0 : 0,
-          mode === 'top' ? -1 : mode === 'ground' ? 1 : 0,
-          mode === 'rear' ? -1 : 0
-        );
-        let hitX = worldPos.x;
-        let hitY = 0;
-        let hitZ = worldPos.z;
-        let hitWall = false;
+        let dir = new THREE.Vector3(0, -1, 0);
         if (f3d.headGroup) {
           const q = new THREE.Quaternion();
           f3d.headGroup.getWorldQuaternion(q);
-          const dir = localDir.clone().applyQuaternion(q);
-          // Project to floor (y=0) or to back wall (z=STAGE_DEPTH/2)
-          if (mode === 'rear' && dir.z < -0.001) {
-            const t = (STAGE_DEPTH/2 - worldPos.z) / dir.z;
-            if (t > 0) { hitX = worldPos.x + dir.x * t; hitY = worldPos.y + dir.y * t; hitZ = STAGE_DEPTH/2; hitWall = true; }
-          } else if (mode === 'ground' && dir.y > 0.001 && worldPos.y < 5) {
-            const t = (5.0 - worldPos.y) / dir.y;
-            hitX = worldPos.x + dir.x * t; hitZ = worldPos.z + dir.z * t;
-          } else if (mode === 'top' && dir.y < -0.001 && worldPos.y > 0.01) {
-            const t = -worldPos.y / dir.y;
-            hitX = worldPos.x + dir.x * t; hitZ = worldPos.z + dir.z * t;
-          } else {
-            // Fallback: project straight per mode
-            if (mode === 'ground') hitY = 5;
-            hitZ = mode === 'rear' ? STAGE_DEPTH/2 : hitZ;
-          }
-        } else {
-          // Fixed fixture: point straight to target surface
-          if (mode === 'ground') hitY = 5;
-          if (mode === 'rear') hitZ = STAGE_DEPTH/2;
+          dir = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+        }
+        let hitX = worldPos.x;
+        let hitZ = worldPos.z;
+        if (dir.y < -0.001 && worldPos.y > 0.01) {
+          const t = -worldPos.y / dir.y;
+          hitX = worldPos.x + dir.x * t;
+          hitZ = worldPos.z + dir.z * t;
         }
         const cx = Math.max(-STAGE_WIDTH/2, Math.min(STAGE_WIDTH/2, hitX));
         const cz = Math.max(-STAGE_DEPTH/2, Math.min(STAGE_DEPTH/2, hitZ));
         if (f3d.floorSpot) {
           f3d.floorSpot.position.set(cx, 0.015, cz);
-          if (hitWall) f3d.floorSpot.position.set(cx, hitY, STAGE_DEPTH/2 - 0.01);
           const smat = f3d.floorSpot.material as THREE.MeshBasicMaterial;
           smat.color.copy(color);
           smat.opacity = normIntensity * 0.7;
@@ -980,7 +954,6 @@ export const Stage3D: React.FC = () => {
         }
         if (f3d.floorGlow) {
           f3d.floorGlow.position.set(cx, 0.012, cz);
-          if (hitWall) f3d.floorGlow.position.set(cx, hitY, STAGE_DEPTH/2 - 0.01);
           const gmat = f3d.floorGlow.material as THREE.MeshBasicMaterial;
           gmat.color.copy(color);
           gmat.opacity = normIntensity * 0.25;
