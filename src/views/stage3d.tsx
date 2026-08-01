@@ -143,6 +143,7 @@ interface Fixture3D {
   universeIndex: number;        // Index into channelData map
   mountMode: 'top' | 'ground' | 'rear'; // beam default direction
   beamAngle: number;            // beam opening angle in radians
+  _staticTilt: number;          // static tilt offset from panel
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -796,7 +797,7 @@ export const Stage3D: React.FC = () => {
         fitMountRotation(f3d, pos.mountMode || 'top');
         // Apply static tilt from panel
         if (pos.tilt !== undefined && f3d.headGroup) {
-          f3d.headGroup.rotation.x = (pos.tilt * Math.PI) / 180;
+          f3d._staticTilt = (pos.tilt * Math.PI) / 180;
         }
         // Update beam angle (zoom)
         if (pos.beamAngle !== undefined && f3d.beamCone) {
@@ -834,7 +835,7 @@ export const Stage3D: React.FC = () => {
       f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
       if (pos.mountMode) f3d.mountMode = pos.mountMode;
       if (pos.tilt !== undefined && f3d.headGroup) {
-        f3d.headGroup.rotation.x = (pos.tilt * Math.PI) / 180;
+        f3d._staticTilt = (pos.tilt * Math.PI) / 180;
       }
       if (pos.beamAngle !== undefined && f3d.beamCone) {
         f3d.beamAngle = pos.beamAngle;
@@ -915,7 +916,10 @@ export const Stage3D: React.FC = () => {
         f3d.armGroup.rotation.y = ((panVal / 255) - 0.5) * Math.PI * 3;
       }
       if (f3d.headGroup) {
-        f3d.headGroup.rotation.x = ((tiltVal / 255) - 0.5) * Math.PI * 0.5;
+        // Apply DMX tilt + static panel tilt offset
+        const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI * 0.5;
+        const staticTilt = f3d._staticTilt ?? 0;
+        f3d.headGroup.rotation.x = dmxTilt + staticTilt;
       }
 
       // --- Update PointLight ---
@@ -1438,6 +1442,15 @@ export const Stage3D: React.FC = () => {
                 </div>
               </div>
             </div>
+            {/* Close button */}
+            <div className="px-4 py-2 border-t border-gray-800/50">
+              <button
+                onClick={() => setSelectedFixtureId(null)}
+                className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-700/50 transition-colors"
+              >
+                Close
+              </button>
+            </div>
             </div>
           </div>
         )}
@@ -1477,7 +1490,15 @@ function disposeFixture3D(f3d: Fixture3D): void {
 }
 
 function fitMountRotation(f3d: Fixture3D, mode: string): void {
-  if (mode === 'rear') f3d.group.rotation.x = -Math.PI / 2;
-  else if (mode === 'ground') f3d.group.rotation.x = Math.PI;
-  else f3d.group.rotation.x = 0;
+  // Reset group X rotation first
+  if (mode === 'rear') {
+    // Horizontal, beam forward (+Z)
+    f3d.group.rotation.x = -Math.PI / 2;
+  } else if (mode === 'ground') {
+    // Beam vertical UP (-Y), fixture points up
+    f3d.group.rotation.x = -Math.PI;
+  } else {
+    // Top: beam vertical DOWN (+Y), default
+    f3d.group.rotation.x = 0;
+  }
 }
