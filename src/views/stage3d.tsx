@@ -424,6 +424,8 @@ export const Stage3D: React.FC = () => {
       channelMap,
       universeIndex: universeIndexMap.get(fixture.universeId) ?? 0,
       mountMode: pos.mountMode || 'top',
+      beamAngle: pos.beamAngle ?? 0.15,
+      _staticTilt: (pos.tilt ?? 0) * Math.PI / 180,
     };
   }, [universeIndexMap]);
 
