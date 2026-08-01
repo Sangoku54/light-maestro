@@ -1190,13 +1190,29 @@ export const Stage3D: React.FC = () => {
           </div>
         )}
 
-        {/* Selected fixture editor */}
+        {/* Selected fixture editor — floating panel, draggable */}
         {selectedFixture && selectedPos && (
           <div
-            className="absolute bottom-4 left-4 bg-[#12121a]/95 border border-purple-500/30 rounded-xl p-4 z-20 shadow-2xl backdrop-blur-sm min-w-[240px]"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed bg-[#12121a]/95 border border-purple-500/30 rounded-xl p-4 z-[60] shadow-2xl backdrop-blur-sm min-w-[240px]"
+            style={{ right: 16, top: 80 }}
+            onMouseDown={(e) => {
+              const panel = e.currentTarget;
+              const ox = e.clientX - panel.offsetLeft;
+              const oy = e.clientY - panel.offsetTop;
+              const onMove = (ev: MouseEvent) => {
+                panel.style.left = (ev.clientX - ox) + 'px';
+                panel.style.top = (ev.clientY - oy) + 'px';
+                panel.style.right = 'auto';
+              };
+              const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+              };
+              document.addEventListener('mousemove', onMove);
+              document.addEventListener('mouseup', onUp);
+            }}
           >
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-3 cursor-grab active:cursor-grabbing">
               <div className="flex items-center gap-2">
                 <GripVertical size={12} className="text-gray-600" />
                 <span className="text-sm font-semibold text-gray-200">{selectedFixture.name}</span>
