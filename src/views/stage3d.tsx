@@ -142,6 +142,7 @@ interface Fixture3D {
   channelMap: FixtureChannelMap;
   universeIndex: number;        // Index into channelData map
   mountMode: 'top' | 'ground' | 'rear'; // beam default direction
+  beamAngle: number;            // beam opening angle in radians
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -720,10 +721,10 @@ export const Stage3D: React.FC = () => {
         f3d.lightTarget.add(pointLight);
         f3d.pointLight = pointLight;
 
-        // Create beam cone (volumetric) — larger, more visible
-        const coneHeight = 5;
-        const coneRadiusBottom = coneHeight * Math.tan(0.45);
-        const coneGeo = new THREE.CylinderGeometry(0.05, coneRadiusBottom, coneHeight, 24, 1, true);
+        // Create beam cone — very long, no visible end
+        const coneHeight = 50; // extends far beyond stage
+        const coneRadiusBottom = coneHeight * Math.tan(0.15); // narrow beam
+        const coneGeo = new THREE.CylinderGeometry(0.03, coneRadiusBottom, coneHeight, 24, 1, true);
         const coneMat = new THREE.MeshBasicMaterial({
           color: 0xffffff,
           transparent: true,
@@ -734,7 +735,8 @@ export const Stage3D: React.FC = () => {
         });
         const cone = new THREE.Mesh(coneGeo, coneMat);
         f3d.mountMode = pos.mountMode || 'top';
-        // Cone pointe vers l'avant (+Z) depuis la lentille, en partant de la lumière
+        f3d.beamAngle = pos.beamAngle ?? 0.15;
+        // Cone pointe vers l'avant (+Z) depuis la lentille
         cone.rotation.x = -Math.PI / 2;
         cone.position.z = coneHeight / 2;
         cone.visible = showBeams;
@@ -1041,10 +1043,8 @@ export const Stage3D: React.FC = () => {
       }
       if (obj?.userData?.fixtureId) {
         const fid = obj.userData.fixtureId as string;
-        setSelectedFixtureId(fid === selectedFixtureId ? null : fid);
+        if (fid !== selectedFixtureId) setSelectedFixtureId(fid);
       }
-    } else {
-      setSelectedFixtureId(null);
     }
   }, [selectedFixtureId]);
 
@@ -1354,10 +1354,10 @@ export const Stage3D: React.FC = () => {
                 </div>
               </div>
 
-              {/* Heading / Rotation */}
+              {/* Heading / Rotation + Tilt */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-gray-500">Heading</span>
+                  <span className="text-gray-500">Heading (Pan)</span>
                   <span className="text-gray-400 font-mono">{((selectedPos.heading ?? 0)).toFixed(0)}°</span>
                 </div>
                 <input
@@ -1371,6 +1371,46 @@ export const Stage3D: React.FC = () => {
                 />
                 <div className="flex justify-between text-[8px] text-gray-700">
                   <span>0°</span><span>360°</span>
+                </div>
+              </div>
+
+              {/* Beam Tilt */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-gray-500">Tilt</span>
+                  <span className="text-gray-400 font-mono">{((selectedPos.tilt ?? 0)).toFixed(0)}°</span>
+                </div>
+                <input
+                  type="range"
+                  min={-90}
+                  max={90}
+                  step={1}
+                  value={selectedPos.tilt ?? 0}
+                  onChange={(e) => setFixturePosition(selectedFixture.id, { tilt: parseFloat(e.target.value) })}
+                  className="w-full h-1 accent-blue-500 cursor-pointer"
+                />
+                <div className="flex justify-between text-[8px] text-gray-700">
+                  <span>-90°</span><span>+90°</span>
+                </div>
+              </div>
+
+              {/* Beam Angle (Zoom) */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-gray-500">Beam Angle</span>
+                  <span className="text-gray-400 font-mono">{((selectedPos.beamAngle ?? 0.15) * 180 / Math.PI).toFixed(0)}°</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.02}
+                  max={0.8}
+                  step={0.01}
+                  value={selectedPos.beamAngle ?? 0.15}
+                  onChange={(e) => setFixturePosition(selectedFixture.id, { beamAngle: parseFloat(e.target.value) })}
+                  className="w-full h-1 accent-cyan-500 cursor-pointer"
+                />
+                <div className="flex justify-between text-[8px] text-gray-700">
+                  <span>1°</span><span>46°</span>
                 </div>
               </div>
             </div>
