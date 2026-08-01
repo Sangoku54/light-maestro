@@ -734,9 +734,9 @@ export const Stage3D: React.FC = () => {
         });
         const cone = new THREE.Mesh(coneGeo, coneMat);
         f3d.mountMode = pos.mountMode || 'top';
-        // Orient cone forward (-Z) from the lens
-        cone.rotation.x = Math.PI / 2;
-        cone.position.z = -coneHeight / 2;
+        // Cone pointe vers l'avant (+Z) depuis la lentille, en partant de la lumière
+        cone.rotation.x = -Math.PI / 2;
+        cone.position.z = coneHeight / 2;
         cone.visible = showBeams;
         f3d.lightTarget.add(cone);
         f3d.beamCone = cone;
@@ -914,7 +914,7 @@ export const Stage3D: React.FC = () => {
         if (f3d.headGroup) {
           const q = new THREE.Quaternion();
           f3d.headGroup.getWorldQuaternion(q);
-          dir = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+          dir = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
         }
         let hitX = worldPos.x;
         let hitZ = worldPos.z;
