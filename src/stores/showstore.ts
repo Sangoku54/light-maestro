@@ -141,6 +141,8 @@ export interface FixturePos {
   y: number; // normalized 0-1 (stage depth)
   h: number; // height multiplier (0-1, maps to 0-5m range)
   heading: number; // rotation in degrees (0-360), 0=front (toward audience)
+  tilt?: number; // static tilt in degrees (-90 to +90)
+  beamAngle?: number; // beam opening angle in radians (0.02-0.8)
   mountMode?: 'top' | 'ground' | 'rear'; // beam direction: top=down, ground=up, rear=forward
 }
 
