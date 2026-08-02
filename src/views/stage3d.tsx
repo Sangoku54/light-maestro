@@ -739,10 +739,8 @@ export const Stage3D: React.FC = () => {
         const cone = new THREE.Mesh(coneGeo, coneMat);
         f3d.mountMode = pos.mountMode || 'top';
         f3d.beamAngle = pos.beamAngle ?? 0.15;
-        // Cone part de la lentille et pointe vers le bas (-Y)
-        cone.position.set(0, 0, 0.325); // same as lens position in headGroup
-        cone.rotation.x = Math.PI / 2; // Cylinder axis to Z, pointing forward from lens
-        cone.position.z += coneHeight / 2; // offset along cone direction
+        // Cone part de la lentille, pointe vers le bas (-Y) pour un truss top
+        cone.position.set(0, -coneHeight / 2, 0.325);
         cone.visible = showBeams;
         if (f3d.headGroup) {
           f3d.headGroup.add(cone);
@@ -841,7 +839,8 @@ export const Stage3D: React.FC = () => {
       if (pos.mountMode) f3d.mountMode = pos.mountMode;
       fitMountRotation(f3d, pos.mountMode || 'top');
       f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
-      if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._staticTilt; console.log('TILT applied:', pos.tilt, 'rad:', f3d._staticTilt.toFixed(3), 'fixture:', pf.id); }
+      console.log('TILT set:', pos.tilt, 'rad:', f3d._staticTilt.toFixed(3), 'fixture:', pf.id, 'hasHead:', !!f3d.headGroup, 'hasArm:', !!f3d.armGroup);
+      if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._staticTilt; }
       if (pos.beamAngle !== undefined && f3d.beamCone) {
         f3d.beamAngle = pos.beamAngle;
         const ch = 50;
