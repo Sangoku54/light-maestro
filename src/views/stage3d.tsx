@@ -739,8 +739,10 @@ export const Stage3D: React.FC = () => {
         const cone = new THREE.Mesh(coneGeo, coneMat);
         f3d.mountMode = pos.mountMode || 'top';
         f3d.beamAngle = pos.beamAngle ?? 0.15;
-        // Cone points along -Y (down), attach to headGroup so it follows pan/tilt
-        cone.position.y = -coneHeight / 2;
+        // Cone part de la lentille et pointe vers le bas (-Y)
+        cone.position.set(0, 0, 0.325); // same as lens position in headGroup
+        cone.rotation.x = Math.PI / 2; // Cylinder axis to Z, pointing forward from lens
+        cone.position.z += coneHeight / 2; // offset along cone direction
         cone.visible = showBeams;
         if (f3d.headGroup) {
           f3d.headGroup.add(cone);
