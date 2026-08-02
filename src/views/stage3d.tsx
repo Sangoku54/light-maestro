@@ -411,6 +411,29 @@ export const Stage3D: React.FC = () => {
       }
     }
 
+    // If fixture has pan/tilt channels but no arm/head yet, create them
+    if (!armGroup && !headGroup) {
+      const hasPan = channelMap.panOffset !== null;
+      const hasTilt = channelMap.tiltOffset !== null;
+      if (hasPan || hasTilt) {
+        armGroup = new THREE.Group();
+        armGroup.position.y = 0.15;
+        armGroup.name = 'arm';
+
+        headGroup = new THREE.Group();
+        headGroup.position.y = 0;
+        headGroup.name = 'head';
+
+        // Move bodyMesh and lightTarget into head → arm → group
+        group.remove(bodyMesh);
+        if (lightTarget !== bodyMesh) group.remove(lightTarget);
+        headGroup.add(bodyMesh);
+        if (lightTarget !== bodyMesh) headGroup.add(lightTarget);
+        armGroup.add(headGroup);
+        group.add(armGroup);
+      }
+    }
+
     group.castShadow = false;
     group.receiveShadow = false;
 
