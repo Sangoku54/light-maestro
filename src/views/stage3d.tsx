@@ -739,8 +739,7 @@ export const Stage3D: React.FC = () => {
         const cone = new THREE.Mesh(coneGeo, coneMat);
         f3d.mountMode = pos.mountMode || 'top';
         f3d.beamAngle = pos.beamAngle ?? 0.15;
-        // Cone pointe vers le bas (-Y) par defaut (direction d'un fixture sur truss)
-        cone.rotation.x = Math.PI / 2;
+        // Cone: CylinderGeometry is along Y by default, move down to point -Y
         cone.position.y = -coneHeight / 2;
         cone.visible = showBeams;
         f3d.lightTarget.add(cone);
