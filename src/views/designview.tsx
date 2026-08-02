@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { generateAllThumbnails, getVariantsForCategory, type ThumbnailVariant } from '../utils/fixtureThumbnails';
 import { useTranslation } from 'react-i18next';
 import { Plus, Play, Pause, Square, Trash2, GripVertical, Search, X, Edit2, Check, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Zap, Save } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
@@ -3274,6 +3275,7 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
   const [startAddress, setStartAddress] = useState(1);
   const [quantity, setQuantity] = useState(1);
   const [addTier, setAddTier] = useState<'primary' | 'secondary' | 'tertiary'>('primary');
+  const [addThumbnailId, setAddThumbnailId] = useState<string>('');
   const [addError, setAddError] = useState<string | null>(null);
   const [detailFixture, setDetailFixture] = useState<any>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -3520,6 +3522,7 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
         channelCount: channels,
         name,
         tier: addTier,
+        thumbnailId: addThumbnailId || undefined,
       });
 
       if ('error' in result) {
@@ -3546,6 +3549,7 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
     setSelectedManufacturer('');
     setManufacturerFixtures([]);
     setAddTier('primary');
+    setAddThumbnailId('');
   };
 
   const handleBack = () => {
@@ -4260,6 +4264,9 @@ interface AddFixtureModalProps {
   allFixtures: FixtureDefResult[];
   tier: 'primary' | 'secondary' | 'tertiary';
   onSetTier: (tier: 'primary' | 'secondary' | 'tertiary') => void;
+  thumbnailId: string;
+  onSetThumbnail: (id: string) => void;
+  fixtureType: string;
   onSearch: (query: string) => void;
   onSelectDef: (def: FixtureDefResult) => void;
   onSelectMode: (modeIdx: number) => void;
@@ -4646,6 +4653,22 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                   </div>
                 );
               })()}
+
+              {/* Fixture Thumbnail / Gif selector */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-gray-400">Fixture Preview</label>
+                  <span className="text-[9px] text-gray-600">Choose how the fixture appears in 3D view</span>
+                </div>
+                <div className="grid grid-cols-5 gap-2">
+                  {(function(){
+                    try{var variants=require('../utils/fixtureThumbnails').getVariantsForCategory(fixtureType||'moving_head');return variants.map(function(v){
+                      var sel=thumbnailId===v.id;
+                      return React.createElement('button',{key:v.id,onClick:function(){onSetThumbnail(v.id)},className:'flex flex-col items-center gap-1 p-1.5 rounded-lg border transition-all '+(sel?'border-purple-400 bg-purple-600/20':'border-gray-700/50 bg-gray-800/30 hover:bg-gray-700/30'),title:v.description},[React.createElement('img',{src:v.dataUrl,className:'w-10 h-10 rounded object-contain'}),React.createElement('span',{className:'text-[8px] text-gray-400 leading-tight text-center'},v.label)]);
+                    })}catch(e){return React.createElement('span',{className:'text-[9px] text-gray-600'},'No previews available');}
+                  })()}
+                </div>
+              </div>
 
               {/* Tier selector */}
               <div className="space-y-2">

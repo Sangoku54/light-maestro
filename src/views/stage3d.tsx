@@ -808,6 +808,21 @@ export const Stage3D: React.FC = () => {
         scene.add(floorGlow);
         f3d.floorGlow = floorGlow;
 
+        // ── Thumbnail sprite ──
+        if (pf.thumbnailId) {
+          const variants = (() => { try { return require('../utils/fixtureThumbnails').generateAllThumbnails(); } catch { return []; } })();
+          const v = variants.find((x: any) => x.id === pf.thumbnailId);
+          if (v) {
+            const tex = new THREE.TextureLoader().load(v.dataUrl);
+            const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false });
+            const sprite = new THREE.Sprite(spriteMat);
+            sprite.scale.set(0.6, 0.6, 1);
+            sprite.position.set(0, 0.4, 0);
+            f3d.group.add(sprite);
+            f3d.thumbnailSprite = sprite;
+          }
+        }
+
         fixturesRef.current.set(pf.id, f3d);
       }
 
