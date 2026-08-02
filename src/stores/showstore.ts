@@ -25,6 +25,7 @@ export interface PatchedFixture {
   channelCount: number;
   name: string;
   tier: FixtureTier;
+  thumbnailId?: string; // variant id from fixtureThumbnails
 }
 
 export interface ShowUniverse {
