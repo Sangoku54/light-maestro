@@ -28,6 +28,7 @@ import {
   type DmxFixtureCapability,
 } from '../hooks/dmx-cues';
 import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X } from 'lucide-react';
+import { generateAllThumbnails } from '../utils/fixtureThumbnails';
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -144,6 +145,7 @@ interface Fixture3D {
   mountMode: 'top' | 'ground' | 'rear'; // beam default direction
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
+  thumbnailSprite?: THREE.Sprite; // fixture preview sprite
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -810,7 +812,7 @@ export const Stage3D: React.FC = () => {
 
         // ── Thumbnail sprite ──
         if (pf.thumbnailId) {
-          const variants = (() => { try { return require('../utils/fixtureThumbnails').generateAllThumbnails(); } catch { return []; } })();
+          const variants = generateAllThumbnails();
           const v = variants.find((x: any) => x.id === pf.thumbnailId);
           if (v) {
             const tex = new THREE.TextureLoader().load(v.dataUrl);
@@ -1531,6 +1533,9 @@ function disposeFixture3D(f3d: Fixture3D): void {
   if (f3d.floorGlow) {
     f3d.floorGlow.geometry?.dispose();
     (f3d.floorGlow.material as THREE.Material)?.dispose();
+  }
+  if (f3d.thumbnailSprite) {
+    f3d.thumbnailSprite.material?.dispose();
   }
 }
 

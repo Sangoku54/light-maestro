@@ -4660,14 +4660,29 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                   <label className="text-xs text-gray-400">Fixture Preview</label>
                   <span className="text-[9px] text-gray-600">Choose how the fixture appears in 3D view</span>
                 </div>
-                <div className="grid grid-cols-5 gap-2">
-                  {(function(){
-                    try{var variants=require('../utils/fixtureThumbnails').getVariantsForCategory(fixtureType||'moving_head');return variants.map(function(v){
-                      var sel=thumbnailId===v.id;
-                      return React.createElement('button',{key:v.id,onClick:function(){onSetThumbnail(v.id)},className:'flex flex-col items-center gap-1 p-1.5 rounded-lg border transition-all '+(sel?'border-purple-400 bg-purple-600/20':'border-gray-700/50 bg-gray-800/30 hover:bg-gray-700/30'),title:v.description},[React.createElement('img',{src:v.dataUrl,className:'w-10 h-10 rounded object-contain'}),React.createElement('span',{className:'text-[8px] text-gray-400 leading-tight text-center'},v.label)]);
-                    })}catch(e){return React.createElement('span',{className:'text-[9px] text-gray-600'},'No previews available');}
-                  })()}
-                </div>
+                {
+  /* Use the imported getVariantsForCategory */
+  (() => {
+    const variants = getVariantsForCategory(fixtureType || 'moving_head');
+    return (
+      <div className="grid grid-cols-5 gap-2">
+        {variants.length > 0 ? variants.map((v) => {
+          const sel = thumbnailId === v.id;
+          return (
+            <button key={v.id}
+              onClick={() => onSetThumbnail(v.id)}
+              className={`flex flex-col items-center gap-1 p-1.5 rounded-lg border transition-all ${sel ? 'border-purple-400 bg-purple-600/20' : 'border-gray-700/50 bg-gray-800/30 hover:bg-gray-700/30'}`}
+              title={v.description}
+            >
+              <img src={v.dataUrl} className="w-10 h-10 rounded object-contain" />
+              <span className="text-[8px] text-gray-400 leading-tight text-center">{v.label}</span>
+            </button>
+          );
+        }) : <span className="text-[9px] text-gray-600">Loading…</span>}
+      </div>
+    );
+  })()
+}
               </div>
 
               {/* Tier selector */}
