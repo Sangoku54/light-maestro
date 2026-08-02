@@ -739,10 +739,14 @@ export const Stage3D: React.FC = () => {
         const cone = new THREE.Mesh(coneGeo, coneMat);
         f3d.mountMode = pos.mountMode || 'top';
         f3d.beamAngle = pos.beamAngle ?? 0.15;
-        // Cone: CylinderGeometry is along Y by default, move down to point -Y
+        // Cone points along -Y (down), attach to headGroup so it follows pan/tilt
         cone.position.y = -coneHeight / 2;
         cone.visible = showBeams;
-        f3d.lightTarget.add(cone);
+        if (f3d.headGroup) {
+          f3d.headGroup.add(cone);
+        } else {
+          f3d.lightTarget.add(cone);
+        }
         f3d.beamCone = cone;
 
         // ── Floor spot (light circle on stage floor) ──
