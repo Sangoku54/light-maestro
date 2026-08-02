@@ -247,7 +247,7 @@ export const Stage3D: React.FC = () => {
       emissiveIntensity: 0.3,
     });
 
-    switch (type) {
+    switch (type.toLowerCase()) {
       // ── Moving Head (QLC+ model: base → arm(pans on Y) → head(tilts on X)) ──
       case 'moving_head': {
         const baseGeo = new THREE.CylinderGeometry(0.38, 0.45, 0.20, 16);
