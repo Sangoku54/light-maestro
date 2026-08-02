@@ -874,6 +874,8 @@ export const Stage3D: React.FC = () => {
       if (!rawData) {
         if (f3d.pointLight) f3d.pointLight.intensity = 0;
         if (f3d.beamCone) { (f3d.beamCone.material as THREE.MeshBasicMaterial).opacity = 0; }
+        // Apply static tilt even without DMX
+        if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._staticTilt ?? 0;
         continue;
       }
       // Normalize data to Uint8Array-like access
