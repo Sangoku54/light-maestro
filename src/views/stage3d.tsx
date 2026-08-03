@@ -1098,11 +1098,9 @@ export const Stage3D: React.FC = () => {
         }
       }
 
-      // --- Update body emission ---
-      // During DMX playback with thumbnail: hide default geometry
+      // --- Body visibility: hide 3D geometry when thumbnail is present (always)
       const hasThumbnail = !!f3d.thumbnailSprite;
-      const isDmxActive = normIntensity > 0.01 || intensity > 0;
-      f3d.bodyMesh.visible = !(hasThumbnail && isDmxActive);
+      f3d.bodyMesh.visible = !hasThumbnail;
       if (!hasThumbnail && normIntensity > 0.01) {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
         if (Array.isArray(bodyMat)) {
