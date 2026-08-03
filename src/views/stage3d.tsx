@@ -754,14 +754,11 @@ export const Stage3D: React.FC = () => {
         const f3d = createFixtureGeometry(pf, pos, channelMap, defs);
         scene.add(f3d.group);
 
-        // Create PointLight at lens position (no target needed —
-        // beamCone handles visual direction, PointLight provides
-        // realistic omnidirectional fill from the fixture lens)
+        // PointLight: Always in headGroup at lens origin (0,0,0) so it moves with pan/tilt.
+        // Cone and light share the same origin — they stay in sync.
         const pointLight = new THREE.PointLight(0xffffff, 0, 8, 2);
-        // Position at the lens output (front of head, z=0.35 for moving_head)
-        pointLight.position.set(0, 0, 0.35);
+        pointLight.position.set(0, 0, 0);
         pointLight.visible = showBeams;
-        // Attach to headGroup so it follows pan/tilt
         if (f3d.headGroup) {
           f3d.headGroup.add(pointLight);
         } else {
