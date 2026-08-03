@@ -825,15 +825,21 @@ export const Stage3D: React.FC = () => {
         // ── Thumbnail sprite ──
         if (pf.thumbnailId) {
           const variants = generateAllThumbnails();
-          const v = variants.find((x: any) => x.id === pf.thumbnailId);
+          const v = variants.find((x) => x.id === pf.thumbnailId);
           if (v) {
-            const tex = new THREE.TextureLoader().load(v.dataUrl);
-            const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false });
-            const sprite = new THREE.Sprite(spriteMat);
-            sprite.scale.set(0.6, 0.6, 1);
-            sprite.position.set(0, 0.4, 0);
-            f3d.group.add(sprite);
-            f3d.thumbnailSprite = sprite;
+            // data URL: instant via Image + CanvasTexture
+            const img = new Image();
+            img.onload = () => {
+              const tex = new THREE.CanvasTexture(img as any);
+              tex.needsUpdate = true;
+              const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false });
+              const sprite = new THREE.Sprite(spriteMat);
+              sprite.scale.set(0.6, 0.6, 1);
+              sprite.position.set(0, 0.3, 0);
+              f3d.group.add(sprite);
+              f3d.thumbnailSprite = sprite;
+            };
+            img.src = v.dataUrl;
           }
         }
 
@@ -854,6 +860,25 @@ export const Stage3D: React.FC = () => {
         fitMountRotation(f3d, pos.mountMode || 'top');
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
         if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._staticTilt;
+        // Update thumbnail sprite
+        if (pf.thumbnailId && !f3d.thumbnailSprite) {
+          const variants = generateAllThumbnails();
+          const v = variants.find((x) => x.id === pf.thumbnailId);
+          if (v) {
+            const img = new Image();
+            img.onload = () => {
+              const tex = new THREE.CanvasTexture(img as any);
+              tex.needsUpdate = true;
+              const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false });
+              const sprite = new THREE.Sprite(spriteMat);
+              sprite.scale.set(0.6, 0.6, 1);
+              sprite.position.set(0, 0.3, 0);
+              f3d.group.add(sprite);
+              f3d.thumbnailSprite = sprite;
+            };
+            img.src = v.dataUrl;
+          }
+        }
         // Update beam angle (zoom)
         if (pos.beamAngle !== undefined && f3d.beamCone) {
           f3d.beamAngle = pos.beamAngle;
