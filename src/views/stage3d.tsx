@@ -1062,41 +1062,9 @@ export const Stage3D: React.FC = () => {
         f3d.beamCone.visible = showBeams && normIntensity > 0.005;
       }
 
-      // --- Update floor spot (raycast beam to floor) ---
-      if (f3d.floorSpot || f3d.floorGlow) {
-        const worldPos = new THREE.Vector3();
-        f3d.lightTarget.getWorldPosition(worldPos);
-        // Beam direction: down (-Y) by default, rotated by headGroup
-        let dir = new THREE.Vector3(0, -1, 0);
-        if (f3d.headGroup) {
-          const q = new THREE.Quaternion();
-          f3d.headGroup.getWorldQuaternion(q);
-          dir = new THREE.Vector3(0, -1, 0).applyQuaternion(q);
-        }
-        let hitX = worldPos.x;
-        let hitZ = worldPos.z;
-        if (dir.y < -0.001 && worldPos.y > 0.01) {
-          const t = -worldPos.y / dir.y;
-          hitX = worldPos.x + dir.x * t;
-          hitZ = worldPos.z + dir.z * t;
-        }
-        const cx = Math.max(-STAGE_WIDTH/2, Math.min(STAGE_WIDTH/2, hitX));
-        const cz = Math.max(-STAGE_DEPTH/2, Math.min(STAGE_DEPTH/2, hitZ));
-        if (f3d.floorSpot) {
-          f3d.floorSpot.position.set(cx, 0.015, cz);
-          const smat = f3d.floorSpot.material as THREE.MeshBasicMaterial;
-          smat.color.copy(color);
-          smat.opacity = normIntensity * 0.7;
-          f3d.floorSpot.visible = showBeams && normIntensity > 0.005;
-        }
-        if (f3d.floorGlow) {
-          f3d.floorGlow.position.set(cx, 0.012, cz);
-          const gmat = f3d.floorGlow.material as THREE.MeshBasicMaterial;
-          gmat.color.copy(color);
-          gmat.opacity = normIntensity * 0.25;
-          f3d.floorGlow.visible = showBeams && normIntensity > 0.005;
-        }
-      }
+      // --- Floor spot disabled: only beam cones from lens are shown ---
+      // Floor spot/glow visibility forced off
+      if (f3d.floorSpot) f3d.floorSpot.visible = false;
 
       // --- Body visibility: hide 3D geometry when thumbnail is present (always)
       const hasThumbnail = !!f3d.thumbnailSprite;

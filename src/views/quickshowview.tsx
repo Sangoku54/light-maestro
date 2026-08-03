@@ -1932,7 +1932,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   // ── Floating 3D view ──
   const [showFloating3D, setShowFloating3D] = useState(false);
   const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
-  const [float3DSize, setFloat3DSize] = useState({ w: 1920, h: 1080 });
+  const [float3DSize, setFloat3DSize] = useState({ w: 1280, h: 720 });
   const float3DDragRef = useRef(null);
   const float3DResizeRef = useRef(null);
 
