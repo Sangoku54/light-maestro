@@ -842,10 +842,11 @@ export const Stage3D: React.FC = () => {
               ctx.drawImage(img, 0, 0);
               const tex = new THREE.CanvasTexture(canvas);
               tex.needsUpdate = true;
-              const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false });
+              const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false });
               const sprite = new THREE.Sprite(spriteMat);
               sprite.scale.set(0.5, 0.5, 1);
-              sprite.position.set(0, 0.4, 0);
+              sprite.position.set(0, 0.45, 0);
+              sprite.renderOrder = 999;
               const parent = f3d.headGroup || f3d.armGroup || f3d.group;
               parent.add(sprite);
               f3d.thumbnailSprite = sprite;
