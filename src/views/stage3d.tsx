@@ -835,17 +835,23 @@ export const Stage3D: React.FC = () => {
           if (v) {
             const img = new Image();
             img.onload = () => {
-              const tex = new THREE.CanvasTexture(img as any);
+              const canvas = document.createElement('canvas');
+              canvas.width = img.width;
+              canvas.height = img.height;
+              const ctx = canvas.getContext('2d')!;
+              ctx.drawImage(img, 0, 0);
+              const tex = new THREE.CanvasTexture(canvas);
               tex.needsUpdate = true;
               const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false });
               const sprite = new THREE.Sprite(spriteMat);
-              sprite.scale.set(0.6, 0.6, 1);
-              sprite.position.set(0, 0.35, 0);
-              // Attach to head for moving heads, arm for scanners, else group
+              sprite.scale.set(0.5, 0.5, 1);
+              sprite.position.set(0, 0.4, 0);
               const parent = f3d.headGroup || f3d.armGroup || f3d.group;
               parent.add(sprite);
               f3d.thumbnailSprite = sprite;
+              console.log('THUMBNAIL sprite created for', pf.id, pf.thumbnailId);
             };
+            img.onerror = () => console.error('THUMBNAIL failed to load', pf.thumbnailId);
             img.src = v.dataUrl;
           }
         }
