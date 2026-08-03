@@ -1089,10 +1089,11 @@ export const Stage3D: React.FC = () => {
       }
 
       // --- Update body emission ---
-      // Hide default geometry if a thumbnail sprite is present
-      const hideBody = !!f3d.thumbnailSprite;
-      f3d.bodyMesh.visible = !hideBody;
-      if (!hideBody && normIntensity > 0.01) {
+      // During DMX playback with thumbnail: hide default geometry
+      const hasThumbnail = !!f3d.thumbnailSprite;
+      const isDmxActive = normIntensity > 0.01 || intensity > 0;
+      f3d.bodyMesh.visible = !(hasThumbnail && isDmxActive);
+      if (!hasThumbnail && normIntensity > 0.01) {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
         if (Array.isArray(bodyMat)) {
           for (const m of bodyMat) { m.emissive = color; m.emissiveIntensity = normIntensity * 0.8; }
@@ -1100,7 +1101,7 @@ export const Stage3D: React.FC = () => {
           bodyMat.emissive = color;
           bodyMat.emissiveIntensity = normIntensity * 0.8;
         }
-      } else if (!hideBody) {
+      } else if (!hasThumbnail) {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
         if (Array.isArray(bodyMat)) {
           for (const m of bodyMat) { m.emissiveIntensity = 0; }
