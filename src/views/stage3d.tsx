@@ -157,6 +157,7 @@ interface Fixture3D {
   mountMode: 'top' | 'ground' | 'rear'; // beam default direction
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
+  _thumbnailScale: number;      // sprite scale from panel
   thumbnailSprite?: THREE.Sprite; // fixture preview sprite
 }
 
@@ -1572,6 +1573,26 @@ export const Stage3D: React.FC = () => {
                 />
                 <div className="flex justify-between text-[8px] text-gray-700">
                   <span>1°</span><span>46°</span>
+                </div>
+              </div>
+
+              {/* Thumbnail Size */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-gray-500">Preview Size</span>
+                  <span className="text-gray-400 font-mono">{((selectedPos.thumbnailScale ?? 0.5) * 100).toFixed(0)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.2}
+                  max={2.0}
+                  step={0.05}
+                  value={selectedPos.thumbnailScale ?? 0.5}
+                  onChange={(e) => setFixturePosition(selectedFixture.id, { thumbnailScale: parseFloat(e.target.value) })}
+                  className="w-full h-1 accent-pink-500 cursor-pointer"
+                />
+                <div className="flex justify-between text-[8px] text-gray-700">
+                  <span>20%</span><span>200%</span>
                 </div>
               </div>
             </div>
