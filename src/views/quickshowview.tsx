@@ -1932,7 +1932,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   // ── Floating 3D view ──
   const [showFloating3D, setShowFloating3D] = useState(false);
   const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
-  const [float3DSize, setFloat3DSize] = useState({ w: 640, h: 360 });
+  const [float3DSize, setFloat3DSize] = useState({ w: 1920, h: 1080 });
   const float3DDragRef = useRef(null);
   const float3DResizeRef = useRef(null);
 
@@ -2738,7 +2738,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
             <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D View</span>
             <div className="flex items-center gap-1">
-              <button onClick={() => { setFloat3DSize({ w: 640, h: 360 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◰</button>
+              <button onClick={() => { setFloat3DSize({ w: 640, h: 360 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
               <button onClick={() => setShowFloating3D(false)} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
             </div>
           </div>

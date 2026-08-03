@@ -850,7 +850,7 @@ export const Stage3D: React.FC = () => {
               sprite.scale.set(0.5, 0.5, 1);
               sprite.position.set(0, 0.45, 0);
               sprite.renderOrder = 999;
-              const parent = f3d.headGroup || f3d.armGroup || f3d.group;
+              const parent = f3d.group; // Root group: preview stays at fixture base, head/arm pan-tilt independently
               parent.add(sprite);
               f3d.thumbnailSprite = sprite;
               console.log('THUMBNAIL sprite created for', pf.id, pf.thumbnailId);
