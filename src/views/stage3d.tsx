@@ -119,7 +119,19 @@ function wheelValueToColor(
   if (caps) {
     for (const cap of caps) {
       if (value >= cap.min && value <= cap.max && cap.color) {
-        return new THREE.Color(cap.color);
+        // Normalize: hex strings like "Red", "Green" are not valid
+        const c = cap.color;
+        if (c.startsWith('#')) return new THREE.Color(c);
+        // Map color names to hex
+        const named: Record<string, string> = {
+          red: '#ff0000', green: '#00ff00', blue: '#0000ff',
+          white: '#ffffff', yellow: '#ffff00', cyan: '#00ffff',
+          magenta: '#ff00ff', orange: '#ff8800', purple: '#8800ff',
+          amber: '#ffbf00', pink: '#ff69b4', uv: '#8800ff',
+        };
+        const hex = named[c.toLowerCase()];
+        if (hex) return new THREE.Color(hex);
+        return new THREE.Color(c); // try anyway
       }
     }
   }
