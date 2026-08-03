@@ -837,7 +837,7 @@ export const Stage3D: React.FC = () => {
               tex.needsUpdate = true;
               const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false });
               const sprite = new THREE.Sprite(spriteMat);
-              sprite.scale.set(0.5, 0.5, 1);
+              sprite.scale.set(0.75, 0.75, 1);
               sprite.position.set(0, 0.45, 0);
               sprite.renderOrder = 999;
               const parent = f3d.group; // Root group: preview stays at fixture base, head/arm pan-tilt independently
@@ -954,7 +954,7 @@ export const Stage3D: React.FC = () => {
         f3d.beamCone.position.set(0, -ch / 2, 0);
       }
       // Update thumbnail scale
-      const scale = pos.thumbnailScale ?? 0.5;
+      const scale = pos.thumbnailScale ?? 0.75;
       f3d._thumbnailScale = scale;
       if (f3d.thumbnailSprite) {
         f3d.thumbnailSprite.scale.set(scale, scale, 1);
@@ -1543,14 +1543,14 @@ export const Stage3D: React.FC = () => {
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
                   <span className="text-gray-500">Preview Size</span>
-                  <span className="text-gray-400 font-mono">{((selectedPos.thumbnailScale ?? 0.5) * 100).toFixed(0)}%</span>
+                  <span className="text-gray-400 font-mono">{((selectedPos.thumbnailScale ?? 0.75) * 100).toFixed(0)}%</span>
                 </div>
                 <input
                   type="range"
                   min={0.2}
                   max={2.0}
                   step={0.05}
-                  value={selectedPos.thumbnailScale ?? 0.5}
+                  value={selectedPos.thumbnailScale ?? 0.75}
                   onChange={(e) => setFixturePosition(selectedFixture.id, { thumbnailScale: parseFloat(e.target.value) })}
                   className="w-full h-1 accent-pink-500 cursor-pointer"
                 />
