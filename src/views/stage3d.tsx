@@ -892,7 +892,7 @@ export const Stage3D: React.FC = () => {
                 const sprite = new THREE.Sprite(spriteMat);
                 sprite.scale.set(0.6, 0.6, 1);
                 sprite.position.set(0, 0.35, 0);
-                const parent = f3d.headGroup || f3d.armGroup || f3d.group;
+                const parent = f3d.group; // Root group: preview stays at fixture base
                 parent.add(sprite);
                 f3d.thumbnailSprite = sprite;
               };
