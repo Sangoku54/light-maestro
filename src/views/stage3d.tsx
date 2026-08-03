@@ -1336,6 +1336,8 @@ export const Stage3D: React.FC = () => {
           <div
             className="fixed bg-[#12121a]/95 border border-purple-500/30 rounded-xl shadow-2xl backdrop-blur-sm min-w-[240px]"
             style={{ right: 16, top: 80 }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
           >
             <div
               className="flex items-center justify-between px-4 py-3 cursor-grab active:cursor-grabbing border-b border-gray-800/50"
