@@ -1503,7 +1503,14 @@ export const Stage3D: React.FC = () => {
                 </div>
               </div>
 
-              {/* Heading / Rotation + Tilt */}
+              {/* Heading / Rotation + Tilt — only for fixtures with Pan/Tilt channels */}
+              {selectedFixture && selectedFixture.fixtureType && (() => {
+                const f3d = fixturesRef.current.get(selectedFixture.id);
+                const hasPan = f3d?.channelMap?.panOffset !== null && f3d?.channelMap?.panOffset !== undefined;
+                const hasTilt = f3d?.channelMap?.tiltOffset !== null && f3d?.channelMap?.tiltOffset !== undefined;
+                const hasPanTilt = hasPan || hasTilt;
+                return hasPanTilt ? (
+                  <>
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
                   <span className="text-gray-500">Heading (Pan)</span>
@@ -1542,6 +1549,9 @@ export const Stage3D: React.FC = () => {
                   <span>-90°</span><span>+90°</span>
                 </div>
               </div>
+                  </>
+                ) : null;
+              })()}
 
               {/* Beam Angle (Zoom) */}
               <div className="space-y-1">
