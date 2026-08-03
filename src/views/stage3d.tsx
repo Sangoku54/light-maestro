@@ -300,19 +300,16 @@ export const Stage3D: React.FC = () => {
         head.position.set(0, 0, 0.10);
         headGroup.add(head);
 
-        const lensGeo = new THREE.CylinderGeometry(0.10, 0.10, 0.075, 16);
-        const lens = new THREE.Mesh(lensGeo, new THREE.MeshStandardMaterial({
-          color: 0xcccccc, roughness: 0.1, metalness: 0.2, emissive: 0xffffff, emissiveIntensity: 0.1,
-        }));
-        lens.rotation.z = Math.PI / 2;
-        lens.position.set(0, 0, 0.325);
-        lens.visible = false; // hidden: beam cone replaces it
-        headGroup.add(lens);
+        // Light exit point: positioned exactly at lens face (z=0.325)
+        const lightExit = new THREE.Group();
+        lightExit.position.set(0, 0, 0.325);
+        lightExit.name = 'lightExit';
+        headGroup.add(lightExit);
 
         armGroup.add(headGroup);
 
         bodyMesh = base;
-        lightTarget = lens;
+        lightTarget = lightExit; // ✅ beam cone & point light attach here
         break;
       }
 
@@ -754,16 +751,11 @@ export const Stage3D: React.FC = () => {
         const f3d = createFixtureGeometry(pf, pos, channelMap, defs);
         scene.add(f3d.group);
 
-        // PointLight: Always in headGroup at lens origin (0,0,0) so it moves with pan/tilt.
-        // Cone and light share the same origin — they stay in sync.
+        // PointLight & beam cone share lightTarget (lightExit at lens face z=0.325)
         const pointLight = new THREE.PointLight(0xffffff, 0, 8, 2);
         pointLight.position.set(0, 0, 0);
         pointLight.visible = showBeams;
-        if (f3d.headGroup) {
-          f3d.headGroup.add(pointLight);
-        } else {
-          f3d.lightTarget.add(pointLight);
-        }
+        f3d.lightTarget.add(pointLight);
         f3d.pointLight = pointLight;
 
         // Create beam cone — attached to lightTarget (lens), points along local -Y then rotated by headGroup
@@ -784,12 +776,8 @@ export const Stage3D: React.FC = () => {
         // Cone starts at origin (lens) and extends down in local space
         cone.position.set(0, -coneHeight / 2, 0);
         cone.visible = showBeams;
-        // Always attach to headGroup: the cone follows pan/tilt from the lens position
-        if (f3d.headGroup) {
-          f3d.headGroup.add(cone);
-        } else {
-          f3d.lightTarget.add(cone);
-        }
+        // Attach to lightTarget (lightExit) — follows pan/tilt from lens face
+        f3d.lightTarget.add(cone);
         f3d.beamCone = cone;
 
         // ── Floor spot (light circle on stage floor) ──
