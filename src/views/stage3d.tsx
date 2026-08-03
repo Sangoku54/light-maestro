@@ -960,7 +960,14 @@ export const Stage3D: React.FC = () => {
         const radius = ch * Math.tan(pos.beamAngle);
         f3d.beamCone.geometry?.dispose();
         f3d.beamCone.geometry = new THREE.CylinderGeometry(0.03, radius, ch, 24, 1, true);
-        f3d.beamCone.position.z = ch / 2;
+        // Cone position: starts at origin (lens), extends down
+        f3d.beamCone.position.set(0, -ch / 2, 0);
+      }
+      // Update thumbnail scale
+      const scale = pos.thumbnailScale ?? 0.5;
+      f3d._thumbnailScale = scale;
+      if (f3d.thumbnailSprite) {
+        f3d.thumbnailSprite.scale.set(scale, scale, 1);
       }
     }
   }, [fixturePositions, patchedFixtures]);
