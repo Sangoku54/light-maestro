@@ -756,9 +756,15 @@ export const Stage3D: React.FC = () => {
         // beamCone handles visual direction, PointLight provides
         // realistic omnidirectional fill from the fixture lens)
         const pointLight = new THREE.PointLight(0xffffff, 0, 8, 2);
-        pointLight.position.set(0, 0, 0);
+        // Position at the lens output (front of head, z=0.35 for moving_head)
+        pointLight.position.set(0, 0, 0.35);
         pointLight.visible = showBeams;
-        f3d.lightTarget.add(pointLight);
+        // Attach to headGroup so it follows pan/tilt
+        if (f3d.headGroup) {
+          f3d.headGroup.add(pointLight);
+        } else {
+          f3d.lightTarget.add(pointLight);
+        }
         f3d.pointLight = pointLight;
 
         // Create beam cone — very long, no visible end
@@ -827,7 +833,6 @@ export const Stage3D: React.FC = () => {
           const variants = generateAllThumbnails();
           const v = variants.find((x) => x.id === pf.thumbnailId);
           if (v) {
-            // data URL: instant via Image + CanvasTexture
             const img = new Image();
             img.onload = () => {
               const tex = new THREE.CanvasTexture(img as any);
@@ -835,8 +840,10 @@ export const Stage3D: React.FC = () => {
               const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false });
               const sprite = new THREE.Sprite(spriteMat);
               sprite.scale.set(0.6, 0.6, 1);
-              sprite.position.set(0, 0.3, 0);
-              f3d.group.add(sprite);
+              sprite.position.set(0, 0.35, 0);
+              // Attach to head for moving heads, arm for scanners, else group
+              const parent = f3d.headGroup || f3d.armGroup || f3d.group;
+              parent.add(sprite);
               f3d.thumbnailSprite = sprite;
             };
             img.src = v.dataUrl;
@@ -861,22 +868,41 @@ export const Stage3D: React.FC = () => {
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
         if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._staticTilt;
         // Update thumbnail sprite
-        if (pf.thumbnailId && !f3d.thumbnailSprite) {
-          const variants = generateAllThumbnails();
-          const v = variants.find((x) => x.id === pf.thumbnailId);
-          if (v) {
-            const img = new Image();
-            img.onload = () => {
-              const tex = new THREE.CanvasTexture(img as any);
-              tex.needsUpdate = true;
-              const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false });
-              const sprite = new THREE.Sprite(spriteMat);
-              sprite.scale.set(0.6, 0.6, 1);
-              sprite.position.set(0, 0.3, 0);
-              f3d.group.add(sprite);
-              f3d.thumbnailSprite = sprite;
-            };
-            img.src = v.dataUrl;
+        if (pf.thumbnailId) {
+          if (!f3d.thumbnailSprite) {
+            // First time: create new
+            const variants = generateAllThumbnails();
+            const v = variants.find((x) => x.id === pf.thumbnailId);
+            if (v) {
+              const img = new Image();
+              img.onload = () => {
+                const tex = new THREE.CanvasTexture(img as any);
+                tex.needsUpdate = true;
+                const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false });
+                const sprite = new THREE.Sprite(spriteMat);
+                sprite.scale.set(0.6, 0.6, 1);
+                sprite.position.set(0, 0.35, 0);
+                const parent = f3d.headGroup || f3d.armGroup || f3d.group;
+                parent.add(sprite);
+                f3d.thumbnailSprite = sprite;
+              };
+              img.src = v.dataUrl;
+            }
+          } else {
+            // Already has sprite — update texture only
+            const variants = generateAllThumbnails();
+            const v = variants.find((x) => x.id === pf.thumbnailId);
+            if (v) {
+              const img = new Image();
+              img.onload = () => {
+                const oldTex = (f3d.thumbnailSprite!.material as THREE.SpriteMaterial).map;
+                const tex = new THREE.CanvasTexture(img as any);
+                tex.needsUpdate = true;
+                (f3d.thumbnailSprite!.material as THREE.SpriteMaterial).map = tex;
+                if (oldTex) oldTex.dispose();
+              };
+              img.src = v.dataUrl;
+            }
           }
         }
         // Update beam angle (zoom)

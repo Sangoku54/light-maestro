@@ -3795,6 +3795,9 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
           allFixtures={allFixtures}
           tier={addTier}
           onSetTier={setAddTier}
+          thumbnailId={addThumbnailId}
+          onSetThumbnail={setAddThumbnailId}
+          fixtureType={selectedDef?.type || ''}
           onSearch={handleSearch}
           onSelectDef={handleSelectDef}
           onSelectMode={handleSelectMode}
