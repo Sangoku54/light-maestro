@@ -300,10 +300,15 @@ export const Stage3D: React.FC = () => {
         head.position.set(0, 0, 0.10);
         headGroup.add(head);
 
-        // Light exit point: positioned exactly at lens face (z=0.325)
+        // Light exit point + lens marker (visible ring at lens face)
         const lightExit = new THREE.Group();
         lightExit.position.set(0, 0, 0.325);
         lightExit.name = 'lightExit';
+        const lensRingGeo = new THREE.TorusGeometry(0.08, 0.01, 8, 16);
+        const lensRingMat = new THREE.MeshBasicMaterial({ color: 0xcccccc, transparent: true, opacity: 0.6 });
+        const lensRing = new THREE.Mesh(lensRingGeo, lensRingMat);
+        lensRing.position.set(0, 0, 0.01);
+        lightExit.add(lensRing);
         headGroup.add(lightExit);
 
         armGroup.add(headGroup);
@@ -1027,7 +1032,7 @@ export const Stage3D: React.FC = () => {
         f3d.armGroup.rotation.y = ((panVal / 255) - 0.5) * Math.PI * 3;
       }
       if (f3d.headGroup) {
-        // Apply DMX tilt + static panel tilt offset
+        // Tilt the whole head (geometry + lightExit together)
         const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI * 0.5;
         const staticTilt = f3d._staticTilt ?? 0;
         f3d.headGroup.rotation.x = dmxTilt + staticTilt;
