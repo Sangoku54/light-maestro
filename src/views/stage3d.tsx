@@ -182,7 +182,8 @@ export const Stage3D: React.FC = () => {
   const [showSmoke, setShowSmoke] = useState(true);
   const [fixtureDefsReady, setFixtureDefsReady] = useState(false);
   const [selectedFixtureId, setSelectedFixtureId] = useState<string | null>(null);
-  const dragRotateRef = useRef<{ startX: number; startY: number } | null>(null);
+  // ── Rotate selected fixture on drag ────────────────
+  const dragRotateRef = useRef<{ startX: number; startY: number; fixtureId: string } | null>(null);
   const [hoveredFixtureId, setHoveredFixtureId] = useState<string | null>(null);
 
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
@@ -1159,8 +1160,7 @@ export const Stage3D: React.FC = () => {
         if (fid !== selectedFixtureId) setSelectedFixtureId(fid);
       }
     } else {
-      // Clicked empty space → start group rotate drag
-      dragRotateRef.current = { startX: e.clientX, startY: e.clientY };
+      // Clicked empty space → deselect (no auto-rotate)
       setSelectedFixtureId(null);
     }
   }, [selectedFixtureId]);
@@ -1196,22 +1196,19 @@ export const Stage3D: React.FC = () => {
     }
   }, []);
 
-  // ── Group rotate on empty-space drag ────────────────
+  // ── Rotate selected fixture on drag ────────────────
   useEffect(() => {
     const onMove = (ev: MouseEvent) => {
       if (!dragRotateRef.current) return;
-      const dx = ev.clientX - dragRotateRef.current.startX;
-      const dy = ev.clientY - dragRotateRef.current.startY;
-      const panDelta = dx * 0.5;
-      const tiltDelta = dy * 0.3;
-      for (const pf of patchedFixtures) {
-        const pos = fixturePositions[pf.id];
-        if (!pos) continue;
-        const newHeading = ((pos.heading ?? 0) + panDelta + 360) % 360;
-        const newTilt = Math.max(-90, Math.min(90, (pos.tilt ?? 0) - tiltDelta));
-        setFixturePosition(pf.id, { heading: newHeading, tilt: newTilt });
-      }
-      dragRotateRef.current = { startX: ev.clientX, startY: ev.clientY };
+      const { startX, startY, fixtureId } = dragRotateRef.current;
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      const pos = fixturePositions[fixtureId];
+      if (!pos) return;
+      const newHeading = ((pos.heading ?? 0) + dx * 0.5 + 360) % 360;
+      const newTilt = Math.max(-90, Math.min(90, (pos.tilt ?? 0) - dy * 0.3));
+      setFixturePosition(fixtureId, { heading: newHeading, tilt: newTilt });
+      dragRotateRef.current = { startX: ev.clientX, startY: ev.clientY, fixtureId };
     };
     const onUp = () => { dragRotateRef.current = null; };
     window.addEventListener('mousemove', onMove);
@@ -1220,7 +1217,7 @@ export const Stage3D: React.FC = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [patchedFixtures, fixturePositions, setFixturePosition]);
+  }, [fixturePositions, setFixturePosition]);
 
   // ── Selected fixture info ────────────────────────────
   const selectedFixture = selectedFixtureId
@@ -1314,6 +1311,7 @@ export const Stage3D: React.FC = () => {
         ref={containerRef}
         className="flex-1 relative cursor-grab active:cursor-grabbing"
         onClick={handleCanvasClick}
+        onMouseDown={handleCanvasClick}
         onMouseMove={handleCanvasMouseMove}
       >
         {!fixtureDefsReady && (
