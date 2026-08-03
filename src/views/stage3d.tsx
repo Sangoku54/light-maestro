@@ -305,6 +305,7 @@ export const Stage3D: React.FC = () => {
         }));
         lens.rotation.z = Math.PI / 2;
         lens.position.set(0, 0, 0.325);
+        lens.visible = false; // hidden: beam cone replaces it
         headGroup.add(lens);
 
         armGroup.add(headGroup);
@@ -767,9 +768,9 @@ export const Stage3D: React.FC = () => {
         }
         f3d.pointLight = pointLight;
 
-        // Create beam cone — very long, no visible end
-        const coneHeight = 50; // extends far beyond stage
-        const coneRadiusBottom = coneHeight * Math.tan(0.15); // narrow beam
+        // Create beam cone — attached to lightTarget (lens), points along local -Y then rotated by headGroup
+        const coneHeight = 50;
+        const coneRadiusBottom = coneHeight * Math.tan(0.15);
         const coneGeo = new THREE.CylinderGeometry(0.03, coneRadiusBottom, coneHeight, 24, 1, true);
         const coneMat = new THREE.MeshBasicMaterial({
           color: 0xffffff,
@@ -782,9 +783,10 @@ export const Stage3D: React.FC = () => {
         const cone = new THREE.Mesh(coneGeo, coneMat);
         f3d.mountMode = pos.mountMode || 'top';
         f3d.beamAngle = pos.beamAngle ?? 0.15;
-        // Cone part de la lentille, pointe vers le bas (-Y) pour un truss top
-        cone.position.set(0, -coneHeight / 2, 0.325);
+        // Cone starts at origin (lens) and extends down in local space
+        cone.position.set(0, -coneHeight / 2, 0);
         cone.visible = showBeams;
+        // Always attach to headGroup: the cone follows pan/tilt from the lens position
         if (f3d.headGroup) {
           f3d.headGroup.add(cone);
         } else {
