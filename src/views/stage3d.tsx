@@ -182,6 +182,7 @@ export const Stage3D: React.FC = () => {
   const [showSmoke, setShowSmoke] = useState(true);
   const [fixtureDefsReady, setFixtureDefsReady] = useState(false);
   const [selectedFixtureId, setSelectedFixtureId] = useState<string | null>(null);
+  const dragRotateRef = useRef<{ startX: number; startY: number } | null>(null);
   const [hoveredFixtureId, setHoveredFixtureId] = useState<string | null>(null);
 
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
@@ -1130,6 +1131,7 @@ export const Stage3D: React.FC = () => {
 
   // ── Canvas click handler (raycasting) ─────────────────
   const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
     const container = containerRef.current;
     const camera = cameraRef.current;
     if (!container || !camera) return;
@@ -1140,7 +1142,6 @@ export const Stage3D: React.FC = () => {
 
     raycasterRef.current.setFromCamera(mouseRef.current, camera);
 
-    // Gather all fixture group meshes
     const targets: THREE.Object3D[] = [];
     for (const f3d of fixturesRef.current.values()) {
       f3d.group.traverse((child) => {
@@ -1151,15 +1152,16 @@ export const Stage3D: React.FC = () => {
     const intersects = raycasterRef.current.intersectObjects(targets, false);
 
     if (intersects.length > 0) {
-      // Walk up to find the fixture group
       let obj: THREE.Object3D | null = intersects[0].object;
-      while (obj && !obj.userData?.fixtureId) {
-        obj = obj.parent;
-      }
+      while (obj && !obj.userData?.fixtureId) obj = obj.parent;
       if (obj?.userData?.fixtureId) {
         const fid = obj.userData.fixtureId as string;
         if (fid !== selectedFixtureId) setSelectedFixtureId(fid);
       }
+    } else {
+      // Clicked empty space → start group rotate drag
+      dragRotateRef.current = { startX: e.clientX, startY: e.clientY };
+      setSelectedFixtureId(null);
     }
   }, [selectedFixtureId]);
 
@@ -1193,6 +1195,32 @@ export const Stage3D: React.FC = () => {
       setHoveredFixtureId(null);
     }
   }, []);
+
+  // ── Group rotate on empty-space drag ────────────────
+  useEffect(() => {
+    const onMove = (ev: MouseEvent) => {
+      if (!dragRotateRef.current) return;
+      const dx = ev.clientX - dragRotateRef.current.startX;
+      const dy = ev.clientY - dragRotateRef.current.startY;
+      const panDelta = dx * 0.5;
+      const tiltDelta = dy * 0.3;
+      for (const pf of patchedFixtures) {
+        const pos = fixturePositions[pf.id];
+        if (!pos) continue;
+        const newHeading = ((pos.heading ?? 0) + panDelta + 360) % 360;
+        const newTilt = Math.max(-90, Math.min(90, (pos.tilt ?? 0) - tiltDelta));
+        setFixturePosition(pf.id, { heading: newHeading, tilt: newTilt });
+      }
+      dragRotateRef.current = { startX: ev.clientX, startY: ev.clientY };
+    };
+    const onUp = () => { dragRotateRef.current = null; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [patchedFixtures, fixturePositions, setFixturePosition]);
 
   // ── Selected fixture info ────────────────────────────
   const selectedFixture = selectedFixtureId
