@@ -4723,9 +4723,14 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                 </button>
                 <button
                   onClick={onConfirm}
-                  className="flex-1 px-3 py-2 bg-purple-600/30 border border-purple-500/30 rounded-lg text-xs text-purple-200 hover:bg-purple-600/50 transition-colors font-medium"
+                  disabled={!thumbnailId}
+                  className={`flex-1 px-3 py-2 rounded-lg text-xs transition-colors font-medium ${
+                    thumbnailId
+                      ? 'bg-purple-600/30 border border-purple-500/30 text-purple-200 hover:bg-purple-600/50'
+                      : 'bg-gray-800/30 border border-gray-700/50 text-gray-600 cursor-not-allowed'
+                  }`}
                 >
-                  Patch {quantity > 1 ? `${quantity} Fixtures` : 'Fixture'}
+                  {!thumbnailId ? 'Select a preview' : `Patch ${quantity > 1 ? `${quantity} Fixtures` : 'Fixture'}`}
                 </button>
               </div>
             </div>

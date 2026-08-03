@@ -1089,7 +1089,10 @@ export const Stage3D: React.FC = () => {
       }
 
       // --- Update body emission ---
-      if (normIntensity > 0.01) {
+      // Hide default geometry if a thumbnail sprite is present
+      const hideBody = !!f3d.thumbnailSprite;
+      f3d.bodyMesh.visible = !hideBody;
+      if (!hideBody && normIntensity > 0.01) {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
         if (Array.isArray(bodyMat)) {
           for (const m of bodyMat) { m.emissive = color; m.emissiveIntensity = normIntensity * 0.8; }
@@ -1097,7 +1100,7 @@ export const Stage3D: React.FC = () => {
           bodyMat.emissive = color;
           bodyMat.emissiveIntensity = normIntensity * 0.8;
         }
-      } else {
+      } else if (!hideBody) {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
         if (Array.isArray(bodyMat)) {
           for (const m of bodyMat) { m.emissiveIntensity = 0; }
