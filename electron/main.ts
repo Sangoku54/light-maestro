@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import { execSync } from 'child_process';
 import { DMXEngine } from './dmx/engine';
 import { FixtureLibrary } from './fixtures/library';
 import { checkForFixtureUpdates, getUpdateStatus as getFixtureUpdateStatus } from './fixtures/updater';
@@ -18,6 +19,24 @@ app.commandLine.appendSwitch('disable-features', 'Autofill');
 process.env.UV_THREADPOOL_SIZE = '8';
 app.setPath('userData', path.join(app.getPath('appData'), 'light-maestro'));
 
+// ─── Auto-build before showing window (packaged app ships pre-built; dev always fresh) ───
+let _autoBuildDone = false;
+function ensureBuilt(): void {
+  if (_autoBuildDone) return;
+  const indexPath = path.join(__dirname, '../renderer/index.html');
+  if (fs.existsSync(indexPath)) { _autoBuildDone = true; return; }
+  // Missing build — run tsc + vite synchronously before window opens
+  const projectRoot = path.join(__dirname, '..');
+  try {
+    execSync('npx tsc -p tsconfig.electron.json', { cwd: projectRoot, stdio: 'inherit' });
+    execSync('npx vite build', { cwd: projectRoot, stdio: 'inherit' });
+    _autoBuildDone = true;
+  } catch (_) {
+    // Build failed — will show error page; don't crash the process
+    console.error('Auto-build failed; make sure dependencies are installed (npm install)');
+  }
+}
+
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
@@ -28,6 +47,9 @@ const midiManager = new MidiManager();
 const audioAnalyzer = new AudioAnalyzer();
 
 function createWindow() {
+  // Ensure build exists before showing the window
+  ensureBuilt();
+
   mainWindow = new BrowserWindow({
     show: false,
     minWidth: 1024,
