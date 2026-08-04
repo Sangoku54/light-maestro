@@ -892,23 +892,25 @@ export const Stage3D: React.FC = () => {
               ctx.drawImage(img, 0, 0);
               const tex = new THREE.CanvasTexture(canvas);
               tex.needsUpdate = true;
-              // ── Thumbnail plane (NOT a sprite — billboard hides mount rotation) ──
+              // ── Thumbnail sign (thin box — visible from any angle) ──
               // QLC+ EasyView style: flat plane that rotates with the fixture assembly
-              const planeGeo = new THREE.PlaneGeometry(0.45, 0.45);
+              // BoxGeometry has front/back faces → always visible regardless of mount rotation
+              const planeGeo = new THREE.BoxGeometry(0.45, 0.35, 0.02);
               const planeMat = new THREE.MeshBasicMaterial({
+                color: 0xffffff,
                 map: tex,
                 side: THREE.DoubleSide,
                 transparent: true,
-                opacity: 0.85,
-                depthTest: true,
+                opacity: 0.90,
+                depthTest: false,
                 depthWrite: false,
               });
               const plane = new THREE.Mesh(planeGeo, planeMat);
-              // Assumes fixture faces +Z (audience) — plane will rotate with headGroup
-              plane.position.set(0, 0.10, -0.26); // just behind the fixture, same orientation
-              plane.renderOrder = 0;
-              const parent = f3d.headGroup || f3d.group;
-              parent.add(plane);
+              // Position above the fixture group center — follows group.rotation.x (mount mode)
+              plane.position.set(0, 0.45, 0);
+              plane.renderOrder = 999;
+              // Parent to root group so mountMode rotation → sign physically rotates
+              f3d.group.add(plane);
               f3d.thumbnailMesh = plane;
               console.log('THUMBNAIL plane created for', pf.id, pf.thumbnailId);
             };
