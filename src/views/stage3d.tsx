@@ -1022,12 +1022,9 @@ export const Stage3D: React.FC = () => {
       // Floor spot/glow visibility forced off
       if (f3d.floorSpot) f3d.floorSpot.visible = false;
 
-      // --- Body visibility: always show 3D geometry so rotations are visible
-      // The thumbnail is a label — geometry provides the visual rotation feedback
+      // --- Body visibility: hide basic geometry when thumbnail sprite is present
       const hasThumbnail = !!f3d.thumbnailSprite;
-      // Don't hide geometry — show it alongside the sprite
-      // f3d.bodyMesh.visible = !hasThumbnail;  ← REMOVED: keep geometry visible
-      f3d.bodyMesh.visible = true;
+      f3d.bodyMesh.visible = !hasThumbnail;
       if (normIntensity > 0.01) {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
         if (Array.isArray(bodyMat)) {
