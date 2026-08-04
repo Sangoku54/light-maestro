@@ -954,7 +954,7 @@ export const Stage3D: React.FC = () => {
         if (f3d.pointLight) f3d.pointLight.intensity = 0;
         if (f3d.beamCone) { (f3d.beamCone.material as THREE.MeshBasicMaterial).opacity = 0; }
         // Apply static tilt even without DMX
-        if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._staticTilt ?? 0;
+        if (f3d.headGroup) f3d.headGroup.rotation.x = (f3d._staticTilt ?? 0) + f3d._mountTilt;
         continue;
       }
       // Normalize data to Uint8Array-like access
@@ -1605,17 +1605,17 @@ function disposeFixture3D(f3d: Fixture3D): void {
 }
 
 function fitMountRotation(f3d: Fixture3D, mode: string): void {
-  // Mount mode changes beam direction via headGroup offset, NOT by rotating the fixture base.
-  // The base always stays upright on its mount surface.
-  f3d.group.rotation.x = 0;
+  // Mount mode: headGroup.rotation.x determines beam direction.
+  // The head is a cylinder along Z, beamCone extends in -Y local.
+  // rotation.x=0 → beam ↓ (-Y world) : TOP
+  // rotation.x=π → beam ↑ (+Y world) : GROUND (180° flip)
+  // rotation.x=-π/2 → beam → +Z world : REAR (toward audience)
+  f3d.group.rotation.x = 0; // base always upright
   if (mode === 'rear') {
-    // Fixture mounted on rear wall, beam forward (+Z)
-    f3d._mountTilt = Math.PI / 2;
-  } else if (mode === 'ground') {
-    // Fixture on floor, beam up (+Y)
     f3d._mountTilt = -Math.PI / 2;
+  } else if (mode === 'ground') {
+    f3d._mountTilt = Math.PI;
   } else {
-    // Top mount, beam down (-Y), default
     f3d._mountTilt = 0;
   }
 }
