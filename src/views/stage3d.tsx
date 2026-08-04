@@ -157,8 +157,8 @@ interface Fixture3D {
   mountMode: 'top' | 'ground' | 'rear'; // beam default direction
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
-  _thumbnailScale: number;      // sprite scale from panel
-  thumbnailSprite?: THREE.Sprite; // fixture preview sprite
+  _thumbnailScale: number;      // preview scale from panel
+  thumbnailMesh?: THREE.Mesh;    // fixture preview plane (QLC+ style)
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -892,15 +892,25 @@ export const Stage3D: React.FC = () => {
               ctx.drawImage(img, 0, 0);
               const tex = new THREE.CanvasTexture(canvas);
               tex.needsUpdate = true;
-              const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, transparent: true, opacity: 0.85 });
-              const sprite = new THREE.Sprite(spriteMat);
-              sprite.scale.set(0.28, 0.28, 1);
-              sprite.renderOrder = 999;
-              const parent = f3d.headGroup || f3d.group; // HeadGroup rotates with head; root for non-head fixtures
-              sprite.position.set(0.35, 0.10, 0); // offset to side, so 3D geometry is visible
-              parent.add(sprite);
-              f3d.thumbnailSprite = sprite;
-              console.log('THUMBNAIL sprite created for', pf.id, pf.thumbnailId);
+              // ── Thumbnail plane (NOT a sprite — billboard hides mount rotation) ──
+              // QLC+ EasyView style: flat plane that rotates with the fixture assembly
+              const planeGeo = new THREE.PlaneGeometry(0.45, 0.45);
+              const planeMat = new THREE.MeshBasicMaterial({
+                map: tex,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.85,
+                depthTest: true,
+                depthWrite: false,
+              });
+              const plane = new THREE.Mesh(planeGeo, planeMat);
+              // Assumes fixture faces +Z (audience) — plane will rotate with headGroup
+              plane.position.set(0, 0.10, -0.26); // just behind the fixture, same orientation
+              plane.renderOrder = 0;
+              const parent = f3d.headGroup || f3d.group;
+              parent.add(plane);
+              f3d.thumbnailSprite = plane as any;
+              console.log('THUMBNAIL plane created for', pf.id, pf.thumbnailId);
             };
             img.onerror = () => console.error('THUMBNAIL failed to load', pf.thumbnailId);
             img.src = v.dataUrl;
@@ -976,8 +986,8 @@ export const Stage3D: React.FC = () => {
       // Update thumbnail scale
       const scale = pos.thumbnailScale ?? 0.75;
       f3d._thumbnailScale = scale;
-      if (f3d.thumbnailSprite) {
-        f3d.thumbnailSprite.scale.set(scale, scale, 1);
+      if (f3d.thumbnailMesh) {
+        f3d.thumbnailMesh.scale.set(scale, scale, 1);
       }
     }
   }, [fixturePositions, patchedFixtures]);
@@ -1077,7 +1087,7 @@ export const Stage3D: React.FC = () => {
       if (f3d.floorSpot) f3d.floorSpot.visible = false;
 
       // --- Body visibility: always show geometry so mount rotation is visible
-      const hasThumbnail = !!f3d.thumbnailSprite;
+      const hasThumbnail = !!f3d.thumbnailMesh;
       // Keep geometry visible — thumbnail is a label, body shows rotation
       // For moving_head with arm/head, those groups are always visible
       f3d.bodyMesh.visible = !hasThumbnail;
@@ -1652,8 +1662,8 @@ function disposeFixture3D(f3d: Fixture3D): void {
     f3d.floorGlow.geometry?.dispose();
     (f3d.floorGlow.material as THREE.Material)?.dispose();
   }
-  if (f3d.thumbnailSprite) {
-    f3d.thumbnailSprite.material?.dispose();
+  if (f3d.thumbnailMesh) {
+    f3d.thumbnailMesh.material?.dispose();
   }
 }
 
