@@ -265,58 +265,112 @@ export const Stage3D: React.FC = () => {
     });
 
     switch (type.toLowerCase()) {
-      // ── Moving Head (QLC+ model: base → arm(pans on Y) → head(tilts on X)) ──
+      // ── Moving Head (Pro model: base plate → yoke arms → directional head → lens) ──
       case 'moving_head': {
-        const baseGeo = new THREE.CylinderGeometry(0.38, 0.45, 0.20, 16);
-        const base = new THREE.Mesh(baseGeo, accentMat);
-        base.position.y = 0.10;
-        group.add(base);
+        // Materials
+        const metalMat = new THREE.MeshStandardMaterial({
+          color: 0x2a2a35, roughness: 0.3, metalness: 0.8,
+        });
+        const headMat = new THREE.MeshStandardMaterial({
+          color: tierColor, roughness: 0.35, metalness: 0.5,
+          emissive: tierColor, emissiveIntensity: 0.2,
+        });
+        const lensMat = new THREE.MeshStandardMaterial({
+          color: 0xffffff, roughness: 0.05, metalness: 0.1,
+          emissive: 0xffffff, emissiveIntensity: 0.6,
+        });
 
+        // ── BASE: wide plate + truss clamp bracket ──
+        const basePlate = new THREE.Mesh(
+          new THREE.BoxGeometry(0.40, 0.05, 0.40), metalMat);
+        basePlate.position.y = 0.025;
+        group.add(basePlate);
+        const clamp = new THREE.Mesh(
+          new THREE.BoxGeometry(0.12, 0.08, 0.28),
+          new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.4, metalness: 0.85 }));
+        clamp.position.y = 0.09;
+        group.add(clamp);
+
+        bodyMesh = basePlate;
+
+        // ── YOKE: U-shaped metal bracket (pans on Y) ──
         armGroup = new THREE.Group();
-        armGroup.position.y = 0.20;
+        armGroup.position.y = 0.13;
         armGroup.name = 'arm';
 
         const yokeMat = new THREE.MeshStandardMaterial({
-          color: 0x2a2a3e, roughness: 0.5, metalness: 0.6,
+          color: 0x333340, roughness: 0.4, metalness: 0.75,
         });
-
-        const lp = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.30, 0.10), yokeMat);
-        lp.position.set(-0.20, 0.15, 0);
-        armGroup.add(lp);
-        const rp = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.30, 0.10), yokeMat);
-        rp.position.set(0.20, 0.15, 0);
-        armGroup.add(rp);
-        const cb = new THREE.Mesh(new THREE.BoxGeometry(0.475, 0.075, 0.10), yokeMat);
-        cb.position.y = 0.30;
-        armGroup.add(cb);
+        // Left arm
+        const la = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.32, 0.07), yokeMat);
+        la.position.set(-0.14, 0.16, 0);
+        armGroup.add(la);
+        // Right arm
+        const ra = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.32, 0.07), yokeMat);
+        ra.position.set(0.14, 0.16, 0);
+        armGroup.add(ra);
+        // Crossbar
+        const xb = new THREE.Mesh(new THREE.BoxGeometry(0.33, 0.04, 0.07), yokeMat);
+        xb.position.y = 0.32;
+        armGroup.add(xb);
 
         group.add(armGroup);
 
+        // ── HEAD: box body (asymmetric z-depth visible), lens front, vents back ──
         headGroup = new THREE.Group();
-        headGroup.position.y = 0.15;
+        headGroup.position.y = 0.34;
         headGroup.name = 'head';
 
-        const headGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.40, 16);
-        const head = new THREE.Mesh(headGeo, accentMat);
-        head.rotation.z = Math.PI / 2;
-        head.position.set(0, 0, 0.10);
-        headGroup.add(head);
+        // Head body: wider than tall, deeper than wide → front/back OBVIOUS
+        const headBody = new THREE.Mesh(
+          new THREE.BoxGeometry(0.20, 0.16, 0.42), headMat);
+        headBody.position.set(0, 0, 0);
+        headBody.castShadow = true;
+        headGroup.add(headBody);
 
-        // Light exit point + lens marker (visible ring at lens face)
+        // Lens disc (front face z+)
+        const lensDisc = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.08, 0.08, 0.015, 24), lensMat);
+        lensDisc.rotation.x = Math.PI / 2;
+        lensDisc.position.set(0, 0, 0.22);
+        headGroup.add(lensDisc);
+        // Lens ring
+        const lensR = new THREE.Mesh(
+          new THREE.TorusGeometry(0.08, 0.01, 8, 24),
+          new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.2, metalness: 0.95 }));
+        lensR.position.set(0, 0, 0.22);
+        headGroup.add(lensR);
+
+        // Vent fins on back (z-) — makes back face distinct
+        for (let i = -1; i <= 1; i++) {
+          const fin = new THREE.Mesh(
+            new THREE.BoxGeometry(0.14, 0.008, 0.025),
+            new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9, metalness: 0.2 }));
+          fin.position.set(0, i * 0.045, -0.21);
+          headGroup.add(fin);
+        }
+
+        // Light exit (lens center)
         const lightExit = new THREE.Group();
-        lightExit.position.set(0, 0, 0.325);
+        lightExit.position.set(0, 0, 0.23);
         lightExit.name = 'lightExit';
-        const lensRingGeo = new THREE.TorusGeometry(0.08, 0.01, 8, 16);
-        const lensRingMat = new THREE.MeshBasicMaterial({ color: 0xcccccc, transparent: true, opacity: 0.6 });
-        const lensRing = new THREE.Mesh(lensRingGeo, lensRingMat);
-        lensRing.position.set(0, 0, 0.01);
-        lightExit.add(lensRing);
         headGroup.add(lightExit);
 
         armGroup.add(headGroup);
 
-        bodyMesh = base;
-        lightTarget = lightExit; // ✅ beam cone & point light attach here
+        lightTarget = lightExit;
+
+        // ── Debug direction arrow (attached to head, points beam direction in local -Y = world beam dir) ──
+        const arrowLen = 0.6;
+        const arrowGeo = new THREE.ConeGeometry(0.04, arrowLen, 8, 4);
+        arrowGeo.translate(0, -arrowLen / 2, 0);
+        const arrowMat = new THREE.MeshBasicMaterial({ color: tierColor, transparent: true, opacity: 0.7, depthTest: false, depthWrite: false });
+        const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+        arrow.position.set(0, 0, 0.23);
+        headGroup.add(arrow);
+        // Store for debug toggle
+        (headGroup as any).__debugArrow = arrow;
+
         break;
       }
 
@@ -1022,8 +1076,10 @@ export const Stage3D: React.FC = () => {
       // Floor spot/glow visibility forced off
       if (f3d.floorSpot) f3d.floorSpot.visible = false;
 
-      // --- Body visibility: hide basic geometry when thumbnail sprite is present
+      // --- Body visibility: always show geometry so mount rotation is visible
       const hasThumbnail = !!f3d.thumbnailSprite;
+      // Keep geometry visible — thumbnail is a label, body shows rotation
+      // For moving_head with arm/head, those groups are always visible
       f3d.bodyMesh.visible = !hasThumbnail;
       if (normIntensity > 0.01) {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
@@ -1607,9 +1663,9 @@ function fitMountRotation(f3d: Fixture3D, mode: string): void {
   // This is correct because a real fixture mounted on a truss/wall/floor has its
   // entire body oriented accordingly. Pan/tilt happen within that frame.
   //
-  // group.rotation.x = +π/2  →  fixture horizontal, beam toward audience (-Z) → rear
-  // group.rotation.x = -π    →  fixture pointing up, beam up (+Y)             → ground
-  // group.rotation.x = 0     →  fixture upright, beam down (-Y)               → top
+  // group.rotation.x = -π/2  →  fixture horizontal, beam toward audience (+Z) → rear
+  // group.rotation.x = -π    →  fixture pointing up, beam up (+Y)              → ground
+  // group.rotation.x = 0     →  fixture upright, beam down (-Y)                → top
   //
   // Head/arm sub-rotations are always relative, so they work the same in any mount.
 
@@ -1617,7 +1673,7 @@ function fitMountRotation(f3d: Fixture3D, mode: string): void {
   f3d.group.rotation.x = 0;
 
   if (mode === 'rear') {
-    f3d.group.rotation.x = Math.PI / 2;
+    f3d.group.rotation.x = -Math.PI / 2;
   } else if (mode === 'ground') {
     f3d.group.rotation.x = -Math.PI;
   }
