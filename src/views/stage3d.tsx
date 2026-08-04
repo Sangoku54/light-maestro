@@ -157,6 +157,7 @@ interface Fixture3D {
   mountMode: 'top' | 'ground' | 'rear'; // beam default direction
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
+  _mountTilt: number;           // base tilt from mount mode (0=top, π/2=rear, -π/2=ground)
   _thumbnailScale: number;      // sprite scale from panel
   thumbnailSprite?: THREE.Sprite; // fixture preview sprite
 }
@@ -469,6 +470,8 @@ export const Stage3D: React.FC = () => {
       mountMode: pos.mountMode || 'top',
       beamAngle: pos.beamAngle ?? 0.15,
       _staticTilt: (pos.tilt ?? 0) * Math.PI / 180,
+      _mountTilt: 0,
+      _thumbnailScale: 0.75,
     };
   }, [universeIndexMap]);
 
@@ -868,45 +871,8 @@ export const Stage3D: React.FC = () => {
         if (pos.mountMode) f3d.mountMode = pos.mountMode;
         fitMountRotation(f3d, pos.mountMode || 'top');
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
-        if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._staticTilt;
-        // Update thumbnail sprite
-        if (pf.thumbnailId) {
-          if (!f3d.thumbnailSprite) {
-            // First time: create new
-            const variants = generateAllThumbnails();
-            const v = variants.find((x) => x.id === pf.thumbnailId);
-            if (v) {
-              const img = new Image();
-              img.onload = () => {
-                const tex = new THREE.CanvasTexture(img as any);
-                tex.needsUpdate = true;
-                const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false });
-                const sprite = new THREE.Sprite(spriteMat);
-                sprite.scale.set(0.6, 0.6, 1);
-                sprite.position.set(0, 0.35, 0);
-                const parent = f3d.group; // Root group: preview stays at fixture base
-                parent.add(sprite);
-                f3d.thumbnailSprite = sprite;
-              };
-              img.src = v.dataUrl;
-            }
-          } else {
-            // Already has sprite — update texture only
-            const variants = generateAllThumbnails();
-            const v = variants.find((x) => x.id === pf.thumbnailId);
-            if (v) {
-              const img = new Image();
-              img.onload = () => {
-                const oldTex = (f3d.thumbnailSprite!.material as THREE.SpriteMaterial).map;
-                const tex = new THREE.CanvasTexture(img as any);
-                tex.needsUpdate = true;
-                (f3d.thumbnailSprite!.material as THREE.SpriteMaterial).map = tex;
-                if (oldTex) oldTex.dispose();
-              };
-              img.src = v.dataUrl;
-            }
-          }
-        }
+        if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._staticTilt + f3d._mountTilt;
+        // Thumbnail sprite: created once at init, scale updated in position effect
         // Update beam angle (zoom)
         if (pos.beamAngle !== undefined && f3d.beamCone) {
           f3d.beamAngle = pos.beamAngle;
@@ -1037,7 +1003,8 @@ export const Stage3D: React.FC = () => {
         // Tilt the whole head (geometry + lightExit together)
         const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI * 0.5;
         const staticTilt = f3d._staticTilt ?? 0;
-        f3d.headGroup.rotation.x = dmxTilt + staticTilt;
+        const mountTilt = f3d._mountTilt ?? 0;
+        f3d.headGroup.rotation.x = dmxTilt + staticTilt + mountTilt;
       }
 
       // --- Update PointLight ---
@@ -1638,15 +1605,17 @@ function disposeFixture3D(f3d: Fixture3D): void {
 }
 
 function fitMountRotation(f3d: Fixture3D, mode: string): void {
-  // Reset group X rotation first
+  // Mount mode changes beam direction via headGroup offset, NOT by rotating the fixture base.
+  // The base always stays upright on its mount surface.
+  f3d.group.rotation.x = 0;
   if (mode === 'rear') {
-    // Horizontal, beam forward (+Z)
-    f3d.group.rotation.x = -Math.PI / 2;
+    // Fixture mounted on rear wall, beam forward (+Z)
+    f3d._mountTilt = Math.PI / 2;
   } else if (mode === 'ground') {
-    // Beam vertical UP (-Y), fixture points up
-    f3d.group.rotation.x = -Math.PI;
+    // Fixture on floor, beam up (+Y)
+    f3d._mountTilt = -Math.PI / 2;
   } else {
-    // Top: beam vertical DOWN (+Y), default
-    f3d.group.rotation.x = 0;
+    // Top mount, beam down (-Y), default
+    f3d._mountTilt = 0;
   }
 }
