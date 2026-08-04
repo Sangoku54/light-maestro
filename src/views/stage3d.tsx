@@ -909,7 +909,7 @@ export const Stage3D: React.FC = () => {
               plane.renderOrder = 0;
               const parent = f3d.headGroup || f3d.group;
               parent.add(plane);
-              f3d.thumbnailSprite = plane as any;
+              f3d.thumbnailMesh = plane;
               console.log('THUMBNAIL plane created for', pf.id, pf.thumbnailId);
             };
             img.onerror = () => console.error('THUMBNAIL failed to load', pf.thumbnailId);
@@ -1086,11 +1086,10 @@ export const Stage3D: React.FC = () => {
       // Floor spot/glow visibility forced off
       if (f3d.floorSpot) f3d.floorSpot.visible = false;
 
-      // --- Body visibility: always show geometry so mount rotation is visible
-      const hasThumbnail = !!f3d.thumbnailMesh;
-      // Keep geometry visible — thumbnail is a label, body shows rotation
-      // For moving_head with arm/head, those groups are always visible
-      f3d.bodyMesh.visible = !hasThumbnail;
+      // --- Body visibility: keep geometry visible alongside thumbnail
+      // Thumbnail plane rotates with the fixture (Mesh, not Sprite) so mount mode is obvious
+      // Both render — thumbnail for fixture ID, geometry for rotation confirmation
+      f3d.bodyMesh.visible = true;
       if (normIntensity > 0.01) {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
         if (Array.isArray(bodyMat)) {
@@ -1099,7 +1098,7 @@ export const Stage3D: React.FC = () => {
           bodyMat.emissive = color;
           bodyMat.emissiveIntensity = normIntensity * 0.8;
         }
-      } else if (!hasThumbnail) {
+      } else {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
         if (Array.isArray(bodyMat)) {
           for (const m of bodyMat) { m.emissiveIntensity = 0; }
