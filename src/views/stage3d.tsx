@@ -159,6 +159,7 @@ interface Fixture3D {
   _staticTilt: number;          // static tilt offset from panel
   _thumbnailScale: number;      // preview scale from panel
   thumbnailMesh?: THREE.Mesh;    // fixture preview plane (QLC+ style)
+  _debugSphere?: THREE.Mesh;     // DEBUG: red sphere at thumbnail position
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -892,27 +893,33 @@ export const Stage3D: React.FC = () => {
               ctx.drawImage(img, 0, 0);
               const tex = new THREE.CanvasTexture(canvas);
               tex.needsUpdate = true;
-              // ── Thumbnail sign (thin box — visible from any angle) ──
-              // QLC+ EasyView style: flat plane that rotates with the fixture assembly
-              // BoxGeometry has front/back faces → always visible regardless of mount rotation
-              const planeGeo = new THREE.BoxGeometry(0.45, 0.35, 0.02);
+              // ── Thumbnail sign (thick box — impossible to miss) ──
+              const planeGeo = new THREE.BoxGeometry(0.45, 0.35, 0.12);
               const planeMat = new THREE.MeshBasicMaterial({
-                color: 0xffffff,
                 map: tex,
                 side: THREE.DoubleSide,
                 transparent: true,
-                opacity: 0.90,
+                opacity: 0.92,
                 depthTest: false,
                 depthWrite: false,
               });
               const plane = new THREE.Mesh(planeGeo, planeMat);
-              // Position above the fixture group center — follows group.rotation.x (mount mode)
-              plane.position.set(0, 0.45, 0);
+              plane.position.set(0, 0.50, 0);
               plane.renderOrder = 999;
-              // Parent to root group so mountMode rotation → sign physically rotates
               f3d.group.add(plane);
               f3d.thumbnailMesh = plane;
-              console.log('THUMBNAIL plane created for', pf.id, pf.thumbnailId);
+
+              // DEBUG: bright sphere at same position to confirm mesh location
+              const debugSphere = new THREE.Mesh(
+                new THREE.SphereGeometry(0.08, 8, 8),
+                new THREE.MeshBasicMaterial({ color: 0xff0000, depthTest: false, depthWrite: false })
+              );
+              debugSphere.position.copy(plane.position);
+              debugSphere.renderOrder = 998;
+              f3d.group.add(debugSphere);
+              f3d._debugSphere = debugSphere;
+
+              console.log('THUMBNAIL plane created for', pf.id, pf.thumbnailId, 'pos:', plane.position.toArray(), 'parent:', f3d.group.name || 'group');
             };
             img.onerror = () => console.error('THUMBNAIL failed to load', pf.thumbnailId);
             img.src = v.dataUrl;
