@@ -157,7 +157,7 @@ interface Fixture3D {
   mountMode: 'top' | 'ground' | 'rear'; // beam default direction
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
-  _mountTilt: number;           // base tilt from mount mode (0=top, π/2=rear, -π/2=ground)
+  _mountTilt: number;           // DEPRECATED: mount rotation now via group.rotation.x directly
   _thumbnailScale: number;      // sprite scale from panel
   thumbnailSprite?: THREE.Sprite; // fixture preview sprite
 }
@@ -872,7 +872,7 @@ export const Stage3D: React.FC = () => {
         if (pos.mountMode) f3d.mountMode = pos.mountMode;
         fitMountRotation(f3d, pos.mountMode || 'top');
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
-        if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._staticTilt + f3d._mountTilt;
+        if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._staticTilt;
         // Thumbnail sprite: created once at init, scale updated in position effect
         // Update beam angle (zoom)
         if (pos.beamAngle !== undefined && f3d.beamCone) {
@@ -912,7 +912,7 @@ export const Stage3D: React.FC = () => {
       fitMountRotation(f3d, pos.mountMode || 'top');
       f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
       console.log('TILT set:', pos.tilt, 'rad:', f3d._staticTilt.toFixed(3), 'fixture:', pf.id, 'hasHead:', !!f3d.headGroup, 'hasArm:', !!f3d.armGroup);
-      if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._staticTilt + f3d._mountTilt; }
+      if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._staticTilt; }
       if (pos.beamAngle !== undefined && f3d.beamCone) {
         f3d.beamAngle = pos.beamAngle;
         const ch = 50;
@@ -955,7 +955,7 @@ export const Stage3D: React.FC = () => {
         if (f3d.pointLight) f3d.pointLight.intensity = 0;
         if (f3d.beamCone) { (f3d.beamCone.material as THREE.MeshBasicMaterial).opacity = 0; }
         // Apply static tilt even without DMX
-        if (f3d.headGroup) f3d.headGroup.rotation.x = (f3d._staticTilt ?? 0) + f3d._mountTilt;
+        if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._staticTilt ?? 0;
         continue;
       }
       // Normalize data to Uint8Array-like access
@@ -1004,8 +1004,7 @@ export const Stage3D: React.FC = () => {
         // Tilt the whole head (geometry + lightExit together)
         const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI * 0.5;
         const staticTilt = f3d._staticTilt ?? 0;
-        const mountTilt = f3d._mountTilt ?? 0;
-        f3d.headGroup.rotation.x = dmxTilt + staticTilt + mountTilt;
+        f3d.headGroup.rotation.x = dmxTilt + staticTilt;
       }
 
       // --- Update PointLight ---
@@ -1026,10 +1025,13 @@ export const Stage3D: React.FC = () => {
       // Floor spot/glow visibility forced off
       if (f3d.floorSpot) f3d.floorSpot.visible = false;
 
-      // --- Body visibility: hide 3D geometry when thumbnail is present (always)
+      // --- Body visibility: always show 3D geometry so rotations are visible
+      // The thumbnail is a label — geometry provides the visual rotation feedback
       const hasThumbnail = !!f3d.thumbnailSprite;
-      f3d.bodyMesh.visible = !hasThumbnail;
-      if (!hasThumbnail && normIntensity > 0.01) {
+      // Don't hide geometry — show it alongside the sprite
+      // f3d.bodyMesh.visible = !hasThumbnail;  ← REMOVED: keep geometry visible
+      f3d.bodyMesh.visible = true;
+      if (normIntensity > 0.01) {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
         if (Array.isArray(bodyMat)) {
           for (const m of bodyMat) { m.emissive = color; m.emissiveIntensity = normIntensity * 0.8; }
@@ -1606,17 +1608,25 @@ function disposeFixture3D(f3d: Fixture3D): void {
 }
 
 function fitMountRotation(f3d: Fixture3D, mode: string): void {
-  // Mount mode: headGroup.rotation.x determines beam direction.
-  // The head is a cylinder along Z, beamCone extends in -Y local.
-  // rotation.x=0 → beam ↓ (-Y world) : TOP
-  // rotation.x=π → beam ↑ (+Y world) : GROUND (180° flip)
-  // rotation.x=-π/2 → beam → +Z world : REAR (toward audience)
-  f3d.group.rotation.x = 0; // base always upright
+  // QLC+ approach: rotate the ENTIRE fixture group per the mount mode.
+  // The fixture is physically attached to a surface — the whole assembly rotates.
+  // This is correct because a real fixture mounted on a truss/wall/floor has its
+  // entire body oriented accordingly. Pan/tilt happen within that frame.
+  //
+  // group.rotation.x = -π/2  →  fixture horizontal, beam forward (+Z)  → rear
+  // group.rotation.x = -π     →  fixture pointing up, beam up (+Y)      → ground
+  // group.rotation.x = 0      →  fixture upright, beam down (-Y)        → top
+  //
+  // Head/arm sub-rotations are always relative, so they work the same in any mount.
+
+  // Reset then apply
+  f3d.group.rotation.x = 0;
+  f3d._mountTilt = 0;
+
   if (mode === 'rear') {
-    f3d._mountTilt = -Math.PI / 2;
+    f3d.group.rotation.x = -Math.PI / 2;
   } else if (mode === 'ground') {
-    f3d._mountTilt = Math.PI;
-  } else {
-    f3d._mountTilt = 0;
+    f3d.group.rotation.x = -Math.PI;
   }
+  // top: group.rotation.x = 0 (default)
 }
