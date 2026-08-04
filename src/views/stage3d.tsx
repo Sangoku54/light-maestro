@@ -911,7 +911,7 @@ export const Stage3D: React.FC = () => {
       fitMountRotation(f3d, pos.mountMode || 'top');
       f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
       console.log('TILT set:', pos.tilt, 'rad:', f3d._staticTilt.toFixed(3), 'fixture:', pf.id, 'hasHead:', !!f3d.headGroup, 'hasArm:', !!f3d.armGroup);
-      if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._staticTilt; }
+      if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._staticTilt + f3d._mountTilt; }
       if (pos.beamAngle !== undefined && f3d.beamCone) {
         f3d.beamAngle = pos.beamAngle;
         const ch = 50;
