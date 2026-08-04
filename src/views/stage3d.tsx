@@ -157,7 +157,6 @@ interface Fixture3D {
   mountMode: 'top' | 'ground' | 'rear'; // beam default direction
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
-  _mountTilt: number;           // DEPRECATED: mount rotation now via group.rotation.x directly
   _thumbnailScale: number;      // sprite scale from panel
   thumbnailSprite?: THREE.Sprite; // fixture preview sprite
 }
@@ -470,7 +469,6 @@ export const Stage3D: React.FC = () => {
       mountMode: pos.mountMode || 'top',
       beamAngle: pos.beamAngle ?? 0.15,
       _staticTilt: (pos.tilt ?? 0) * Math.PI / 180,
-      _mountTilt: 0,
       _thumbnailScale: 0.75,
     };
   }, [universeIndexMap]);
@@ -840,13 +838,12 @@ export const Stage3D: React.FC = () => {
               ctx.drawImage(img, 0, 0);
               const tex = new THREE.CanvasTexture(canvas);
               tex.needsUpdate = true;
-              const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false });
+              const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, transparent: true, opacity: 0.85 });
               const sprite = new THREE.Sprite(spriteMat);
-              sprite.scale.set(0.75, 0.75, 1);
-              sprite.position.set(0, 0.45, 0);
+              sprite.scale.set(0.28, 0.28, 1);
               sprite.renderOrder = 999;
               const parent = f3d.headGroup || f3d.group; // HeadGroup rotates with head; root for non-head fixtures
-              sprite.position.set(0, 0.28, 0.25); // above the head, slightly forward
+              sprite.position.set(0.35, 0.10, 0); // offset to side, so 3D geometry is visible
               parent.add(sprite);
               f3d.thumbnailSprite = sprite;
               console.log('THUMBNAIL sprite created for', pf.id, pf.thumbnailId);
@@ -1613,18 +1610,17 @@ function fitMountRotation(f3d: Fixture3D, mode: string): void {
   // This is correct because a real fixture mounted on a truss/wall/floor has its
   // entire body oriented accordingly. Pan/tilt happen within that frame.
   //
-  // group.rotation.x = -π/2  →  fixture horizontal, beam forward (+Z)  → rear
-  // group.rotation.x = -π     →  fixture pointing up, beam up (+Y)      → ground
-  // group.rotation.x = 0      →  fixture upright, beam down (-Y)        → top
+  // group.rotation.x = +π/2  →  fixture horizontal, beam toward audience (-Z) → rear
+  // group.rotation.x = -π    →  fixture pointing up, beam up (+Y)             → ground
+  // group.rotation.x = 0     →  fixture upright, beam down (-Y)               → top
   //
   // Head/arm sub-rotations are always relative, so they work the same in any mount.
 
   // Reset then apply
   f3d.group.rotation.x = 0;
-  f3d._mountTilt = 0;
 
   if (mode === 'rear') {
-    f3d.group.rotation.x = -Math.PI / 2;
+    f3d.group.rotation.x = Math.PI / 2;
   } else if (mode === 'ground') {
     f3d.group.rotation.x = -Math.PI;
   }
