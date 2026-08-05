@@ -272,10 +272,6 @@ export const Stage3D: React.FC = () => {
           color: tierColor, roughness: 0.35, metalness: 0.5,
           emissive: tierColor, emissiveIntensity: 0.2,
         });
-        const lensMat = new THREE.MeshStandardMaterial({
-          color: 0xffffff, roughness: 0.05, metalness: 0.1,
-          emissive: 0xffffff, emissiveIntensity: 0.6,
-        });
 
         // ── BASE: wide plate + truss clamp bracket ──
         const basePlate = new THREE.Mesh(
@@ -313,60 +309,26 @@ export const Stage3D: React.FC = () => {
 
         group.add(armGroup);
 
-        // ── HEAD: box body (asymmetric z-depth visible), lens front, vents back ──
+        // ── HEAD: sphere (orientation-agnostic, beam exits at bottom point) ──
         headGroup = new THREE.Group();
         headGroup.position.y = 0.34;
         headGroup.name = 'head';
 
-        // Head body: wider than tall, deeper than wide → front/back OBVIOUS
         const headBody = new THREE.Mesh(
-          new THREE.BoxGeometry(0.20, 0.16, 0.42), headMat);
+          new THREE.SphereGeometry(0.16, 24, 16), headMat);
         headBody.position.set(0, 0, 0);
         headBody.castShadow = true;
         headGroup.add(headBody);
 
-        // Lens disc (bottom face y=-0.08 , beam direction) 
-        const lensDisc = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.08, 0.08, 0.015, 24), lensMat);
-        lensDisc.rotation.x = Math.PI / 2;
-        lensDisc.position.set(0, -0.085, 0);
-        headGroup.add(lensDisc);
-        // Lens ring
-        const lensR = new THREE.Mesh(
-          new THREE.TorusGeometry(0.08, 0.01, 8, 24),
-          new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.2, metalness: 0.95 }));
-        lensR.position.set(0, -0.085, 0);
-        headGroup.add(lensR);
-
-        // Vent fins on back (z-) - makes back face distinct
-        for (let i = -1; i <= 1; i++) {
-          const fin = new THREE.Mesh(
-            new THREE.BoxGeometry(0.14, 0.008, 0.025),
-            new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9, metalness: 0.2 }));
-          fin.position.set(0, i * 0.045, -0.21);
-          headGroup.add(fin);
-        }
-
-        // Light exit (lens center, bottom face)
+        // Light exit at bottom point of sphere (y = -radius)
         const lightExit = new THREE.Group();
-        lightExit.position.set(0, -0.09, 0);
+        lightExit.position.set(0, -0.16, 0);
         lightExit.name = 'lightExit';
         headGroup.add(lightExit);
 
         armGroup.add(headGroup);
 
         lightTarget = lightExit;
-
-        // Debug direction arrow (bottom face, points beam direction in local -Y)
-        const arrowLen = 0.6;
-        const arrowGeo = new THREE.ConeGeometry(0.04, arrowLen, 8, 4);
-        arrowGeo.translate(0, -arrowLen / 2, 0);
-        const arrowMat = new THREE.MeshBasicMaterial({ color: tierColor, transparent: true, opacity: 0.7, depthTest: false, depthWrite: false });
-        const arrow = new THREE.Mesh(arrowGeo, arrowMat);
-        arrow.position.set(0, -0.09, 0);
-        headGroup.add(arrow);
-        // Store for debug toggle
-        (headGroup as any).__debugArrow = arrow;
 
         break;
       }
@@ -898,7 +860,7 @@ export const Stage3D: React.FC = () => {
           const radius = ch * Math.tan(pos.beamAngle);
           f3d.beamCone.geometry?.dispose();
           f3d.beamCone.geometry = new THREE.CylinderGeometry(0.03, radius, ch, 24, 1, true);
-          f3d.beamCone.position.z = ch / 2;
+          f3d.beamCone.position.set(0, -ch / 2, 0);
         }
       }
     });
