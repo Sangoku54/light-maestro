@@ -16,6 +16,8 @@ app.commandLine.appendSwitch('disable-gpu-sandbox');
 app.commandLine.appendSwitch('no-force-async-hooks-checks');
 // Silence Chromium Autofill errors in DevTools console
 app.commandLine.appendSwitch('disable-features', 'Autofill');
+// Disable disk cache in dev so Vite-served modules are always fresh
+if (!app.isPackaged) app.commandLine.appendSwitch('disable-http-cache');
 process.env.UV_THREADPOOL_SIZE = '8';
 app.setPath('userData', path.join(app.getPath('appData'), 'light-maestro'));
 
