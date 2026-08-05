@@ -23,7 +23,7 @@ app.setPath('userData', path.join(app.getPath('appData'), 'light-maestro'));
 let _autoBuildDone = false;
 function ensureBuilt(): void {
   if (_autoBuildDone) return;
-  const projectRoot = path.join(__dirname, '..');
+  const projectRoot = path.join(__dirname, '../..');
   const indexPath = path.join(__dirname, '../renderer/index.html');
   const isDev = !app.isPackaged;
 
