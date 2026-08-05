@@ -158,8 +158,7 @@ interface Fixture3D {
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
   _thumbnailScale: number;      // preview scale from panel
-  thumbnailMesh?: THREE.Mesh;    // fixture preview plane (QLC+ style)
-  _debugSphere?: THREE.Mesh;     // DEBUG: red sphere at thumbnail position
+  thumbnailSprite?: THREE.Sprite; // fixture preview sprite
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -893,33 +892,13 @@ export const Stage3D: React.FC = () => {
               ctx.drawImage(img, 0, 0);
               const tex = new THREE.CanvasTexture(canvas);
               tex.needsUpdate = true;
-              // ── Thumbnail sign (thick box — impossible to miss) ──
-              const planeGeo = new THREE.BoxGeometry(0.45, 0.35, 0.12);
-              const planeMat = new THREE.MeshBasicMaterial({
-                map: tex,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.92,
-                depthTest: false,
-                depthWrite: false,
-              });
-              const plane = new THREE.Mesh(planeGeo, planeMat);
-              plane.position.set(0, 0.50, 0);
-              plane.renderOrder = 999;
-              f3d.group.add(plane);
-              f3d.thumbnailMesh = plane;
-
-              // DEBUG: bright sphere at same position to confirm mesh location
-              const debugSphere = new THREE.Mesh(
-                new THREE.SphereGeometry(0.08, 8, 8),
-                new THREE.MeshBasicMaterial({ color: 0xff0000, depthTest: false, depthWrite: false })
-              );
-              debugSphere.position.copy(plane.position);
-              debugSphere.renderOrder = 998;
-              f3d.group.add(debugSphere);
-              f3d._debugSphere = debugSphere;
-
-              console.log('THUMBNAIL plane created for', pf.id, pf.thumbnailId, 'pos:', plane.position.toArray(), 'parent:', f3d.group.name || 'group');
+              const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, transparent: true, opacity: 0.85 });
+              const sprite = new THREE.Sprite(spriteMat);
+              sprite.scale.set(0.28, 0.28, 1);
+              sprite.renderOrder = 999;
+              sprite.position.set(0.35, 0.10, 0);
+              (f3d.headGroup || f3d.group).add(sprite);
+              f3d.thumbnailSprite = sprite;
             };
             img.onerror = () => console.error('THUMBNAIL failed to load', pf.thumbnailId);
             img.src = v.dataUrl;
@@ -940,9 +919,7 @@ export const Stage3D: React.FC = () => {
         f3d.group.position.set(stageX, stageY, stageZ);
         f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
         if (pos.mountMode) f3d.mountMode = pos.mountMode;
-        console.log('MOUNT-E1', pf.id, 'pos.mountMode:', pos.mountMode, 'group.rotX before:', f3d.group.rotation.x.toFixed(3));
         fitMountRotation(f3d, pos.mountMode || 'top');
-        console.log('MOUNT-E1 after', pf.id, 'group.rotX:', f3d.group.rotation.x.toFixed(3));
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
         if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._staticTilt;
         // Thumbnail plane: created once at init, scale updated in position effect
@@ -981,11 +958,8 @@ export const Stage3D: React.FC = () => {
       f3d.group.position.set(stageX, stageY, stageZ);
       f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
       if (pos.mountMode) f3d.mountMode = pos.mountMode;
-      console.log('MOUNT-E2', pf.id, 'pos:', JSON.stringify(pos), 'mountMode:', pos.mountMode, 'group.rotX before:', f3d.group.rotation.x.toFixed(3));
       fitMountRotation(f3d, pos.mountMode || 'top');
-      console.log('MOUNT-E2 after', pf.id, 'group.rotX:', f3d.group.rotation.x.toFixed(3));
       f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
-      console.log('TILT-E2', pos.tilt, 'rad:', f3d._staticTilt.toFixed(3), 'fixture:', pf.id, 'hasHead:', !!f3d.headGroup, 'hasArm:', !!f3d.armGroup);
       if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._staticTilt; }
       if (pos.beamAngle !== undefined && f3d.beamCone) {
         f3d.beamAngle = pos.beamAngle;
@@ -999,8 +973,8 @@ export const Stage3D: React.FC = () => {
       // Update thumbnail scale
       const scale = pos.thumbnailScale ?? 0.75;
       f3d._thumbnailScale = scale;
-      if (f3d.thumbnailMesh) {
-        f3d.thumbnailMesh.scale.set(scale, scale, 1);
+      if (f3d.thumbnailSprite) {
+        f3d.thumbnailSprite.scale.set(scale, scale, 1);
       }
     }
   }, [fixturePositions, patchedFixtures]);
@@ -1674,8 +1648,8 @@ function disposeFixture3D(f3d: Fixture3D): void {
     f3d.floorGlow.geometry?.dispose();
     (f3d.floorGlow.material as THREE.Material)?.dispose();
   }
-  if (f3d.thumbnailMesh) {
-    f3d.thumbnailMesh.material?.dispose();
+  if (f3d.thumbnailSprite) {
+    f3d.thumbnailSprite.material?.dispose();
   }
 }
 
