@@ -1,5 +1,5 @@
 /**
- * Stage3D — Real-time 3D Stage Visualizer
+ * Stage3D - Real-time 3D Stage Visualizer
  *
  * Replaces the 2D stage view with a Three.js-powered 3D renderer.
  * Lights react in real-time to DMX channel values during show playback.
@@ -28,7 +28,6 @@ import {
   type DmxFixtureCapability,
 } from '../hooks/dmx-cues';
 import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X } from 'lucide-react';
-import { generateAllThumbnails } from '../utils/fixtureThumbnails';
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -157,8 +156,6 @@ interface Fixture3D {
   mountMode: 'top' | 'ground' | 'rear'; // beam default direction
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
-  _thumbnailScale: number;      // preview scale from panel
-  thumbnailSprite?: THREE.Sprite; // fixture preview sprite
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -328,20 +325,20 @@ export const Stage3D: React.FC = () => {
         headBody.castShadow = true;
         headGroup.add(headBody);
 
-        // Lens disc (front face z+)
+        // Lens disc (bottom face y=-0.08 , beam direction) 
         const lensDisc = new THREE.Mesh(
           new THREE.CylinderGeometry(0.08, 0.08, 0.015, 24), lensMat);
         lensDisc.rotation.x = Math.PI / 2;
-        lensDisc.position.set(0, 0, 0.22);
+        lensDisc.position.set(0, -0.085, 0);
         headGroup.add(lensDisc);
         // Lens ring
         const lensR = new THREE.Mesh(
           new THREE.TorusGeometry(0.08, 0.01, 8, 24),
           new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.2, metalness: 0.95 }));
-        lensR.position.set(0, 0, 0.22);
+        lensR.position.set(0, -0.085, 0);
         headGroup.add(lensR);
 
-        // Vent fins on back (z-) — makes back face distinct
+        // Vent fins on back (z-) - makes back face distinct
         for (let i = -1; i <= 1; i++) {
           const fin = new THREE.Mesh(
             new THREE.BoxGeometry(0.14, 0.008, 0.025),
@@ -350,9 +347,9 @@ export const Stage3D: React.FC = () => {
           headGroup.add(fin);
         }
 
-        // Light exit (lens center)
+        // Light exit (lens center, bottom face)
         const lightExit = new THREE.Group();
-        lightExit.position.set(0, 0, 0.23);
+        lightExit.position.set(0, -0.09, 0);
         lightExit.name = 'lightExit';
         headGroup.add(lightExit);
 
@@ -360,13 +357,13 @@ export const Stage3D: React.FC = () => {
 
         lightTarget = lightExit;
 
-        // ── Debug direction arrow (attached to head, points beam direction in local -Y = world beam dir) ──
+        // Debug direction arrow (bottom face, points beam direction in local -Y)
         const arrowLen = 0.6;
         const arrowGeo = new THREE.ConeGeometry(0.04, arrowLen, 8, 4);
         arrowGeo.translate(0, -arrowLen / 2, 0);
         const arrowMat = new THREE.MeshBasicMaterial({ color: tierColor, transparent: true, opacity: 0.7, depthTest: false, depthWrite: false });
         const arrow = new THREE.Mesh(arrowGeo, arrowMat);
-        arrow.position.set(0, 0, 0.23);
+        arrow.position.set(0, -0.09, 0);
         headGroup.add(arrow);
         // Store for debug toggle
         (headGroup as any).__debugArrow = arrow;
@@ -523,7 +520,6 @@ export const Stage3D: React.FC = () => {
       mountMode: pos.mountMode || 'top',
       beamAngle: pos.beamAngle ?? 0.15,
       _staticTilt: (pos.tilt ?? 0) * Math.PI / 180,
-      _thumbnailScale: 0.75,
     };
   }, [universeIndexMap]);
 
@@ -820,7 +816,7 @@ export const Stage3D: React.FC = () => {
         f3d.lightTarget.add(pointLight);
         f3d.pointLight = pointLight;
 
-        // Create beam cone — attached to lightTarget (lens), points along local -Y then rotated by headGroup
+        // Create beam cone - attached to lightTarget (lens), points along local -Y then rotated by headGroup
         const coneHeight = 50;
         const coneRadiusBottom = coneHeight * Math.tan(0.15);
         const coneGeo = new THREE.CylinderGeometry(0.03, coneRadiusBottom, coneHeight, 24, 1, true);
@@ -838,7 +834,7 @@ export const Stage3D: React.FC = () => {
         // Cone starts at origin (lens) and extends down in local space
         cone.position.set(0, -coneHeight / 2, 0);
         cone.visible = showBeams;
-        // Attach to lightTarget (lightExit) — follows pan/tilt from lens face
+        // Attach to lightTarget (lightExit) - follows pan/tilt from lens face
         f3d.lightTarget.add(cone);
         f3d.beamCone = cone;
 
@@ -878,33 +874,6 @@ export const Stage3D: React.FC = () => {
         scene.add(floorGlow);
         f3d.floorGlow = floorGlow;
 
-        // ── Thumbnail sprite ──
-        if (pf.thumbnailId) {
-          const variants = generateAllThumbnails();
-          const v = variants.find((x) => x.id === pf.thumbnailId);
-          if (v) {
-            const img = new Image();
-            img.onload = () => {
-              const canvas = document.createElement('canvas');
-              canvas.width = img.width;
-              canvas.height = img.height;
-              const ctx = canvas.getContext('2d')!;
-              ctx.drawImage(img, 0, 0);
-              const tex = new THREE.CanvasTexture(canvas);
-              tex.needsUpdate = true;
-              const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, transparent: true, opacity: 0.85 });
-              const sprite = new THREE.Sprite(spriteMat);
-              sprite.scale.set(0.28, 0.28, 1);
-              sprite.renderOrder = 999;
-              sprite.position.set(0.35, 0.10, 0);
-              (f3d.headGroup || f3d.group).add(sprite);
-              f3d.thumbnailSprite = sprite;
-            };
-            img.onerror = () => console.error('THUMBNAIL failed to load', pf.thumbnailId);
-            img.src = v.dataUrl;
-          }
-        }
-
         fixturesRef.current.set(pf.id, f3d);
       }
 
@@ -922,7 +891,6 @@ export const Stage3D: React.FC = () => {
         fitMountRotation(f3d, pos.mountMode || 'top');
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
         if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._staticTilt;
-        // Thumbnail plane: created once at init, scale updated in position effect
         // Update beam angle (zoom)
         if (pos.beamAngle !== undefined && f3d.beamCone) {
           f3d.beamAngle = pos.beamAngle;
@@ -945,7 +913,7 @@ export const Stage3D: React.FC = () => {
   }, [fixtureDefsReady, patchedFixtures, showBeams, createFixtureGeometry]);
 
   // ── Update fixture positions from store ─────────────
-  // Separate effect — only updates positions, doesn't recreate geometry
+  // Separate effect - only updates positions, doesn't recreate geometry
   useEffect(() => {
     for (const pf of patchedFixtures) {
       const f3d = fixturesRef.current.get(pf.id);
@@ -969,12 +937,6 @@ export const Stage3D: React.FC = () => {
         f3d.beamCone.geometry = new THREE.CylinderGeometry(0.03, radius, ch, 24, 1, true);
         // Cone position: starts at origin (lens), extends down
         f3d.beamCone.position.set(0, -ch / 2, 0);
-      }
-      // Update thumbnail scale
-      const scale = pos.thumbnailScale ?? 0.75;
-      f3d._thumbnailScale = scale;
-      if (f3d.thumbnailSprite) {
-        f3d.thumbnailSprite.scale.set(scale, scale, 1);
       }
     }
   }, [fixturePositions, patchedFixtures]);
@@ -1073,11 +1035,8 @@ export const Stage3D: React.FC = () => {
       // Floor spot/glow visibility forced off
       if (f3d.floorSpot) f3d.floorSpot.visible = false;
 
-      // --- Body visibility: keep geometry visible alongside thumbnail
-      // Thumbnail plane rotates with the fixture (Mesh, not Sprite) so mount mode is obvious
-      // Both render — thumbnail for fixture ID, geometry for rotation confirmation
-      f3d.bodyMesh.visible = true;
-      if (normIntensity > 0.01) {
+      // --- Body visibility: always show geometry so mount rotation is visible
+    if (normIntensity > 0.01) {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
         if (Array.isArray(bodyMat)) {
           for (const m of bodyMat) { m.emissive = color; m.emissiveIntensity = normIntensity * 0.8; }
@@ -1334,7 +1293,7 @@ export const Stage3D: React.FC = () => {
           <div className="absolute inset-0 flex items-center justify-center bg-[#08080e]/80 z-10">
             <div className="text-center">
               <div className="w-5 h-5 border-2 border-purple-500/30 border-t-purple-400 rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-xs text-gray-500">Loading fixture definitions…</p>
+              <p className="text-xs text-gray-500">Loading fixture definitions...</p>
             </div>
           </div>
         )}
@@ -1347,7 +1306,7 @@ export const Stage3D: React.FC = () => {
           </div>
         )}
 
-        {/* Selected fixture editor — floating panel, draggable by header only */}
+        {/* Selected fixture editor - floating panel, draggable by header only */}
         {selectedFixture && selectedPos && (
           <div
             className="fixed bg-[#12121a]/95 border border-purple-500/30 rounded-xl shadow-2xl backdrop-blur-sm min-w-[240px]"
@@ -1513,7 +1472,7 @@ export const Stage3D: React.FC = () => {
                 </div>
               </div>
 
-              {/* Heading / Rotation + Tilt — only for fixtures with Pan/Tilt channels */}
+              {/* Heading / Rotation + Tilt - only for fixtures with Pan/Tilt channels */}
               {selectedFixture && selectedFixture.fixtureType && (() => {
                 const f3d = fixturesRef.current.get(selectedFixture.id);
                 const hasPan = f3d?.channelMap?.panOffset !== null && f3d?.channelMap?.panOffset !== undefined;
@@ -1583,25 +1542,6 @@ export const Stage3D: React.FC = () => {
                 </div>
               </div>
 
-              {/* Thumbnail Size */}
-              <div className="space-y-1">
-                <div className="flex justify-between text-[10px]">
-                  <span className="text-gray-500">Preview Size</span>
-                  <span className="text-gray-400 font-mono">{((selectedPos.thumbnailScale ?? 0.75) * 100).toFixed(0)}%</span>
-                </div>
-                <input
-                  type="range"
-                  min={0.2}
-                  max={2.0}
-                  step={0.05}
-                  value={selectedPos.thumbnailScale ?? 0.75}
-                  onChange={(e) => setFixturePosition(selectedFixture.id, { thumbnailScale: parseFloat(e.target.value) })}
-                  className="w-full h-1 accent-pink-500 cursor-pointer"
-                />
-                <div className="flex justify-between text-[8px] text-gray-700">
-                  <span>20%</span><span>200%</span>
-                </div>
-              </div>
             </div>
             {/* Close button */}
             <div className="px-4 py-2 border-t border-gray-800/50">
@@ -1648,14 +1588,11 @@ function disposeFixture3D(f3d: Fixture3D): void {
     f3d.floorGlow.geometry?.dispose();
     (f3d.floorGlow.material as THREE.Material)?.dispose();
   }
-  if (f3d.thumbnailSprite) {
-    f3d.thumbnailSprite.material?.dispose();
-  }
 }
 
 function fitMountRotation(f3d: Fixture3D, mode: string): void {
   // QLC+ approach: rotate the ENTIRE fixture group per the mount mode.
-  // The fixture is physically attached to a surface — the whole assembly rotates.
+  // The fixture is physically attached to a surface - the whole assembly rotates.
   // This is correct because a real fixture mounted on a truss/wall/floor has its
   // entire body oriented accordingly. Pan/tilt happen within that frame.
   //
