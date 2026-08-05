@@ -940,10 +940,12 @@ export const Stage3D: React.FC = () => {
         f3d.group.position.set(stageX, stageY, stageZ);
         f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
         if (pos.mountMode) f3d.mountMode = pos.mountMode;
+        console.log('MOUNT-E1', pf.id, 'pos.mountMode:', pos.mountMode, 'group.rotX before:', f3d.group.rotation.x.toFixed(3));
         fitMountRotation(f3d, pos.mountMode || 'top');
+        console.log('MOUNT-E1 after', pf.id, 'group.rotX:', f3d.group.rotation.x.toFixed(3));
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
         if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._staticTilt;
-        // Thumbnail sprite: created once at init, scale updated in position effect
+        // Thumbnail plane: created once at init, scale updated in position effect
         // Update beam angle (zoom)
         if (pos.beamAngle !== undefined && f3d.beamCone) {
           f3d.beamAngle = pos.beamAngle;
@@ -979,9 +981,11 @@ export const Stage3D: React.FC = () => {
       f3d.group.position.set(stageX, stageY, stageZ);
       f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
       if (pos.mountMode) f3d.mountMode = pos.mountMode;
+      console.log('MOUNT-E2', pf.id, 'pos:', JSON.stringify(pos), 'mountMode:', pos.mountMode, 'group.rotX before:', f3d.group.rotation.x.toFixed(3));
       fitMountRotation(f3d, pos.mountMode || 'top');
+      console.log('MOUNT-E2 after', pf.id, 'group.rotX:', f3d.group.rotation.x.toFixed(3));
       f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
-      console.log('TILT set:', pos.tilt, 'rad:', f3d._staticTilt.toFixed(3), 'fixture:', pf.id, 'hasHead:', !!f3d.headGroup, 'hasArm:', !!f3d.armGroup);
+      console.log('TILT-E2', pos.tilt, 'rad:', f3d._staticTilt.toFixed(3), 'fixture:', pf.id, 'hasHead:', !!f3d.headGroup, 'hasArm:', !!f3d.armGroup);
       if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._staticTilt; }
       if (pos.beamAngle !== undefined && f3d.beamCone) {
         f3d.beamAngle = pos.beamAngle;
