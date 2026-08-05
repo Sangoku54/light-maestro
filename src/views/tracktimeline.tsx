@@ -642,7 +642,7 @@ if (editBlock) { setEditBlock(null); return; }
           const rect2 = canvas2.getBoundingClientRect();
           const x2 = e.clientX - rect2.left;
           const y2 = e.clientY - rect2.top;
-          const duration2 = audioFile.resolvedAnalysis.timelineMs || 120000;
+          const duration2 = duration || 120000;
           const drawW2 = canvas2.width - LABEL_WIDTH;
           if (y2 >= HEADER_HEIGHT && x2 >= LABEL_WIDTH) {
             const trackIdx2 = Math.floor((y2 - HEADER_HEIGHT) / TRACK_HEIGHT);
@@ -716,13 +716,13 @@ if (editBlock) { setEditBlock(null); return; }
           const rect = canvas.getBoundingClientRect();
           const x = e.clientX - rect.left;
           const y = e.clientY - rect.top;
-          const duration = audioFile.resolvedAnalysis.timelineMs || 120000;
+          const trackDuration = duration || 120000; // from props
           const drawW = canvas.width - LABEL_WIDTH;
           if (y >= HEADER_HEIGHT && x >= LABEL_WIDTH) {
             const trackIdx = Math.floor((y - HEADER_HEIGHT) / TRACK_HEIGHT);
             if (trackIdx >= 0 && trackIdx < numFixtures) {
               const fixture = patchedFixtures[trackIdx];
-              const timeAtX = ((x - LABEL_WIDTH) / drawW) * duration;
+              const timeAtX = ((x - LABEL_WIDTH) / drawW) * trackDuration;
               for (let fti = 0; fti < fixtureTracks.length; fti++) {
                 const ft = fixtureTracks[fti];
                 if (!ft.enabled) continue;
