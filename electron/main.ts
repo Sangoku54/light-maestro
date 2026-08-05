@@ -50,8 +50,11 @@ const midiManager = new MidiManager();
 const audioAnalyzer = new AudioAnalyzer();
 
 function createWindow() {
-  // Ensure build exists before showing the window
-  ensureBuilt();
+  const isDev = !app.isPackaged;
+
+  // In dev mode, Vite dev server handles everything — skip auto-build
+  // In production, ensure dist exists before showing window
+  if (!isDev) ensureBuilt();
 
   mainWindow = new BrowserWindow({
     show: false,
@@ -71,7 +74,9 @@ function createWindow() {
   mainWindow.maximize();
   mainWindow.show();
 
-  if (process.env.NODE_ENV === 'development') {
+  // In dev mode, load from Vite dev server (live HMR)
+  // In production, load the pre-built renderer
+  if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
