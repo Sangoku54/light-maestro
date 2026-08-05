@@ -314,8 +314,11 @@ export const Stage3D: React.FC = () => {
         headGroup.position.y = 0.34;
         headGroup.name = 'head';
 
+        // RED SPHERE DIAGNOSTIC — si rouge = code chargé, si gris/noir = cache V8
         const headBody = new THREE.Mesh(
-          new THREE.SphereGeometry(0.16, 24, 16), headMat);
+          new THREE.SphereGeometry(0.32, 24, 16), new THREE.MeshStandardMaterial({
+            color: 0xff0000, roughness: 0.2, metalness: 0.1, emissive: 0xff0000, emissiveIntensity: 0.6,
+          }));
         headBody.position.set(0, 0, 0);
         headBody.castShadow = true;
         headGroup.add(headBody);
