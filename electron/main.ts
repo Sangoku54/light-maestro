@@ -23,16 +23,17 @@ app.setPath('userData', path.join(app.getPath('appData'), 'light-maestro'));
 let _autoBuildDone = false;
 function ensureBuilt(): void {
   if (_autoBuildDone) return;
-  const indexPath = path.join(__dirname, '../renderer/index.html');
-  if (fs.existsSync(indexPath)) { _autoBuildDone = true; return; }
-  // Missing build — run tsc + vite synchronously before window opens
   const projectRoot = path.join(__dirname, '..');
+  const indexPath = path.join(__dirname, '../renderer/index.html');
+  const isDev = !app.isPackaged;
+
+  // In dev mode, always rebuild to avoid stale renderer cache
+  if (fs.existsSync(indexPath) && !isDev) { _autoBuildDone = true; return; }
+
   try {
-    execSync('npx tsc -p tsconfig.electron.json', { cwd: projectRoot, stdio: 'inherit' });
     execSync('npx vite build', { cwd: projectRoot, stdio: 'inherit' });
     _autoBuildDone = true;
   } catch (_) {
-    // Build failed — will show error page; don't crash the process
     console.error('Auto-build failed; make sure dependencies are installed (npm install)');
   }
 }
