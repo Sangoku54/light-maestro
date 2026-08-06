@@ -41,6 +41,7 @@ const GRID_SIZE = 1; // 1m grid squares
 
 let _diagLastLog = 0; // diagnostic throttle
 let _diagCount = 0;
+let _diagLastStoreLog = 0;
 
 interface FixtureChannelMap {
   intensityOffset: number | null;
@@ -757,10 +758,21 @@ export const Stage3D: React.FC = () => {
         particles.geometry.attributes.position.needsUpdate = true;
       }
 
-      // DMX polling (30fps)
+      // DMX polling — syncs fixture visuals from store
       const now = performance.now();
       if (now - lastDmxPollRef.current >= DMX_POLL_INTERVAL) {
         lastDmxPollRef.current = now;
+        // Direct store read diagnostic — bypasses useCallback to confirm store has data
+        if (!_diagLastStoreLog || Date.now() - _diagLastStoreLog > 1000) {
+          _diagLastStoreLog = Date.now();
+          const st = useAppStore.getState().dmx;
+          const cd = st.channelData as Record<number, Uint8Array | number[]> | undefined;
+          const nonEmpty = cd ? Object.entries(cd).filter(([,v]) => {
+            const arr = v instanceof Uint8Array ? Array.from(v) : Object.values(v);
+            return arr.some((x: number) => x !== 0);
+          }) : [];
+          console.log('[stage3d-loop] store dmx.channelData universes with data:', nonEmpty.length > 0 ? nonEmpty.map(([k]) => k).join(',') : 'NONE', '| updateDmxState type:', typeof updateDmxStateRef.current, 'fixtures:', fixturesRef.current.size);
+        }
         updateDmxStateRef.current();
       }
 
@@ -1082,19 +1094,13 @@ export const Stage3D: React.FC = () => {
     const blackout = dmxState.blackout ?? false;
     const grandMaster = dmxState.grandMaster ?? 255;
 
-    // Diagnostic: unconditional log throttled to 1/sec
+    // Diagnostic: one-liner per second
     if (!_diagCount) _diagCount = 0;
     _diagCount++;
     const diagNow = Date.now();
     if (!_diagLastLog || diagNow - _diagLastLog > 1000) {
       _diagLastLog = diagNow;
-      console.log('[stage3d] updateDmxState called', _diagCount, 'times; channelData keys:', Object.keys(channelData || {}).length, 'fixtures:', fixturesRef.current.size);
-      // Dump first fixture's channel map
-      for (const f3d of fixturesRef.current.values()) {
-        const pf = patchedFixtures.find(f => f.id === f3d.id);
-        console.log('[stage3d] first fixture id:', f3d.id, 'name:', pf?.name, 'uniIdx:', f3d.universeIndex, 'panOffset:', f3d.channelMap.panOffset, 'tiltOffset:', f3d.channelMap.tiltOffset, 'hasChannelData:', !!channelData[f3d.universeIndex]);
-        break;
-      }
+      console.log('[stage3d-updateDmxState] called #', _diagCount, '| fixtures:', fixturesRef.current.size, '| patchedFixtures:', patchedFixtures.length);
     }
 
     for (const f3d of fixturesRef.current.values()) {
