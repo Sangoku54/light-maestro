@@ -74,20 +74,25 @@ function createWindow() {
   mainWindow.maximize();
   mainWindow.show();
 
-  // In dev mode, load from Vite dev server (live HMR) with retry
-  // In production, load the pre-built renderer
+  // Load strategy:
+  //   1. Try Vite dev server (localhost:5173) — used by `npm run dev`
+  //   2. Fall back to pre-built dist/renderer — used by .vbs/.bat launchers
   if (isDev) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
-    // Retry until Vite dev server is ready (concurrently starts both in parallel)
-    const tryLoad = (attempt: number) => {
-      fetch('http://localhost:5173').then(() => {
-        mainWindow!.loadURL('http://localhost:5173');
+    const viteUrl = 'http://localhost:5173';
+    const fallbackPath = path.join(__dirname, '../renderer/index.html');
+    const tryVite = (attempt: number) => {
+      fetch(viteUrl).then(() => {
+        mainWindow!.loadURL(viteUrl);
       }).catch(() => {
-        if (attempt < 30) setTimeout(() => tryLoad(attempt + 1), 500);
-        else console.error('Vite dev server did not start within 15s');
+        if (attempt < 5) setTimeout(() => tryVite(attempt + 1), 500);
+        else {
+          console.log('Vite not running, loading pre-built renderer');
+          mainWindow!.loadFile(fallbackPath);
+        }
       });
     };
-    tryLoad(0);
+    tryVite(0);
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
