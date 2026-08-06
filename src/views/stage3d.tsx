@@ -1208,6 +1208,7 @@ export const Stage3D: React.FC = () => {
   useEffect(() => {
     const unsub = dmxBridge.onPush(() => {
       dmxDiagCount.current++;
+      dmxActivityRef.current = performance.now(); // mark DMX active on every push
       const el = dmxDiagRef.current;
       if (el) el.textContent = `DMX push #${dmxDiagCount.current}`;
       syncRef.current();
