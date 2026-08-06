@@ -875,7 +875,7 @@ export const Stage3D: React.FC = () => {
         const pos = fixturePositions[pf.id] || { x: 0.5, y: 0.3, h: 0.5, heading: 0 };
         const stageX = (pos.x - 0.5) * STAGE_WIDTH;
         const stageZ = (pos.y - 0.5) * STAGE_DEPTH;
-        const stageY = pos.h * 5.0;
+        const stageY = (pos.mountMode || 'top') === 'ground' ? 0 : pos.h * 5.0;
         f3d.group.position.set(stageX, stageY, stageZ);
         f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
         if (pos.mountMode) f3d.mountMode = pos.mountMode;
@@ -913,7 +913,8 @@ export const Stage3D: React.FC = () => {
       if (!pos) continue;
       const stageX = (pos.x - 0.5) * STAGE_WIDTH;
       const stageZ = (pos.y - 0.5) * STAGE_DEPTH;
-      const stageY = pos.h * 5.0;
+      // Ground-mounted fixtures always at Y=0 (floor level)
+      const stageY = (pos.mountMode || 'top') === 'ground' ? 0 : pos.h * 5.0;
       f3d.group.position.set(stageX, stageY, stageZ);
       f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
       if (pos.mountMode) f3d.mountMode = pos.mountMode;
