@@ -166,8 +166,7 @@ interface Fixture3D {
   headGroup?: THREE.Group;      // Head (tilt, X-axis rotation)
   lightTarget: THREE.Object3D;  // Where the light is attached
   pointLight?: THREE.PointLight;    // Dynamic point light
-  beamCone?: THREE.Mesh;        // Volumetric beam cone (outer, soft edge)
-  _innerBeamCone?: THREE.Mesh;  // Inner hotspot cone (narrower, brighter)
+  beamCone?: THREE.Mesh;        // Volumetric beam cone
   floorSpot?: THREE.Mesh;       // Light spot on the floor
   floorGlow?: THREE.Mesh;       // Soft outer glow on floor
   channelMap: FixtureChannelMap;
@@ -185,7 +184,6 @@ interface Fixture3D {
   _strobePhase: number;          // strobe timer accumulator
   _strobeBaseIntensity?: number;  // cached base pointLight intensity (for strobe restore)
   _strobeBaseOpacity?: number;    // cached base beam cone opacity (for strobe restore)
-  _strobeInnerOpacity?: number;   // cached base inner cone opacity (for strobe restore)
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -800,14 +798,8 @@ export const Stage3D: React.FC = () => {
           if (f3d.beamCone) {
             const mat = f3d.beamCone.material as THREE.ShaderMaterial;
             if (f3d._strobeBaseOpacity === undefined) f3d._strobeBaseOpacity = mat.uniforms.uOpacity.value;
-            mat.uniforms.uOpacity.value = strobeOn ? (f3d._strobeBaseOpacity ?? 0.35) : 0;
+            mat.uniforms.uOpacity.value = strobeOn ? (f3d._strobeBaseOpacity ?? 0.50) : 0;
             f3d.beamCone.visible = strobeOn;
-          }
-          if (f3d._innerBeamCone) {
-            const imat = f3d._innerBeamCone.material as THREE.ShaderMaterial;
-            if (f3d._strobeInnerOpacity === undefined) f3d._strobeInnerOpacity = imat.uniforms.uOpacity.value;
-            imat.uniforms.uOpacity.value = strobeOn ? (f3d._strobeInnerOpacity ?? 0.28) : 0;
-            f3d._innerBeamCone.visible = strobeOn;
           }
         }
       }
@@ -961,27 +953,6 @@ export const Stage3D: React.FC = () => {
         f3d.lightTarget.add(cone);
         f3d.beamCone = cone;
 
-        // Inner hotspot cone: 18% radius, subtle glow — blends into beam center
-        const innerGeo = new THREE.CylinderGeometry(0.015, coneRadiusBottom * 0.18, coneHeight, 16, 1, true);
-        const innerMat = new THREE.ShaderMaterial({
-          uniforms: {
-            uColor: { value: new THREE.Color(0xffffff) },
-            uOpacity: { value: 0 },
-            uBeamLength: { value: coneHeight },
-          },
-          vertexShader: beamVertexShader,
-          fragmentShader: beamFragmentShader,
-          transparent: true,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-          side: THREE.FrontSide,
-        });
-        const innerCone = new THREE.Mesh(innerGeo, innerMat);
-        innerCone.position.set(0, -coneHeight / 2, 0);
-        innerCone.visible = showBeams;
-        f3d.lightTarget.add(innerCone);
-        f3d._innerBeamCone = innerCone;
-
         // ── Floor spot (light circle on stage floor) ──
         const spotRadius = 0.6;
         const spotGeo = new THREE.CircleGeometry(spotRadius, 32);
@@ -1046,11 +1017,6 @@ export const Stage3D: React.FC = () => {
           f3d.beamCone.geometry?.dispose();
           f3d.beamCone.geometry = new THREE.CylinderGeometry(0.03, radius, ch, 32, 1, true);
           f3d.beamCone.position.set(0, -ch / 2, 0);
-          if (f3d._innerBeamCone) {
-            f3d._innerBeamCone.geometry?.dispose();
-            f3d._innerBeamCone.geometry = new THREE.CylinderGeometry(0.015, radius * 0.18, ch, 16, 1, true);
-            f3d._innerBeamCone.position.set(0, -ch / 2, 0);
-          }
         }
       }
     });
@@ -1092,11 +1058,6 @@ export const Stage3D: React.FC = () => {
         f3d.beamCone.geometry?.dispose();
         f3d.beamCone.geometry = new THREE.CylinderGeometry(0.03, radius, ch, 32, 1, true);
         f3d.beamCone.position.set(0, -ch / 2, 0);
-        if (f3d._innerBeamCone) {
-          f3d._innerBeamCone.geometry?.dispose();
-          f3d._innerBeamCone.geometry = new THREE.CylinderGeometry(0.015, radius * 0.18, ch, 16, 1, true);
-          f3d._innerBeamCone.position.set(0, -ch / 2, 0);
-        }
       }
     }
   }, [fixturePositions, patchedFixtures]);
@@ -1106,7 +1067,6 @@ export const Stage3D: React.FC = () => {
     for (const f3d of fixturesRef.current.values()) {
       if (f3d.pointLight) f3d.pointLight.visible = showBeams;
       if (f3d.beamCone) f3d.beamCone.visible = showBeams;
-      if (f3d._innerBeamCone) f3d._innerBeamCone.visible = showBeams;
       if (f3d.floorSpot) f3d.floorSpot.visible = showBeams;
       if (f3d.floorGlow) f3d.floorGlow.visible = showBeams;
     }
@@ -1125,7 +1085,6 @@ export const Stage3D: React.FC = () => {
       if (!rawData) {
         if (f3d.pointLight) f3d.pointLight.intensity = 0;
         if (f3d.beamCone) { (f3d.beamCone.material as THREE.ShaderMaterial).uniforms.uOpacity.value = 0; }
-        if (f3d._innerBeamCone) { (f3d._innerBeamCone.material as THREE.ShaderMaterial).uniforms.uOpacity.value = 0; }
         // Apply static tilt even without DMX
         if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._mountTilt + (f3d._staticTilt ?? 0); f3d._currentTiltX = f3d._targetTiltX = f3d.headGroup.rotation.x; }
         continue;
@@ -1217,14 +1176,8 @@ export const Stage3D: React.FC = () => {
       if (f3d.beamCone) {
         const mat = f3d.beamCone.material as THREE.ShaderMaterial;
         mat.uniforms.uColor.value.copy(color);
-        mat.uniforms.uOpacity.value = normIntensity * 0.35;
+        mat.uniforms.uOpacity.value = normIntensity * 0.50;
         f3d.beamCone.visible = showBeams && normIntensity > 0.005;
-      }
-      if (f3d._innerBeamCone) {
-        const imat = f3d._innerBeamCone.material as THREE.ShaderMaterial;
-        imat.uniforms.uColor.value.copy(color);
-        imat.uniforms.uOpacity.value = normIntensity * 0.28; // subtle center glow
-        f3d._innerBeamCone.visible = showBeams && normIntensity > 0.005;
       }
 
       // --- Floor spot disabled: only beam cones from lens are shown ---
@@ -1779,10 +1732,6 @@ function disposeFixture3D(f3d: Fixture3D): void {
   if (f3d.beamCone) {
     f3d.beamCone.geometry?.dispose();
     (f3d.beamCone.material as THREE.Material)?.dispose();
-  }
-  if (f3d._innerBeamCone) {
-    f3d._innerBeamCone.geometry?.dispose();
-    (f3d._innerBeamCone.material as THREE.Material)?.dispose();
   }
   if (f3d.floorSpot) {
     f3d.floorSpot.geometry?.dispose();
