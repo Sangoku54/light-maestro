@@ -1234,12 +1234,37 @@ export const Stage3D: React.FC = () => {
 
   // DMX diagnostic overlay (DOM-managed to avoid React re-renders)
   const dmxDiagRef = useRef<HTMLDivElement>(null);
+  const dmxCounterRef = useRef<HTMLDivElement>(null);
   const dmxDiagCount = useRef(0);
+  const dmxLastValues = useRef<Map<string, number>>(new Map()); // fixture id → last pan value
 
   useEffect(() => {
     const unsub = dmxBridge.onPush((universe: number, channels: Record<number, number>) => {
       dmxDiagCount.current++;
       dmxActivityRef.current = performance.now();
+
+      // Track value changes for live delta overlay
+      let anyChange = false;
+      for (const f3d of fixturesRef.current.values()) {
+        if (f3d.universeIndex !== universe) continue;
+        const cm = f3d.channelMap;
+        const sAddr = f3d._startAddr;
+        if (cm.panOffset !== null) {
+          const pan = channels[sAddr + cm.panOffset] ?? 128;
+          const last = dmxLastValues.current.get(f3d.id);
+          if (last !== undefined && last !== pan) anyChange = true;
+          dmxLastValues.current.set(f3d.id, pan);
+        }
+      }
+
+      // Update live counter overlay
+      const counterEl = dmxCounterRef.current;
+      if (counterEl) {
+        const color = anyChange ? '#4f4' : '#f84';
+        const label = anyChange ? 'MOVING' : 'STATIC';
+        counterEl.innerHTML =
+          `<span style="color:${color}">#${dmxDiagCount.current} ${label}</span>`;
+      }
 
       // DIRECT pan/tilt target computation — bypasses updateDtxmState React closure
       // This runs synchronously in the dmxBridge callback, ensures targets are set
@@ -1517,10 +1542,17 @@ export const Stage3D: React.FC = () => {
         onMouseDown={handleCanvasClick}
         onMouseMove={handleCanvasMouseMove}
       >
-        {/* DMX diagnostic overlay (top-left corner) */}
+        {/* DMX push counter + live delta (top-left corner) */}
+        <div
+          ref={dmxCounterRef}
+          className="absolute top-2 left-2 z-31 px-2 py-0.5 rounded text-[10px] font-mono bg-black/70 text-green-400 pointer-events-none"
+        >
+          DMX idle
+        </div>
+        {/* DMX diagnostic overlay (per-fixture detail) */}
         <div
           ref={dmxDiagRef}
-          className="absolute top-2 left-2 z-30 px-2 py-1 rounded text-[10px] font-mono bg-black/60 text-yellow-400 pointer-events-none"
+          className="absolute top-2 left-2 z-30 px-2 py-1 rounded text-[10px] font-mono bg-black/60 text-yellow-400 pointer-events-none" style={{ marginTop: '20px' }}
         >
           DMX idle
         </div>
