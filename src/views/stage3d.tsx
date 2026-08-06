@@ -200,6 +200,7 @@ export const Stage3D: React.FC = () => {
   const timerRef = useRef<THREE.Timer>(new THREE.Timer());
   const animFrameRef = useRef<number>(0);
   const lastDmxPollRef = useRef<number>(0);
+  const updateDmxStateRef = useRef<() => void>(() => {});
   const particlesRef = useRef<THREE.Points | null>(null);
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
@@ -758,7 +759,7 @@ export const Stage3D: React.FC = () => {
       const now = performance.now();
       if (now - lastDmxPollRef.current >= DMX_POLL_INTERVAL) {
         lastDmxPollRef.current = now;
-        updateDmxState();
+        updateDmxStateRef.current();
       }
 
       // Speed-based pan/tilt interpolation — respects fixture speed channel
@@ -937,7 +938,7 @@ export const Stage3D: React.FC = () => {
           transparent: true,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
-          side: THREE.DoubleSide,
+          side: THREE.FrontSide,
         });
         const cone = new THREE.Mesh(coneGeo, coneMat);
         f3d.mountMode = pos.mountMode || 'top';
@@ -962,7 +963,7 @@ export const Stage3D: React.FC = () => {
           transparent: true,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
-          side: THREE.DoubleSide,
+          side: THREE.FrontSide,
         });
         const innerCone = new THREE.Mesh(innerGeo, innerMat);
         innerCone.position.set(0, -coneHeight / 2, 0);
@@ -1234,6 +1235,7 @@ export const Stage3D: React.FC = () => {
       }
     }
   }, [patchedFixtures, showBeams]);
+  updateDmxStateRef.current = updateDmxState;
 
   // ── Camera presets ──────────────────────────────────
   // ── Camera presets ──────────────────────────────────
