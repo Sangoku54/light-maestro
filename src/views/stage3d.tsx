@@ -427,22 +427,52 @@ export const Stage3D: React.FC = () => {
         break;
       }
 
-      // ── Dimmer, Fog, Smoke, Default ─────────────
+      // ── Default / unknown type: sphere head like moving_head ──
       default: {
-        const boxGeo = new THREE.BoxGeometry(0.375, 0.30, 0.30);
-        const box = new THREE.Mesh(boxGeo, bodyMat);
-        box.position.y = 0.15;
-        group.add(box);
+        // Materials
+        const metalMat = new THREE.MeshStandardMaterial({
+          color: 0x2a2a35, roughness: 0.3, metalness: 0.8,
+        });
+        const headMatDef = new THREE.MeshStandardMaterial({
+          color: tierColor, roughness: 0.35, metalness: 0.5,
+          emissive: tierColor, emissiveIntensity: 0.2,
+        });
 
-        const indicator = new THREE.Mesh(
-          new THREE.SphereGeometry(0.075, 8, 8),
-          accentMat,
-        );
-        indicator.position.y = 0.30;
-        group.add(indicator);
+        // Base plate
+        const base = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.05, 0.35), metalMat);
+        base.position.y = 0.025;
+        group.add(base);
 
-        bodyMesh = box;
-        lightTarget = indicator;
+        // Yoke arms
+        armGroup = new THREE.Group();
+        armGroup.position.y = 0.10;
+        const yokeMat = new THREE.MeshStandardMaterial({ color: 0x333340, roughness: 0.4, metalness: 0.75 });
+        const la2 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.28, 0.06), yokeMat);
+        la2.position.set(-0.12, 0.14, 0);
+        armGroup.add(la2);
+        const ra2 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.28, 0.06), yokeMat);
+        ra2.position.set(0.12, 0.14, 0);
+        armGroup.add(ra2);
+        const xb2 = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.03, 0.06), yokeMat);
+        xb2.position.y = 0.28;
+        armGroup.add(xb2);
+        group.add(armGroup);
+
+        // Head: sphere
+        headGroup = new THREE.Group();
+        headGroup.position.y = 0.30;
+        headGroup.name = 'head';
+        const headBody = new THREE.Mesh(new THREE.SphereGeometry(0.32, 24, 16), headMatDef);
+        headBody.castShadow = true;
+        headGroup.add(headBody);
+        const lightExitDef = new THREE.Group();
+        lightExitDef.position.set(0, -0.32, 0);
+        lightExitDef.name = 'lightExit';
+        headGroup.add(lightExitDef);
+        armGroup.add(headGroup);
+
+        bodyMesh = base;
+        lightTarget = lightExitDef;
         break;
       }
     }
