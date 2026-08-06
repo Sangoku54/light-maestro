@@ -261,7 +261,9 @@ export const Stage3D: React.FC = () => {
       emissiveIntensity: 0.3,
     });
 
-    switch (type.toLowerCase()) {
+    // Normalize: "Moving Head" → "moving_head", "Color Changer" → "color_changer", etc.
+    const normalized = type.toLowerCase().replace(/[\s-]+/g, '_');
+    switch (normalized) {
       case 'moving_head': {
         // Materials
         const metalMat = new THREE.MeshStandardMaterial({
@@ -367,7 +369,8 @@ export const Stage3D: React.FC = () => {
       }
 
       // ── LED PAR ───────────────────────────────────
-      case 'led_par': {
+      case 'led_par':
+      case 'color_changer': {
         // Can body
         const canGeo = new THREE.CylinderGeometry(0.20, 0.25, 0.45, 16);
         const can = new THREE.Mesh(canGeo, bodyMat);
