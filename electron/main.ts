@@ -74,11 +74,20 @@ function createWindow() {
   mainWindow.maximize();
   mainWindow.show();
 
-  // In dev mode, load from Vite dev server (live HMR)
+  // In dev mode, load from Vite dev server (live HMR) with retry
   // In production, load the pre-built renderer
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
+    // Retry until Vite dev server is ready (concurrently starts both in parallel)
+    const tryLoad = (attempt: number) => {
+      fetch('http://localhost:5173').then(() => {
+        mainWindow!.loadURL('http://localhost:5173');
+      }).catch(() => {
+        if (attempt < 30) setTimeout(() => tryLoad(attempt + 1), 500);
+        else console.error('Vite dev server did not start within 15s');
+      });
+    };
+    tryLoad(0);
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
   }

@@ -17,7 +17,6 @@
 
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
-console.log('[STAGE3D] module loaded — SphereGeometry present:', !!THREE.SphereGeometry);
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { useShowStore, type PatchedFixture, type FixturePos } from '../stores/showStore';
 import { useAppStore } from '../stores/appStore';
@@ -262,10 +261,8 @@ export const Stage3D: React.FC = () => {
       emissiveIntensity: 0.3,
     });
 
-    console.log('[STAGE3D createFixtureGeometry] type:', type, 'tierColor:', tierColor.toString(16), 'pos:', pos.x, pos.y, pos.h);
     switch (type.toLowerCase()) {
       case 'moving_head': {
-        console.log('[STAGE3D] CREATING moving_head SPHERE');
         // Materials
         const metalMat = new THREE.MeshStandardMaterial({
           color: 0x2a2a35, roughness: 0.3, metalness: 0.8,
