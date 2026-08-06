@@ -1158,14 +1158,15 @@ export const Stage3D: React.FC = () => {
         const dmxTilt = ((tilt16 / 65535) - 0.5) * Math.PI * 1.5;
         f3d._targetTiltX = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
       }
-      // Diagnostic: track first fixture's pan/tilt + universe
-      if (fixtureCount === 1) {
-        diagLines = [
-          `uni=${f3d.universeIndex} addr=${sAddr} panOff=${cm.panOffset} tiltOff=${cm.tiltOffset}`,
-          `pan=${panCoarse}f=${panFine} tilt=${tiltCoarse}f=${tiltFine}`,
-          `tgtPan=${f3d._targetPanY.toFixed(2)} tgtTilt=${f3d._targetTiltX.toFixed(2)}`,
-        ];
-      }
+      // Diagnostic: show every fixture that has DMX data
+      const hasArm = !!f3d.armGroup;
+      const hasHead = !!f3d.headGroup;
+      diagLines.push(
+        `#${fixtureCount} id=${pf.id.slice(-8)} un=${f3d.universeIndex} s=${sAddr}` +
+        ` pOff=${cm.panOffset} tOff=${cm.tiltOffset} arm=${hasArm} head=${hasHead}`,
+        `  pan=${panCoarse}f=${panFine} tilt=${tiltCoarse}f=${tiltFine}` +
+        ` tgtPan=${f3d._targetPanY.toFixed(2)} tgtTilt=${f3d._targetTiltX.toFixed(2)}`,
+      );
       // Track DMX activity: any non-center pan/tilt = DMX is driving
       if (pan16 !== 32768 || tilt16 !== 32768) {
         dmxActivityRef.current = performance.now();
