@@ -1196,10 +1196,14 @@ export const Stage3D: React.FC = () => {
     }
   }, [patchedFixtures, showBeams]);
 
-  // Subscribe to Zustand store - triggers updateDmxState on every DMX change
+  // Subscribe to Zustand store — triggers updateDmxState on every DMX change
   useEffect(() => {
+    let count = 0;
     const unsub = useAppStore.subscribe(() => {
       updateDmxState();
+      // Minimal diagnostic: log first 3 invocations then every 60th
+      count++;
+      if (count <= 3 || count % 60 === 0) console.log('[stage3d-sub] updateDmxState fired #', count);
     });
     return unsub;
   }, [updateDmxState]);
