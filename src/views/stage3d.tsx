@@ -813,6 +813,13 @@ export const Stage3D: React.FC = () => {
         }
       }
 
+      // Debug: render frame counter — proves animation loop runs
+      renderFrameCount.current++;
+      if (renderFrameCount.current % 30 === 0) {
+        const el2 = dmxCounterRef.current;
+        if (el2) el2.dataset.rf = String(renderFrameCount.current);
+      }
+
       renderer.render(scene, camera);
     };
 
@@ -1250,6 +1257,7 @@ export const Stage3D: React.FC = () => {
   const dmxDiagRef = useRef<HTMLDivElement>(null);
   const dmxCounterRef = useRef<HTMLDivElement>(null);
   const dmxDiagCount = useRef(0);
+  const renderFrameCount = useRef(0);
   const dmxLastValues = useRef<Map<string, number>>(new Map()); // fixture id → last pan value
 
   useEffect(() => {
@@ -1276,8 +1284,10 @@ export const Stage3D: React.FC = () => {
       if (counterEl) {
         const color = anyChange ? '#4f4' : '#f84';
         const label = anyChange ? 'MOVING' : 'STATIC';
+        const rf = counterEl.dataset.rf || '?';
         counterEl.innerHTML =
-          `<span style="color:${color}">#${dmxDiagCount.current} ${label}</span>`;
+          `<span style="color:${color}">#${dmxDiagCount.current} ${label}</span>` +
+          ` <span style="color:#aaa">R:${rf}</span>`;
       }
 
       // DIRECT pan/tilt target computation — bypasses updateDtxmState React closure
