@@ -45,9 +45,17 @@ export interface DmxFixtureChannel {
   capabilities?: DmxFixtureCapability[];
 }
 
+export interface DmxFixturePhysical {
+  lensDegMin?: number;
+  lensDegMax?: number;
+  panMax?: number;
+  tiltMax?: number;
+}
+
 export interface DmxFixtureMode {
   name: string;
   channels: DmxFixtureChannel[];
+  physical?: DmxFixturePhysical;
 }
 
 export interface DmxFixtureDefinition {
@@ -55,6 +63,7 @@ export interface DmxFixtureDefinition {
   manufacturer: string;
   model: string;
   modes: DmxFixtureMode[];
+  physical?: DmxFixturePhysical;
 }
 
 // â”€â”€â”€ DMX Cue type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

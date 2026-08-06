@@ -251,6 +251,25 @@ export const Stage3D: React.FC = () => {
     return () => { cancelled = true; };
   }, [patchedFixtures.map(f => f.fixtureDefId).join(',')]);
 
+  // ── Beam angle from fixture definition physical data ──
+  function resolveBeamAngle(fixture: PatchedFixture, pos: FixturePos, defs: Map<string, DmxFixtureDefinition>): number {
+    // User override from fixture position always wins
+    if (pos.beamAngle !== undefined) return pos.beamAngle;
+    const def = defs.get(fixture.fixtureDefId);
+    if (def) {
+      const mode = def.modes[fixture.modeIndex];
+      const phys = mode?.physical ?? def.physical;
+      if (phys) {
+        const min = phys.lensDegMin;
+        const max = phys.lensDegMax;
+        if (min !== undefined && max !== undefined) return ((min + max) / 2) * Math.PI / 180;
+        if (min !== undefined) return min * Math.PI / 180;
+        if (max !== undefined) return max * Math.PI / 180;
+      }
+    }
+    return 0.15; // fallback ~8.6°
+  }
+
   // ── Create procedural fixture geometry ──────────────────
   const createFixtureGeometry = useCallback((
     fixture: PatchedFixture,
@@ -537,7 +556,7 @@ export const Stage3D: React.FC = () => {
       channelMap,
       universeIndex: universeIndexMap.get(fixture.universeId) ?? 0,
       mountMode: pos.mountMode || 'top',
-      beamAngle: pos.beamAngle ?? 0.15,
+      beamAngle: resolveBeamAngle(fixture, pos, defs),
       _staticTilt: (pos.tilt ?? 0) * Math.PI / 180,
       _mountTilt: 0,
       _targetPanY: 0,
@@ -884,7 +903,7 @@ export const Stage3D: React.FC = () => {
 
         // Outer beam cone (soft edge, wide)
         const coneHeight = 50;
-        const coneRadiusBottom = coneHeight * Math.tan(pos.beamAngle ?? 0.15);
+        const coneRadiusBottom = coneHeight * Math.tan(resolveBeamAngle(pf, pos, defs));
         const coneGeo = new THREE.CylinderGeometry(0.03, coneRadiusBottom, coneHeight, 32, 1, true);
         // Simple additive beam material: distance attenuation only (no radial math on surface vertices)
         const beamVertexShader = /* glsl */`
@@ -922,7 +941,7 @@ export const Stage3D: React.FC = () => {
         });
         const cone = new THREE.Mesh(coneGeo, coneMat);
         f3d.mountMode = pos.mountMode || 'top';
-        f3d.beamAngle = pos.beamAngle ?? 0.15;
+        f3d.beamAngle = resolveBeamAngle(pf, pos, defs);
         // Cone starts at origin (lens) and extends down in local space
         cone.position.set(0, -coneHeight / 2, 0);
         cone.visible = showBeams;
