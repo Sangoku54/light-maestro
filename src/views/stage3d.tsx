@@ -1237,7 +1237,14 @@ export const Stage3D: React.FC = () => {
     const unsub = dmxBridge.onPush(() => {
       dmxDiagCount.current++;
       dmxActivityRef.current = performance.now(); // mark DMX active on every push
-      syncRef.current(); // updateDmxState now writes to dmxDiagRef
+      try {
+        syncRef.current(); // updateDmxState now writes to dmxDiagRef
+      } catch (e: any) {
+        const diagEl = dmxDiagRef.current;
+        if (diagEl) {
+          diagEl.innerHTML = `<span style="color:#f44">ERROR: ${String(e?.message ?? e).slice(0, 80)}</span>`;
+        }
+      }
     });
     return unsub;
   }, [/* never re-subscribe — syncRef always points to latest */]);
