@@ -34,14 +34,11 @@ import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVer
 const STAGE_WIDTH = 10;  // meters
 const STAGE_DEPTH = 8;   // meters
 const TRUSS_HEIGHT = 3;  // meters
-const DMX_POLL_INTERVAL = 1000 / 60; // 60fps — smooth pan/tilt update every render frame
 const GRID_SIZE = 1; // 1m grid squares
 
 // ─── Channel Analysis (mirrors dmx-cues.ts analyzeFixture) ──
 
-let _diagLastLog = 0; // diagnostic throttle
-let _diagCount = 0;
-let _diagLastStoreLog = 0;
+
 
 interface FixtureChannelMap {
   intensityOffset: number | null;
@@ -201,8 +198,6 @@ export const Stage3D: React.FC = () => {
   const fixturesRef = useRef<Map<string, Fixture3D>>(new Map());
   const timerRef = useRef<THREE.Timer>(new THREE.Timer());
   const animFrameRef = useRef<number>(0);
-  const lastDmxPollRef = useRef<number>(0);
-  const updateDmxStateRef = useRef<() => void>(() => {});
   const dmxActivityRef = useRef<number>(0); // timestamp of last DMX-driven pan/tilt change
   const particlesRef = useRef<THREE.Points | null>(null);
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
@@ -758,29 +753,11 @@ export const Stage3D: React.FC = () => {
         particles.geometry.attributes.position.needsUpdate = true;
       }
 
-      // DMX polling — syncs fixture visuals from store
-      const now = performance.now();
-      if (now - lastDmxPollRef.current >= DMX_POLL_INTERVAL) {
-        lastDmxPollRef.current = now;
-        // Direct store read diagnostic — bypasses useCallback to confirm store has data
-        if (!_diagLastStoreLog || Date.now() - _diagLastStoreLog > 1000) {
-          _diagLastStoreLog = Date.now();
-          const st = useAppStore.getState().dmx;
-          const cd = st.channelData as Record<number, Uint8Array | number[]> | undefined;
-          const nonEmpty = cd ? Object.entries(cd).filter(([,v]) => {
-            const arr = v instanceof Uint8Array ? Array.from(v) : Object.values(v);
-            return arr.some((x: number) => x !== 0);
-          }) : [];
-          console.log('[stage3d-loop] store dmx.channelData universes with data:', nonEmpty.length > 0 ? nonEmpty.map(([k]) => k).join(',') : 'NONE', '| updateDmxState type:', typeof updateDmxStateRef.current, 'fixtures:', fixturesRef.current.size);
-        }
-        updateDmxStateRef.current();
-      }
-
-      // Speed-based pan/tilt interpolation — respects fixture speed channel
+      // Speed-based pan/tilt interpolation - respects fixture speed channel
       for (const f3d of fixturesRef.current.values()) {
         const factor = 1 - Math.exp(-f3d._speedLerp * 60 * dt); // frame-rate-independent lerp
         // Diagnostic auto-sweep: if no DMX activity for 3s, gently oscillate pan ±60°
-        // This proves the render loop + beam hierarchy work — remove once DMX is verified
+        // This proves the render loop + beam hierarchy work - remove once DMX is verified
         const elapsedSinceDmx = performance.now() - dmxActivityRef.current;
         if (elapsedSinceDmx > 3000 && f3d.headGroup) {
           const autoTilt = Math.sin(performance.now() * 0.001) * 0.4; // ±23° gentle tilt
@@ -928,7 +905,7 @@ export const Stage3D: React.FC = () => {
         const beamVertexShader = /* glsl */`
           varying float vDistFromLens;
           void main() {
-            // Cone local y: -height/2 (wide far end) … +height/2 (narrow lens)
+            // Cone local y: -height/2 (wide far end) ... +height/2 (narrow lens)
             // distFromLens: 0 at lens, height at far end
             vDistFromLens = ${coneHeight.toFixed(1)} * 0.5 - position.y;
             gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
@@ -1087,21 +1064,12 @@ export const Stage3D: React.FC = () => {
     }
   }, [showBeams]);
 
-  // ── DMX update function (called from render loop) ───
+  // ── DMX → fixture target sync (Zustand subscribe instead of polling) ───
   const updateDmxState = useCallback(() => {
     const dmxState = useAppStore.getState().dmx;
     let channelData = dmxState.channelData as Record<number, Uint8Array | number[]>;
     const blackout = dmxState.blackout ?? false;
     const grandMaster = dmxState.grandMaster ?? 255;
-
-    // Diagnostic: one-liner per second
-    if (!_diagCount) _diagCount = 0;
-    _diagCount++;
-    const diagNow = Date.now();
-    if (!_diagLastLog || diagNow - _diagLastLog > 1000) {
-      _diagLastLog = diagNow;
-      console.log('[stage3d-updateDmxState] called #', _diagCount, '| fixtures:', fixturesRef.current.size, '| patchedFixtures:', patchedFixtures.length);
-    }
 
     for (const f3d of fixturesRef.current.values()) {
       // Get DMX data for this fixture's universe
@@ -1151,7 +1119,7 @@ export const Stage3D: React.FC = () => {
 
       if (blackout) intensity = 0;
       intensity = intensity * (grandMaster / 255);
-      // Square-law dimmer curve (LED fixtures: perceived brightness ∝ DMX²)
+      // Square-law dimmer curve (LED fixtures: perceived brightness ∝ DMX2)
       const rawNormIntensity = intensity / 255;
       const normIntensity = rawNormIntensity * rawNormIntensity; // gamma 2.0
 
@@ -1227,7 +1195,14 @@ export const Stage3D: React.FC = () => {
       }
     }
   }, [patchedFixtures, showBeams]);
-  updateDmxStateRef.current = updateDmxState;
+
+  // Subscribe to Zustand store - triggers updateDmxState on every DMX change
+  useEffect(() => {
+    const unsub = useAppStore.subscribe(() => {
+      updateDmxState();
+    });
+    return unsub;
+  }, [updateDmxState]);
 
   // ── Camera presets ──────────────────────────────────
   // ── Camera presets ──────────────────────────────────

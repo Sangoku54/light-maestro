@@ -594,14 +594,6 @@ export function useDmxPlayback(options: {
           const sig=String(uniIdx)+':'+Object.entries(chVals).sort((a,b)=>Number(a[0])-Number(b[0])).map(([k,v])=>`${k}=${v}`).join(',');
           if(sig!==lastSig){lastSig=sig;
             // Mirror DMX to React store for 3D Stage view
-            const panKeys = Object.keys(chVals).filter(k => {
-              for (const fa of fixtures) {
-                for (const po of fa.panOffsets) if (Number(k) === fa.fixture.startAddress + po) return true;
-                for (const to of fa.tiltOffsets) if (Number(k) === fa.fixture.startAddress + to) return true;
-              }
-              return false;
-            });
-            if (panKeys.length > 0) console.log('[dmx-playback] setUniverseData uni', uniIdx, 'pan/tilt channels:', panKeys.map(k => k + '=' + chVals[Number(k)]).join(', '), 'total channels:', Object.keys(chVals).length);
             useAppStore.getState().setUniverseData(uniIdx, chVals);
             if (onVirtualDmx) onVirtualDmx(uniIdx, chVals);
             api.setChannels(uniIdx,chVals).catch(()=>{});}
