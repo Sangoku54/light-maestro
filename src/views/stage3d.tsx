@@ -775,7 +775,7 @@ export const Stage3D: React.FC = () => {
           if (f3d._innerBeamCone) {
             const imat = f3d._innerBeamCone.material as THREE.ShaderMaterial;
             if (f3d._strobeInnerOpacity === undefined) f3d._strobeInnerOpacity = imat.uniforms.uOpacity.value;
-            imat.uniforms.uOpacity.value = strobeOn ? (f3d._strobeInnerOpacity ?? 0.70) : 0;
+            imat.uniforms.uOpacity.value = strobeOn ? (f3d._strobeInnerOpacity ?? 0.28) : 0;
             f3d._innerBeamCone.visible = strobeOn;
           }
         }
@@ -930,8 +930,8 @@ export const Stage3D: React.FC = () => {
         f3d.lightTarget.add(cone);
         f3d.beamCone = cone;
 
-        // Inner hotspot cone: 35% radius, 2× opacity — creates bright center illusion
-        const innerGeo = new THREE.CylinderGeometry(0.02, coneRadiusBottom * 0.35, coneHeight, 24, 1, true);
+        // Inner hotspot cone: 18% radius, subtle glow — blends into beam center
+        const innerGeo = new THREE.CylinderGeometry(0.015, coneRadiusBottom * 0.18, coneHeight, 16, 1, true);
         const innerMat = new THREE.ShaderMaterial({
           uniforms: {
             uColor: { value: new THREE.Color(0xffffff) },
@@ -1017,7 +1017,7 @@ export const Stage3D: React.FC = () => {
           f3d.beamCone.position.set(0, -ch / 2, 0);
           if (f3d._innerBeamCone) {
             f3d._innerBeamCone.geometry?.dispose();
-            f3d._innerBeamCone.geometry = new THREE.CylinderGeometry(0.02, radius * 0.35, ch, 24, 1, true);
+            f3d._innerBeamCone.geometry = new THREE.CylinderGeometry(0.015, radius * 0.18, ch, 16, 1, true);
             f3d._innerBeamCone.position.set(0, -ch / 2, 0);
           }
         }
@@ -1063,7 +1063,7 @@ export const Stage3D: React.FC = () => {
         f3d.beamCone.position.set(0, -ch / 2, 0);
         if (f3d._innerBeamCone) {
           f3d._innerBeamCone.geometry?.dispose();
-          f3d._innerBeamCone.geometry = new THREE.CylinderGeometry(0.02, radius * 0.35, ch, 24, 1, true);
+          f3d._innerBeamCone.geometry = new THREE.CylinderGeometry(0.015, radius * 0.18, ch, 16, 1, true);
           f3d._innerBeamCone.position.set(0, -ch / 2, 0);
         }
       }
@@ -1188,7 +1188,7 @@ export const Stage3D: React.FC = () => {
       if (f3d._innerBeamCone) {
         const imat = f3d._innerBeamCone.material as THREE.ShaderMaterial;
         imat.uniforms.uColor.value.copy(color);
-        imat.uniforms.uOpacity.value = normIntensity * 0.70; // 2× brighter hotspot
+        imat.uniforms.uOpacity.value = normIntensity * 0.28; // subtle center glow
         f3d._innerBeamCone.visible = showBeams && normIntensity > 0.005;
       }
 
