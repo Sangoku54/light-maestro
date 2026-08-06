@@ -34,7 +34,7 @@ import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVer
 const STAGE_WIDTH = 10;  // meters
 const STAGE_DEPTH = 8;   // meters
 const TRUSS_HEIGHT = 3;  // meters
-const DMX_POLL_INTERVAL = 1000 / 30; // 30fps
+const DMX_POLL_INTERVAL = 1000 / 60; // 60fps — smooth pan/tilt update every render frame
 const GRID_SIZE = 1; // 1m grid squares
 
 // ─── Channel Analysis (mirrors dmx-cues.ts analyzeFixture) ──
