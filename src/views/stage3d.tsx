@@ -313,7 +313,7 @@ export const Stage3D: React.FC = () => {
 
         // T�te moving_head : sph�re (orientation-agnostic, 2x pour diagnostic visuel)
         const headBody = new THREE.Mesh(
-          new THREE.SphereGeometry(0.32, 24, 16), headMat);
+          new THREE.SphereGeometry(0.16, 24, 16), headMat);
         headBody.position.set(0, 0, 0);
         headBody.castShadow = true;
         headGroup.add(headBody);
@@ -457,7 +457,7 @@ export const Stage3D: React.FC = () => {
         headGroup = new THREE.Group();
         headGroup.position.y = 0.30;
         headGroup.name = 'head';
-        const headBody = new THREE.Mesh(new THREE.SphereGeometry(0.32, 24, 16), headMatDef);
+        const headBody = new THREE.Mesh(new THREE.SphereGeometry(0.16, 24, 16), headMatDef);
         headBody.castShadow = true;
         headGroup.add(headBody);
         const lightExitDef = new THREE.Group();
@@ -1452,7 +1452,7 @@ export const Stage3D: React.FC = () => {
                     <button key={opt.v}
                       onClick={() => setFixturePosition(selectedFixture.id, {
                         mountMode: opt.v,
-                        ...(opt.v === 'ground' ? { h: 0.14 } : {}), // 0.7m default
+                        ...(opt.v === 'ground' ? { h: 0 } : {}),
                       })}
                       className={`px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
                         (selectedPos.mountMode || 'top') === opt.v
