@@ -176,6 +176,7 @@ interface Fixture3D {
   mountMode: 'top' | 'ground' | 'rear'; // beam default direction
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
+  _startAddr: number;          // DMX start address (1-indexed) for direct channel lookups
   _mountTilt: number;           // mount-mode head tilt compensation (π for ground, 0 otherwise)
   _targetPanY: number;           // target pan rotation (set by DMX)
   _targetTiltX: number;          // target tilt rotation (set by DMX)
@@ -554,6 +555,7 @@ export const Stage3D: React.FC = () => {
       headGroup,
       lightTarget,
       channelMap,
+      _startAddr: fixture.startAddress, // 1-indexed DMX start address
       universeIndex: universeIndexMap.get(fixture.universeId) ?? 0,
       mountMode: pos.mountMode || 'top',
       beamAngle: resolveBeamAngle(fixture, pos, defs),
@@ -1235,15 +1237,46 @@ export const Stage3D: React.FC = () => {
   const dmxDiagCount = useRef(0);
 
   useEffect(() => {
-    const unsub = dmxBridge.onPush(() => {
+    const unsub = dmxBridge.onPush((universe: number, channels: Record<number, number>) => {
       dmxDiagCount.current++;
-      dmxActivityRef.current = performance.now(); // mark DMX active on every push
+      dmxActivityRef.current = performance.now();
+
+      // DIRECT pan/tilt target computation — bypasses updateDtxmState React closure
+      // This runs synchronously in the dmxBridge callback, ensures targets are set
+      // before the next animation frame reads them.
+      for (const f3d of fixturesRef.current.values()) {
+        if (f3d.universeIndex !== universe) continue;
+        const cm = f3d.channelMap;
+        const sAddr = f3d._startAddr;
+        const ch = (off: number) => channels[sAddr + off] ?? 0;
+
+        if (f3d.armGroup && cm.panOffset !== null) {
+          const panCoarse = ch(cm.panOffset);
+          const panFine = cm.panFineOffset !== null ? ch(cm.panFineOffset) : 0;
+          const pan16 = panCoarse * 256 + panFine;
+          f3d._targetPanY = ((pan16 / 65535) - 0.5) * Math.PI * 3;
+        }
+        if (f3d.headGroup && cm.tiltOffset !== null) {
+          const tiltCoarse = ch(cm.tiltOffset);
+          const tiltFine = cm.tiltFineOffset !== null ? ch(cm.tiltFineOffset) : 0;
+          const tilt16 = tiltCoarse * 256 + tiltFine;
+          const dmxTilt = ((tilt16 / 65535) - 0.5) * Math.PI * 1.5;
+          f3d._targetTiltX = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
+        }
+        // Map speed channel to lerp rate
+        if (cm.speedOffset !== null) {
+          const speedVal = ch(cm.speedOffset);
+          f3d._speedLerp = 0.015 + (speedVal / 255) * 0.385;
+        }
+      }
+
+      // Also run updateDmxState for intensity/color/shutter
       try {
-        syncRef.current(); // updateDmxState now writes to dmxDiagRef
+        syncRef.current();
       } catch (e: any) {
         const diagEl = dmxDiagRef.current;
         if (diagEl) {
-          diagEl.innerHTML = `<span style="color:#f44">ERROR: ${String(e?.message ?? e).slice(0, 80)}</span>`;
+          diagEl.innerHTML = `<span style="color:#f44">ERR: ${String(e?.message ?? e).slice(0, 80)}</span>`;
         }
       }
     });
