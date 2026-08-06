@@ -1065,36 +1065,35 @@ export const Stage3D: React.FC = () => {
     }
   }, [showBeams]);
 
-  // ── DMX → fixture target sync (Zustand subscribe instead of polling) ───
+  // ── DMX → fixture target sync (reads from dmxBridge cache, NOT Zustand store) ───
   const updateDmxState = useCallback(() => {
-    const dmxState = useAppStore.getState().dmx;
-    let channelData = dmxState.channelData as Record<number, Uint8Array | number[]>;
-    const blackout = dmxState.blackout ?? false;
-    const grandMaster = dmxState.grandMaster ?? 255;
+    const blackout = useAppStore.getState().dmx?.blackout ?? false;
+    const grandMaster = useAppStore.getState().dmx?.grandMaster ?? 255;
 
     for (const f3d of fixturesRef.current.values()) {
-      // Get DMX data for this fixture's universe
-      const rawData = channelData[f3d.universeIndex];
-      if (!rawData) {
+      // Get DMX data for this fixture's universe from the bridge cache
+      const chVals = dmxBridge.getChannels(f3d.universeIndex);
+      if (!chVals || Object.keys(chVals).length === 0) {
         if (f3d.pointLight) f3d.pointLight.intensity = 0;
         if (f3d.beamCone) { (f3d.beamCone.material as THREE.ShaderMaterial).uniforms.uOpacity.value = 0; }
         // Apply static tilt even without DMX
         if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._mountTilt + (f3d._staticTilt ?? 0); }
         continue;
       }
-      // Normalize data to Uint8Array-like access
-      const data = rawData instanceof Uint8Array ? rawData : new Uint8Array(Object.values(rawData));
 
       const pf = patchedFixtures.find(f => f.id === f3d.id);
       if (!pf) continue;
 
-      const baseAddr = pf.startAddress - 1;
       const cm = f3d.channelMap;
+      const sAddr = pf.startAddress; // 1-indexed, matches chVals keys
+
+      // Helper: read a DMX channel value, returns 0 if missing
+      const ch = (off: number) => chVals[sAddr + off] ?? 0;
 
       // --- Intensity (supports Shutter-channel dimmer and strobe) ---
       let intensity = 0;
       // Read shutter channel (many fixtures combine dimmer+strobe on one channel)
-      const shutterRaw = cm.shutterOffset !== null ? (data[baseAddr + cm.shutterOffset] ?? 0) : null;
+      const shutterRaw = cm.shutterOffset !== null ? ch(cm.shutterOffset) : null;
       let strobeRate = 0;
       if (shutterRaw !== null) {
         if (shutterRaw <= 7) {
@@ -1109,11 +1108,11 @@ export const Stage3D: React.FC = () => {
           intensity = 255; // shutter open
         }
       } else if (cm.intensityOffset !== null && cm.intensityOffset >= 0) {
-        intensity = data[baseAddr + cm.intensityOffset] ?? 0;
+        intensity = ch(cm.intensityOffset);
       } else if (cm.rgbOffsets) {
-        const r = data[baseAddr + cm.rgbOffsets[0]] ?? 0;
-        const g = data[baseAddr + cm.rgbOffsets[1]] ?? 0;
-        const b = data[baseAddr + cm.rgbOffsets[2]] ?? 0;
+        const r = ch(cm.rgbOffsets[0]);
+        const g = ch(cm.rgbOffsets[1]);
+        const b = ch(cm.rgbOffsets[2]);
         intensity = Math.max(r, g, b);
       }
       f3d._strobeRate = strobeRate;
@@ -1127,24 +1126,24 @@ export const Stage3D: React.FC = () => {
       // --- Color ---
       let color = new THREE.Color(0xffffff);
       if (cm.rgbOffsets && cm.rgbOffsets.length >= 3) {
-        const r = (data[baseAddr + cm.rgbOffsets[0]] ?? 0) / 255;
-        const g = (data[baseAddr + cm.rgbOffsets[1]] ?? 0) / 255;
-        const b = (data[baseAddr + cm.rgbOffsets[2]] ?? 0) / 255;
+        const r = ch(cm.rgbOffsets[0]) / 255;
+        const g = ch(cm.rgbOffsets[1]) / 255;
+        const b = ch(cm.rgbOffsets[2]) / 255;
         if (r > 0 || g > 0 || b > 0) color.setRGB(r, g, b);
       } else if (cm.wheelOffset !== null) {
-        const wheelVal = data[baseAddr + cm.wheelOffset] ?? 0;
+        const wheelVal = ch(cm.wheelOffset);
         color = wheelValueToColor(wheelVal, cm.wheelCaps);
       }
 
       // --- Pan/Tilt (QLC+ model: arm=pan/Y, head=tilt/X) ---
       // 16-bit resolution: coarse * 256 + fine / 65535 (8-bit fallback when no fine channel)
-      const panCoarse = cm.panOffset !== null ? (data[baseAddr + cm.panOffset] ?? 128) : 128;
-      const panFine = cm.panFineOffset !== null ? (data[baseAddr + cm.panFineOffset] ?? 0) : 0;
+      const panCoarse = cm.panOffset !== null ? ch(cm.panOffset) : 128;
+      const panFine = cm.panFineOffset !== null ? ch(cm.panFineOffset) : 0;
       const pan16 = panCoarse * 256 + panFine; // 0-65535
-      const tiltCoarse = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128) : 128;
-      const tiltFine = cm.tiltFineOffset !== null ? (data[baseAddr + cm.tiltFineOffset] ?? 0) : 0;
+      const tiltCoarse = cm.tiltOffset !== null ? ch(cm.tiltOffset) : 128;
+      const tiltFine = cm.tiltFineOffset !== null ? ch(cm.tiltFineOffset) : 0;
       const tilt16 = tiltCoarse * 256 + tiltFine; // 0-65535
-      const speedVal = cm.speedOffset !== null ? (data[baseAddr + cm.speedOffset] ?? 0) : 0;
+      const speedVal = cm.speedOffset !== null ? ch(cm.speedOffset) : 0;
       if (f3d.armGroup) {
         f3d._targetPanY = ((pan16 / 65535) - 0.5) * Math.PI * 3;
       }
