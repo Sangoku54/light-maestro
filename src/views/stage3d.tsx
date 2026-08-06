@@ -1201,8 +1201,15 @@ export const Stage3D: React.FC = () => {
   const syncRef = useRef(updateDmxState);
   syncRef.current = updateDmxState;
 
+  // DMX diagnostic overlay (DOM-managed to avoid React re-renders)
+  const dmxDiagRef = useRef<HTMLDivElement>(null);
+  const dmxDiagCount = useRef(0);
+
   useEffect(() => {
     const unsub = dmxBridge.onPush(() => {
+      dmxDiagCount.current++;
+      const el = dmxDiagRef.current;
+      if (el) el.textContent = `DMX push #${dmxDiagCount.current}`;
       syncRef.current();
     });
     return unsub;
@@ -1442,6 +1449,14 @@ export const Stage3D: React.FC = () => {
         onMouseDown={handleCanvasClick}
         onMouseMove={handleCanvasMouseMove}
       >
+        {/* DMX diagnostic overlay (top-left corner) */}
+        <div
+          ref={dmxDiagRef}
+          className="absolute top-2 left-2 z-30 px-2 py-1 rounded text-[10px] font-mono bg-black/60 text-yellow-400 pointer-events-none"
+        >
+          DMX idle
+        </div>
+
         {!fixtureDefsReady && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#08080e]/80 z-10">
             <div className="text-center">
