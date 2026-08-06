@@ -47,6 +47,8 @@ interface FixtureChannelMap {
   wheelCaps: DmxFixtureCapability[] | null;
   panOffset: number | null;
   tiltOffset: number | null;
+  panFineOffset: number | null;
+  tiltFineOffset: number | null;
   speedOffset: number | null;
   goboOffset: number | null;
 }
@@ -64,6 +66,8 @@ function analyzeFixtureChannels(
     wheelCaps: null,
     panOffset: null,
     tiltOffset: null,
+    panFineOffset: null,
+    tiltFineOffset: null,
     speedOffset: null,
     goboOffset: null,
   };
@@ -93,6 +97,15 @@ function analyzeFixtureChannels(
         break;
       case 'Gobo':
         if (result.goboOffset === null) result.goboOffset = i;
+        break;
+      case 'Nothing':
+        // 16-bit fine channels: named "Pan fine" / "Tilt fine" right after their coarse channel
+        if (/pan/i.test(ch.name) && /fine/i.test(ch.name) && result.panFineOffset === null && result.panOffset === i - 1) {
+          result.panFineOffset = i;
+        }
+        if (/tilt/i.test(ch.name) && /fine/i.test(ch.name) && result.tiltFineOffset === null && result.tiltOffset === i - 1) {
+          result.tiltFineOffset = i;
+        }
         break;
     }
   }
@@ -167,6 +180,10 @@ interface Fixture3D {
   _currentPanY: number;          // current pan rotation (interpolated)
   _currentTiltX: number;         // current tilt rotation (interpolated)
   _speedLerp: number;            // lerp rate from speed channel (0.015-0.40)
+  _strobeRate: number;           // strobe flash rate in Hz (0 = no strobe)
+  _strobePhase: number;          // strobe timer accumulator
+  _strobeBaseIntensity?: number;  // cached base pointLight intensity (for strobe restore)
+  _strobeBaseOpacity?: number;    // cached base beam cone opacity (for strobe restore)
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -526,6 +543,8 @@ export const Stage3D: React.FC = () => {
       _currentPanY: 0,
       _currentTiltX: 0,
       _speedLerp: 0.10,  // default medium speed
+      _strobeRate: 0,
+      _strobePhase: 0,
     };
   }, [universeIndexMap]);
 
@@ -731,6 +750,26 @@ export const Stage3D: React.FC = () => {
         if (f3d.headGroup) {
           f3d._currentTiltX += (f3d._targetTiltX - f3d._currentTiltX) * factor;
           f3d.headGroup.rotation.x = f3d._currentTiltX;
+        }
+        // Strobe: toggles light visibility at strobe rate
+        if (f3d._strobeRate > 0) {
+          f3d._strobePhase += dt;
+          const period = 1 / f3d._strobeRate;
+          if (f3d._strobePhase >= period) f3d._strobePhase -= period;
+          const strobeOn = f3d._strobePhase < period * 0.35; // 35% duty cycle (bright flash)
+          if (f3d.pointLight) {
+            const baseIntensity = f3d.pointLight.intensity;
+            // Store base intensity on first strobe frame
+            if (!f3d._strobeBaseIntensity) f3d._strobeBaseIntensity = baseIntensity;
+            f3d.pointLight.intensity = strobeOn ? (f3d._strobeBaseIntensity ?? 1) : 0;
+            f3d.pointLight.visible = strobeOn;
+          }
+          if (f3d.beamCone) {
+            const mat = f3d.beamCone.material as THREE.MeshBasicMaterial;
+            if (!f3d._strobeBaseOpacity) f3d._strobeBaseOpacity = mat.opacity;
+            mat.opacity = strobeOn ? (f3d._strobeBaseOpacity ?? 0.35) : 0;
+            f3d.beamCone.visible = strobeOn;
+          }
         }
       }
 
@@ -1003,9 +1042,24 @@ export const Stage3D: React.FC = () => {
       const baseAddr = pf.startAddress - 1;
       const cm = f3d.channelMap;
 
-      // --- Intensity ---
+      // --- Intensity (supports Shutter-channel dimmer and strobe) ---
       let intensity = 0;
-      if (cm.intensityOffset !== null && cm.intensityOffset >= 0) {
+      // Read shutter channel (many fixtures combine dimmer+strobe on one channel)
+      const shutterRaw = cm.shutterOffset !== null ? (data[baseAddr + cm.shutterOffset] ?? 0) : null;
+      let strobeRate = 0;
+      if (shutterRaw !== null) {
+        if (shutterRaw <= 7) {
+          intensity = 0; // shutter closed
+        } else if (shutterRaw <= 134) {
+          intensity = Math.round(((shutterRaw - 8) / (134 - 8)) * 255); // dimmer range
+        } else if (shutterRaw <= 239) {
+          // Strobe: 135=slow (~1Hz), 239=fast (~25Hz)
+          strobeRate = 1 + ((shutterRaw - 135) / (239 - 135)) * 24;
+          intensity = 255; // full intensity, strobe masks it
+        } else {
+          intensity = 255; // shutter open
+        }
+      } else if (cm.intensityOffset !== null && cm.intensityOffset >= 0) {
         intensity = data[baseAddr + cm.intensityOffset] ?? 0;
       } else if (cm.rgbOffsets) {
         const r = data[baseAddr + cm.rgbOffsets[0]] ?? 0;
@@ -1013,6 +1067,7 @@ export const Stage3D: React.FC = () => {
         const b = data[baseAddr + cm.rgbOffsets[2]] ?? 0;
         intensity = Math.max(r, g, b);
       }
+      f3d._strobeRate = strobeRate;
 
       if (blackout) intensity = 0;
       intensity = intensity * (grandMaster / 255);
@@ -1031,15 +1086,19 @@ export const Stage3D: React.FC = () => {
       }
 
       // --- Pan/Tilt (QLC+ model: arm=pan/Y, head=tilt/X) ---
-      // Set targets for speed-based interpolation (applied in animate loop)
-      const panVal = cm.panOffset !== null ? (data[baseAddr + cm.panOffset] ?? 128) : 128;
-      const tiltVal = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128) : 128;
+      // 16-bit resolution: coarse * 256 + fine / 65535 (8-bit fallback when no fine channel)
+      const panCoarse = cm.panOffset !== null ? (data[baseAddr + cm.panOffset] ?? 128) : 128;
+      const panFine = cm.panFineOffset !== null ? (data[baseAddr + cm.panFineOffset] ?? 0) : 0;
+      const pan16 = panCoarse * 256 + panFine; // 0-65535
+      const tiltCoarse = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128) : 128;
+      const tiltFine = cm.tiltFineOffset !== null ? (data[baseAddr + cm.tiltFineOffset] ?? 0) : 0;
+      const tilt16 = tiltCoarse * 256 + tiltFine; // 0-65535
       const speedVal = cm.speedOffset !== null ? (data[baseAddr + cm.speedOffset] ?? 0) : 0;
       if (f3d.armGroup) {
-        f3d._targetPanY = ((panVal / 255) - 0.5) * Math.PI * 3;
+        f3d._targetPanY = ((pan16 / 65535) - 0.5) * Math.PI * 3;
       }
       if (f3d.headGroup) {
-        const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI * 1.5;
+        const dmxTilt = ((tilt16 / 65535) - 0.5) * Math.PI * 1.5;
         f3d._targetTiltX = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
       }
       // Map speed channel to lerp rate: 0=slow (0.015), 255=fast (0.40)
