@@ -765,9 +765,10 @@ export const Stage3D: React.FC = () => {
             f3d.pointLight.visible = strobeOn;
           }
           if (f3d.beamCone) {
-            const mat = f3d.beamCone.material as THREE.MeshBasicMaterial;
-            if (!f3d._strobeBaseOpacity) f3d._strobeBaseOpacity = mat.opacity;
-            mat.opacity = strobeOn ? (f3d._strobeBaseOpacity ?? 0.35) : 0;
+            const mat = f3d.beamCone.material as THREE.ShaderMaterial;
+            if (f3d._strobeBaseOpacity === undefined) f3d._strobeBaseOpacity = mat.uniforms.uOpacity.value;
+            mat.uniforms.uOpacity.value = strobeOn ? (f3d._strobeBaseOpacity ?? 0.35) : 0;
+            f3d.beamCone.visible = strobeOn;
             f3d.beamCone.visible = strobeOn;
           }
         }
@@ -874,17 +875,53 @@ export const Stage3D: React.FC = () => {
         f3d.lightTarget.add(pointLight);
         f3d.pointLight = pointLight;
 
-        // Create beam cone - attached to lightTarget (lens), points along local -Y then rotated by headGroup
+        // Create beam cone with hotspot shader (radial gradient toward center)
         const coneHeight = 50;
-        const coneRadiusBottom = coneHeight * Math.tan(0.15);
-        const coneGeo = new THREE.CylinderGeometry(0.03, coneRadiusBottom, coneHeight, 24, 1, true);
-        const coneMat = new THREE.MeshBasicMaterial({
-          color: 0xffffff,
+        const coneRadiusBottom = coneHeight * Math.tan(pos.beamAngle ?? 0.15);
+        const coneGeo = new THREE.CylinderGeometry(0.03, coneRadiusBottom, coneHeight, 32, 1, true);
+        const coneMat = new THREE.ShaderMaterial({
+          uniforms: {
+            uColor: { value: new THREE.Color(0xffffff) },
+            uOpacity: { value: 0 },
+            uBaseRadius: { value: 0.03 },
+            uTopRadius: { value: coneRadiusBottom },
+            uBeamLength: { value: coneHeight },
+          },
+          vertexShader: /* glsl */`
+            varying vec3 vLocalPos;
+            void main() {
+              vLocalPos = position;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */`
+            varying vec3 vLocalPos;
+            uniform vec3 uColor;
+            uniform float uOpacity;
+            uniform float uBaseRadius;
+            uniform float uTopRadius;
+            uniform float uBeamLength;
+            void main() {
+              // Cone local coords: y in [-height/2, +height/2]
+              // Lens (narrow): y = +height/2, Far (wide): y = -height/2
+              float distFromLens = (uBeamLength * 0.5) - vLocalPos.y;
+              float t = clamp(distFromLens / uBeamLength, 0.0, 1.0);
+              float radiusAtT = uBaseRadius + t * (uTopRadius - uBaseRadius);
+              float radialDist = length(vLocalPos.xz);
+              float normDist = radialDist / max(radiusAtT, 0.001);
+              // Hotspot: bright center, fading to edge
+              float hotspot = 1.0 - smoothstep(0.0, 0.45, normDist);
+              float softEdge = 1.0 - smoothstep(0.4, 1.0, normDist);
+              // Distance attenuation: brighter near lens
+              float distAtten = 1.0 - t * 0.85;
+              float alpha = uOpacity * hotspot * softEdge * distAtten;
+              gl_FragColor = vec4(uColor, alpha);
+            }
+          `,
           transparent: true,
-          opacity: 0,
-          side: THREE.DoubleSide,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide,
         });
         const cone = new THREE.Mesh(coneGeo, coneMat);
         f3d.mountMode = pos.mountMode || 'top';
@@ -1028,7 +1065,7 @@ export const Stage3D: React.FC = () => {
       const rawData = channelData[f3d.universeIndex];
       if (!rawData) {
         if (f3d.pointLight) f3d.pointLight.intensity = 0;
-        if (f3d.beamCone) { (f3d.beamCone.material as THREE.MeshBasicMaterial).opacity = 0; }
+        if (f3d.beamCone) { (f3d.beamCone.material as THREE.ShaderMaterial).uniforms.uOpacity.value = 0; }
         // Apply static tilt even without DMX
         if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._mountTilt + (f3d._staticTilt ?? 0); f3d._currentTiltX = f3d._targetTiltX = f3d.headGroup.rotation.x; }
         continue;
@@ -1112,9 +1149,9 @@ export const Stage3D: React.FC = () => {
 
       // --- Update beam cone ---
       if (f3d.beamCone) {
-        const mat = f3d.beamCone.material as THREE.MeshBasicMaterial;
-        mat.color.copy(color);
-        mat.opacity = normIntensity * 0.35;
+        const mat = f3d.beamCone.material as THREE.ShaderMaterial;
+        mat.uniforms.uColor.value.copy(color);
+        mat.uniforms.uOpacity.value = normIntensity * 0.35;
         f3d.beamCone.visible = showBeams && normIntensity > 0.005;
       }
 
