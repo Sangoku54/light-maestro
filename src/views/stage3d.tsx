@@ -39,6 +39,8 @@ const GRID_SIZE = 1; // 1m grid squares
 
 // ─── Channel Analysis (mirrors dmx-cues.ts analyzeFixture) ──
 
+let _diagLastLog = 0; // diagnostic throttle
+
 interface FixtureChannelMap {
   intensityOffset: number | null;
   shutterOffset: number | null;
@@ -1078,6 +1080,34 @@ export const Stage3D: React.FC = () => {
     let channelData = dmxState.channelData as Record<number, Uint8Array | number[]>;
     const blackout = dmxState.blackout ?? false;
     const grandMaster = dmxState.grandMaster ?? 255;
+
+    // Diagnostic: log once per second
+    const now = Date.now();
+    if (!_diagLastLog || now - _diagLastLog > 1000) {
+      _diagLastLog = now;
+      const uniKeys = Object.keys(channelData).filter(k => {
+        const arr = channelData[Number(k)];
+        return arr && (arr instanceof Uint8Array ? arr.some(v => v !== 0) : Object.values(arr).some((v: number) => v !== 0));
+      });
+      console.log('[stage3d] channelData universes with non-zero data:', uniKeys.length > 0 ? uniKeys.join(', ') : 'NONE', 'total entries:', Object.keys(channelData).length);
+      if (uniKeys.length > 0) {
+        const uni0 = channelData[Number(uniKeys[0])];
+        const arr0 = uni0 instanceof Uint8Array ? Array.from(uni0).slice(0, 16) : Object.values(uni0).slice(0, 16);
+        console.log('[stage3d] universe', uniKeys[0], 'first 16 bytes:', arr0.join(','));
+        // Show pan/tilt for first fixture
+        for (const f3d of fixturesRef.current.values()) {
+          const pf = patchedFixtures.find(f => f.id === f3d.id);
+          if (!pf) continue;
+          const baseAddr = pf.startAddress - 1;
+          const cm = f3d.channelMap;
+          const data = uni0 instanceof Uint8Array ? uni0 : new Uint8Array(Object.values(uni0));
+          const panVal = cm.panOffset !== null ? data[baseAddr + cm.panOffset] : null;
+          const tiltVal = cm.tiltOffset !== null ? data[baseAddr + cm.tiltOffset] : null;
+          console.log('[stage3d] fixture', pf.name, 'universe', f3d.universeIndex, 'startAddr', pf.startAddress, 'panOffset', cm.panOffset, 'tiltOffset', cm.tiltOffset, 'pan=', panVal, 'tilt=', tiltVal);
+          break;
+        }
+      }
+    }
 
     for (const f3d of fixturesRef.current.values()) {
       // Get DMX data for this fixture's universe
