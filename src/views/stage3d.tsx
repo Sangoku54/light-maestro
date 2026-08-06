@@ -178,8 +178,10 @@ interface Fixture3D {
   _staticTilt: number;          // static tilt offset from panel
   _startAddr: number;          // DMX start address (1-indexed) for direct channel lookups
   _mountTilt: number;           // mount-mode head tilt compensation (π for ground, 0 otherwise)
-  _targetPanY: number;           // target pan rotation (set by DMX)
-  _targetTiltX: number;          // target tilt rotation (set by DMX)
+  _targetPanY: number;           // current TARGET pan (DMX + auto-sweep blend, read by lerp)
+  _targetTiltX: number;          // current TARGET tilt (DMX + auto-sweep blend)
+  _dmxPanY: number;              // raw DMX pan target (set by onPush, 0=center, NaN=no DMX yet)
+  _dmxTiltX: number;             // raw DMX tilt target (absolute angle)
   _currentPanY: number;          // current pan rotation (interpolated)
   _currentTiltX: number;         // current tilt rotation (interpolated)
   _speedLerp: number;            // lerp rate from speed channel (0.015-0.40)
@@ -563,6 +565,8 @@ export const Stage3D: React.FC = () => {
       _mountTilt: 0,
       _targetPanY: 0,
       _targetTiltX: 0,
+      _dmxPanY: NaN,
+      _dmxTiltX: NaN,
       _currentPanY: 0,
       _currentTiltX: 0,
       _speedLerp: 0.10,  // default medium speed
@@ -760,13 +764,23 @@ export const Stage3D: React.FC = () => {
       for (const f3d of fixturesRef.current.values()) {
         const factor = 1 - Math.exp(-f3d._speedLerp * 60 * dt); // frame-rate-independent lerp
         // Diagnostic auto-sweep: if no DMX activity for 3s, gently oscillate pan ±60°
-        // This proves the render loop + beam hierarchy work - remove once DMX is verified
+        // When DMX is active, blend: DMX target + subtle auto wobble (15% amplitude)
         const elapsedSinceDmx = performance.now() - dmxActivityRef.current;
-        if (elapsedSinceDmx > 3000 && f3d.headGroup) {
-          const autoTilt = Math.sin(performance.now() * 0.001) * 0.4; // ±23° gentle tilt
-          f3d._targetTiltX = f3d._mountTilt + autoTilt + (f3d._staticTilt ?? 0);
-          const autoPan = Math.sin(performance.now() * 0.0007) * Math.PI * 0.33; // ±60° pan
-          if (f3d.armGroup) f3d._targetPanY = autoPan;
+        const dmxAlive = elapsedSinceDmx < 3000 && f3d.headGroup && !isNaN(f3d._dmxPanY as number);
+        const tNow = performance.now();
+        const autoPan = Math.sin(tNow * 0.0007) * Math.PI * 0.33;  // ±60°
+        const autoTilt = Math.sin(tNow * 0.001) * 0.4;              // ±23°
+
+        if (dmxAlive) {
+          // DMX target + subtle auto wobble (15% amplitude)
+          if (f3d.armGroup) f3d._targetPanY = f3d._dmxPanY + autoPan * 0.15;
+          f3d._targetTiltX = f3d._dmxTiltX + autoTilt * 0.15;
+        } else if (!dmxAlive) {
+          // Full auto-sweep when no DMX data
+          if (f3d.headGroup) {
+            f3d._targetTiltX = f3d._mountTilt + autoTilt + (f3d._staticTilt ?? 0);
+            if (f3d.armGroup) f3d._targetPanY = autoPan;
+          }
           f3d._speedLerp = 0.08; // moderate speed for smooth sweep
         }
         if (f3d.armGroup) {
@@ -1279,14 +1293,14 @@ export const Stage3D: React.FC = () => {
           const panCoarse = ch(cm.panOffset);
           const panFine = cm.panFineOffset !== null ? ch(cm.panFineOffset) : 0;
           const pan16 = panCoarse * 256 + panFine;
-          f3d._targetPanY = ((pan16 / 65535) - 0.5) * Math.PI * 3;
+          f3d._dmxPanY = ((pan16 / 65535) - 0.5) * Math.PI * 3;
         }
         if (f3d.headGroup && cm.tiltOffset !== null) {
           const tiltCoarse = ch(cm.tiltOffset);
           const tiltFine = cm.tiltFineOffset !== null ? ch(cm.tiltFineOffset) : 0;
           const tilt16 = tiltCoarse * 256 + tiltFine;
           const dmxTilt = ((tilt16 / 65535) - 0.5) * Math.PI * 1.5;
-          f3d._targetTiltX = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
+          f3d._dmxTiltX = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
         }
         // Map speed channel to lerp rate
         if (cm.speedOffset !== null) {
