@@ -1108,7 +1108,9 @@ export const Stage3D: React.FC = () => {
 
       if (blackout) intensity = 0;
       intensity = intensity * (grandMaster / 255);
-      const normIntensity = intensity / 255;
+      // Square-law dimmer curve (LED fixtures: perceived brightness ∝ DMX²)
+      const rawNormIntensity = intensity / 255;
+      const normIntensity = rawNormIntensity * rawNormIntensity; // gamma 2.0
 
       // --- Color ---
       let color = new THREE.Color(0xffffff);
