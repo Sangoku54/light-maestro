@@ -47,6 +47,7 @@ interface FixtureChannelMap {
   wheelCaps: DmxFixtureCapability[] | null;
   panOffset: number | null;
   tiltOffset: number | null;
+  speedOffset: number | null;
   goboOffset: number | null;
 }
 
@@ -63,6 +64,7 @@ function analyzeFixtureChannels(
     wheelCaps: null,
     panOffset: null,
     tiltOffset: null,
+    speedOffset: null,
     goboOffset: null,
   };
 
@@ -85,6 +87,9 @@ function analyzeFixtureChannels(
         break;
       case 'Tilt':
         if (result.tiltOffset === null) result.tiltOffset = i;
+        break;
+      case 'Speed':
+        if (result.speedOffset === null) result.speedOffset = i;
         break;
       case 'Gobo':
         if (result.goboOffset === null) result.goboOffset = i;
@@ -157,6 +162,11 @@ interface Fixture3D {
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
   _mountTilt: number;           // mount-mode head tilt compensation (π for ground, 0 otherwise)
+  _targetPanY: number;           // target pan rotation (set by DMX)
+  _targetTiltX: number;          // target tilt rotation (set by DMX)
+  _currentPanY: number;          // current pan rotation (interpolated)
+  _currentTiltX: number;         // current tilt rotation (interpolated)
+  _speedLerp: number;            // lerp rate from speed channel (0.015-0.40)
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -511,6 +521,11 @@ export const Stage3D: React.FC = () => {
       beamAngle: pos.beamAngle ?? 0.15,
       _staticTilt: (pos.tilt ?? 0) * Math.PI / 180,
       _mountTilt: 0,
+      _targetPanY: 0,
+      _targetTiltX: 0,
+      _currentPanY: 0,
+      _currentTiltX: 0,
+      _speedLerp: 0.10,  // default medium speed
     };
   }, [universeIndexMap]);
 
@@ -706,6 +721,19 @@ export const Stage3D: React.FC = () => {
         updateDmxState();
       }
 
+      // Speed-based pan/tilt interpolation — respects fixture speed channel
+      for (const f3d of fixturesRef.current.values()) {
+        const factor = 1 - Math.exp(-f3d._speedLerp * 60 * dt); // frame-rate-independent lerp
+        if (f3d.armGroup) {
+          f3d._currentPanY += (f3d._targetPanY - f3d._currentPanY) * factor;
+          f3d.armGroup.rotation.y = f3d._currentPanY;
+        }
+        if (f3d.headGroup) {
+          f3d._currentTiltX += (f3d._targetTiltX - f3d._currentTiltX) * factor;
+          f3d.headGroup.rotation.x = f3d._currentTiltX;
+        }
+      }
+
       renderer.render(scene, camera);
     };
 
@@ -882,6 +910,9 @@ export const Stage3D: React.FC = () => {
         fitMountRotation(f3d, pos.mountMode || 'top');
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
         if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._mountTilt + f3d._staticTilt;
+        // Sync interpolation state with actual rotations
+        if (f3d.armGroup) { f3d._targetPanY = f3d._currentPanY = f3d.armGroup.rotation.y; }
+        if (f3d.headGroup) { f3d._targetTiltX = f3d._currentTiltX = f3d.headGroup.rotation.x; }
         // Update beam angle (zoom)
         if (pos.beamAngle !== undefined && f3d.beamCone) {
           f3d.beamAngle = pos.beamAngle;
@@ -921,6 +952,9 @@ export const Stage3D: React.FC = () => {
       fitMountRotation(f3d, pos.mountMode || 'top');
       f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
       if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._mountTilt + f3d._staticTilt; }
+      // Sync interpolation state
+      if (f3d.armGroup) { f3d._targetPanY = f3d._currentPanY = f3d.armGroup.rotation.y; }
+      if (f3d.headGroup) { f3d._targetTiltX = f3d._currentTiltX = f3d.headGroup.rotation.x; }
       if (pos.beamAngle !== undefined && f3d.beamCone) {
         f3d.beamAngle = pos.beamAngle;
         const ch = 50;
@@ -957,7 +991,7 @@ export const Stage3D: React.FC = () => {
         if (f3d.pointLight) f3d.pointLight.intensity = 0;
         if (f3d.beamCone) { (f3d.beamCone.material as THREE.MeshBasicMaterial).opacity = 0; }
         // Apply static tilt even without DMX
-        if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._mountTilt + (f3d._staticTilt ?? 0);
+        if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._mountTilt + (f3d._staticTilt ?? 0); f3d._currentTiltX = f3d._targetTiltX = f3d.headGroup.rotation.x; }
         continue;
       }
       // Normalize data to Uint8Array-like access
@@ -997,16 +1031,19 @@ export const Stage3D: React.FC = () => {
       }
 
       // --- Pan/Tilt (QLC+ model: arm=pan/Y, head=tilt/X) ---
+      // Set targets for speed-based interpolation (applied in animate loop)
       const panVal = cm.panOffset !== null ? (data[baseAddr + cm.panOffset] ?? 128) : 128;
       const tiltVal = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128) : 128;
+      const speedVal = cm.speedOffset !== null ? (data[baseAddr + cm.speedOffset] ?? 0) : 0;
       if (f3d.armGroup) {
-        f3d.armGroup.rotation.y = ((panVal / 255) - 0.5) * Math.PI * 3;
+        f3d._targetPanY = ((panVal / 255) - 0.5) * Math.PI * 3;
       }
       if (f3d.headGroup) {
-        // Tilt range: ±135° (π * 1.5) — matches real moving-head tilt span
         const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI * 1.5;
-        f3d.headGroup.rotation.x = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
+        f3d._targetTiltX = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
       }
+      // Map speed channel to lerp rate: 0=slow (0.015), 255=fast (0.40)
+      f3d._speedLerp = 0.015 + (speedVal / 255) * 0.385;
 
       // --- Update PointLight ---
       if (f3d.pointLight) {
