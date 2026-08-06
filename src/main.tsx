@@ -7,6 +7,8 @@ import App from './App';
 // showStore persistence has been moved to filesystem via Electron IPC.
 try { localStorage.removeItem('light-maestro-show'); } catch { /* */ }
 
+console.log('%cLight Maestro %c24 commits %cdmxBridge', 'color:#0ff;font-size:16px', 'color:#fa0', 'color:#0f0');
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
