@@ -77,8 +77,8 @@ function createWindow() {
   // Load strategy:
   //   1. Try Vite dev server (localhost:5173) — used by `npm run dev`
   //   2. Fall back to pre-built dist/renderer — used by .vbs/.bat launchers
+  mainWindow.webContents.openDevTools({ mode: 'bottom' });
   if (isDev) {
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
     const viteUrl = 'http://localhost:5173';
     const fallbackPath = path.join(__dirname, '../renderer/index.html');
     const tryVite = (attempt: number) => {
