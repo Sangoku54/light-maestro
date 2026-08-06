@@ -760,7 +760,19 @@ export const Stage3D: React.FC = () => {
         particles.geometry.attributes.position.needsUpdate = true;
       }
 
-      // Speed-based pan/tilt interpolation - respects fixture speed channel
+      // ═══ SMOKE TEST: hard-coded rotation to prove render loop + hierarchy work ═══
+      // If beams STILL don't move with this, the problem is NOT in our logic.
+      const smokeT = performance.now() * 0.001;
+      for (const f3d of fixturesRef.current.values()) {
+        if (f3d.armGroup) {
+          f3d.armGroup.rotation.y = Math.sin(smokeT * 1.5) * 1.2;  // ±69° fast sweep
+        }
+        if (f3d.headGroup) {
+          f3d.headGroup.rotation.x = Math.sin(smokeT * 2.0) * 0.8;  // ±46° fast tilt
+        }
+      }
+
+      // Speed-based pan/tilt interpolation — BELOW smoke test, will be restored after diag
       for (const f3d of fixturesRef.current.values()) {
         // Minimum lerp factor: guarantees visible movement even at 9 fps
         const rawFactor = 1 - Math.exp(-f3d._speedLerp * 60 * dt);
