@@ -274,16 +274,11 @@ export const Stage3D: React.FC = () => {
           emissive: tierColor, emissiveIntensity: 0.2,
         });
 
-        // ── BASE: wide plate + truss clamp bracket ──
+        // ── BASE: minimal anchor disc ──
         const basePlate = new THREE.Mesh(
-          new THREE.BoxGeometry(0.40, 0.05, 0.40), metalMat);
-        basePlate.position.y = 0.025;
+          new THREE.CylinderGeometry(0.08, 0.10, 0.04, 12), metalMat);
+        basePlate.position.y = 0.02;
         group.add(basePlate);
-        const clamp = new THREE.Mesh(
-          new THREE.BoxGeometry(0.12, 0.08, 0.28),
-          new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.4, metalness: 0.85 }));
-        clamp.position.y = 0.09;
-        group.add(clamp);
 
         bodyMesh = basePlate;
 
@@ -437,9 +432,9 @@ export const Stage3D: React.FC = () => {
           emissive: tierColor, emissiveIntensity: 0.2,
         });
 
-        // Base plate
-        const base = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.05, 0.35), metalMat);
-        base.position.y = 0.025;
+        // Base plate: minimal anchor disc
+        const base = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.04, 12), metalMat);
+        base.position.y = 0.02;
         group.add(base);
 
         // Yoke arms
