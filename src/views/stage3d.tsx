@@ -1196,16 +1196,20 @@ export const Stage3D: React.FC = () => {
     }
   }, [patchedFixtures, showBeams]);
 
-  // Subscribe to Zustand store — triggers updateDmxState on every DMX change
+  // ── DMX → 3D sync: subscribe (primary) + interval fallback (safety net) ───
   useEffect(() => {
     let count = 0;
+    // Primary: Zustand subscribe — fires on every store change
     const unsub = useAppStore.subscribe(() => {
       updateDmxState();
-      // Minimal diagnostic: log first 3 invocations then every 60th
       count++;
       if (count <= 3 || count % 60 === 0) console.log('[stage3d-sub] updateDmxState fired #', count);
     });
-    return unsub;
+    // Fallback: 200ms interval — catches edge cases where subscribe misses
+    const interval = setInterval(() => {
+      updateDmxState();
+    }, 200);
+    return () => { unsub(); clearInterval(interval); };
   }, [updateDmxState]);
 
   // ── Camera presets ──────────────────────────────────
