@@ -1070,10 +1070,17 @@ export const Stage3D: React.FC = () => {
     const blackout = useAppStore.getState().dmx?.blackout ?? false;
     const grandMaster = useAppStore.getState().dmx?.grandMaster ?? 255;
 
+    let diagLines: string[] = [];
+    let fixtureCount = 0;
+    let noDataCount = 0;
+    let noPfCount = 0;
+
     for (const f3d of fixturesRef.current.values()) {
+      fixtureCount++;
       // Get DMX data for this fixture's universe from the bridge cache
       const chVals = dmxBridge.getChannels(f3d.universeIndex);
       if (!chVals || Object.keys(chVals).length === 0) {
+        noDataCount++;
         if (f3d.pointLight) f3d.pointLight.intensity = 0;
         if (f3d.beamCone) { (f3d.beamCone.material as THREE.ShaderMaterial).uniforms.uOpacity.value = 0; }
         // Apply static tilt even without DMX
@@ -1082,7 +1089,7 @@ export const Stage3D: React.FC = () => {
       }
 
       const pf = patchedFixtures.find(f => f.id === f3d.id);
-      if (!pf) continue;
+      if (!pf) { noPfCount++; continue; }
 
       const cm = f3d.channelMap;
       const sAddr = pf.startAddress; // 1-indexed, matches chVals keys
@@ -1151,6 +1158,14 @@ export const Stage3D: React.FC = () => {
         const dmxTilt = ((tilt16 / 65535) - 0.5) * Math.PI * 1.5;
         f3d._targetTiltX = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
       }
+      // Diagnostic: track first fixture's pan/tilt + universe
+      if (fixtureCount === 1) {
+        diagLines = [
+          `uni=${f3d.universeIndex} addr=${sAddr} panOff=${cm.panOffset} tiltOff=${cm.tiltOffset}`,
+          `pan=${panCoarse}f=${panFine} tilt=${tiltCoarse}f=${tiltFine}`,
+          `tgtPan=${f3d._targetPanY.toFixed(2)} tgtTilt=${f3d._targetTiltX.toFixed(2)}`,
+        ];
+      }
       // Track DMX activity: any non-center pan/tilt = DMX is driving
       if (pan16 !== 32768 || tilt16 !== 32768) {
         dmxActivityRef.current = performance.now();
@@ -1194,6 +1209,19 @@ export const Stage3D: React.FC = () => {
         }
       }
     }
+    // Update diagnostic overlay with per-frame info
+    const diagEl = dmxDiagRef.current;
+    if (diagEl) {
+      if (fixtureCount === 0) {
+        diagEl.innerHTML = '<span style="color:#f44">NO fixtures in ref</span>';
+      } else if (noPfCount > 0 && noPfCount === fixtureCount) {
+        diagEl.innerHTML = `<span style="color:#f44">${fixtureCount}f / NO patch match</span>`;
+      } else if (noDataCount > 0 && noDataCount === fixtureCount) {
+        diagEl.innerHTML = `<span style="color:#fa0">${fixtureCount}f / NO dmx data</span>`;
+      } else {
+        diagEl.innerHTML = diagLines.map(l => `<div>${l}</div>`).join('');
+      }
+    }
   }, [patchedFixtures, showBeams]);
 
   // ── DMX → 3D sync: direct bridge from dmx-playback (no store, no polling) ───
@@ -1209,9 +1237,7 @@ export const Stage3D: React.FC = () => {
     const unsub = dmxBridge.onPush(() => {
       dmxDiagCount.current++;
       dmxActivityRef.current = performance.now(); // mark DMX active on every push
-      const el = dmxDiagRef.current;
-      if (el) el.textContent = `DMX push #${dmxDiagCount.current}`;
-      syncRef.current();
+      syncRef.current(); // updateDmxState now writes to dmxDiagRef
     });
     return unsub;
   }, [/* never re-subscribe — syncRef always points to latest */]);
