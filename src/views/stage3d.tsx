@@ -20,6 +20,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { useShowStore, type PatchedFixture, type FixturePos } from '../stores/showStore';
 import { useAppStore } from '../stores/appStore';
+import { dmxBridge } from '../utils/dmx-bridge';
 import {
   loadFixtureDefinitions,
   clearFixtureDefCache,
@@ -1196,21 +1197,17 @@ export const Stage3D: React.FC = () => {
     }
   }, [patchedFixtures, showBeams]);
 
-  // ── DMX → 3D sync: subscribe (primary) + interval fallback (safety net) ───
+  // ── DMX → 3D sync: direct bridge from dmx-playback (no store, no polling) ───
+  // Ref to latest updateDmxState callback (avoids closure staleness)
+  const syncRef = useRef(updateDmxState);
+  syncRef.current = updateDmxState;
+
   useEffect(() => {
-    let count = 0;
-    // Primary: Zustand subscribe — fires on every store change
-    const unsub = useAppStore.subscribe(() => {
-      updateDmxState();
-      count++;
-      if (count <= 3 || count % 60 === 0) console.log('[stage3d-sub] updateDmxState fired #', count);
+    const unsub = dmxBridge.onPush(() => {
+      syncRef.current();
     });
-    // Fallback: 200ms interval — catches edge cases where subscribe misses
-    const interval = setInterval(() => {
-      updateDmxState();
-    }, 200);
-    return () => { unsub(); clearInterval(interval); };
-  }, [updateDmxState]);
+    return unsub;
+  }, [/* never re-subscribe — syncRef always points to latest */]);
 
   // ── Camera presets ──────────────────────────────────
   // ── Camera presets ──────────────────────────────────
