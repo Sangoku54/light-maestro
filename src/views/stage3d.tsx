@@ -201,6 +201,7 @@ export const Stage3D: React.FC = () => {
   const animFrameRef = useRef<number>(0);
   const lastDmxPollRef = useRef<number>(0);
   const updateDmxStateRef = useRef<() => void>(() => {});
+  const dmxActivityRef = useRef<number>(0); // timestamp of last DMX-driven pan/tilt change
   const particlesRef = useRef<THREE.Points | null>(null);
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
@@ -765,6 +766,16 @@ export const Stage3D: React.FC = () => {
       // Speed-based pan/tilt interpolation — respects fixture speed channel
       for (const f3d of fixturesRef.current.values()) {
         const factor = 1 - Math.exp(-f3d._speedLerp * 60 * dt); // frame-rate-independent lerp
+        // Diagnostic auto-sweep: if no DMX activity for 3s, gently oscillate pan ±60°
+        // This proves the render loop + beam hierarchy work — remove once DMX is verified
+        const elapsedSinceDmx = performance.now() - dmxActivityRef.current;
+        if (elapsedSinceDmx > 3000 && f3d.headGroup) {
+          const autoTilt = Math.sin(performance.now() * 0.001) * 0.4; // ±23° gentle tilt
+          f3d._targetTiltX = f3d._mountTilt + autoTilt + (f3d._staticTilt ?? 0);
+          const autoPan = Math.sin(performance.now() * 0.0007) * Math.PI * 0.33; // ±60° pan
+          if (f3d.armGroup) f3d._targetPanY = autoPan;
+          f3d._speedLerp = 0.08; // moderate speed for smooth sweep
+        }
         if (f3d.armGroup) {
           f3d._currentPanY += (f3d._targetPanY - f3d._currentPanY) * factor;
           f3d.armGroup.rotation.y = f3d._currentPanY;
@@ -1188,6 +1199,10 @@ export const Stage3D: React.FC = () => {
       if (f3d.headGroup) {
         const dmxTilt = ((tilt16 / 65535) - 0.5) * Math.PI * 1.5;
         f3d._targetTiltX = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
+      }
+      // Track DMX activity: any non-center pan/tilt = DMX is driving
+      if (pan16 !== 32768 || tilt16 !== 32768) {
+        dmxActivityRef.current = performance.now();
       }
       // Map speed channel to lerp rate: 0=slow (0.015), 255=fast (0.40)
       f3d._speedLerp = 0.015 + (speedVal / 255) * 0.385;
