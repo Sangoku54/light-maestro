@@ -153,6 +153,7 @@ interface AppState {
   setBlackout: (blackout: boolean) => void;
   setGrandMaster: (value: number) => void;
   setChannelValue: (universe: number, channel: number, value: number) => void;
+  setUniverseData: (universe: number, values: Record<number, number>) => void;
   setAudioAnalysis: (analysis: any) => void;
   setAudioRunning: (running: boolean) => void;
 }
@@ -373,6 +374,25 @@ export const useAppStore = create<AppState>()(
           data = new Uint8Array(512);
         }
         data[channel - 1] = value;
+        set({ dmx: { ...dmx, channelData: { ...(raw as any), [universe]: data } } });
+      },
+
+      setUniverseData: (universe: number, values: Record<number, number>) => {
+        const { dmx } = get();
+        const raw = dmx.channelData || {};
+        const prev = (raw as any)[universe];
+        let data: Uint8Array;
+        if (prev instanceof Uint8Array) {
+          data = new Uint8Array(prev); // copy to avoid mutation surprises
+        } else if (prev && typeof prev === 'object') {
+          data = new Uint8Array(Object.values(prev as Record<number, number>));
+        } else {
+          data = new Uint8Array(512);
+        }
+        for (const [ch, val] of Object.entries(values)) {
+          const idx = Number(ch) - 1;
+          if (idx >= 0 && idx < 512) data[idx] = val;
+        }
         set({ dmx: { ...dmx, channelData: { ...(raw as any), [universe]: data } } });
       },
 

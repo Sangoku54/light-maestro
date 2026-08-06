@@ -13,6 +13,7 @@ import { useEffect, useRef } from 'react';
 import type { PatchedFixture, FixtureTier } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureCapability } from './dmx-cues';
 import { resolveTrackTargets, type FixtureTrack, type MovementBlock } from './fixture-tracks';
+import { useAppStore } from '../stores/appstore';
 
 /**
  * Dispatch DMX channel values to the correct universe based on fixture address ranges.
@@ -592,7 +593,8 @@ export function useDmxPlayback(options: {
         if(Object.keys(chVals).length>0){
           const sig=String(uniIdx)+':'+Object.entries(chVals).sort((a,b)=>Number(a[0])-Number(b[0])).map(([k,v])=>`${k}=${v}`).join(',');
           if(sig!==lastSig){lastSig=sig;
-            // Virtual DMX mirror for 3D Stage view
+            // Mirror DMX to React store for 3D Stage view
+            useAppStore.getState().setUniverseData(uniIdx, chVals);
             if (onVirtualDmx) onVirtualDmx(uniIdx, chVals);
             api.setChannels(uniIdx,chVals).catch(()=>{});}
         }

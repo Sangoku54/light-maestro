@@ -1884,10 +1884,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     fixtureGroupsRef,
     colorFadeMs: qs.colorFadeMs ?? 250,
     onVirtualDmx: (uni, chVals) => {
-      const aps = useAppStore.getState();
-      for (const [ch, val] of Object.entries(chVals)) {
-        aps.setChannelValue(uni, Number(ch), val);
-      }
+      useAppStore.getState().setUniverseData(uni, chVals);
     },
   });
 
