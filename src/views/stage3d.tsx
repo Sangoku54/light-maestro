@@ -762,9 +762,11 @@ export const Stage3D: React.FC = () => {
 
       // Speed-based pan/tilt interpolation - respects fixture speed channel
       for (const f3d of fixturesRef.current.values()) {
-        const factor = 1 - Math.exp(-f3d._speedLerp * 60 * dt); // frame-rate-independent lerp
-        // Diagnostic auto-sweep: if no DMX activity for 3s, gently oscillate pan ±60°
-        // When DMX is active, blend: DMX target + subtle auto wobble (15% amplitude)
+        // Minimum lerp factor: guarantees visible movement even at 9 fps
+        const rawFactor = 1 - Math.exp(-f3d._speedLerp * 60 * dt);
+        const factor = Math.max(rawFactor, 1 - Math.exp(-0.10 * 60 * dt)); // floor at speedLerp≈0.10
+
+        // Auto-sweep: always runs — full sweep when no DMX, subtle blend when DMX active
         const elapsedSinceDmx = performance.now() - dmxActivityRef.current;
         const dmxAlive = elapsedSinceDmx < 3000 && f3d.headGroup && !isNaN(f3d._dmxPanY as number);
         const tNow = performance.now();
@@ -775,19 +777,21 @@ export const Stage3D: React.FC = () => {
           // DMX target + subtle auto wobble (15% amplitude)
           if (f3d.armGroup) f3d._targetPanY = f3d._dmxPanY + autoPan * 0.15;
           f3d._targetTiltX = f3d._dmxTiltX + autoTilt * 0.15;
-        } else if (!dmxAlive) {
+        } else {
           // Full auto-sweep when no DMX data
           if (f3d.headGroup) {
             f3d._targetTiltX = f3d._mountTilt + autoTilt + (f3d._staticTilt ?? 0);
             if (f3d.armGroup) f3d._targetPanY = autoPan;
           }
-          f3d._speedLerp = 0.08; // moderate speed for smooth sweep
+          f3d._speedLerp = 0.10;
         }
-        if (f3d.armGroup) {
+
+        // Apply rotation with NaN guard
+        if (f3d.armGroup && !isNaN(f3d._targetPanY)) {
           f3d._currentPanY += (f3d._targetPanY - f3d._currentPanY) * factor;
           f3d.armGroup.rotation.y = f3d._currentPanY;
         }
-        if (f3d.headGroup) {
+        if (f3d.headGroup && !isNaN(f3d._targetTiltX)) {
           f3d._currentTiltX += (f3d._targetTiltX - f3d._currentTiltX) * factor;
           f3d.headGroup.rotation.x = f3d._currentTiltX;
         }
