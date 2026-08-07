@@ -594,6 +594,7 @@ async function saveProject(
   colorTracks: ColorTrack[],
   strobeTracks: StrobeTrack[],
   dimmerTracks: DimmerTrack[],
+  disabledFixtures: Set<string>,
 ): Promise<void> {
   if (!analysis) return;
   const data: any = {
@@ -606,6 +607,7 @@ async function saveProject(
     strobeTracks,
     dimmerTracks,
     fixtureTracks,
+    disabledFixtures: [...disabledFixtures],
     audioFileName: analysis.fileName,
     timestamp: new Date().toISOString(),
     version: 1,
@@ -674,6 +676,7 @@ async function loadProject(
   setColorTracks: (tracks: ColorTrack[]) => void,
   setStrobeTracks: (tracks: StrobeTrack[]) => void,
   setDimmerTracks: (tracks: DimmerTrack[]) => void,
+  setDisabledFixtures?: (ids: Set<string>) => void,
 ): Promise<void> {
   return new Promise((resolve) => {
     const inp = document.createElement('input');
@@ -693,6 +696,7 @@ async function loadProject(
         if (data.strobeTracks) setStrobeTracks(data.strobeTracks);
         if (data.dimmerTracks) setDimmerTracks(data.dimmerTracks);
         if (data.fixtureTracks) setFixtureTracks(data.fixtureTracks);
+        if (data.disabledFixtures && setDisabledFixtures) setDisabledFixtures(new Set(data.disabledFixtures));
         if (data.analysis) {
           if (data.audioDataBase64) {
             try {
@@ -1650,6 +1654,9 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const scenePickerRef = useRef<HTMLDivElement>(null);
   const chaserPickerRef = useRef<HTMLDivElement>(null);
   const [manualCues, setManualCues] = useState<DmxCue[]>([]);
+  const [disabledFixtures, setDisabledFixtures] = useState<Set<string>>(new Set());
+  const disabledFixturesRef = useRef<Set<string>>(new Set());
+  disabledFixturesRef.current = disabledFixtures;
   const [efxTracks, setEfxTracks] = useState<EfxTrack[]>([]);
   const [colorTracks, setColorTracks] = useState<ColorTrack[]>([]);
   const colorTracksRef = useRef<ColorTrack[]>([]);
@@ -1718,35 +1725,51 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       colorTracks: [...colorTracks],
       strobeTracks: [...strobeTracks],
       dimmerTracks: [...dimmerTracks],
+      disabledFixtures: new Set(disabledFixtures),
     });
     redoHistoryRef.current = [];
-  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks]);
+  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, disabledFixtures]);
+
+    const restoreState = (state: any) => {
+    setSections(state.sections);
+    setManualCues(state.manual);
+    setEfxTracks(state.efx);
+    setFixtureTracks(state.fixtureTracks);
+    setColorTracks(state.colorTracks);
+    setStrobeTracks(state.strobeTracks);
+    setDimmerTracks(state.dimmerTracks);
+    setDisabledFixtures(state.disabledFixtures || new Set<string>());
+  };
+  const saveState = () => ({
+    sections: [...sections], manual: [...manualCues], efx: [...efxTracks],
+    fixtureTracks: [...fixtureTracks], colorTracks: [...colorTracks],
+    strobeTracks: [...strobeTracks], dimmerTracks: [...dimmerTracks],
+    disabledFixtures: new Set(disabledFixtures),
+  });
 
   const undo = useCallback(() => {
     const state = undoHistoryRef.current.pop();
     if (!state) return;
-    redoHistoryRef.current.push({ sections: [...sections], manual: [...manualCues], efx: [...efxTracks], fixtureTracks: [...fixtureTracks], colorTracks: [...colorTracks], strobeTracks: [...strobeTracks], dimmerTracks: [...dimmerTracks] });
-    setSections(state.sections);
-    setManualCues(state.manual);
-    setEfxTracks(state.efx);
-    setFixtureTracks(state.fixtureTracks);
-    setColorTracks(state.colorTracks);
-    setStrobeTracks(state.strobeTracks);
-    setDimmerTracks(state.dimmerTracks);
-  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks]);
+    redoHistoryRef.current.push(saveState());
+    restoreState(state);
+  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, disabledFixtures]);
 
   const redo = useCallback(() => {
     const state = redoHistoryRef.current.pop();
     if (!state) return;
-    undoHistoryRef.current.push({ sections: [...sections], manual: [...manualCues], efx: [...efxTracks], fixtureTracks: [...fixtureTracks], colorTracks: [...colorTracks], strobeTracks: [...strobeTracks], dimmerTracks: [...dimmerTracks] });
-    setSections(state.sections);
-    setManualCues(state.manual);
-    setEfxTracks(state.efx);
-    setFixtureTracks(state.fixtureTracks);
-    setColorTracks(state.colorTracks);
-    setStrobeTracks(state.strobeTracks);
-    setDimmerTracks(state.dimmerTracks);
+    undoHistoryRef.current.push(saveState());
+    restoreState(state);
   }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks]);
+
+  const handleToggleFixture = useCallback((fixtureId: string) => {
+    pushHistory();
+    setDisabledFixtures(prev => {
+      const next = new Set(prev);
+      if (next.has(fixtureId)) { next.delete(fixtureId); }
+      else { next.add(fixtureId); }
+      return next;
+    });
+  }, [pushHistory]);
 
   const clearAudio = useCallback(() => {
     pushHistory();
@@ -2174,6 +2197,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     colorTracksRef: colorTracksRef as any,
     strobeTracksRef: strobeTracksRef as any,
     dimmerTracksRef: dimmerTracksRef as any,
+    disabledFixturesRef: disabledFixturesRef as any,
     colorFadeMs: qs.colorFadeMs ?? 250,
     onVirtualDmx: (uni, chVals) => {
       useAppStore.getState().setUniverseData(uni, chVals);
@@ -2789,10 +2813,10 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         </button>
 
         {/* Save / Load */}
-        <button title={t('save') || 'Save'} onClick={() => saveProject(resolvedAnalysis, sections, qs, audioFile, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks)} className="p-1 rounded text-gray-400 hover:text-white">
+        <button title={t('save') || 'Save'} onClick={() => saveProject(resolvedAnalysis, sections, qs, audioFile, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, disabledFixtures)} className="p-1 rounded text-gray-400 hover:text-white">
           <Save className="w-3.5 h-3.5" />
         </button>
-        <button title={t('open') || 'Open'} onClick={() => loadProject(setQs, audioFile, setSections, setManualCues, setEfxTracks, setFixtureTracks, setColorTracks, setStrobeTracks, setDimmerTracks)} className="p-1 rounded text-gray-400 hover:text-white">
+        <button title={t('open') || 'Open'} onClick={() => loadProject(setQs, audioFile, setSections, setManualCues, setEfxTracks, setFixtureTracks, setColorTracks, setStrobeTracks, setDimmerTracks, setDisabledFixtures)} className="p-1 rounded text-gray-400 hover:text-white">
           <FolderOpen className="w-3.5 h-3.5" />
         </button>
         <button title={t('clear') || 'Clear'} onClick={clearAudio} className="p-1 rounded text-gray-400 hover:text-red-400">
@@ -2953,6 +2977,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           scenes={entitySceneList}
           chasers={entityChaserList}
           cueLists={entityCueListList}
+          disabledFixtures={disabledFixtures}
+          onToggleFixture={handleToggleFixture}
           effects={entityEffectList}
         />
       </div>

@@ -405,9 +405,10 @@ export function useDmxPlayback(options: {
   colorTracksRef?: React.MutableRefObject<ColorTrackRef[]>; // Color track overrides
   strobeTracksRef?: React.MutableRefObject<StrobeTrackRef[]>; // Strobe track overrides
   dimmerTracksRef?: React.MutableRefObject<DimmerTrackRef[] | null>; // Dimmer track overrides (highest priority for intensity)
+  disabledFixturesRef?: React.MutableRefObject<Set<string>>; // Disabled fixture IDs
   onVirtualDmx?: (universe: number, channelValues: Record<number, number>) => void; // Mirror for 3D view
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,onVirtualDmx}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,onVirtualDmx,disabledFixturesRef}=options;
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
 
@@ -557,6 +558,9 @@ export function useDmxPlayback(options: {
 
         for(let fi=0;fi<fixtures.length;fi++){
           const fa=fixtures[fi];const pf=fa.fixture;
+
+          // Skip disabled fixtures
+          if (disabledFixturesRef?.current?.has(pf.id)) continue;
 
           let dimmerVal = (() => {
             // Fixture track override check
@@ -829,6 +833,7 @@ export function computeDmxForCue(
   colorTrackColors?: Map<string, string>,
   strobeTrackOverrides?: Map<string, { active: boolean; speed: number }>,
   dimmerTrackOverrides?: Map<string, { active: boolean; value: number }>,
+  disabledFixtures?: Set<string>,
 ): Array<{ universe: number; channelValues: Record<number, number> }> {
   const uniIds = universes.map(u => String(u.id));
   const analyses: ChannelAnalysis[] = [];
@@ -864,6 +869,9 @@ export function computeDmxForCue(
     for (let fi = 0; fi < fixtures.length; fi++) {
       const fa = fixtures[fi];
       const pf = fa.fixture;
+
+      // Skip disabled fixtures
+      if (disabledFixtures?.has(pf.id)) continue;
 
       let dimmerVal = (fixtureTrackOverrides?.forcedDimmers?.has(pf.id))
         ? fixtureTrackOverrides.forcedDimmers.get(pf.id)!

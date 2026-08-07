@@ -185,6 +185,9 @@ interface TrackTimelineProps {
   colorEntries?: Array<{ id: string; time: number; endTime: number; color: string }>;
   dimmerEntries?: Array<{ id: string; time: number; endTime: number; value: number }>;
   strobeEntries?: Array<{ id: string; time: number; endTime: number; speed: number }>;
+  /** Disabled fixture IDs (checkboxes) */
+  disabledFixtures?: Set<string>;
+  onToggleFixture?: (fixtureId: string) => void;
 }
 
 // ─── Constants ────────────────────────────────────────────
@@ -412,6 +415,8 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   colorEntries,
   dimmerEntries,
   strobeEntries,
+  disabledFixtures,
+  onToggleFixture,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -2607,6 +2612,30 @@ if (editBlock) { setEditBlock(null); return; }
         onWheel={(e) => { if (e.ctrlKey) { e.preventDefault(); setZoomLevel(prev => Math.max(0.25, Math.min(8, prev + (e.deltaY < 0 ? 0.25 : -0.25)))); } }}
       >
         <canvas ref={canvasRef} className="w-full h-full" />
+      </div>
+
+      {/* ── Fixture Enable/Disable Checkboxes ── */}
+      <div className="absolute top-0 left-0 z-20 pointer-events-none" style={{ paddingTop: HEADER_HEIGHT }}>
+        {patchedFixtures.map(pf => {
+          const disabled = disabledFixtures?.has(pf.id) ?? false;
+          return (
+            <div
+              key={pf.id}
+              className="flex items-center pointer-events-auto"
+              style={{ height: TRACK_HEIGHT, paddingLeft: 4, width: LABEL_WIDTH - 4 }}
+            >
+              <input
+                type="checkbox"
+                checked={!disabled}
+                onChange={() => onToggleFixture?.(pf.id)}
+                title={disabled
+                  ? `Activer "${pf.name}" — la fixture est désactivée`
+                  : `Désactiver "${pf.name}" — la fixture est active`}
+                className="w-3.5 h-3.5 accent-purple-500 cursor-pointer"
+              />
+            </div>
+          );
+        })}
       </div>
 
       {/* ── Fixture Track Context Menu ── */}
