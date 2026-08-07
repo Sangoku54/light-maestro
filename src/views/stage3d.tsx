@@ -171,7 +171,6 @@ export const Stage3D: React.FC = () => {
   const timerRef = useRef<THREE.Timer>(new THREE.Timer());
   const animFrameRef = useRef<number>(0);
   const lastDmxPollRef = useRef<number>(0);
-  const dtRef = useRef<number>(0.016);
   const particlesRef = useRef<THREE.Points | null>(null);
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
@@ -683,7 +682,6 @@ export const Stage3D: React.FC = () => {
       animFrameRef.current = requestAnimationFrame(animate);
 
       const dt = Math.min(timer.getDelta(), 0.1);
-      dtRef.current = dt;
       controls.update();
 
       // Animate smoke particles
@@ -1003,14 +1001,12 @@ export const Stage3D: React.FC = () => {
       const tiltVal = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128) : 128;
       if (f3d.armGroup) {
         const panTarget = ((panVal / 255) - 0.5) * Math.PI * 3;
-        const t = 1 - Math.exp(-8 * dtRef.current);
-        f3d.armGroup.rotation.y += (panTarget - f3d.armGroup.rotation.y) * t;
+        f3d.armGroup.rotation.y += (panTarget - f3d.armGroup.rotation.y) * 0.3;
       }
       if (f3d.headGroup) {
         const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI * 1.5;
         const tiltTarget = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
-        const t = 1 - Math.exp(-8 * dtRef.current);
-        f3d.headGroup.rotation.x += (tiltTarget - f3d.headGroup.rotation.x) * t;
+        f3d.headGroup.rotation.x += (tiltTarget - f3d.headGroup.rotation.x) * 0.3;
       }
 
       // --- Update PointLight ---
