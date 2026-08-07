@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useRef } from 'react';
-import type { PatchedFixture, FixtureTier } from '../stores/showStore';
+import type { PatchedFixture, FixtureGroup, FixtureTier } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureCapability } from './dmx-cues';
 import { resolveTrackTargets, computeEfxOverrides, type EfxTrackRef, type FixtureTrack, type MovementBlock } from './fixture-tracks';
 
@@ -24,6 +24,46 @@ export interface ColorTrackRef {
     fixtureIds?: string[];
   };
 }
+
+/** Compute per-fixture forced colors from active color track entries at a given time. */
+export function computeColorTrackColors(
+  colorTracks: ColorTrackRef[],
+  currentTime: number,
+  patchedFixtures: PatchedFixture[],
+  fixtureGroups: FixtureGroup[],
+): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const ctItem of colorTracks) {
+    const activeEntry = ctItem.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
+    if (!activeEntry || !ctItem.targetFixtures) continue;
+    const tf = ctItem.targetFixtures;
+    let targets: string[] = [];
+    if (tf.type === 'all') {
+      targets = patchedFixtures.map(f => f.id);
+    } else if (tf.type === 'group' && tf.groupId) {
+      const group = fixtureGroups.find(g => g.id === tf.groupId);
+      targets = group?.fixtureIds || [];
+    } else if (tf.type === 'fixture' && tf.fixtureIds) {
+      targets = tf.fixtureIds;
+    }
+    for (const fid of targets) {
+      if (activeEntry.endColor && activeEntry.endColor !== activeEntry.color) {
+        const dur = activeEntry.endTime - activeEntry.time;
+        const t = dur > 0 ? Math.max(0, Math.min(1, (currentTime - activeEntry.time) / dur)) : 1;
+        const [sr, sg, sb] = hexToRgb(activeEntry.color);
+        const [er, eg, eb] = hexToRgb(activeEntry.endColor);
+        const r = Math.round(sr + (er - sr) * t);
+        const g = Math.round(sg + (eg - sg) * t);
+        const b = Math.round(sb + (eb - sb) * t);
+        result.set(fid, `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`);
+      } else {
+        result.set(fid, activeEntry.color);
+      }
+    }
+  }
+  return result;
+}
+
 import type { SavedEffect } from '../stores/showStore';
 import { useAppStore } from '../stores/appstore';
 import { dmxBridge } from '../utils/dmx-bridge';
@@ -384,39 +424,12 @@ export function useDmxPlayback(options: {
       if(!analysis||c.length===0){rafRef.current=requestAnimationFrame(tick);return;}
 
       // ── Color track forced colors (compute early, used later in palette resolution) ──
-      const colorTrackColors = new Map<string, string>();
-      if (colorTracksRef?.current) {
-        for (const ctItem of colorTracksRef.current) {
-          const activeEntry = ctItem.entries.find(e => ct >= e.time && ct < e.endTime);
-          if (!activeEntry || !ctItem.targetFixtures) continue;
-          const tf = ctItem.targetFixtures;
-          let targets: string[] = [];
-          if (tf.type === 'all') {
-            targets = patchedFixtures.map(f => f.id);
-          } else if (tf.type === 'group' && tf.groupId) {
-            const groups = fixtureGroupsRef?.current || [];
-            const group = groups.find(g => g.id === tf.groupId);
-            targets = group?.fixtureIds || [];
-          } else if (tf.type === 'fixture' && tf.fixtureIds) {
-            targets = tf.fixtureIds;
-          }
-          for (const fid of targets) {
-            // Interpolate between start and end color
-            if (activeEntry.endColor && activeEntry.endColor !== activeEntry.color) {
-              const dur = activeEntry.endTime - activeEntry.time;
-              const t = dur > 0 ? Math.max(0, Math.min(1, (ct - activeEntry.time) / dur)) : 1;
-              const [sr, sg, sb] = hexToRgb(activeEntry.color);
-              const [er, eg, eb] = hexToRgb(activeEntry.endColor);
-              const r = Math.round(sr + (er - sr) * t);
-              const g = Math.round(sg + (eg - sg) * t);
-              const b = Math.round(sb + (eb - sb) * t);
-              colorTrackColors.set(fid, `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`);
-            } else {
-              colorTrackColors.set(fid, activeEntry.color);
-            }
-          }
-        }
-      }
+      const colorTrackColors = computeColorTrackColors(
+        colorTracksRef?.current || [],
+        ct,
+        patchedFixtures,
+        fixtureGroupsRef?.current || [],
+      );
 
       // Find active cue: direct latest-before-ct, NO section grouping
       let active:CuePlayback|null=null;
@@ -697,6 +710,7 @@ export function computeDmxForCue(
     forcedStrobes?: Map<string, { active: boolean; speed: number }>;
     forcedMovements?: Map<string, { pattern: string; amplitude: number }>;
   },
+  colorTrackColors?: Map<string, string>,
 ): Array<{ universe: number; channelValues: Record<number, number> }> {
   const uniIds = universes.map(u => String(u.id));
   const analyses: ChannelAnalysis[] = [];
@@ -743,7 +757,7 @@ export function computeDmxForCue(
 
       const tierColorIdx = pf.tier === 'secondary' ? 1 : pf.tier === 'tertiary' ? 2 : 0;
       // Color track > fixture track > cue color
-      let paletteColor = (colorTrackColors.has(pf.id))
+      let paletteColor = (colorTrackColors?.has(pf.id))
         ? colorTrackColors.get(pf.id)!
         : (fixtureTrackOverrides?.forcedColors?.has(pf.id))
         ? fixtureTrackOverrides.forcedColors.get(pf.id)!

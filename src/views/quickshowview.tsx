@@ -10,7 +10,7 @@ import { TrackAnalysis, TrackSection, SECTION_COLORS, keyToPalette, SectionAnaly
 import type { GenreProfile } from '../hooks/audio-analysis';
 import { computeFixtureTrackOverrides, type FixtureTrack } from '../hooks/fixture-tracks';
 import { loadFixtureDefinitions, clearFixtureDefCache, type DmxCue, type DmxFixtureDefinition } from '../hooks/dmx-cues';
-import { useDmxPlayback, computeDmxForCue } from '../hooks/dmx-playback';
+import { useDmxPlayback, computeDmxForCue, computeColorTrackColors, type ColorTrackRef } from '../hooks/dmx-playback';
 import { Stage3D } from './Stage3D';
 import TrackTimeline from './TrackTimeline';
 import type { EfxTrack, EfxTrackEntry, ColorTrack, ColorTrackEntry } from './TrackTimeline';
@@ -1785,7 +1785,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           for (const cue of currentCues) {
             try {
               const overrides = computeFixtureTrackOverrides(fixtureTracksRef.current, cue.time, pf, fixtureGroupsRef.current);
-              const computed = computeDmxForCue(cue, pf, fDefs, uni as any, tierMultipliers, overrides);
+              const ctc = computeColorTrackColors(colorTracksRef.current as any, cue.time, pf, fixtureGroupsRef.current);
+              const computed = computeDmxForCue(cue, pf, fDefs, uni as any, tierMultipliers, overrides, ctc);
               for (const c of computed) {
                 dmxCuesArray.push({
                   time: cue.time, section: cue.section, universe: c.universe,
@@ -1936,6 +1937,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     if (sign === lastDmxCuesRef.current[0]?.effect) return;
 
     try {
+      const ctc = computeColorTrackColors(colorTracksRef.current as any, cues[0].time, patchedFixtures, fixtureGroupsRef.current);
       const computed = computeDmxForCue(
         cues[0],
         patchedFixtures,
@@ -1943,6 +1945,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         universes as any,
         { primary: qs.tierConfig?.primary || 100, secondary: qs.tierConfig?.secondary || 70, tertiary: qs.tierConfig?.tertiary || 40 },
         computeFixtureTrackOverrides(fixtureTracksRef.current, cues[0].time, patchedFixtures, fixtureGroupsRef.current),
+        ctc,
       );
 
       const dmxResult: DmxCue[] = computed.map(c => ({
