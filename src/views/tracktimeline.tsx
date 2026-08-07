@@ -78,6 +78,27 @@ export interface ColorTrack {
   };
 }
 
+// ─── Strobe Track types ────────────────────────────────
+
+export interface StrobeTrackEntry {
+  id: string;
+  time: number;
+  endTime: number;
+  speed: number;       // strobe speed (Hz, 1-25)
+  endSpeed?: number;   // end speed for gradient (defaults to speed)
+}
+
+export interface StrobeTrack {
+  id: string;
+  name: string;
+  entries: StrobeTrackEntry[];
+  targetFixtures: {
+    type: 'all' | 'group' | 'fixture';
+    groupId?: string;
+    fixtureIds?: string[];
+  };
+}
+
 interface TrackTimelineProps {
   cues: Cue[];
   dmxCues?: DmxCue[];
@@ -107,6 +128,16 @@ interface TrackTimelineProps {
   onColorEntryContextMenu?: (trackId: string, entry: ColorTrackEntry, clientX: number, clientY: number) => void;
   /** Called when user drag-resizes or drag-moves a color entry */
   onColorEntryChange?: (trackId: string, entryIndex: number, newTime: number, newEndTime: number) => void;
+  /** Strobe tracks to render below color tracks */
+  strobeTracks?: StrobeTrack[];
+  /** Called when user right-clicks on a strobe track row */
+  onStrobeTrackContextMenu?: (trackId: string, time: number, clientX: number, clientY: number) => void;
+  /** Called when user left-clicks a strobe entry */
+  onStrobeEntryClick?: (trackId: string, entry: StrobeTrackEntry) => void;
+  /** Called when user right-clicks a strobe entry */
+  onStrobeEntryContextMenu?: (trackId: string, entry: StrobeTrackEntry, clientX: number, clientY: number) => void;
+  /** Called when user drag-resizes or drag-moves a strobe entry */
+  onStrobeEntryChange?: (trackId: string, entryIndex: number, newTime: number, newEndTime: number) => void;
   /** Called when user drags a section boundary to resize */
   onSectionsChange?: (sections: TrackSection[]) => void;
   /** Fixture tracks (override lanes drawn inside fixture tracks) */
@@ -132,6 +163,7 @@ const HEADER_HEIGHT = 32;
 const AUTOSCRIPT_TRACK_HEIGHT = 40;
 const EFX_TRACK_HEIGHT = 28;
 const COLOR_TRACK_HEIGHT = 26;
+const STROBE_TRACK_HEIGHT = 26;
 const LABEL_WIDTH = 90;
 
 const fmt = (s: number) =>
@@ -265,6 +297,26 @@ function findColorEntryAt(
   return best;
 }
 
+function findStrobeEntryAt(
+  track: StrobeTrack,
+  timeAtX: number,
+  duration: number,
+): StrobeTrackEntry | null {
+  const threshold = Math.min(2, duration * 0.05);
+  let best: StrobeTrackEntry | null = null;
+  let bestDist = Infinity;
+  for (const entry of track.entries) {
+    const entryMid = (entry.time + entry.endTime) / 2;
+    const halfLen = (entry.endTime - entry.time) / 2 + 0.1;
+    const d = Math.abs(entryMid - timeAtX);
+    if (d < halfLen + threshold && d < bestDist) {
+      best = entry;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
 // ─── Component ────────────────────────────────────────────
 
 const TrackTimeline: React.FC<TrackTimelineProps> = ({
@@ -286,6 +338,11 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   onColorEntryClick,
   onColorEntryContextMenu,
   onColorEntryChange,
+  strobeTracks,
+  onStrobeTrackContextMenu,
+  onStrobeEntryClick,
+  onStrobeEntryContextMenu,
+  onStrobeEntryChange,
   onSectionsChange,
   fixtureTracks,
   onFixtureTracksChange,
@@ -336,7 +393,8 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const numFixtures = patchedFixtures.length;
   const numEfxTracks = efxTracks?.length ?? 0;
   const numColorTracks = colorTracks?.length ?? 0;
-  const totalHeight = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT;
+  const numStrobeTracks = strobeTracks?.length ?? 0;
+  const totalHeight = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT;
 
   // ── Fixture → cue mapping (memoized) ─────────────────
   const fixtureCueMap = useMemo(
@@ -451,6 +509,16 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
 
   // ── Color entry drag state (parallel to EFX drag) ──
   const colorDragRef = useRef<{
+    trackId: string;
+    entryIndex: number;
+    mode: 'move' | 'resize-left' | 'resize-right';
+    startX: number;
+    entryTime: number;
+    entryEndTime: number;
+  } | null>(null);
+
+  // ── Strobe entry drag state (parallel to EFX drag) ──
+  const strobeDragRef = useRef<{
     trackId: string;
     entryIndex: number;
     mode: 'move' | 'resize-left' | 'resize-right';
@@ -640,6 +708,28 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         return;
       }
 
+      // Strobe entry drag/resize (parallel to EFX)
+      if (strobeDragRef.current) {
+        const c = containerRef.current; if (!c) return;
+        const rect = c.getBoundingClientRect();
+        const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
+        if (drawW <= 0) return;
+        const dx = (e.clientX - strobeDragRef.current.startX) / drawW * duration;
+        const drag = strobeDragRef.current;
+        if (drag.mode === 'move') {
+          const newTime = Math.max(0, drag.entryTime + dx);
+          const newEnd = drag.entryEndTime + dx;
+          onStrobeEntryChange?.(drag.trackId, drag.entryIndex, newTime, newEnd);
+        } else if (drag.mode === 'resize-left') {
+          const newTime = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          onStrobeEntryChange?.(drag.trackId, drag.entryIndex, newTime, drag.entryEndTime);
+        } else if (drag.mode === 'resize-right') {
+          const newEnd = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          onStrobeEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
+        }
+        return;
+      }
+
       // Section resize in progress
       if (sectionResizeRef.current) {
         const resize = sectionResizeRef.current;
@@ -682,7 +772,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         setTooltip(null);
       }
     },
-    [getCueAtPosition, duration, sections, onSectionsChange, onEfxEntryChange, onColorEntryChange],
+    [getCueAtPosition, duration, sections, onSectionsChange, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange],
   );
 
   const handleClick = useCallback(
@@ -957,9 +1047,26 @@ if (editBlock) { setEditBlock(null); return; }
             }
           }
         }
+        // Check strobe tracks (below color tracks)
+        const strobeTrackBaseY = colorTrackBaseY + cTracks.length * COLOR_TRACK_HEIGHT;
+        const sTracks = strobeTracks || [];
+        if (y >= strobeTrackBaseY && sTracks.length > 0) {
+          const sTrackIdx = Math.floor((y - strobeTrackBaseY) / STROBE_TRACK_HEIGHT);
+          if (sTrackIdx >= 0 && sTrackIdx < sTracks.length) {
+            e.preventDefault();
+            const timeAtX2 = (x / drawW) * duration;
+            const sTrack = sTracks[sTrackIdx];
+            const sEntry = findStrobeEntryAt(sTrack, timeAtX2, duration);
+            if (sEntry && onStrobeEntryContextMenu) {
+              onStrobeEntryContextMenu(sTrack.id, sEntry, e.clientX, e.clientY);
+            } else {
+              onStrobeTrackContextMenu?.(sTrack.id, Math.max(0, Math.min(duration, timeAtX2)), e.clientX, e.clientY);
+            }
+          }
+        }
       }
     },
-    [duration, efxTracks, colorTracks, numFixtures, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu],
+    [duration, efxTracks, colorTracks, strobeTracks, numFixtures, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -1117,6 +1224,49 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
+    // -- Strobe entry drag detection (parallel to EFX) --
+    {
+      const c4 = containerRef.current;
+      if (c4 && onStrobeEntryChange) {
+        const rect4 = c4.getBoundingClientRect();
+        const x4 = e.clientX - rect4.left - LABEL_WIDTH;
+        const y4 = e.clientY - rect4.top;
+        const drawW4 = rect4.width - LABEL_WIDTH;
+        const eT = efxTracks || [];
+        const cT = colorTracks || [];
+        const sT = strobeTracks || [];
+        if (sT.length > 0 && drawW4 > 0 && x4 >= 0 && y4 >= HEADER_HEIGHT) {
+          const efxBase = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT;
+          const colorBase = efxBase + eT.length * EFX_TRACK_HEIGHT;
+          const strobeBase = colorBase + cT.length * COLOR_TRACK_HEIGHT;
+          if (y4 >= strobeBase) {
+            const sIdx = Math.floor((y4 - strobeBase) / STROBE_TRACK_HEIGHT);
+            if (sIdx >= 0 && sIdx < sT.length) {
+              const sTrack = sT[sIdx];
+              for (let ei = 0; ei < sTrack.entries.length; ei++) {
+                const entry = sTrack.entries[ei];
+                const ex1 = (entry.time / duration) * drawW4;
+                const ex2 = (entry.endTime / duration) * drawW4;
+                const EDGE = 5;
+                if (Math.abs(x4 - ex1) < EDGE) {
+                  strobeDragRef.current = { trackId: sTrack.id, entryIndex: ei, mode: 'resize-left', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (Math.abs(x4 - ex2) < EDGE) {
+                  strobeDragRef.current = { trackId: sTrack.id, entryIndex: ei, mode: 'resize-right', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (x4 > ex1 + EDGE && x4 < ex2 - EDGE) {
+                  strobeDragRef.current = { trackId: sTrack.id, entryIndex: ei, mode: 'move', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     if (!onSectionsChange) return;
     const c = containerRef.current;
     if (!c) return;
@@ -1149,7 +1299,7 @@ if (editBlock) { setEditBlock(null); return; }
         return;
       }
     }
-  }, [sections, duration, onSectionsChange, efxTracks, colorTracks, onEfxEntryChange, onColorEntryChange]);
+  }, [sections, duration, onSectionsChange, efxTracks, colorTracks, strobeTracks, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Clear EFX drag
@@ -1161,6 +1311,12 @@ if (editBlock) { setEditBlock(null); return; }
     // Color entry drag end
     if (colorDragRef.current) {
       colorDragRef.current = null;
+      return;
+    }
+
+    // Strobe entry drag end
+    if (strobeDragRef.current) {
+      strobeDragRef.current = null;
       return;
     }
 
@@ -1909,6 +2065,121 @@ if (editBlock) { setEditBlock(null); return; }
           ctx.closePath();
           ctx.fill();
 
+          ctx.beginPath();
+          ctx.moveTo(endX, barY + barH / 2 - diamondSize);
+          ctx.lineTo(endX + diamondSize, barY + barH / 2);
+          ctx.lineTo(endX, barY + barH / 2 + diamondSize);
+          ctx.lineTo(endX - diamondSize, barY + barH / 2);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
+
+    // ── Strobe tracks ───────────────────────────────
+    if (numStrobeTracks > 0) {
+      const eT = efxTracks || [];
+      const cT = colorTracks || [];
+      const efxBase = autoY + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT;
+      const colorBase = efxBase + cT.length * COLOR_TRACK_HEIGHT;
+      const strobeTrackBaseY = colorBase;
+      for (let si = 0; si < numStrobeTracks; si++) {
+        const sTrack = strobeTracks![si];
+        const trackY = strobeTrackBaseY + si * STROBE_TRACK_HEIGHT;
+
+        // Track background
+        ctx.fillStyle = si % 2 === 0 ? 'rgba(168, 85, 247, 0.04)' : 'rgba(168, 85, 247, 0.02)';
+        ctx.fillRect(LABEL_WIDTH, trackY, drawW, STROBE_TRACK_HEIGHT);
+
+        // Top separator
+        ctx.strokeStyle = 'rgba(168, 85, 247, 0.25)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY);
+        ctx.lineTo(w, trackY);
+        ctx.stroke();
+
+        // Track label
+        ctx.fillStyle = '#a855f7';
+        ctx.font = '9px -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+        const sLabel = sTrack.name.length > 11 ? sTrack.name.substring(0, 10) + '\u2026' : sTrack.name;
+        ctx.fillText('STR: ' + sLabel, 6, trackY + 12);
+
+        // Target badge
+        const tf = sTrack.targetFixtures;
+        let targetLabel = '';
+        if (tf?.type === 'group') {
+          const store = (window as any).__useShowStore?.getState?.();
+          const groups = store?.fixtureGroups || [];
+          const g = groups.find((gg: any) => gg.id === tf.groupId);
+          targetLabel = g ? '📁 ' + (g.name.length > 8 ? g.name.slice(0,7)+'…' : g.name) : '📁 ?';
+        } else if (tf?.type === 'fixture') {
+          targetLabel = '💡 ×1';
+        } else {
+          targetLabel = '🌐 all';
+        }
+        if (targetLabel) {
+          ctx.fillStyle = '#6b7280';
+          ctx.font = '8px -apple-system, sans-serif';
+          ctx.fillText(targetLabel, 72, trackY + 12);
+        }
+
+        // Bottom separator
+        ctx.strokeStyle = 'rgba(75, 85, 99, 0.1)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY + STROBE_TRACK_HEIGHT);
+        ctx.lineTo(w, trackY + STROBE_TRACK_HEIGHT);
+        ctx.stroke();
+
+        // Draw entries (strobe blocks)
+        for (const entry of sTrack.entries) {
+          const ex = LABEL_WIDTH + (entry.time / duration) * drawW;
+          const endX = LABEL_WIDTH + (entry.endTime / duration) * drawW;
+          const entryW = Math.max(4, endX - ex);
+          if (ex < LABEL_WIDTH - 10 || ex > w + 10) continue;
+
+          const pad = 3;
+          const barY = trackY + pad;
+          const barH = STROBE_TRACK_HEIGHT - pad * 2;
+
+          // Purple bar with opacity based on speed
+          const speedAlpha = Math.min(1, 0.3 + (entry.speed / 25) * 0.7);
+          ctx.fillStyle = '#a855f7';
+          ctx.globalAlpha = speedAlpha;
+          ctx.beginPath();
+          ctx.roundRect(ex, barY, entryW, barH, 3);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+
+          // Edge accents
+          ctx.fillStyle = '#c084fc';
+          ctx.beginPath();
+          ctx.roundRect(ex, barY, 3, barH, [3, 0, 0, 3]);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.roundRect(endX - 3, barY, 3, barH, [0, 3, 3, 0]);
+          ctx.fill();
+
+          // Speed label
+          if (entryW > 40) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 7px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(entry.speed + ' Hz', ex + entryW / 2, trackY + STROBE_TRACK_HEIGHT / 2 + 3);
+          }
+
+          // Start/end diamonds
+          ctx.fillStyle = '#c084fc';
+          const diamondSize = 3;
+          ctx.beginPath();
+          ctx.moveTo(ex, barY + barH / 2 - diamondSize);
+          ctx.lineTo(ex + diamondSize, barY + barH / 2);
+          ctx.lineTo(ex, barY + barH / 2 + diamondSize);
+          ctx.lineTo(ex - diamondSize, barY + barH / 2);
+          ctx.closePath();
+          ctx.fill();
           ctx.beginPath();
           ctx.moveTo(endX, barY + barH / 2 - diamondSize);
           ctx.lineTo(endX + diamondSize, barY + barH / 2);

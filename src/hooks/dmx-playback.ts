@@ -25,6 +25,50 @@ export interface ColorTrackRef {
   };
 }
 
+export interface StrobeTrackRef {
+  id: string;
+  entries: Array<{ id: string; time: number; endTime: number; speed: number; endSpeed?: number }>;
+  targetFixtures: {
+    type: 'all' | 'group' | 'fixture';
+    groupId?: string;
+    fixtureIds?: string[];
+  };
+}
+
+/** Compute per-fixture strobe overrides from active strobe track entries at a given time. */
+export function computeStrobeTrackOverrides(
+  strobeTracks: StrobeTrackRef[],
+  currentTime: number,
+  patchedFixtures: PatchedFixture[],
+  fixtureGroups: FixtureGroup[],
+): Map<string, { active: boolean; speed: number }> {
+  const result = new Map<string, { active: boolean; speed: number }>();
+  for (const stItem of strobeTracks) {
+    const activeEntry = stItem.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
+    if (!activeEntry || !stItem.targetFixtures) continue;
+    const tf = stItem.targetFixtures;
+    let targets: string[] = [];
+    if (tf.type === 'all') {
+      targets = patchedFixtures.map(f => f.id);
+    } else if (tf.type === 'group' && tf.groupId) {
+      const group = fixtureGroups.find(g => g.id === tf.groupId);
+      targets = group?.fixtureIds || [];
+    } else if (tf.type === 'fixture' && tf.fixtureIds) {
+      targets = tf.fixtureIds;
+    }
+    for (const fid of targets) {
+      let speed = activeEntry.speed;
+      if (activeEntry.endSpeed !== undefined && activeEntry.endSpeed !== activeEntry.speed) {
+        const dur = activeEntry.endTime - activeEntry.time;
+        const t = dur > 0 ? Math.max(0, Math.min(1, (currentTime - activeEntry.time) / dur)) : 1;
+        speed = activeEntry.speed + (activeEntry.endSpeed - activeEntry.speed) * t;
+      }
+      result.set(fid, { active: true, speed });
+    }
+  }
+  return result;
+}
+
 /** Compute per-fixture forced colors from active color track entries at a given time. */
 export function computeColorTrackColors(
   colorTracks: ColorTrackRef[],
@@ -313,9 +357,10 @@ export function useDmxPlayback(options: {
   effectsRef?: React.MutableRefObject<SavedEffect[]>; // Saved effect definitions
   fixtureGroupsRef?: React.MutableRefObject<{ id: string; fixtureIds: string[] }[]>;
   colorTracksRef?: React.MutableRefObject<ColorTrackRef[]>; // Color track overrides
+  strobeTracksRef?: React.MutableRefObject<StrobeTrackRef[]>; // Strobe track overrides
   onVirtualDmx?: (universe: number, channelValues: Record<number, number>) => void; // Mirror for 3D view
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,onVirtualDmx}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,onVirtualDmx}=options;
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
 
@@ -545,6 +590,14 @@ export function useDmxPlayback(options: {
 
           // Shutter
           if(fa.shutterOffset!==null){const sAddr=pf.startAddress+fa.shutterOffset;
+            // Strobe track override (highest priority)
+            const strobeTrackOverride = (() => {
+              if (strobeTracksRef?.current) {
+                const sto = computeStrobeTrackOverrides(strobeTracksRef.current, ct, patchedFixtures, fixtureGroupsRef?.current || []);
+                return sto.get(pf.id) || null;
+              }
+              return null;
+            })();
             const trackStrobe = (() => {
               if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
                 for (const ft of fixtureTracksRef.current) {
@@ -565,10 +618,12 @@ export function useDmxPlayback(options: {
               }
               return null;
             })();
-            const useStrobe = trackStrobe
+            const useStrobe = strobeTrackOverride
+              ? strobeTrackOverride.active
+              : trackStrobe
               ? trackStrobe.active
               : active.forcedStrobe !== undefined ? active.forcedStrobe : ((isDrop || isChorus) && active.strobe && pf.tier === 'primary');
-            if (useStrobe) {const speed = Math.min(trackStrobe?.speed || active.strobeSpeed || 10, strobeLimit); chVals[sAddr] = Math.min(255, 180 + Math.floor(speed * 3));}
+            if (useStrobe) {const speed = Math.min(strobeTrackOverride?.speed || trackStrobe?.speed || active.strobeSpeed || 10, strobeLimit); chVals[sAddr] = Math.min(255, 180 + Math.floor(speed * 3));}
             else if(fa.intensityOffset===null){chVals[sAddr]=Math.max(8,Math.min(255,8+Math.round((dimmerVal/255)*247)));}
             else{chVals[sAddr]=255;}}
 
@@ -715,6 +770,7 @@ export function computeDmxForCue(
     forcedMovements?: Map<string, { pattern: string; amplitude: number }>;
   },
   colorTrackColors?: Map<string, string>,
+  strobeTrackOverrides?: Map<string, { active: boolean; speed: number }>,
 ): Array<{ universe: number; channelValues: Record<number, number> }> {
   const uniIds = universes.map(u => String(u.id));
   const analyses: ChannelAnalysis[] = [];
@@ -793,12 +849,15 @@ export function computeDmxForCue(
 
       if (fa.shutterOffset !== null) {
         const sAddr = pf.startAddress + fa.shutterOffset;
+        const strobeTrackStrobe = strobeTrackOverrides?.get(pf.id);
         const trackStrobe = fixtureTrackOverrides?.forcedStrobes?.get(pf.id);
-        const useStrobe = trackStrobe 
+        const useStrobe = strobeTrackStrobe
+          ? strobeTrackStrobe.active
+          : trackStrobe 
           ? trackStrobe.active
           : (cue as any).forcedStrobe !== undefined ? (cue as any).forcedStrobe : ((isDrop || isChorus) && cue.strobe && pf.tier === 'primary');
         if (useStrobe) {
-          const speed = Math.min(trackStrobe?.speed || (cue as any).strobeSpeed || 10, 10);
+          const speed = Math.min(strobeTrackStrobe?.speed || trackStrobe?.speed || (cue as any).strobeSpeed || 10, 10);
           chVals[sAddr] = Math.min(255, 180 + Math.floor(speed * 3));
         } else if (fa.intensityOffset === null) {
           chVals[sAddr] = Math.max(8, Math.min(255, 8 + Math.round((dimmerVal / 255) * 247)));
