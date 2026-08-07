@@ -1924,6 +1924,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [efxTargetGroupId, setEfxTargetGroupId] = useState('');
   const [efxTargetFixtureIds, setEfxTargetFixtureIds] = useState<string[]>([]);
   const [efxPattern, setEfxPattern] = useState<'static' | 'sweep' | 'circle' | 'pulse' | 'wave' | 'bounce' | 'figure8' | 'spiral' | 'zigzag' | 'heartbeat' | 'randomWalk' | 'diamond' | 'custom'>('static');
+  const [efxCustomEffectId, setEfxCustomEffectId] = useState('');
 
   // Resolve target fixture names for display + DMX filtering
   const efxTargetFixtureNames = useMemo(() => {
@@ -1992,13 +1993,15 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setEfxTargetType('all');
     setEfxTargetGroupId('');
     setEfxTargetFixtureIds([]);
-  }, [pushHistory, efxTrackName, efxTargetType, efxTargetGroupId, efxTargetFixtureIds]);
+    setEfxCustomEffectId('');
+  }, [pushHistory, efxTrackName, efxTargetType, efxTargetGroupId, efxTargetFixtureIds, efxCustomEffectId]);
 
   const openEfxTrackModal = useCallback(() => {
     setEfxTrackName('');
     setEfxTargetType('all');
     setEfxTargetGroupId('');
     setEfxTargetFixtureIds([]);
+    setEfxCustomEffectId('');
     setEfxTrackModal(true);
   }, []);
 
