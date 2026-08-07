@@ -491,6 +491,10 @@ export function useDmxPlayback(options: {
 
           const tierColorIdx=pf.tier==='secondary'?1:pf.tier==='tertiary'?2:0;
           let paletteColor = (() => {
+            // Color track override (highest priority)
+            if (colorTrackColors.has(pf.id)) {
+              return colorTrackColors.get(pf.id)!;
+            }
             // Fixture track override check
             if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
               for (const ft of fixtureTracksRef.current) {
