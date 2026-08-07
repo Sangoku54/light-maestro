@@ -923,7 +923,7 @@ if (editBlock) { setEditBlock(null); return; }
         }
       }
     },
-    [duration, efxTracks, numFixtures, onEfxTrackContextMenu, onEfxEntryContextMenu],
+    [duration, efxTracks, colorTracks, numFixtures, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu],
   );
 
   const handleMouseLeave = useCallback(() => {
