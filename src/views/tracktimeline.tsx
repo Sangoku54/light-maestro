@@ -2599,9 +2599,10 @@ if (editBlock) { setEditBlock(null); return; }
 
   return (
     <div className="relative">
+      {/* ── Fixture Enable/Disable Checkboxes ── */}
       <div
         ref={containerRef}
-        className="w-full rounded-lg overflow-hidden border border-gray-800/50 cursor-pointer select-none"
+        className="w-full rounded-lg overflow-hidden border border-gray-800/50 cursor-pointer select-none relative"
         style={{ height: `${totalHeight}px`, backgroundColor: '#0a0a0f' }}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
@@ -2611,31 +2612,32 @@ if (editBlock) { setEditBlock(null); return; }
         onContextMenu={handleContextMenu}
         onWheel={(e) => { if (e.ctrlKey) { e.preventDefault(); setZoomLevel(prev => Math.max(0.25, Math.min(8, prev + (e.deltaY < 0 ? 0.25 : -0.25)))); } }}
       >
+        {/* Checkboxes overlay inside container */}
+        <div className="absolute top-0 left-0 z-20" style={{ paddingTop: HEADER_HEIGHT }}>
+          {patchedFixtures.map(pf => {
+            const disabled = disabledFixtures?.has(pf.id) ?? false;
+            return (
+              <div
+                key={pf.id}
+                className="flex items-center"
+                style={{ height: TRACK_HEIGHT, paddingLeft: 4, width: LABEL_WIDTH - 4 }}
+                onMouseDown={e => e.stopPropagation()}
+                onClick={e => e.stopPropagation()}
+              >
+                <input
+                  type="checkbox"
+                  checked={!disabled}
+                  onChange={() => onToggleFixture?.(pf.id)}
+                  title={disabled
+                    ? `Activer "${pf.name}" — la fixture est désactivée`
+                    : `Désactiver "${pf.name}" — la fixture est active`}
+                  className="w-3.5 h-3.5 accent-purple-500 cursor-pointer"
+                />
+              </div>
+            );
+          })}
+        </div>
         <canvas ref={canvasRef} className="w-full h-full" />
-      </div>
-
-      {/* ── Fixture Enable/Disable Checkboxes ── */}
-      <div className="absolute top-0 left-0 z-20 pointer-events-none" style={{ paddingTop: HEADER_HEIGHT }}>
-        {patchedFixtures.map(pf => {
-          const disabled = disabledFixtures?.has(pf.id) ?? false;
-          return (
-            <div
-              key={pf.id}
-              className="flex items-center pointer-events-auto"
-              style={{ height: TRACK_HEIGHT, paddingLeft: 4, width: LABEL_WIDTH - 4 }}
-            >
-              <input
-                type="checkbox"
-                checked={!disabled}
-                onChange={() => onToggleFixture?.(pf.id)}
-                title={disabled
-                  ? `Activer "${pf.name}" — la fixture est désactivée`
-                  : `Désactiver "${pf.name}" — la fixture est active`}
-                className="w-3.5 h-3.5 accent-purple-500 cursor-pointer"
-              />
-            </div>
-          );
-        })}
       </div>
 
       {/* ── Fixture Track Context Menu ── */}
