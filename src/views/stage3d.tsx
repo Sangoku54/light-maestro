@@ -20,7 +20,6 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { useShowStore, type PatchedFixture, type FixturePos } from '../stores/showStore';
 import { useAppStore } from '../stores/appStore';
-import { dmxBridge } from '../utils/dmx-bridge';
 import {
   loadFixtureDefinitions,
   clearFixtureDefCache,
@@ -35,11 +34,10 @@ import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVer
 const STAGE_WIDTH = 10;  // meters
 const STAGE_DEPTH = 8;   // meters
 const TRUSS_HEIGHT = 3;  // meters
+const DMX_POLL_INTERVAL = 1000 / 60; // 60fps — smooth pan/tilt update every render frame
 const GRID_SIZE = 1; // 1m grid squares
 
 // ─── Channel Analysis (mirrors dmx-cues.ts analyzeFixture) ──
-
-
 
 interface FixtureChannelMap {
   intensityOffset: number | null;
@@ -49,9 +47,6 @@ interface FixtureChannelMap {
   wheelCaps: DmxFixtureCapability[] | null;
   panOffset: number | null;
   tiltOffset: number | null;
-  panFineOffset: number | null;
-  tiltFineOffset: number | null;
-  speedOffset: number | null;
   goboOffset: number | null;
 }
 
@@ -68,9 +63,6 @@ function analyzeFixtureChannels(
     wheelCaps: null,
     panOffset: null,
     tiltOffset: null,
-    panFineOffset: null,
-    tiltFineOffset: null,
-    speedOffset: null,
     goboOffset: null,
   };
 
@@ -94,20 +86,8 @@ function analyzeFixtureChannels(
       case 'Tilt':
         if (result.tiltOffset === null) result.tiltOffset = i;
         break;
-      case 'Speed':
-        if (result.speedOffset === null) result.speedOffset = i;
-        break;
       case 'Gobo':
         if (result.goboOffset === null) result.goboOffset = i;
-        break;
-      case 'Nothing':
-        // 16-bit fine channels: named "Pan fine" / "Tilt fine" right after their coarse channel
-        if (/pan/i.test(ch.name) && /fine/i.test(ch.name) && result.panFineOffset === null && result.panOffset === i - 1) {
-          result.panFineOffset = i;
-        }
-        if (/tilt/i.test(ch.name) && /fine/i.test(ch.name) && result.tiltFineOffset === null && result.tiltOffset === i - 1) {
-          result.tiltFineOffset = i;
-        }
         break;
     }
   }
@@ -176,19 +156,7 @@ interface Fixture3D {
   mountMode: 'top' | 'ground' | 'rear'; // beam default direction
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
-  _startAddr: number;          // DMX start address (1-indexed) for direct channel lookups
   _mountTilt: number;           // mount-mode head tilt compensation (π for ground, 0 otherwise)
-  _targetPanY: number;           // current TARGET pan (DMX + auto-sweep blend, read by lerp)
-  _targetTiltX: number;          // current TARGET tilt (DMX + auto-sweep blend)
-  _dmxPanY: number;              // raw DMX pan target (set by onPush, 0=center, NaN=no DMX yet)
-  _dmxTiltX: number;             // raw DMX tilt target (absolute angle)
-  _currentPanY: number;          // current pan rotation (interpolated)
-  _currentTiltX: number;         // current tilt rotation (interpolated)
-  _speedLerp: number;            // lerp rate from speed channel (0.015-0.40)
-  _strobeRate: number;           // strobe flash rate in Hz (0 = no strobe)
-  _strobePhase: number;          // strobe timer accumulator
-  _strobeBaseIntensity?: number;  // cached base pointLight intensity (for strobe restore)
-  _strobeBaseOpacity?: number;    // cached base beam cone opacity (for strobe restore)
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -202,7 +170,7 @@ export const Stage3D: React.FC = () => {
   const fixturesRef = useRef<Map<string, Fixture3D>>(new Map());
   const timerRef = useRef<THREE.Timer>(new THREE.Timer());
   const animFrameRef = useRef<number>(0);
-  const dmxActivityRef = useRef<number>(0); // timestamp of last DMX-driven pan/tilt change
+  const lastDmxPollRef = useRef<number>(0);
   const particlesRef = useRef<THREE.Points | null>(null);
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
@@ -253,25 +221,6 @@ export const Stage3D: React.FC = () => {
     });
     return () => { cancelled = true; };
   }, [patchedFixtures.map(f => f.fixtureDefId).join(',')]);
-
-  // ── Beam angle from fixture definition physical data ──
-  function resolveBeamAngle(fixture: PatchedFixture, pos: FixturePos, defs: Map<string, DmxFixtureDefinition>): number {
-    // User override from fixture position always wins
-    if (pos.beamAngle !== undefined) return pos.beamAngle;
-    const def = defs.get(fixture.fixtureDefId);
-    if (def) {
-      const mode = def.modes[fixture.modeIndex];
-      const phys = mode?.physical ?? def.physical;
-      if (phys) {
-        const min = phys.lensDegMin;
-        const max = phys.lensDegMax;
-        if (min !== undefined && max !== undefined) return ((min + max) / 2) * Math.PI / 180;
-        if (min !== undefined) return min * Math.PI / 180;
-        if (max !== undefined) return max * Math.PI / 180;
-      }
-    }
-    return 0.15; // fallback ~8.6°
-  }
 
   // ── Create procedural fixture geometry ──────────────────
   const createFixtureGeometry = useCallback((
@@ -557,21 +506,11 @@ export const Stage3D: React.FC = () => {
       headGroup,
       lightTarget,
       channelMap,
-      _startAddr: fixture.startAddress, // 1-indexed DMX start address
       universeIndex: universeIndexMap.get(fixture.universeId) ?? 0,
       mountMode: pos.mountMode || 'top',
-      beamAngle: resolveBeamAngle(fixture, pos, defs),
+      beamAngle: pos.beamAngle ?? 0.15,
       _staticTilt: (pos.tilt ?? 0) * Math.PI / 180,
       _mountTilt: 0,
-      _targetPanY: 0,
-      _targetTiltX: 0,
-      _dmxPanY: NaN,
-      _dmxTiltX: NaN,
-      _currentPanY: 0,
-      _currentTiltX: 0,
-      _speedLerp: 0.10,  // default medium speed
-      _strobeRate: 0,
-      _strobePhase: 0,
     };
   }, [universeIndexMap]);
 
@@ -760,80 +699,11 @@ export const Stage3D: React.FC = () => {
         particles.geometry.attributes.position.needsUpdate = true;
       }
 
-      // ═══ SMOKE TEST: hard-coded rotation to prove render loop + hierarchy work ═══
-      // If beams STILL don't move with this, the problem is NOT in our logic.
-      const smokeT = performance.now() * 0.001;
-      for (const f3d of fixturesRef.current.values()) {
-        if (f3d.armGroup) {
-          f3d.armGroup.rotation.y = Math.sin(smokeT * 1.5) * 1.2;  // ±69° fast sweep
-        }
-        if (f3d.headGroup) {
-          f3d.headGroup.rotation.x = Math.sin(smokeT * 2.0) * 0.8;  // ±46° fast tilt
-        }
-      }
-
-      // Speed-based pan/tilt interpolation — BELOW smoke test, will be restored after diag
-      for (const f3d of fixturesRef.current.values()) {
-        // Minimum lerp factor: guarantees visible movement even at 9 fps
-        const rawFactor = 1 - Math.exp(-f3d._speedLerp * 60 * dt);
-        const factor = Math.max(rawFactor, 1 - Math.exp(-0.10 * 60 * dt)); // floor at speedLerp≈0.10
-
-        // Auto-sweep: always runs — full sweep when no DMX, subtle blend when DMX active
-        const elapsedSinceDmx = performance.now() - dmxActivityRef.current;
-        const dmxAlive = elapsedSinceDmx < 3000 && f3d.headGroup && !isNaN(f3d._dmxPanY as number);
-        const tNow = performance.now();
-        const autoPan = Math.sin(tNow * 0.0007) * Math.PI * 0.33;  // ±60°
-        const autoTilt = Math.sin(tNow * 0.001) * 0.4;              // ±23°
-
-        if (dmxAlive) {
-          // DMX target + subtle auto wobble (15% amplitude)
-          if (f3d.armGroup) f3d._targetPanY = f3d._dmxPanY + autoPan * 0.15;
-          f3d._targetTiltX = f3d._dmxTiltX + autoTilt * 0.15;
-        } else {
-          // Full auto-sweep when no DMX data
-          if (f3d.headGroup) {
-            f3d._targetTiltX = f3d._mountTilt + autoTilt + (f3d._staticTilt ?? 0);
-            if (f3d.armGroup) f3d._targetPanY = autoPan;
-          }
-          f3d._speedLerp = 0.10;
-        }
-
-        // Apply rotation with NaN guard
-        if (f3d.armGroup && !isNaN(f3d._targetPanY)) {
-          f3d._currentPanY += (f3d._targetPanY - f3d._currentPanY) * factor;
-          f3d.armGroup.rotation.y = f3d._currentPanY;
-        }
-        if (f3d.headGroup && !isNaN(f3d._targetTiltX)) {
-          f3d._currentTiltX += (f3d._targetTiltX - f3d._currentTiltX) * factor;
-          f3d.headGroup.rotation.x = f3d._currentTiltX;
-        }
-        // Strobe: toggles light visibility at strobe rate
-        if (f3d._strobeRate > 0) {
-          f3d._strobePhase += dt;
-          const period = 1 / f3d._strobeRate;
-          if (f3d._strobePhase >= period) f3d._strobePhase -= period;
-          const strobeOn = f3d._strobePhase < period * 0.35; // 35% duty cycle (bright flash)
-          if (f3d.pointLight) {
-            const baseIntensity = f3d.pointLight.intensity;
-            // Store base intensity on first strobe frame
-            if (!f3d._strobeBaseIntensity) f3d._strobeBaseIntensity = baseIntensity;
-            f3d.pointLight.intensity = strobeOn ? (f3d._strobeBaseIntensity ?? 1) : 0;
-            f3d.pointLight.visible = strobeOn;
-          }
-          if (f3d.beamCone) {
-            const mat = f3d.beamCone.material as THREE.ShaderMaterial;
-            if (f3d._strobeBaseOpacity === undefined) f3d._strobeBaseOpacity = mat.uniforms.uOpacity.value;
-            mat.uniforms.uOpacity.value = strobeOn ? (f3d._strobeBaseOpacity ?? 0.50) : 0;
-            f3d.beamCone.visible = strobeOn;
-          }
-        }
-      }
-
-      // Debug: render frame counter — proves animation loop runs
-      renderFrameCount.current++;
-      if (renderFrameCount.current % 30 === 0) {
-        const el2 = dmxCounterRef.current;
-        if (el2) el2.dataset.rf = String(renderFrameCount.current);
+      // DMX polling (30fps)
+      const now = performance.now();
+      if (now - lastDmxPollRef.current >= DMX_POLL_INTERVAL) {
+        lastDmxPollRef.current = now;
+        updateDmxState();
       }
 
       renderer.render(scene, camera);
@@ -937,47 +807,21 @@ export const Stage3D: React.FC = () => {
         f3d.lightTarget.add(pointLight);
         f3d.pointLight = pointLight;
 
-        // Outer beam cone (soft edge, wide)
+        // Create beam cone - attached to lightTarget (lens), points along local -Y then rotated by headGroup
         const coneHeight = 50;
-        const coneRadiusBottom = coneHeight * Math.tan(resolveBeamAngle(pf, pos, defs));
-        const coneGeo = new THREE.CylinderGeometry(0.03, coneRadiusBottom, coneHeight, 32, 1, true);
-        // Simple additive beam material: distance attenuation only (no radial math on surface vertices)
-        const beamVertexShader = /* glsl */`
-          varying float vDistFromLens;
-          void main() {
-            // Cone local y: -height/2 (wide far end) ... +height/2 (narrow lens)
-            // distFromLens: 0 at lens, height at far end
-            vDistFromLens = ${coneHeight.toFixed(1)} * 0.5 - position.y;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `;
-        const beamFragmentShader = /* glsl */`
-          varying float vDistFromLens;
-          uniform vec3 uColor;
-          uniform float uOpacity;
-          uniform float uBeamLength;
-          void main() {
-            float t = clamp(vDistFromLens / uBeamLength, 0.0, 1.0);
-            float distAtten = 1.0 - t * 0.80;
-            gl_FragColor = vec4(uColor, uOpacity * distAtten);
-          }
-        `;
-        const coneMat = new THREE.ShaderMaterial({
-          uniforms: {
-            uColor: { value: new THREE.Color(0xffffff) },
-            uOpacity: { value: 0 },
-            uBeamLength: { value: coneHeight },
-          },
-          vertexShader: beamVertexShader,
-          fragmentShader: beamFragmentShader,
+        const coneRadiusBottom = coneHeight * Math.tan(0.15);
+        const coneGeo = new THREE.CylinderGeometry(0.03, coneRadiusBottom, coneHeight, 24, 1, true);
+        const coneMat = new THREE.MeshBasicMaterial({
+          color: 0xffffff,
           transparent: true,
+          opacity: 0,
+          side: THREE.DoubleSide,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
-          side: THREE.FrontSide,
         });
         const cone = new THREE.Mesh(coneGeo, coneMat);
         f3d.mountMode = pos.mountMode || 'top';
-        f3d.beamAngle = resolveBeamAngle(pf, pos, defs);
+        f3d.beamAngle = pos.beamAngle ?? 0.15;
         // Cone starts at origin (lens) and extends down in local space
         cone.position.set(0, -coneHeight / 2, 0);
         cone.visible = showBeams;
@@ -1038,16 +882,13 @@ export const Stage3D: React.FC = () => {
         fitMountRotation(f3d, pos.mountMode || 'top');
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
         if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._mountTilt + f3d._staticTilt;
-        // Sync interpolation state with actual rotations
-        if (f3d.armGroup) { f3d._targetPanY = f3d._currentPanY = f3d.armGroup.rotation.y; }
-        if (f3d.headGroup) { f3d._targetTiltX = f3d._currentTiltX = f3d.headGroup.rotation.x; }
         // Update beam angle (zoom)
         if (pos.beamAngle !== undefined && f3d.beamCone) {
           f3d.beamAngle = pos.beamAngle;
           const ch = 50;
           const radius = ch * Math.tan(pos.beamAngle);
           f3d.beamCone.geometry?.dispose();
-          f3d.beamCone.geometry = new THREE.CylinderGeometry(0.03, radius, ch, 32, 1, true);
+          f3d.beamCone.geometry = new THREE.CylinderGeometry(0.03, radius, ch, 24, 1, true);
           f3d.beamCone.position.set(0, -ch / 2, 0);
         }
       }
@@ -1080,15 +921,13 @@ export const Stage3D: React.FC = () => {
       fitMountRotation(f3d, pos.mountMode || 'top');
       f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
       if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._mountTilt + f3d._staticTilt; }
-      // Sync interpolation state
-      if (f3d.armGroup) { f3d._targetPanY = f3d._currentPanY = f3d.armGroup.rotation.y; }
-      if (f3d.headGroup) { f3d._targetTiltX = f3d._currentTiltX = f3d.headGroup.rotation.x; }
       if (pos.beamAngle !== undefined && f3d.beamCone) {
         f3d.beamAngle = pos.beamAngle;
         const ch = 50;
         const radius = ch * Math.tan(pos.beamAngle);
         f3d.beamCone.geometry?.dispose();
-        f3d.beamCone.geometry = new THREE.CylinderGeometry(0.03, radius, ch, 32, 1, true);
+        f3d.beamCone.geometry = new THREE.CylinderGeometry(0.03, radius, ch, 24, 1, true);
+        // Cone position: starts at origin (lens), extends down
         f3d.beamCone.position.set(0, -ch / 2, 0);
       }
     }
@@ -1104,114 +943,70 @@ export const Stage3D: React.FC = () => {
     }
   }, [showBeams]);
 
-  // ── DMX → fixture target sync (reads from dmxBridge cache, NOT Zustand store) ───
+  // ── DMX update function (called from render loop) ───
   const updateDmxState = useCallback(() => {
-    const blackout = useAppStore.getState().dmx?.blackout ?? false;
-    const grandMaster = useAppStore.getState().dmx?.grandMaster ?? 255;
-
-    let diagLines: string[] = [];
-    let fixtureCount = 0;
-    let noDataCount = 0;
-    let noPfCount = 0;
+    const dmxState = useAppStore.getState().dmx;
+    let channelData = dmxState.channelData as Record<number, Uint8Array | number[]>;
+    const blackout = dmxState.blackout ?? false;
+    const grandMaster = dmxState.grandMaster ?? 255;
 
     for (const f3d of fixturesRef.current.values()) {
-      fixtureCount++;
-      // Get DMX data for this fixture's universe from the bridge cache
-      const chVals = dmxBridge.getChannels(f3d.universeIndex);
-      if (!chVals || Object.keys(chVals).length === 0) {
-        noDataCount++;
+      // Get DMX data for this fixture's universe
+      const rawData = channelData[f3d.universeIndex];
+      if (!rawData) {
         if (f3d.pointLight) f3d.pointLight.intensity = 0;
-        if (f3d.beamCone) { (f3d.beamCone.material as THREE.ShaderMaterial).uniforms.uOpacity.value = 0; }
+        if (f3d.beamCone) { (f3d.beamCone.material as THREE.MeshBasicMaterial).opacity = 0; }
         // Apply static tilt even without DMX
-        if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._mountTilt + (f3d._staticTilt ?? 0); }
+        if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._mountTilt + (f3d._staticTilt ?? 0);
         continue;
       }
+      // Normalize data to Uint8Array-like access
+      const data = rawData instanceof Uint8Array ? rawData : new Uint8Array(Object.values(rawData));
 
       const pf = patchedFixtures.find(f => f.id === f3d.id);
-      if (!pf) { noPfCount++; continue; }
+      if (!pf) continue;
 
+      const baseAddr = pf.startAddress - 1;
       const cm = f3d.channelMap;
-      const sAddr = pf.startAddress; // 1-indexed, matches chVals keys
 
-      // Helper: read a DMX channel value, returns 0 if missing
-      const ch = (off: number) => chVals[sAddr + off] ?? 0;
-
-      // --- Intensity (supports Shutter-channel dimmer and strobe) ---
+      // --- Intensity ---
       let intensity = 0;
-      // Read shutter channel (many fixtures combine dimmer+strobe on one channel)
-      const shutterRaw = cm.shutterOffset !== null ? ch(cm.shutterOffset) : null;
-      let strobeRate = 0;
-      if (shutterRaw !== null) {
-        if (shutterRaw <= 7) {
-          intensity = 0; // shutter closed
-        } else if (shutterRaw <= 134) {
-          intensity = Math.round(((shutterRaw - 8) / (134 - 8)) * 255); // dimmer range
-        } else if (shutterRaw <= 239) {
-          // Strobe: 135=slow (~1Hz), 239=fast (~25Hz)
-          strobeRate = 1 + ((shutterRaw - 135) / (239 - 135)) * 24;
-          intensity = 255; // full intensity, strobe masks it
-        } else {
-          intensity = 255; // shutter open
-        }
-      } else if (cm.intensityOffset !== null && cm.intensityOffset >= 0) {
-        intensity = ch(cm.intensityOffset);
+      if (cm.intensityOffset !== null && cm.intensityOffset >= 0) {
+        intensity = data[baseAddr + cm.intensityOffset] ?? 0;
       } else if (cm.rgbOffsets) {
-        const r = ch(cm.rgbOffsets[0]);
-        const g = ch(cm.rgbOffsets[1]);
-        const b = ch(cm.rgbOffsets[2]);
+        const r = data[baseAddr + cm.rgbOffsets[0]] ?? 0;
+        const g = data[baseAddr + cm.rgbOffsets[1]] ?? 0;
+        const b = data[baseAddr + cm.rgbOffsets[2]] ?? 0;
         intensity = Math.max(r, g, b);
       }
-      f3d._strobeRate = strobeRate;
 
       if (blackout) intensity = 0;
       intensity = intensity * (grandMaster / 255);
-      // Square-law dimmer curve (LED fixtures: perceived brightness ∝ DMX2)
-      const rawNormIntensity = intensity / 255;
-      const normIntensity = rawNormIntensity * rawNormIntensity; // gamma 2.0
+      const normIntensity = intensity / 255;
 
       // --- Color ---
       let color = new THREE.Color(0xffffff);
       if (cm.rgbOffsets && cm.rgbOffsets.length >= 3) {
-        const r = ch(cm.rgbOffsets[0]) / 255;
-        const g = ch(cm.rgbOffsets[1]) / 255;
-        const b = ch(cm.rgbOffsets[2]) / 255;
+        const r = (data[baseAddr + cm.rgbOffsets[0]] ?? 0) / 255;
+        const g = (data[baseAddr + cm.rgbOffsets[1]] ?? 0) / 255;
+        const b = (data[baseAddr + cm.rgbOffsets[2]] ?? 0) / 255;
         if (r > 0 || g > 0 || b > 0) color.setRGB(r, g, b);
       } else if (cm.wheelOffset !== null) {
-        const wheelVal = ch(cm.wheelOffset);
+        const wheelVal = data[baseAddr + cm.wheelOffset] ?? 0;
         color = wheelValueToColor(wheelVal, cm.wheelCaps);
       }
 
       // --- Pan/Tilt (QLC+ model: arm=pan/Y, head=tilt/X) ---
-      // 16-bit resolution: coarse * 256 + fine / 65535 (8-bit fallback when no fine channel)
-      const panCoarse = cm.panOffset !== null ? ch(cm.panOffset) : 128;
-      const panFine = cm.panFineOffset !== null ? ch(cm.panFineOffset) : 0;
-      const pan16 = panCoarse * 256 + panFine; // 0-65535
-      const tiltCoarse = cm.tiltOffset !== null ? ch(cm.tiltOffset) : 128;
-      const tiltFine = cm.tiltFineOffset !== null ? ch(cm.tiltFineOffset) : 0;
-      const tilt16 = tiltCoarse * 256 + tiltFine; // 0-65535
-      const speedVal = cm.speedOffset !== null ? ch(cm.speedOffset) : 0;
+      const panVal = cm.panOffset !== null ? (data[baseAddr + cm.panOffset] ?? 128) : 128;
+      const tiltVal = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128) : 128;
       if (f3d.armGroup) {
-        f3d._targetPanY = ((pan16 / 65535) - 0.5) * Math.PI * 3;
+        f3d.armGroup.rotation.y = ((panVal / 255) - 0.5) * Math.PI * 3;
       }
       if (f3d.headGroup) {
-        const dmxTilt = ((tilt16 / 65535) - 0.5) * Math.PI * 1.5;
-        f3d._targetTiltX = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
+        // Tilt range: ±135° (π * 1.5) — matches real moving-head tilt span
+        const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI * 1.5;
+        f3d.headGroup.rotation.x = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
       }
-      // Diagnostic: show every fixture that has DMX data
-      const hasArm = !!f3d.armGroup;
-      const hasHead = !!f3d.headGroup;
-      diagLines.push(
-        `#${fixtureCount} id=${pf.id.slice(-8)} un=${f3d.universeIndex} s=${sAddr}` +
-        ` pOff=${cm.panOffset} tOff=${cm.tiltOffset} arm=${hasArm} head=${hasHead}`,
-        `  pan=${panCoarse}f=${panFine} tilt=${tiltCoarse}f=${tiltFine}` +
-        ` tgtPan=${f3d._targetPanY.toFixed(2)} tgtTilt=${f3d._targetTiltX.toFixed(2)}`,
-      );
-      // Track DMX activity: any non-center pan/tilt = DMX is driving
-      if (pan16 !== 32768 || tilt16 !== 32768) {
-        dmxActivityRef.current = performance.now();
-      }
-      // Map speed channel to lerp rate: 0=slow (0.015), 255=fast (0.40)
-      f3d._speedLerp = 0.015 + (speedVal / 255) * 0.385;
 
       // --- Update PointLight ---
       if (f3d.pointLight) {
@@ -1219,11 +1014,11 @@ export const Stage3D: React.FC = () => {
         f3d.pointLight.intensity = normIntensity * 25;
       }
 
-      // --- Update beam cones (outer + inner hotspot) ---
+      // --- Update beam cone ---
       if (f3d.beamCone) {
-        const mat = f3d.beamCone.material as THREE.ShaderMaterial;
-        mat.uniforms.uColor.value.copy(color);
-        mat.uniforms.uOpacity.value = normIntensity * 0.50;
+        const mat = f3d.beamCone.material as THREE.MeshBasicMaterial;
+        mat.color.copy(color);
+        mat.opacity = normIntensity * 0.35;
         f3d.beamCone.visible = showBeams && normIntensity > 0.005;
       }
 
@@ -1249,104 +1044,7 @@ export const Stage3D: React.FC = () => {
         }
       }
     }
-    // Update diagnostic overlay with per-frame info
-    const diagEl = dmxDiagRef.current;
-    if (diagEl) {
-      if (fixtureCount === 0) {
-        diagEl.innerHTML = '<span style="color:#f44">NO fixtures in ref</span>';
-      } else if (noPfCount > 0 && noPfCount === fixtureCount) {
-        diagEl.innerHTML = `<span style="color:#f44">${fixtureCount}f / NO patch match</span>`;
-      } else if (noDataCount > 0 && noDataCount === fixtureCount) {
-        diagEl.innerHTML = `<span style="color:#fa0">${fixtureCount}f / NO dmx data</span>`;
-      } else {
-        diagEl.innerHTML = diagLines.map(l => `<div>${l}</div>`).join('');
-      }
-    }
   }, [patchedFixtures, showBeams]);
-
-  // ── DMX → 3D sync: direct bridge from dmx-playback (no store, no polling) ───
-  // Ref to latest updateDmxState callback (avoids closure staleness)
-  const syncRef = useRef(updateDmxState);
-  syncRef.current = updateDmxState;
-
-  // DMX diagnostic overlay (DOM-managed to avoid React re-renders)
-  const dmxDiagRef = useRef<HTMLDivElement>(null);
-  const dmxCounterRef = useRef<HTMLDivElement>(null);
-  const dmxDiagCount = useRef(0);
-  const renderFrameCount = useRef(0);
-  const dmxLastValues = useRef<Map<string, number>>(new Map()); // fixture id → last pan value
-
-  useEffect(() => {
-    const unsub = dmxBridge.onPush((universe: number, channels: Record<number, number>) => {
-      dmxDiagCount.current++;
-      dmxActivityRef.current = performance.now();
-
-      // Track value changes for live delta overlay
-      let anyChange = false;
-      for (const f3d of fixturesRef.current.values()) {
-        if (f3d.universeIndex !== universe) continue;
-        const cm = f3d.channelMap;
-        const sAddr = f3d._startAddr;
-        if (cm.panOffset !== null) {
-          const pan = channels[sAddr + cm.panOffset] ?? 128;
-          const last = dmxLastValues.current.get(f3d.id);
-          if (last !== undefined && last !== pan) anyChange = true;
-          dmxLastValues.current.set(f3d.id, pan);
-        }
-      }
-
-      // Update live counter overlay
-      const counterEl = dmxCounterRef.current;
-      if (counterEl) {
-        const color = anyChange ? '#4f4' : '#f84';
-        const label = anyChange ? 'MOVING' : 'STATIC';
-        const rf = counterEl.dataset.rf || '?';
-        counterEl.innerHTML =
-          `<span style="color:${color}">#${dmxDiagCount.current} ${label}</span>` +
-          ` <span style="color:#aaa">R:${rf}</span>`;
-      }
-
-      // DIRECT pan/tilt target computation — bypasses updateDtxmState React closure
-      // This runs synchronously in the dmxBridge callback, ensures targets are set
-      // before the next animation frame reads them.
-      for (const f3d of fixturesRef.current.values()) {
-        if (f3d.universeIndex !== universe) continue;
-        const cm = f3d.channelMap;
-        const sAddr = f3d._startAddr;
-        const ch = (off: number) => channels[sAddr + off] ?? 0;
-
-        if (f3d.armGroup && cm.panOffset !== null) {
-          const panCoarse = ch(cm.panOffset);
-          const panFine = cm.panFineOffset !== null ? ch(cm.panFineOffset) : 0;
-          const pan16 = panCoarse * 256 + panFine;
-          f3d._dmxPanY = ((pan16 / 65535) - 0.5) * Math.PI * 3;
-        }
-        if (f3d.headGroup && cm.tiltOffset !== null) {
-          const tiltCoarse = ch(cm.tiltOffset);
-          const tiltFine = cm.tiltFineOffset !== null ? ch(cm.tiltFineOffset) : 0;
-          const tilt16 = tiltCoarse * 256 + tiltFine;
-          const dmxTilt = ((tilt16 / 65535) - 0.5) * Math.PI * 1.5;
-          f3d._dmxTiltX = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
-        }
-        // Map speed channel to lerp rate
-        if (cm.speedOffset !== null) {
-          const speedVal = ch(cm.speedOffset);
-          f3d._speedLerp = 0.015 + (speedVal / 255) * 0.385;
-        }
-      }
-
-      // Also run updateDmxState for intensity/color/shutter
-      try {
-        syncRef.current();
-      } catch (e: any) {
-        const diagEl = dmxDiagRef.current;
-        if (diagEl) {
-          diagEl.innerHTML = `<span style="color:#f44">ERR: ${String(e?.message ?? e).slice(0, 80)}</span>`;
-        }
-      }
-    });
-    return unsub;
-  }, [/* never re-subscribe — syncRef always points to latest */]);
 
   // ── Camera presets ──────────────────────────────────
   // ── Camera presets ──────────────────────────────────
@@ -1582,21 +1280,6 @@ export const Stage3D: React.FC = () => {
         onMouseDown={handleCanvasClick}
         onMouseMove={handleCanvasMouseMove}
       >
-        {/* DMX push counter + live delta (top-left corner) */}
-        <div
-          ref={dmxCounterRef}
-          className="absolute top-2 left-2 z-31 px-2 py-0.5 rounded text-[10px] font-mono bg-black/70 text-green-400 pointer-events-none"
-        >
-          DMX idle
-        </div>
-        {/* DMX diagnostic overlay (per-fixture detail) */}
-        <div
-          ref={dmxDiagRef}
-          className="absolute top-2 left-2 z-30 px-2 py-1 rounded text-[10px] font-mono bg-black/60 text-yellow-400 pointer-events-none" style={{ marginTop: '20px' }}
-        >
-          DMX idle
-        </div>
-
         {!fixtureDefsReady && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#08080e]/80 z-10">
             <div className="text-center">
