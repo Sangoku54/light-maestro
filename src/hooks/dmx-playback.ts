@@ -17,6 +17,8 @@ import type { SavedEffect } from '../stores/showStore';
 import { useAppStore } from '../stores/appstore';
 import { dmxBridge } from '../utils/dmx-bridge';
 
+let _efxNoOverrideFrame = 0;
+
 /**
  * Dispatch DMX channel values to the correct universe based on fixture address ranges.
  * Maps an address-based channel record to per-universe channel records.
@@ -387,6 +389,14 @@ export function useDmxPlayback(options: {
       const efxPtOverrides = efxTracksRef?.current && effectsRef?.current && efxTracksRef.current.length > 0
         ? computeEfxOverrides(efxTracksRef.current, ct, effectsRef.current, patchedFixtures, fixtureGroupsRef?.current || [])
         : null;
+
+      // Debug: log if EFX tracks exist but no overrides computed
+      if (!efxPtOverrides || efxPtOverrides.size === 0) {
+        if (efxTracksRef?.current && efxTracksRef.current.length > 0 && effectsRef?.current && effectsRef.current.length > 0) {
+          const hasEntries = efxTracksRef.current.some(t => t.entries.length > 0);
+          if (hasEntries && _efxNoOverrideFrame++ % 60 === 0) console.log('EFX no-override frame', _efxNoOverrideFrame, 'ct', ct.toFixed(2), 'tracks', efxTracksRef.current.length, 'effects', effectsRef.current.length, 'anyEntries', hasEntries);
+        }
+      }
       const efxMap=efxActive||{};
 
       for(const[uniIdx,fixtures]of analysis.byUniverse.entries()){
