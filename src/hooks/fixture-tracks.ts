@@ -326,8 +326,10 @@ function generateEfxPanTilt(
   const ry = rawPan * sinR + rawTilt * cosR;
 
   // Scale and offset → DMX 0-255
-  const pan = Math.round(128 + rx * width * 127 + xOffset * 127);
-  const tilt = Math.round(128 + ry * height * 127 + yOffset * 127);
+  const w = width || 1;       // fallback: full amplitude if not set
+  const h = height || 1;      // fallback: full amplitude if not set
+  const pan = Math.round(128 + rx * w * 127 + xOffset * 127);
+  const tilt = Math.round(128 + ry * h * 127 + yOffset * 127);
 
   return {
     pan: Math.max(0, Math.min(255, pan)),
@@ -372,7 +374,7 @@ export function computeEfxOverrides(
     if (!effect) continue;
 
     // Debug: log effect params on first frame
-    if (_efxDebugFrame <= 1) console.log('EFX effect', effect.name, 'pattern', effect.pattern, 'speed', effect.speed, 'width', effect.width, 'height', effect.height, 'rotation', effect.rotation, 'entryTime', activeEntry.time.toFixed(2), 'ct', currentTime.toFixed(2));
+    if (_efxDebugFrame <= 1) console.log('EFX effect', JSON.stringify({ name: effect.name, pattern: effect.pattern, speed: effect.speed, width: effect.width, height: effect.height, rotation: effect.rotation, xOffset: effect.xOffset, yOffset: effect.yOffset }));
 
     // Compute relative time: how far into the effect we are (in cycles)
     const speed = effect.speed || 0.5; // fallback: 0.5 Hz if speed not set
