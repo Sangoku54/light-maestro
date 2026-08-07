@@ -2621,7 +2621,7 @@ if (editBlock) { setEditBlock(null); return; }
                 key={pf.id}
                 className="flex items-center cursor-pointer"
                 style={{ height: TRACK_HEIGHT, paddingLeft: 4, width: LABEL_WIDTH - 4 }}
-                onClick={() => onToggleFixture?.(pf.id)}
+                onClick={() => { console.log(`[TrackTimeline checkbox] CLICK on ${pf.id} ${pf.name}`); onToggleFixture?.(pf.id); }}
                 onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
                 onMouseUp={e => { e.preventDefault(); e.stopPropagation(); }}
                 title={disabled
