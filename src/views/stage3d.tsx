@@ -1000,12 +1000,13 @@ export const Stage3D: React.FC = () => {
       const panVal = cm.panOffset !== null ? (data[baseAddr + cm.panOffset] ?? 128) : 128;
       const tiltVal = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128) : 128;
       if (f3d.armGroup) {
-        f3d.armGroup.rotation.y = ((panVal / 255) - 0.5) * Math.PI * 3;
+        const panTarget = ((panVal / 255) - 0.5) * Math.PI * 3;
+        f3d.armGroup.rotation.y += (panTarget - f3d.armGroup.rotation.y) * 0.3;
       }
       if (f3d.headGroup) {
-        // Tilt range: ±135° (π * 1.5) — matches real moving-head tilt span
         const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI * 1.5;
-        f3d.headGroup.rotation.x = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
+        const tiltTarget = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
+        f3d.headGroup.rotation.x += (tiltTarget - f3d.headGroup.rotation.x) * 0.3;
       }
 
       // --- Update PointLight ---
