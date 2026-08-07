@@ -2380,7 +2380,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       const entry: StrobeTrackEntry = {
         id: `strobe-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         time,
-        endTime: time + 0.5,
+        endTime: time + 10,
         speed,
         endSpeed: endSpeed || speed,
       };

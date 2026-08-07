@@ -44,6 +44,7 @@ export function computeStrobeTrackOverrides(
 ): Map<string, { active: boolean; speed: number }> {
   const result = new Map<string, { active: boolean; speed: number }>();
   for (const stItem of strobeTracks) {
+    if (stItem.entries.length === 0) continue;
     const activeEntry = stItem.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
     if (!activeEntry || !stItem.targetFixtures) continue;
     const tf = stItem.targetFixtures;
