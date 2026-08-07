@@ -872,6 +872,23 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
+      // ── Fixture enable/disable checkbox click (canvas-drawn) ──
+      if (onToggleFixture && disabledFixtures) {
+        const c = containerRef.current; if (c) {
+          const rect = c.getBoundingClientRect();
+          const mx = e.clientX - rect.left;
+          const my = e.clientY - rect.top;
+          const cbX = 74; const cbSize = 11; const cbHitPad = 4;
+          if (my >= HEADER_HEIGHT && mx >= cbX - cbHitPad && mx <= cbX + cbSize + cbHitPad) {
+            const fi = Math.floor((my - HEADER_HEIGHT) / TRACK_HEIGHT);
+            if (fi >= 0 && fi < numFixtures) {
+              onToggleFixture(patchedFixtures[fi].id);
+              return;
+            }
+          }
+        }
+      }
+
       // ── Close block menu on any click ──
 if (editBlock) { setEditBlock(null); return; }
             // ── Ctrl+C ──
@@ -1665,6 +1682,29 @@ if (editBlock) { setEditBlock(null); return; }
       ctx.fillStyle = tierColor + '40';
       ctx.font = '8px -apple-system, sans-serif';
       ctx.fillText(fixture.tier.substring(0, 1).toUpperCase(), 72, trackY + TRACK_HEIGHT / 2 + 4);
+
+      // ── Enable/Disable checkbox (canvas-drawn) ──
+      const cbSize = 11;
+      const cbX = 74;
+      const cbY = trackY + (TRACK_HEIGHT - cbSize) / 2;
+      const isDisabled = disabledFixtures?.has(fixture.id) ?? false;
+      // Box background
+      ctx.fillStyle = isDisabled ? 'rgba(100,100,100,0.3)' : 'rgba(168,85,247,0.25)';
+      ctx.fillRect(cbX, cbY, cbSize, cbSize);
+      // Box border
+      ctx.strokeStyle = isDisabled ? 'rgba(150,150,150,0.5)' : 'rgba(168,85,247,0.7)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(cbX, cbY, cbSize, cbSize);
+      // Checkmark if enabled
+      if (!isDisabled) {
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(cbX + 2.5, cbY + cbSize / 2);
+        ctx.lineTo(cbX + cbSize / 2 - 1, cbY + cbSize - 3);
+        ctx.lineTo(cbX + cbSize - 2, cbY + 3);
+        ctx.stroke();
+      }
 
       // ── EFX overlay: show EFX entry blocks on targeted fixture tracks ──
       // (drawn BEFORE fixture track blocks so they appear underneath)
@@ -2612,32 +2652,6 @@ if (editBlock) { setEditBlock(null); return; }
         onContextMenu={handleContextMenu}
         onWheel={(e) => { if (e.ctrlKey) { e.preventDefault(); setZoomLevel(prev => Math.max(0.25, Math.min(8, prev + (e.deltaY < 0 ? 0.25 : -0.25)))); } }}
       >
-        {/* Checkboxes overlay inside container */}
-        <div className="absolute top-0 left-0 z-20" style={{ paddingTop: HEADER_HEIGHT }}>
-          {patchedFixtures.map(pf => {
-            const disabled = disabledFixtures?.has(pf.id) ?? false;
-            return (
-              <div
-                key={pf.id}
-                className="flex items-center cursor-pointer"
-                style={{ height: TRACK_HEIGHT, paddingLeft: 4, width: LABEL_WIDTH - 4 }}
-                onClick={() => { console.log(`[TrackTimeline checkbox] CLICK on ${pf.id} ${pf.name}`); onToggleFixture?.(pf.id); }}
-                onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
-                onMouseUp={e => { e.preventDefault(); e.stopPropagation(); }}
-                title={disabled
-                  ? `Activer "${pf.name}" — la fixture est désactivée`
-                  : `Désactiver "${pf.name}" — la fixture est active`}
-              >
-                <input
-                  type="checkbox"
-                  checked={!disabled}
-                  readOnly
-                  className="w-3.5 h-3.5 accent-purple-500 pointer-events-none"
-                />
-              </div>
-            );
-          })}
-        </div>
         <canvas ref={canvasRef} className="w-full h-full" />
       </div>
 
