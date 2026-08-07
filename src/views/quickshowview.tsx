@@ -10,10 +10,10 @@ import { TrackAnalysis, TrackSection, SECTION_COLORS, keyToPalette, SectionAnaly
 import type { GenreProfile } from '../hooks/audio-analysis';
 import { computeFixtureTrackOverrides, type FixtureTrack } from '../hooks/fixture-tracks';
 import { loadFixtureDefinitions, clearFixtureDefCache, type DmxCue, type DmxFixtureDefinition } from '../hooks/dmx-cues';
-import { useDmxPlayback, computeDmxForCue, computeColorTrackColors, type ColorTrackRef } from '../hooks/dmx-playback';
+import { useDmxPlayback, computeDmxForCue, computeColorTrackColors, type ColorTrackRef, type DimmerTrackRef, computeDimmerTrackOverrides } from '../hooks/dmx-playback';
 import { Stage3D } from './Stage3D';
 import TrackTimeline from './TrackTimeline';
-import type { EfxTrack, EfxTrackEntry, ColorTrack, ColorTrackEntry, StrobeTrack, StrobeTrackEntry } from './TrackTimeline';
+import type { EfxTrack, EfxTrackEntry, ColorTrack, ColorTrackEntry, StrobeTrack, StrobeTrackEntry, DimmerTrack, DimmerTrackEntry } from './TrackTimeline';
 
 type EnrichedCue = DmxCue;
 
@@ -593,6 +593,7 @@ async function saveProject(
   fixtureTracks: FixtureTrack[],
   colorTracks: ColorTrack[],
   strobeTracks: StrobeTrack[],
+  dimmerTracks: DimmerTrack[],
 ): Promise<void> {
   if (!analysis) return;
   const data: any = {
@@ -603,6 +604,7 @@ async function saveProject(
     efxTracks,
     colorTracks,
     strobeTracks,
+    dimmerTracks,
     fixtureTracks,
     audioFileName: analysis.fileName,
     timestamp: new Date().toISOString(),
@@ -632,7 +634,7 @@ async function saveProject(
   } catch (e) {
     // localStorage full — try without large arrays
     try {
-      const slim = { ...localData, manualCues: [], efxTracks: [], colorTracks: [], strobeTracks: [], fixtureTracks: [] };
+      const slim = { ...localData, manualCues: [], efxTracks: [], colorTracks: [], strobeTracks: [], dimmerTracks: [], fixtureTracks: [] };
       localStorage.setItem('light-maestro:lastProject', JSON.stringify(slim));
       console.log('[saveProject] Auto-saved (slim) to localStorage');
     } catch (e2) {
@@ -671,6 +673,7 @@ async function loadProject(
   setFixtureTracks: (tracks: FixtureTrack[]) => void,
   setColorTracks: (tracks: ColorTrack[]) => void,
   setStrobeTracks: (tracks: StrobeTrack[]) => void,
+  setDimmerTracks: (tracks: DimmerTrack[]) => void,
 ): Promise<void> {
   return new Promise((resolve) => {
     const inp = document.createElement('input');
@@ -688,6 +691,7 @@ async function loadProject(
         if (data.efxTracks) setEfxTracks(data.efxTracks);
         if (data.colorTracks) setColorTracks(data.colorTracks);
         if (data.strobeTracks) setStrobeTracks(data.strobeTracks);
+        if (data.dimmerTracks) setDimmerTracks(data.dimmerTracks);
         if (data.fixtureTracks) setFixtureTracks(data.fixtureTracks);
         if (data.analysis) {
           if (data.audioDataBase64) {
@@ -862,6 +866,76 @@ const StrobeTrackInsertMenu: React.FC<{
         <button
           onClick={() => onInsert(speed, endSpeed)}
           className="flex-1 px-3 py-1.5 text-xs bg-purple-600 hover:bg-purple-500 text-white rounded"
+        >
+          Insert
+        </button>
+        <button
+          onClick={onCancel}
+          className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800 rounded"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/* ═══ DimmerTrackInsertMenu ═══════════════════════════ */
+const DimmerTrackInsertMenu: React.FC<{
+  onInsert: (value: number, endValue: number) => void;
+  onCancel: () => void;
+}> = ({ onInsert, onCancel }) => {
+  const [value, setValue] = useState(100);
+  const [endValue, setEndValue] = useState(100);
+
+  return (
+    <div className="px-2 py-1.5">
+      {/* Dimmer Value slider */}
+      <div className="mb-2">
+        <div className="text-[9px] text-gray-500 uppercase mb-1">Dimmer Value</div>
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={value}
+            onChange={e => setValue(Number(e.target.value))}
+            className="flex-1 accent-orange-500 h-1"
+          />
+          <span className="text-xs text-orange-300 font-mono w-10 text-right">{value}%</span>
+        </div>
+      </div>
+
+      <div className="border-t border-gray-800 my-1" />
+
+      {/* End value slider */}
+      <div className="mb-2">
+        <div className="text-[9px] text-gray-500 uppercase mb-1">End Value (optional)</div>
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={endValue}
+            onChange={e => setEndValue(Number(e.target.value))}
+            className="flex-1 accent-orange-500 h-1"
+          />
+          <span className="text-xs text-orange-300 font-mono w-10 text-right">{endValue}%</span>
+        </div>
+      </div>
+
+      {/* Preview */}
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[10px] text-orange-300 font-mono">{value}% → {endValue}%</span>
+        <span className="text-[9px] text-gray-500">preview</span>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          onClick={() => onInsert(value, endValue)}
+          className="flex-1 px-3 py-1.5 text-xs bg-orange-600 hover:bg-orange-500 text-white rounded"
         >
           Insert
         </button>
@@ -1583,6 +1657,9 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [strobeTracks, setStrobeTracks] = useState<StrobeTrack[]>([]);
   const strobeTracksRef = useRef<StrobeTrack[]>([]);
   strobeTracksRef.current = strobeTracks;
+  const [dimmerTracks, setDimmerTracks] = useState<DimmerTrack[]>([]);
+  const dimmerTracksRef = useRef<DimmerTrackRef[]>([]);
+  useEffect(() => { dimmerTracksRef.current = dimmerTracks; }, [dimmerTracks]);
   const [fixtureTracks, setFixtureTracks] = useState<FixtureTrack[]>([]);
   const fixtureTracksRef = useRef<FixtureTrack[]>([]);
   fixtureTracksRef.current = fixtureTracks;
@@ -1627,8 +1704,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const firedRef = useRef<Set<string>>(new Set());
 
   /* ─── Undo/redo ──────────────────────────────────── */
-  const undoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[] }[]>([]);
-  const redoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[] }[]>([]);
+  const undoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[] }[]>([]);
+  const redoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[] }[]>([]);
   const canUndo = undoHistoryRef.current.length > 0;
   const canRedo = redoHistoryRef.current.length > 0;
 
@@ -1640,33 +1717,36 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       fixtureTracks: [...fixtureTracks],
       colorTracks: [...colorTracks],
       strobeTracks: [...strobeTracks],
+      dimmerTracks: [...dimmerTracks],
     });
     redoHistoryRef.current = [];
-  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks]);
+  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks]);
 
   const undo = useCallback(() => {
     const state = undoHistoryRef.current.pop();
     if (!state) return;
-    redoHistoryRef.current.push({ sections: [...sections], manual: [...manualCues], efx: [...efxTracks], fixtureTracks: [...fixtureTracks], colorTracks: [...colorTracks], strobeTracks: [...strobeTracks] });
+    redoHistoryRef.current.push({ sections: [...sections], manual: [...manualCues], efx: [...efxTracks], fixtureTracks: [...fixtureTracks], colorTracks: [...colorTracks], strobeTracks: [...strobeTracks], dimmerTracks: [...dimmerTracks] });
     setSections(state.sections);
     setManualCues(state.manual);
     setEfxTracks(state.efx);
     setFixtureTracks(state.fixtureTracks);
     setColorTracks(state.colorTracks);
     setStrobeTracks(state.strobeTracks);
-  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks]);
+    setDimmerTracks(state.dimmerTracks);
+  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks]);
 
   const redo = useCallback(() => {
     const state = redoHistoryRef.current.pop();
     if (!state) return;
-    undoHistoryRef.current.push({ sections: [...sections], manual: [...manualCues], efx: [...efxTracks], fixtureTracks: [...fixtureTracks], colorTracks: [...colorTracks], strobeTracks: [...strobeTracks] });
+    undoHistoryRef.current.push({ sections: [...sections], manual: [...manualCues], efx: [...efxTracks], fixtureTracks: [...fixtureTracks], colorTracks: [...colorTracks], strobeTracks: [...strobeTracks], dimmerTracks: [...dimmerTracks] });
     setSections(state.sections);
     setManualCues(state.manual);
     setEfxTracks(state.efx);
     setFixtureTracks(state.fixtureTracks);
     setColorTracks(state.colorTracks);
     setStrobeTracks(state.strobeTracks);
-  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks]);
+    setDimmerTracks(state.dimmerTracks);
+  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks]);
 
   const clearAudio = useCallback(() => {
     pushHistory();
@@ -1675,6 +1755,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setEfxTracks([]);
     setColorTracks([]);
     setStrobeTracks([]);
+    setDimmerTracks([]);
     setFixtureTracks([]);
     // Reset audio file + analysis
     audioFile.clear();
@@ -1788,6 +1869,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           if (data.efxTracks) setEfxTracks(data.efxTracks);
           if (data.colorTracks) setColorTracks(data.colorTracks);
           if (data.strobeTracks) setStrobeTracks(data.strobeTracks);
+          if (data.dimmerTracks) setDimmerTracks(data.dimmerTracks);
           if (data.fixtureTracks) setFixtureTracks(data.fixtureTracks);
           let audioDataUrl = '';
           if (data.analysis) {
@@ -1822,6 +1904,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             efxTracks: data.efxTracks || [],
             colorTracks: data.colorTracks || [],
             strobeTracks: data.strobeTracks || [],
+            dimmerTracks: data.dimmerTracks || [],
             manualCues: data.manualCues || [],
             createdAt: new Date().toISOString(),
           }]);
@@ -1893,6 +1976,9 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           sections,
           efxTracks,
           manualCues,
+          colorTracks,
+          strobeTracks,
+          dimmerTracks,
           createdAt: new Date().toISOString(),
         }]);
 
@@ -1904,6 +1990,9 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           manualCues,
           efxTracks,
           fixtureTracks,
+          colorTracks,
+          strobeTracks,
+          dimmerTracks,
         };
         if (audioBase64Raw) data.audioDataBase64 = audioBase64Raw;
         const api = (window as any).lightMaestro?.presets;
@@ -1939,6 +2028,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     if (colorTracksPreset) setColorTracks(colorTracksPreset);
     const strobeTracksPreset = preset?.data?.strobeTracks || preset?.strobeTracks;
     if (strobeTracksPreset) setStrobeTracks(strobeTracksPreset);
+    const dimmerTracksPreset = preset?.data?.dimmerTracks || preset?.dimmerTracks;
+    if (dimmerTracksPreset) setDimmerTracks(dimmerTracksPreset);
     let audioDataUrl = '';
     if (analysisData) {
       if (audioBase64 && typeof audioBase64 === 'string') {
@@ -1975,6 +2066,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       efxTracks: efxTracksData || [],
       colorTracks: colorTracksPreset || [],
       strobeTracks: strobeTracksPreset || [],
+      dimmerTracks: dimmerTracksPreset || [],
       manualCues: manualCuesData || [],
       createdAt: new Date().toISOString(),
     }]);
@@ -2078,6 +2170,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     fixtureGroupsRef,
     colorTracksRef: colorTracksRef as any,
     strobeTracksRef: strobeTracksRef as any,
+    dimmerTracksRef: dimmerTracksRef as any,
     colorFadeMs: qs.colorFadeMs ?? 250,
     onVirtualDmx: (uni, chVals) => {
       useAppStore.getState().setUniverseData(uni, chVals);
@@ -2139,6 +2232,18 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [strobeEntryMenu, setStrobeEntryMenu] = useState<{ trackId: string; entry: StrobeTrackEntry; x: number; y: number } | null>(null);
   const scmRef = useRef<HTMLDivElement>(null);
   const strobeEntryMenuRef = useRef<HTMLDivElement>(null);
+
+  // Dimmer track context menus
+  const [dimmerInsertMenu, setDimmerInsertMenu] = useState<{ trackId: string; time: number; x: number; y: number } | null>(null);
+  const [dimmerEntryMenu, setDimmerEntryMenu] = useState<{ trackId: string; entry: DimmerTrackEntry; x: number; y: number } | null>(null);
+  const dimmerInsertMenuRef = useRef<HTMLDivElement>(null);
+  const dimmerEntryMenuRef = useRef<HTMLDivElement>(null);
+  // Dimmer track modal state
+  const [dimmerTrackModal, setDimmerTrackModal] = useState(false);
+  const [dimmerTrackName, setDimmerTrackName] = useState('');
+  const [dimmerTargetType, setDimmerTargetType] = useState<'all' | 'group' | 'fixture'>('all');
+  const [dimmerTargetGroupId, setDimmerTargetGroupId] = useState('');
+  const [dimmerTargetFixtureIds, setDimmerTargetFixtureIds] = useState<string[]>([]);
 
   // Resolve target fixture names for display + DMX filtering
   const efxTargetFixtureNames = useMemo(() => {
@@ -2415,6 +2520,92 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setStrobeEntryMenu({ trackId, entry, x: clientX, y: clientY });
   }, []);
 
+  // ─── Dimmer Track handlers ─────────────────────────
+  const handleAddDimmerTrack = useCallback((name: string, targetType: 'all' | 'group' | 'fixture', groupId?: string, fixtureIds?: string[]) => {
+    pushHistory();
+    const newTrack: DimmerTrack = {
+      id: `dimmer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name,
+      entries: [],
+      targetFixtures: {
+        type: targetType,
+        ...(targetType === 'group' && groupId ? { groupId } : {}),
+        ...(targetType === 'fixture' && fixtureIds ? { fixtureIds } : {}),
+      },
+    };
+    setDimmerTracks(prev => [...prev, newTrack]);
+  }, [pushHistory]);
+
+  const handleDeleteDimmerTrack = useCallback((trackId: string) => {
+    pushHistory();
+    setDimmerTracks(prev => prev.filter(t => t.id !== trackId));
+  }, [pushHistory]);
+
+  const handleInsertDimmerToTrack = useCallback((trackId: string, time: number, value: number, endValue?: number) => {
+    pushHistory();
+    setDimmerTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      const entry: DimmerTrackEntry = {
+        id: `dimmer-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        time,
+        endTime: time + 10,
+        value,
+        endValue: endValue ?? value,
+      };
+      return { ...t, entries: [...t.entries, entry] };
+    }));
+    setDimmerInsertMenu(null);
+  }, [pushHistory]);
+
+  const handleRemoveDimmerEntry = useCallback((trackId: string, entryId: string) => {
+    pushHistory();
+    setDimmerTracks(prev => prev.map(t => t.id === trackId ? { ...t, entries: t.entries.filter(e => e.id !== entryId) } : t));
+    setDimmerEntryMenu(null);
+  }, [pushHistory]);
+
+  const handleDimmerEntryChange = useCallback((trackId: string, entryIndex: number, newTime: number, newEndTime: number) => {
+    pushHistory();
+    setDimmerTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      const entries = [...t.entries];
+      if (entryIndex >= 0 && entryIndex < entries.length) {
+        entries[entryIndex] = { ...entries[entryIndex], time: newTime, endTime: newEndTime };
+      }
+      return { ...t, entries };
+    }));
+  }, [pushHistory]);
+
+  const handleDimmerTrackContextMenu = useCallback((trackId: string, time: number, clientX: number, clientY: number) => {
+    setDimmerInsertMenu({ trackId, time, x: clientX, y: clientY });
+  }, []);
+
+  const handleDimmerEntryClick = useCallback((trackId: string, entry: DimmerTrackEntry) => {
+    // Same as strobe — seek to entry time
+  }, []);
+
+  const handleDimmerEntryContextMenu = useCallback((trackId: string, entry: DimmerTrackEntry, clientX: number, clientY: number) => {
+    setDimmerEntryMenu({ trackId, entry, x: clientX, y: clientY });
+  }, []);
+
+  const handleAddDimmerTrackFromModal = useCallback(() => {
+    const name = dimmerTrackName.trim();
+    if (!name) return;
+    handleAddDimmerTrack(name, dimmerTargetType, dimmerTargetGroupId || undefined, dimmerTargetFixtureIds);
+    setDimmerTrackModal(false);
+    setDimmerTrackName('');
+    setDimmerTargetType('all');
+    setDimmerTargetGroupId('');
+    setDimmerTargetFixtureIds([]);
+  }, [handleAddDimmerTrack, dimmerTrackName, dimmerTargetType, dimmerTargetGroupId, dimmerTargetFixtureIds]);
+
+  const openDimmerTrackModal = useCallback(() => {
+    setDimmerTrackName('');
+    setDimmerTargetType('all');
+    setDimmerTargetGroupId('');
+    setDimmerTargetFixtureIds([]);
+    setDimmerTrackModal(true);
+  }, []);
+
   /* ─── Insert entity handler ──────────────────────── */
   const handleInsertEntity = useCallback((startTime: number, endTime: number, entityType: string, entityId: string) => {
     pushHistory();
@@ -2595,10 +2786,10 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         </button>
 
         {/* Save / Load */}
-        <button title={t('save') || 'Save'} onClick={() => saveProject(resolvedAnalysis, sections, qs, audioFile, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks)} className="p-1 rounded text-gray-400 hover:text-white">
+        <button title={t('save') || 'Save'} onClick={() => saveProject(resolvedAnalysis, sections, qs, audioFile, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks)} className="p-1 rounded text-gray-400 hover:text-white">
           <Save className="w-3.5 h-3.5" />
         </button>
-        <button title={t('open') || 'Open'} onClick={() => loadProject(setQs, audioFile, setSections, setManualCues, setEfxTracks, setFixtureTracks, setColorTracks, setStrobeTracks)} className="p-1 rounded text-gray-400 hover:text-white">
+        <button title={t('open') || 'Open'} onClick={() => loadProject(setQs, audioFile, setSections, setManualCues, setEfxTracks, setFixtureTracks, setColorTracks, setStrobeTracks, setDimmerTracks)} className="p-1 rounded text-gray-400 hover:text-white">
           <FolderOpen className="w-3.5 h-3.5" />
         </button>
         <button title={t('clear') || 'Clear'} onClick={clearAudio} className="p-1 rounded text-gray-400 hover:text-red-400">
@@ -2855,6 +3046,11 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           }}
           onStrobeEntryContextMenu={handleStrobeEntryContextMenu}
           onStrobeEntryChange={handleStrobeEntryChange}
+          dimmerTracks={dimmerTracks}
+          onDimmerTrackContextMenu={handleDimmerTrackContextMenu}
+          onDimmerEntryClick={handleDimmerEntryClick}
+          onDimmerEntryContextMenu={handleDimmerEntryContextMenu}
+          onDimmerEntryChange={handleDimmerEntryChange}
           onSectionsChange={(newSecs: TrackSection[]) => { pushHistory(); setSections(newSecs); }}
           fixtureTracks={fixtureTracks}
           onFixtureTracksChange={setFixtureTracks}
@@ -2921,6 +3117,13 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         >
           <Plus className="w-3 h-3" />
           Strobe Track
+        </button>
+        <button
+          onClick={openDimmerTrackModal}
+          className="ml-1 px-2 py-0.5 rounded text-[10px] text-orange-400 border border-orange-700/50 hover:bg-orange-400/10 cursor-pointer flex items-center gap-1"
+        >
+          <Plus className="w-3 h-3" />
+          Dimmer Track
         </button>
         <button
           onClick={() => setFadeModal(!fadeModal)}
@@ -3437,6 +3640,71 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         </>
       )}
 
+      {/* Dimmer insert menu */}
+      {dimmerInsertMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setDimmerInsertMenu(null)} />
+          <div
+            ref={dimmerInsertMenuRef}
+            className="fixed z-50 bg-[#1a1a2e] border border-orange-700/50 rounded-lg shadow-xl py-1 min-w-[180px]"
+            style={{ left: dimmerInsertMenu.x, top: dimmerInsertMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1.5 text-[10px] text-orange-400 uppercase tracking-wider border-b border-gray-800">
+              Insert Dimmer at {(dimmerInsertMenu.time ?? 0).toFixed(1)}s
+            </div>
+            <DimmerTrackInsertMenu
+              onInsert={(value, endValue) => {
+                handleInsertDimmerToTrack(dimmerInsertMenu.trackId, dimmerInsertMenu.time ?? 0, value, endValue);
+              }}
+              onCancel={() => setDimmerInsertMenu(null)}
+            />
+            <div className="border-t border-gray-800" />
+            <button
+              onClick={() => { handleDeleteDimmerTrack(dimmerInsertMenu.trackId); setDimmerInsertMenu(null); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
+            >
+              Delete track
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Dimmer entry context menu */}
+      {dimmerEntryMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setDimmerEntryMenu(null)} />
+          <div
+            ref={dimmerEntryMenuRef}
+            className="fixed z-50 bg-[#1a1a2e] border border-orange-700/50 rounded-lg shadow-xl py-1 min-w-[160px]"
+            style={{ left: dimmerEntryMenu.x, top: dimmerEntryMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1.5 text-[10px] text-orange-400 uppercase tracking-wider border-b border-gray-800">
+              <span className="text-orange-300 font-mono">{dimmerEntryMenu.entry.value}%</span>
+              {dimmerEntryMenu.entry.endValue !== undefined && dimmerEntryMenu.entry.endValue !== dimmerEntryMenu.entry.value && (
+                <span className="text-orange-400"> → {dimmerEntryMenu.entry.endValue}%</span>
+              )}
+            </div>
+            <div className="px-3 py-1 text-[9px] text-gray-600">
+              {dimmerEntryMenu.entry.time.toFixed(1)}s – {dimmerEntryMenu.entry.endTime.toFixed(1)}s
+            </div>
+            <button
+              onClick={() => handleRemoveDimmerEntry(dimmerEntryMenu.trackId, dimmerEntryMenu.entry.id)}
+              className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
+            >
+              Remove entry
+            </button>
+            <button
+              onClick={() => setDimmerEntryMenu(null)}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+
       {/* ── Color Track Target Modal ── */}
       {colorTrackModal && (
         <>
@@ -3632,6 +3900,105 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             </div>
           </div>
           <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setStrobeTrackModal(false)} />
+        </>
+      )}
+
+      {/* Dimmer Track Modal */}
+      {dimmerTrackModal && (
+        <>
+          <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
+            <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm font-semibold text-gray-200">New Dimmer Track</span>
+                <button onClick={() => setDimmerTrackModal(false)} className="text-gray-500 hover:text-white">✕</button>
+              </div>
+
+              <label className="block text-[10px] text-gray-400 mb-1">Track Name</label>
+              <input
+                autoFocus
+                value={dimmerTrackName}
+                onChange={e => setDimmerTrackName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && dimmerTrackName.trim()) handleAddDimmerTrackFromModal();
+                  if (e.key === 'Escape') setDimmerTrackModal(false);
+                }}
+                placeholder="e.g. Dimmer Fade"
+                className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none mb-4"
+              />
+
+              <label className="block text-[10px] text-gray-400 mb-1">Apply Dimmer To</label>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {([
+                  { type: 'all' as const, label: 'All Fixtures', icon: '🌐' },
+                  { type: 'group' as const, label: 'Group', icon: '📁' },
+                  { type: 'fixture' as const, label: 'Single Fixture', icon: '💡' },
+                ]).map(opt => (
+                  <button key={opt.type}
+                    onClick={() => {
+                      setDimmerTargetType(opt.type);
+                      if (opt.type !== 'group') setDimmerTargetGroupId('');
+                      if (opt.type !== 'fixture') setDimmerTargetFixtureIds([]);
+                    }}
+                    className={`px-3 py-2.5 rounded-lg text-xs font-medium border transition-all ${
+                      dimmerTargetType === opt.type
+                        ? 'bg-orange-600/20 border-orange-500/50 text-orange-300'
+                        : 'bg-gray-800/40 border-gray-700/40 text-gray-400 hover:border-gray-600'
+                    }`}
+                  >
+                    <div className="text-lg mb-0.5">{opt.icon}</div>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {dimmerTargetType === 'group' && (
+                <div className="mb-3">
+                  <label className="block text-[10px] text-gray-400 mb-1">Select Group</label>
+                  <select
+                    value={dimmerTargetGroupId}
+                    onChange={e => setDimmerTargetGroupId(e.target.value)}
+                    className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
+                  >
+                    <option value="">-- Choose group --</option>
+                    {fixtureGroups.map(g => (
+                      <option key={g.id} value={g.id}>{g.name} ({g.fixtureIds.length} fixtures)</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {dimmerTargetType === 'fixture' && (
+                <div className="mb-3">
+                  <label className="block text-[10px] text-gray-400 mb-1">Select Fixture</label>
+                  <select
+                    value={dimmerTargetFixtureIds[0] || ''}
+                    onChange={e => setDimmerTargetFixtureIds(e.target.value ? [e.target.value] : [])}
+                    className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
+                  >
+                    <option value="">-- Choose fixture --</option>
+                    {patchedFixtures.filter(f => f.enabled !== false).map(f => (
+                      <option key={f.id} value={f.id}>{f.name} ({f.universeId} ch.{f.startAddress})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setDimmerTrackModal(false)}
+                  className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddDimmerTrackFromModal}
+                  disabled={!dimmerTrackName.trim()}
+                  className="px-4 py-1.5 rounded-lg text-xs font-medium bg-orange-600 text-white hover:bg-orange-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Add Track
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setDimmerTrackModal(false)} />
         </>
       )}
     </div>

@@ -99,6 +99,27 @@ export interface StrobeTrack {
   };
 }
 
+// ─── Dimmer Track types ────────────────────────────────
+
+export interface DimmerTrackEntry {
+  id: string;
+  time: number;
+  endTime: number;
+  value: number;       // dimmer value (0-100%)
+  endValue?: number;   // end value for gradient (defaults to value)
+}
+
+export interface DimmerTrack {
+  id: string;
+  name: string;
+  entries: DimmerTrackEntry[];
+  targetFixtures: {
+    type: 'all' | 'group' | 'fixture';
+    groupId?: string;
+    fixtureIds?: string[];
+  };
+}
+
 interface TrackTimelineProps {
   cues: Cue[];
   dmxCues?: DmxCue[];
@@ -138,6 +159,16 @@ interface TrackTimelineProps {
   onStrobeEntryContextMenu?: (trackId: string, entry: StrobeTrackEntry, clientX: number, clientY: number) => void;
   /** Called when user drag-resizes or drag-moves a strobe entry */
   onStrobeEntryChange?: (trackId: string, entryIndex: number, newTime: number, newEndTime: number) => void;
+  /** Dimmer tracks to render below strobe tracks */
+  dimmerTracks?: DimmerTrack[];
+  /** Called when user right-clicks on a dimmer track row */
+  onDimmerTrackContextMenu?: (trackId: string, time: number, clientX: number, clientY: number) => void;
+  /** Called when user left-clicks a dimmer entry */
+  onDimmerEntryClick?: (trackId: string, entry: DimmerTrackEntry) => void;
+  /** Called when user right-clicks a dimmer entry */
+  onDimmerEntryContextMenu?: (trackId: string, entry: DimmerTrackEntry, clientX: number, clientY: number) => void;
+  /** Called when user drag-resizes or drag-moves a dimmer entry */
+  onDimmerEntryChange?: (trackId: string, entryIndex: number, newTime: number, newEndTime: number) => void;
   /** Called when user drags a section boundary to resize */
   onSectionsChange?: (sections: TrackSection[]) => void;
   /** Fixture tracks (override lanes drawn inside fixture tracks) */
@@ -164,6 +195,7 @@ const AUTOSCRIPT_TRACK_HEIGHT = 40;
 const EFX_TRACK_HEIGHT = 28;
 const COLOR_TRACK_HEIGHT = 26;
 const STROBE_TRACK_HEIGHT = 26;
+const DIMMER_TRACK_HEIGHT = 26;
 const LABEL_WIDTH = 90;
 
 const fmt = (s: number) =>
@@ -317,6 +349,26 @@ function findStrobeEntryAt(
   return best;
 }
 
+function findDimmerEntryAt(
+  track: DimmerTrack,
+  timeAtX: number,
+  duration: number,
+): DimmerTrackEntry | null {
+  const threshold = Math.min(2, duration * 0.05);
+  let best: DimmerTrackEntry | null = null;
+  let bestDist = Infinity;
+  for (const entry of track.entries) {
+    const entryMid = (entry.time + entry.endTime) / 2;
+    const halfLen = (entry.endTime - entry.time) / 2 + 0.1;
+    const d = Math.abs(entryMid - timeAtX);
+    if (d < halfLen + threshold && d < bestDist) {
+      best = entry;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
 // ─── Component ────────────────────────────────────────────
 
 const TrackTimeline: React.FC<TrackTimelineProps> = ({
@@ -343,6 +395,11 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   onStrobeEntryClick,
   onStrobeEntryContextMenu,
   onStrobeEntryChange,
+  dimmerTracks,
+  onDimmerTrackContextMenu,
+  onDimmerEntryClick,
+  onDimmerEntryContextMenu,
+  onDimmerEntryChange,
   onSectionsChange,
   fixtureTracks,
   onFixtureTracksChange,
@@ -394,7 +451,8 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const numEfxTracks = efxTracks?.length ?? 0;
   const numColorTracks = colorTracks?.length ?? 0;
   const numStrobeTracks = strobeTracks?.length ?? 0;
-  const totalHeight = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT;
+  const numDimmerTracks = dimmerTracks?.length ?? 0;
+  const totalHeight = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT + numDimmerTracks * DIMMER_TRACK_HEIGHT;
 
   // ── Fixture → cue mapping (memoized) ─────────────────
   const fixtureCueMap = useMemo(
@@ -519,6 +577,16 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
 
   // ── Strobe entry drag state (parallel to EFX drag) ──
   const strobeDragRef = useRef<{
+    trackId: string;
+    entryIndex: number;
+    mode: 'move' | 'resize-left' | 'resize-right';
+    startX: number;
+    entryTime: number;
+    entryEndTime: number;
+  } | null>(null);
+
+  // ── Dimmer entry drag state (parallel to EFX drag) ──
+  const dimmerDragRef = useRef<{
     trackId: string;
     entryIndex: number;
     mode: 'move' | 'resize-left' | 'resize-right';
@@ -730,6 +798,28 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         return;
       }
 
+      // Dimmer entry drag/resize (parallel to EFX)
+      if (dimmerDragRef.current) {
+        const c = containerRef.current; if (!c) return;
+        const rect = c.getBoundingClientRect();
+        const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
+        if (drawW <= 0) return;
+        const dx = (e.clientX - dimmerDragRef.current.startX) / drawW * duration;
+        const drag = dimmerDragRef.current;
+        if (drag.mode === 'move') {
+          const newTime = Math.max(0, drag.entryTime + dx);
+          const newEnd = drag.entryEndTime + dx;
+          onDimmerEntryChange?.(drag.trackId, drag.entryIndex, newTime, newEnd);
+        } else if (drag.mode === 'resize-left') {
+          const newTime = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          onDimmerEntryChange?.(drag.trackId, drag.entryIndex, newTime, drag.entryEndTime);
+        } else if (drag.mode === 'resize-right') {
+          const newEnd = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          onDimmerEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
+        }
+        return;
+      }
+
       // Section resize in progress
       if (sectionResizeRef.current) {
         const resize = sectionResizeRef.current;
@@ -772,7 +862,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         setTooltip(null);
       }
     },
-    [getCueAtPosition, duration, sections, onSectionsChange, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange],
+    [getCueAtPosition, duration, sections, onSectionsChange, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange],
   );
 
   const handleClick = useCallback(
@@ -977,7 +1067,7 @@ if (editBlock) { setEditBlock(null); return; }
       const timeAtX = (x / drawW) * duration;
       onSeek(Math.max(0, Math.min(duration, timeAtX)));
     },
-    [duration, getCueAtPosition, onSeek, efxTracks, onEfxEntryClick],
+    [duration, getCueAtPosition, onSeek, efxTracks, onEfxEntryClick, dimmerTracks, onDimmerEntryClick],
   );
 
   const handleContextMenu = useCallback(
@@ -1064,9 +1154,26 @@ if (editBlock) { setEditBlock(null); return; }
             }
           }
         }
+        // Check dimmer tracks (below strobe tracks)
+        const dimmerTrackBaseY = strobeTrackBaseY + sTracks.length * STROBE_TRACK_HEIGHT;
+        const dTracks = dimmerTracks || [];
+        if (y >= dimmerTrackBaseY && dTracks.length > 0) {
+          const dTrackIdx = Math.floor((y - dimmerTrackBaseY) / DIMMER_TRACK_HEIGHT);
+          if (dTrackIdx >= 0 && dTrackIdx < dTracks.length) {
+            e.preventDefault();
+            const timeAtX3 = (x / drawW) * duration;
+            const dTrack = dTracks[dTrackIdx];
+            const dEntry = findDimmerEntryAt(dTrack, timeAtX3, duration);
+            if (dEntry && onDimmerEntryContextMenu) {
+              onDimmerEntryContextMenu(dTrack.id, dEntry, e.clientX, e.clientY);
+            } else {
+              onDimmerTrackContextMenu?.(dTrack.id, Math.max(0, Math.min(duration, timeAtX3)), e.clientX, e.clientY);
+            }
+          }
+        }
       }
     },
-    [duration, efxTracks, colorTracks, strobeTracks, numFixtures, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu],
+    [duration, efxTracks, colorTracks, strobeTracks, dimmerTracks, numFixtures, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu, onDimmerTrackContextMenu, onDimmerEntryContextMenu],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -1267,6 +1374,51 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
+    // -- Dimmer entry drag detection (parallel to EFX) --
+    {
+      const c5 = containerRef.current;
+      if (c5 && onDimmerEntryChange) {
+        const rect5 = c5.getBoundingClientRect();
+        const x5 = e.clientX - rect5.left - LABEL_WIDTH;
+        const y5 = e.clientY - rect5.top;
+        const drawW5 = rect5.width - LABEL_WIDTH;
+        const eT = efxTracks || [];
+        const cT = colorTracks || [];
+        const sT = strobeTracks || [];
+        const dT = dimmerTracks || [];
+        if (dT.length > 0 && drawW5 > 0 && x5 >= 0 && y5 >= HEADER_HEIGHT) {
+          const efxBase = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT;
+          const colorBase = efxBase + eT.length * EFX_TRACK_HEIGHT;
+          const strobeBase = colorBase + cT.length * COLOR_TRACK_HEIGHT;
+          const dimmerBase = strobeBase + sT.length * STROBE_TRACK_HEIGHT;
+          if (y5 >= dimmerBase) {
+            const dIdx = Math.floor((y5 - dimmerBase) / DIMMER_TRACK_HEIGHT);
+            if (dIdx >= 0 && dIdx < dT.length) {
+              const dTrack = dT[dIdx];
+              for (let ei = 0; ei < dTrack.entries.length; ei++) {
+                const entry = dTrack.entries[ei];
+                const ex1 = (entry.time / duration) * drawW5;
+                const ex2 = (entry.endTime / duration) * drawW5;
+                const EDGE = 5;
+                if (Math.abs(x5 - ex1) < EDGE) {
+                  dimmerDragRef.current = { trackId: dTrack.id, entryIndex: ei, mode: 'resize-left', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (Math.abs(x5 - ex2) < EDGE) {
+                  dimmerDragRef.current = { trackId: dTrack.id, entryIndex: ei, mode: 'resize-right', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (x5 > ex1 + EDGE && x5 < ex2 - EDGE) {
+                  dimmerDragRef.current = { trackId: dTrack.id, entryIndex: ei, mode: 'move', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     if (!onSectionsChange) return;
     const c = containerRef.current;
     if (!c) return;
@@ -1299,7 +1451,7 @@ if (editBlock) { setEditBlock(null); return; }
         return;
       }
     }
-  }, [sections, duration, onSectionsChange, efxTracks, colorTracks, strobeTracks, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange]);
+  }, [sections, duration, onSectionsChange, efxTracks, colorTracks, strobeTracks, dimmerTracks, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Clear EFX drag
@@ -1317,6 +1469,12 @@ if (editBlock) { setEditBlock(null); return; }
     // Strobe entry drag end
     if (strobeDragRef.current) {
       strobeDragRef.current = null;
+      return;
+    }
+
+    // Dimmer entry drag end
+    if (dimmerDragRef.current) {
+      dimmerDragRef.current = null;
       return;
     }
 
@@ -2191,6 +2349,123 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
+    // ── Dimmer tracks ───────────────────────────────
+    if (numDimmerTracks > 0) {
+      const eT = efxTracks || [];
+      const cT = colorTracks || [];
+      const sT = strobeTracks || [];
+      const efxBase = autoY + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT;
+      const colorBase = efxBase + cT.length * COLOR_TRACK_HEIGHT;
+      const strobeBase = colorBase + sT.length * STROBE_TRACK_HEIGHT;
+      const dimmerTrackBaseY = strobeBase;
+      for (let di = 0; di < numDimmerTracks; di++) {
+        const dTrack = dimmerTracks![di];
+        const trackY = dimmerTrackBaseY + di * DIMMER_TRACK_HEIGHT;
+
+        // Track background
+        ctx.fillStyle = di % 2 === 0 ? 'rgba(249, 115, 22, 0.04)' : 'rgba(249, 115, 22, 0.02)';
+        ctx.fillRect(LABEL_WIDTH, trackY, drawW, DIMMER_TRACK_HEIGHT);
+
+        // Top separator
+        ctx.strokeStyle = 'rgba(249, 115, 22, 0.25)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY);
+        ctx.lineTo(w, trackY);
+        ctx.stroke();
+
+        // Track label
+        ctx.fillStyle = '#f97316';
+        ctx.font = '9px -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+        const dLabel = dTrack.name.length > 11 ? dTrack.name.substring(0, 10) + '\u2026' : dTrack.name;
+        ctx.fillText('DIM: ' + dLabel, 6, trackY + 12);
+
+        // Target badge
+        const tf = dTrack.targetFixtures;
+        let targetLabel = '';
+        if (tf?.type === 'group') {
+          const store = (window as any).__useShowStore?.getState?.();
+          const groups = store?.fixtureGroups || [];
+          const g = groups.find((gg: any) => gg.id === tf.groupId);
+          targetLabel = g ? '📁 ' + (g.name.length > 8 ? g.name.slice(0,7)+'…' : g.name) : '📁 ?';
+        } else if (tf?.type === 'fixture') {
+          targetLabel = '💡 ×1';
+        } else {
+          targetLabel = '🌐 all';
+        }
+        if (targetLabel) {
+          ctx.fillStyle = '#6b7280';
+          ctx.font = '8px -apple-system, sans-serif';
+          ctx.fillText(targetLabel, 72, trackY + 12);
+        }
+
+        // Bottom separator
+        ctx.strokeStyle = 'rgba(75, 85, 99, 0.1)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY + DIMMER_TRACK_HEIGHT);
+        ctx.lineTo(w, trackY + DIMMER_TRACK_HEIGHT);
+        ctx.stroke();
+
+        // Draw entries (dimmer blocks)
+        for (const entry of dTrack.entries) {
+          const ex = LABEL_WIDTH + (entry.time / duration) * drawW;
+          const endX = LABEL_WIDTH + (entry.endTime / duration) * drawW;
+          const entryW = Math.max(4, endX - ex);
+          if (ex < LABEL_WIDTH - 10 || ex > w + 10) continue;
+
+          const pad = 3;
+          const barY = trackY + pad;
+          const barH = DIMMER_TRACK_HEIGHT - pad * 2;
+
+          // Orange bar with opacity based on value
+          const valueAlpha = Math.min(1, 0.3 + (entry.value / 100) * 0.7);
+          ctx.fillStyle = '#f97316';
+          ctx.globalAlpha = valueAlpha;
+          ctx.beginPath();
+          ctx.roundRect(ex, barY, entryW, barH, 3);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+
+          // Edge accents
+          ctx.fillStyle = '#fb923c';
+          ctx.beginPath();
+          ctx.roundRect(ex, barY, 3, barH, [3, 0, 0, 3]);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.roundRect(endX - 3, barY, 3, barH, [0, 3, 3, 0]);
+          ctx.fill();
+
+          // Value label
+          if (entryW > 40) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 7px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(entry.value + '%', ex + entryW / 2, trackY + DIMMER_TRACK_HEIGHT / 2 + 3);
+          }
+
+          // Start/end diamonds
+          ctx.fillStyle = '#fb923c';
+          const diamondSize = 3;
+          ctx.beginPath();
+          ctx.moveTo(ex, barY + barH / 2 - diamondSize);
+          ctx.lineTo(ex + diamondSize, barY + barH / 2);
+          ctx.lineTo(ex, barY + barH / 2 + diamondSize);
+          ctx.lineTo(ex - diamondSize, barY + barH / 2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(endX, barY + barH / 2 - diamondSize);
+          ctx.lineTo(endX + diamondSize, barY + barH / 2);
+          ctx.lineTo(endX, barY + barH / 2 + diamondSize);
+          ctx.lineTo(endX - diamondSize, barY + barH / 2);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
+
     // ── Playhead ─────────────────────────────────────
     if (currentTime >= 0 && currentTime <= duration) {
       const px = LABEL_WIDTH + (currentTime / duration) * drawW;
@@ -2236,6 +2511,12 @@ if (editBlock) { setEditBlock(null); return; }
     getCuesForFixture,
     efxTracks,
     numEfxTracks,
+    colorTracks,
+    numColorTracks,
+    strobeTracks,
+    numStrobeTracks,
+    dimmerTracks,
+    numDimmerTracks,
     fixtureTracks,
     ftSelStart,
     ftSelEnd,

@@ -35,6 +35,16 @@ export interface StrobeTrackRef {
   };
 }
 
+export interface DimmerTrackRef {
+  id: string;
+  entries: Array<{ id: string; time: number; endTime: number; value: number; endValue?: number }>;
+  targetFixtures: {
+    type: 'all' | 'group' | 'fixture';
+    groupId?: string;
+    fixtureIds?: string[];
+  };
+}
+
 /** Compute per-fixture strobe overrides from active strobe track entries at a given time. */
 export function computeStrobeTrackOverrides(
   strobeTracks: StrobeTrackRef[],
@@ -65,6 +75,41 @@ export function computeStrobeTrackOverrides(
         speed = activeEntry.speed + (activeEntry.endSpeed - activeEntry.speed) * t;
       }
       result.set(fid, { active: true, speed });
+    }
+  }
+  return result;
+}
+
+/** Compute per-fixture dimmer overrides from active dimmer track entries at a given time. */
+export function computeDimmerTrackOverrides(
+  dimmerTracks: DimmerTrackRef[],
+  currentTime: number,
+  patchedFixtures: PatchedFixture[],
+  fixtureGroups: FixtureGroup[],
+): Map<string, { active: boolean; value: number }> {
+  const result = new Map<string, { active: boolean; value: number }>();
+  for (const dtItem of dimmerTracks) {
+    if (dtItem.entries.length === 0) continue;
+    const activeEntry = dtItem.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
+    if (!activeEntry || !dtItem.targetFixtures) continue;
+    const tf = dtItem.targetFixtures;
+    let targets: string[] = [];
+    if (tf.type === 'all') {
+      targets = patchedFixtures.map(f => f.id);
+    } else if (tf.type === 'group' && tf.groupId) {
+      const group = fixtureGroups.find(g => g.id === tf.groupId);
+      targets = group?.fixtureIds || [];
+    } else if (tf.type === 'fixture' && tf.fixtureIds) {
+      targets = tf.fixtureIds;
+    }
+    for (const fid of targets) {
+      let value = activeEntry.value;
+      if (activeEntry.endValue !== undefined && activeEntry.endValue !== activeEntry.value) {
+        const dur = activeEntry.endTime - activeEntry.time;
+        const t = dur > 0 ? Math.max(0, Math.min(1, (currentTime - activeEntry.time) / dur)) : 1;
+        value = activeEntry.value + (activeEntry.endValue - activeEntry.value) * t;
+      }
+      result.set(fid, { active: true, value });
     }
   }
   return result;
@@ -359,9 +404,10 @@ export function useDmxPlayback(options: {
   fixtureGroupsRef?: React.MutableRefObject<{ id: string; fixtureIds: string[] }[]>;
   colorTracksRef?: React.MutableRefObject<ColorTrackRef[]>; // Color track overrides
   strobeTracksRef?: React.MutableRefObject<StrobeTrackRef[]>; // Strobe track overrides
+  dimmerTracksRef?: React.MutableRefObject<DimmerTrackRef[] | null>; // Dimmer track overrides (highest priority for intensity)
   onVirtualDmx?: (universe: number, channelValues: Record<number, number>) => void; // Mirror for 3D view
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,onVirtualDmx}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,onVirtualDmx}=options;
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
 
@@ -512,7 +558,7 @@ export function useDmxPlayback(options: {
         for(let fi=0;fi<fixtures.length;fi++){
           const fa=fixtures[fi];const pf=fa.fixture;
 
-          const dimmerVal = (() => {
+          let dimmerVal = (() => {
             // Fixture track override check
             if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
               for (const ft of fixtureTracksRef.current) {
@@ -533,6 +579,14 @@ export function useDmxPlayback(options: {
             }
             return active.forcedDimmerVal !== undefined ? active.forcedDimmerVal : mapIntensity(active.intensity, energy, pf.tier, tierMultipliers);
           })();
+          // Dimmer track override (highest priority for intensity)
+          if (dimmerTracksRef?.current) {
+            const dto = computeDimmerTrackOverrides(dimmerTracksRef.current, ct, patchedFixtures, fixtureGroupsRef?.current || []);
+            const dimmerOverride = dto.get(pf.id);
+            if (dimmerOverride) {
+              dimmerVal = Math.round(255 * dimmerOverride.value / 100);
+            }
+          }
           if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=dimmerVal;}
 
           const tierColorIdx=pf.tier==='secondary'?1:pf.tier==='tertiary'?2:0;
@@ -772,6 +826,7 @@ export function computeDmxForCue(
   },
   colorTrackColors?: Map<string, string>,
   strobeTrackOverrides?: Map<string, { active: boolean; speed: number }>,
+  dimmerTrackOverrides?: Map<string, { active: boolean; value: number }>,
 ): Array<{ universe: number; channelValues: Record<number, number> }> {
   const uniIds = universes.map(u => String(u.id));
   const analyses: ChannelAnalysis[] = [];
@@ -808,9 +863,16 @@ export function computeDmxForCue(
       const fa = fixtures[fi];
       const pf = fa.fixture;
 
-      const dimmerVal = (fixtureTrackOverrides?.forcedDimmers?.has(pf.id))
+      let dimmerVal = (fixtureTrackOverrides?.forcedDimmers?.has(pf.id))
         ? fixtureTrackOverrides.forcedDimmers.get(pf.id)!
         : mapIntensity(cue.intensity, energy, pf.tier, tierMultipliers);
+      // Dimmer track override (highest priority for intensity)
+      if (dimmerTrackOverrides) {
+        const dimmerOverride = dimmerTrackOverrides.get(pf.id);
+        if (dimmerOverride) {
+          dimmerVal = Math.round(255 * dimmerOverride.value / 100);
+        }
+      }
       if (fa.intensityOffset !== null) {
         const addr = pf.startAddress + fa.intensityOffset;
         if (!chVals[addr] || dimmerVal > chVals[addr]) chVals[addr] = dimmerVal;
