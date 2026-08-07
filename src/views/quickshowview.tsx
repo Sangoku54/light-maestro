@@ -1762,7 +1762,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks]);
 
   const handleToggleFixture = useCallback((fixtureId: string) => {
-    console.log('[handleToggleFixture] CALLED for', fixtureId);
     pushHistory();
     setDisabledFixtures(prev => {
       const next = new Set(prev);

@@ -420,6 +420,11 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Refs for stale-closure-safe access in callbacks
+  const disabledFixturesRef2 = useRef(disabledFixtures);
+  disabledFixturesRef2.current = disabledFixtures;
+  const onToggleFixtureRef = useRef(onToggleFixture);
+  onToggleFixtureRef.current = onToggleFixture;
   const [tooltip, setTooltip] = useState<{
     cue: Cue;
     x: number;
@@ -873,7 +878,9 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       // ── Fixture enable/disable checkbox click (canvas-drawn) ──
-      if (onToggleFixture && disabledFixtures) {
+      const _dtf = onToggleFixtureRef.current;
+      const _dfx = disabledFixturesRef2.current;
+      if (_dtf && _dfx) {
         const c = containerRef.current; if (c) {
           const rect = c.getBoundingClientRect();
           const mx = e.clientX - rect.left;
@@ -882,7 +889,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
           if (my >= HEADER_HEIGHT && mx >= cbX - cbHitPad && mx <= cbX + cbSize + cbHitPad) {
             const fi = Math.floor((my - HEADER_HEIGHT) / TRACK_HEIGHT);
             if (fi >= 0 && fi < numFixtures) {
-              onToggleFixture(patchedFixtures[fi].id);
+              _dtf(patchedFixtures[fi].id);
               return;
             }
           }
