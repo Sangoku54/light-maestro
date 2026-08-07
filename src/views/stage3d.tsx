@@ -28,6 +28,7 @@ import {
   type DmxFixtureCapability,
 } from '../hooks/dmx-cues';
 import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X } from 'lucide-react';
+import { dmxBridge } from '../utils/dmx-bridge';
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -879,10 +880,20 @@ export const Stage3D: React.FC = () => {
         const stageY = (pos.mountMode || 'top') === 'ground' ? 0 : pos.h * 5.0;
         f3d.group.position.set(stageX, stageY, stageZ);
         f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
+        if (f3d.channelMap.panOffset !== null) {
+          // Reverse: 3D heading → DMX pan value → push to hardware
+          const panDmx = Math.round(((((pos.heading ?? 0) * Math.PI / 180) / (Math.PI * 3)) + 0.5) * 255);
+          dmxBridge.pushDesignChannel(f3d.universeIndex, pf.startAddress + f3d.channelMap.panOffset, panDmx);
+        }
         if (pos.mountMode) f3d.mountMode = pos.mountMode;
         fitMountRotation(f3d, pos.mountMode || 'top');
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
         if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._mountTilt + f3d._staticTilt;
+        if (f3d.channelMap.tiltOffset !== null) {
+          // Reverse: 3D tilt → DMX tilt value → push to hardware
+          const tiltDmx = Math.round(((f3d._staticTilt / (Math.PI * 1.5)) + 0.5) * 255);
+          dmxBridge.pushDesignChannel(f3d.universeIndex, pf.startAddress + f3d.channelMap.tiltOffset, tiltDmx);
+        }
         // Update beam angle (zoom)
         if (pos.beamAngle !== undefined && f3d.beamCone) {
           f3d.beamAngle = pos.beamAngle;
@@ -918,10 +929,18 @@ export const Stage3D: React.FC = () => {
       const stageY = (pos.mountMode || 'top') === 'ground' ? 0 : pos.h * 5.0;
       f3d.group.position.set(stageX, stageY, stageZ);
       f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
+      if (f3d.channelMap.panOffset !== null) {
+        const panDmx = Math.round(((((pos.heading ?? 0) * Math.PI / 180) / (Math.PI * 3)) + 0.5) * 255);
+        dmxBridge.pushDesignChannel(f3d.universeIndex, pf.startAddress + f3d.channelMap.panOffset, panDmx);
+      }
       if (pos.mountMode) f3d.mountMode = pos.mountMode;
       fitMountRotation(f3d, pos.mountMode || 'top');
       f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
       if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._mountTilt + f3d._staticTilt; }
+      if (f3d.channelMap.tiltOffset !== null) {
+        const tiltDmx = Math.round(((f3d._staticTilt / (Math.PI * 1.5)) + 0.5) * 255);
+        dmxBridge.pushDesignChannel(f3d.universeIndex, pf.startAddress + f3d.channelMap.tiltOffset, tiltDmx);
+      }
       if (pos.beamAngle !== undefined && f3d.beamCone) {
         f3d.beamAngle = pos.beamAngle;
         const ch = 50;

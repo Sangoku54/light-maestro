@@ -21,6 +21,29 @@ export const dmxBridge = {
     }
   },
 
+  /**
+   * Push a single channel change from the design panel (3D → Live DMX).
+   * Updates the store cache AND sends to the real DMX hardware via USB.
+   * Safe to call even when the DMX engine is not running.
+   */
+  pushDesignChannel(universe: number, channelAddr: number, value: number) {
+    // Update bridge cache so the 3D render loop picks it up
+    const ch = _channelCache.get(universe) || {};
+    ch[channelAddr] = Math.max(0, Math.min(255, Math.round(value)));
+    _channelCache.set(universe, ch);
+    // Push to real DMX hardware
+    const api = (typeof window !== 'undefined' ? (window as any).lightMaestro?.dmx : null);
+    if (api) {
+      api.isRunning().then((running: boolean) => {
+        if (running) api.setChannels(universe, ch).catch(() => {});
+      }).catch(() => {});
+    }
+    // Notify listeners (Stage3D uses Zustand bridge, but some paths listen here)
+    for (const fn of listeners) {
+      try { fn(universe, ch); } catch (_) { /* ignore */ }
+    }
+  },
+
   /** Stage3D reads the latest channel values for a universe */
   getChannels(universe: number): Record<number, number> | undefined {
     return _channelCache.get(universe);
