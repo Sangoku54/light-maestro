@@ -1007,8 +1007,34 @@ export const Stage3D: React.FC = () => {
         intensity = Math.max(r, g, b);
       }
 
+      // --- Shutter / Strobe ---
+      let strobeHz = 0;
+      let shutterClosed = false;
+      if (cm.shutterOffset !== null && cm.shutterOffset >= 0) {
+        const shutterVal = data[baseAddr + cm.shutterOffset] ?? 255;
+        // DMX shutter ranges: 0-31=closed, 32-63=open, 64-95=strobe slow, 96-127=strobe fast, 128-255=strobe speed (180=0Hz, 255=25Hz)
+        if (shutterVal <= 31) {
+          shutterClosed = true;
+          intensity = 0;
+        } else if (shutterVal >= 180) {
+          // DMX formula: speed = (val - 180) / 3 Hz
+          strobeHz = Math.max(1, (shutterVal - 180) / 3);
+        } else if (shutterVal >= 32 && shutterVal <= 63) {
+          // Open — leave intensity as-is
+        } else if (shutterVal >= 64 && shutterVal <= 127) {
+          // Standard strobe range with rate ramp
+          strobeHz = Math.max(1, (shutterVal - 64) / 4);
+        }
+      }
+
       if (blackout) intensity = 0;
       intensity = intensity * (grandMaster / 255);
+
+      // Apply strobe blink
+      if (strobeHz > 0) {
+        const phase = (performance.now() * 0.001 * strobeHz) % 1;
+        if (phase > 0.5) intensity = 0; // 50% duty cycle blink
+      }
       const normIntensity = intensity / 255;
 
       // --- Color ---
