@@ -1433,6 +1433,10 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   fixtureTracksRef.current = fixtureTracks;
   const fixtureGroupsRef = useRef<{ id: string; fixtureIds: string[] }[]>([]);
   fixtureGroupsRef.current = useShowStore.getState().fixtureGroups;
+  const efxTracksRef = useRef<EfxTrack[]>([]);
+  efxTracksRef.current = efxTracks;
+  const effectsRef = useRef<any[]>([]);
+  effectsRef.current = useShowStore.getState().effects;
   const fixtureDefsRef = useRef<Map<string, DmxFixtureDefinition>>(new Map());
   const cuesRef = useRef<any[]>([]);
   const [efxContextMenu, setEfxContextMenu] = useState<{ trackId: string; time: number; x: number; y: number } | null>(null);
@@ -1892,6 +1896,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     tierMultipliers: { primary: qs.tierConfig?.primary || 100, secondary: qs.tierConfig?.secondary || 70, tertiary: qs.tierConfig?.tertiary || 40 },
     overrideCuesRef: overrideCuesRef as any,
     fixtureTracksRef,
+    efxTracksRef,
+    effectsRef,
     fixtureGroupsRef,
     colorFadeMs: qs.colorFadeMs ?? 250,
     onVirtualDmx: (uni, chVals) => {

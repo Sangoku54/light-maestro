@@ -12,7 +12,7 @@
  */
 
 import type { DmxCue } from './dmx-cues';
-import type { PatchedFixture } from '../stores/showStore';
+import type { PatchedFixture, SavedEffect, EfxPattern } from '../stores/showStore';
 
 // ═══════════════════════════════════════════════════════════
 // Types
@@ -246,4 +246,150 @@ export function generateTrackDmxCues(
   }
 
   return cues;
+}
+
+// ═══════════════════════════════════════════════════════════
+// EFX Track Overlays — generate DMX pan/tilt from saved effects
+// ═══════════════════════════════════════════════════════════
+
+/** Minimal EFX track entry interface matching EfxTrackEntry */
+export interface EfxEntryRef {
+  time: number;
+  endTime: number;
+  effectId: string;
+  pattern: string;
+  fixtureNames: string[];
+}
+
+/** Minimal EFX track interface for the DMX engine */
+export interface EfxTrackRef {
+  id: string;
+  name: string;
+  entries: EfxEntryRef[];
+  targetFixtures: { type: 'all' | 'group' | 'fixture'; groupId?: string; fixtureIds?: string[] };
+}
+
+/**
+ * Generate pan/tilt DMX values from an EFX pattern at a given relative time.
+ * Returns { pan, tilt } in 0-255 range.
+ */
+function generateEfxPanTilt(
+  pattern: EfxPattern,
+  t: number,        // relative time in cycles (0 = start, scales with speed)
+  width: number,     // 0-1
+  height: number,    // 0-1
+  rotation: number,  // radians
+  xOffset: number,
+  yOffset: number,
+): { pan: number; tilt: number } {
+  const twoPi = Math.PI * 2;
+  let rawPan = 0;
+  let rawTilt = 0;
+
+  switch (pattern) {
+    case 'Circle':
+      rawPan = Math.sin(t * twoPi);
+      rawTilt = Math.cos(t * twoPi);
+      break;
+    case 'Line':
+      rawPan = Math.sin(t * twoPi);
+      rawTilt = Math.sin(t * twoPi);
+      break;
+    case 'Eight':
+      rawPan = Math.sin(t * twoPi);
+      rawTilt = Math.sin(t * twoPi * 2);
+      break;
+    case 'Square': {
+      // Discrete: snap to corners of a square
+      const phase = ((t % 1) + 1) % 1;
+      const corner = Math.round(phase * 4) % 4;
+      rawPan = corner === 0 || corner === 1 ? 1 : -1;
+      rawTilt = corner === 1 || corner === 2 ? 1 : -1;
+      break;
+    }
+    case 'Triangle': {
+      // Triangle wave (zigzag)
+      const p = ((t % 1) + 1) % 1;
+      rawPan = p < 0.5 ? 4 * p - 1 : 3 - 4 * p;
+      rawTilt = ((t + 0.25) % 1 < 0.5) ? 4 * ((t + 0.25) % 1) - 1 : 3 - 4 * ((t + 0.25) % 1);
+      break;
+    }
+    default:
+      rawPan = Math.sin(t * twoPi);
+      rawTilt = Math.cos(t * twoPi);
+  }
+
+  // Apply rotation matrix
+  const cosR = Math.cos(rotation);
+  const sinR = Math.sin(rotation);
+  const rx = rawPan * cosR - rawTilt * sinR;
+  const ry = rawPan * sinR + rawTilt * cosR;
+
+  // Scale and offset → DMX 0-255
+  const pan = Math.round(128 + rx * width * 127 + xOffset * 127);
+  const tilt = Math.round(128 + ry * height * 127 + yOffset * 127);
+
+  return {
+    pan: Math.max(0, Math.min(255, pan)),
+    tilt: Math.max(0, Math.min(255, tilt)),
+  };
+}
+
+/**
+ * Compute active EFX pan/tilt overrides for all fixtures at a given time.
+ * Returns Map<fixtureId, { pan, tilt }> with DMX values (0-255).
+ */
+export function computeEfxOverrides(
+  efxTracks: EfxTrackRef[],
+  currentTime: number,
+  effects: SavedEffect[],
+  patchedFixtures: PatchedFixture[],
+  fixtureGroups: { id: string; fixtureIds: string[] }[],
+): Map<string, { pan: number; tilt: number }> {
+  const result = new Map<string, { pan: number; tilt: number }>();
+  const effectMap = new Map(effects.map(e => [e.id, e]));
+
+  for (const track of efxTracks) {
+    // Resolve targets
+    let targetIds: string[];
+    if (track.targetFixtures.type === 'fixture') {
+      targetIds = track.targetFixtures.fixtureIds || [];
+    } else if (track.targetFixtures.type === 'group') {
+      const g = fixtureGroups.find(g => g.id === track.targetFixtures.groupId);
+      targetIds = g ? g.fixtureIds.filter(fid => patchedFixtures.some(f => f.id === fid)) : [];
+    } else {
+      targetIds = patchedFixtures.map(f => f.id);
+    }
+
+    // Find active EFX entry
+    const activeEntry = track.entries.find(
+      e => currentTime >= e.time && currentTime < e.endTime
+    );
+    if (!activeEntry) continue;
+
+    // Look up the effect definition
+    const effect = effectMap.get(activeEntry.effectId);
+    if (!effect) continue;
+
+    // Compute relative time: how far into the effect we are (in cycles)
+    const relTime = (currentTime - activeEntry.time) * effect.speed;
+
+    // Generate pan/tilt for this effect
+    const pt = generateEfxPanTilt(
+      effect.pattern,
+      relTime,
+      effect.width,
+      effect.height,
+      effect.rotation,
+      effect.xOffset,
+      effect.yOffset,
+    );
+
+    // Apply to all targets
+    for (const fid of targetIds) {
+      result.set(fid, pt);
+    }
+  }
+
+  return result;
 }

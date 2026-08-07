@@ -12,7 +12,8 @@
 import { useEffect, useRef } from 'react';
 import type { PatchedFixture, FixtureTier } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureCapability } from './dmx-cues';
-import { resolveTrackTargets, type FixtureTrack, type MovementBlock } from './fixture-tracks';
+import { resolveTrackTargets, computeFixtureTrackOverrides, computeEfxOverrides, type EfxTrackRef, type FixtureTrack, type MovementBlock } from './fixture-tracks';
+import type { SavedEffect } from '../stores/showStore';
 import { useAppStore } from '../stores/appstore';
 import { dmxBridge } from '../utils/dmx-bridge';
 
@@ -255,10 +256,12 @@ export function useDmxPlayback(options: {
   colorFadeMs?: number;
   overrideCuesRef?: React.MutableRefObject<any[]>; // EFX + manual cues that override auto DMX
   fixtureTracksRef?: React.MutableRefObject<FixtureTrack[]>; // Fixture track overrides
+  efxTracksRef?: React.MutableRefObject<EfxTrackRef[]>; // EFX track pan/tilt overrides
+  effectsRef?: React.MutableRefObject<SavedEffect[]>; // Saved effect definitions
   fixtureGroupsRef?: React.MutableRefObject<{ id: string; fixtureIds: string[] }[]>;
   onVirtualDmx?: (universe: number, channelValues: Record<number, number>) => void; // Mirror for 3D view
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,fixtureGroupsRef,onVirtualDmx}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,onVirtualDmx}=options;
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
 
@@ -379,6 +382,11 @@ export function useDmxPlayback(options: {
       // Pre-compute active EFX/manual override for this frame
       let efxActive:Record<number,number>|null=null;let efxTime=0;
       if(overrideCuesRef?.current){for(const oc of overrideCuesRef.current){if(oc.time<=ct&&oc.time>=efxTime){efxTime=oc.time;efxActive=oc.channelValues;}}}
+
+      // Pre-compute EFX track pan/tilt overrides for this frame
+      const efxPtOverrides = efxTracksRef?.current && effectsRef?.current && efxTracksRef.current.length > 0
+        ? computeEfxOverrides(efxTracksRef.current, ct, effectsRef.current, patchedFixtures, fixtureGroupsRef?.current || [])
+        : null;
       const efxMap=efxActive||{};
 
       for(const[uniIdx,fixtures]of analysis.byUniverse.entries()){
@@ -498,6 +506,10 @@ export function useDmxPlayback(options: {
             if(tiltCount>0){const ta=pf.startAddress+fa.tiltOffsets[0];if(efxMap[ta]!==undefined)efxTilt=efxMap[ta];}
             if(!isNaN(efxPan)||!isNaN(efxTilt)){
               for(let m=0;m<motorCount;m++){if(m<panCount)chVals[pf.startAddress+fa.panOffsets[m]]=isNaN(efxPan)?128:efxPan;if(m<tiltCount)chVals[pf.startAddress+fa.tiltOffsets[m]]=isNaN(efxTilt)?128:efxTilt;}
+            }else if(efxPtOverrides?.has(pf.id)){
+              // EFX track pan/tilt override (from saved effects on timeline)
+              const ept = efxPtOverrides.get(pf.id)!;
+              for(let m=0;m<motorCount;m++){if(m<panCount)chVals[pf.startAddress+fa.panOffsets[m]]=ept.pan;if(m<tiltCount)chVals[pf.startAddress+fa.tiltOffsets[m]]=ept.tilt;}
             }else{
               const trackMovement = (() => {
                 if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
