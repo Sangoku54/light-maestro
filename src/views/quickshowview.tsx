@@ -618,10 +618,21 @@ async function saveProject(
   }
 
   // ── Auto-save to localStorage for next launch ──
+  // Exclude audioDataBase64 — it can be 10+ MB and exceeds localStorage quota
+  const { audioDataBase64: _, ...localData } = data;
   try {
-    localStorage.setItem('light-maestro:lastProject', JSON.stringify(data));
+    localStorage.setItem('light-maestro:lastProject', JSON.stringify(localData));
     console.log('[saveProject] Auto-saved to localStorage');
-  } catch (e) { console.error('Failed to auto-save project:', e); }
+  } catch (e) {
+    // localStorage full — try without large arrays
+    try {
+      const slim = { ...localData, manualCues: [], efxTracks: [], fixtureTracks: [] };
+      localStorage.setItem('light-maestro:lastProject', JSON.stringify(slim));
+      console.log('[saveProject] Auto-saved (slim) to localStorage');
+    } catch (e2) {
+      console.warn('[saveProject] Could not auto-save: localStorage full');
+    }
+  }
 
   // ── File download ──
   const json = JSON.stringify(data, null, 2);
