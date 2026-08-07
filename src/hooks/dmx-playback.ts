@@ -509,6 +509,7 @@ export function useDmxPlayback(options: {
             }else if(efxPtOverrides?.has(pf.id)){
               // EFX track pan/tilt override (from saved effects on timeline)
               const ept = efxPtOverrides.get(pf.id)!;
+              if (pf.id === patchedFixtures[0]?.id) console.log('EFX pt', ct.toFixed(2), 'pan', ept.pan, 'tilt', ept.tilt);
               for(let m=0;m<motorCount;m++){if(m<panCount)chVals[pf.startAddress+fa.panOffsets[m]]=ept.pan;if(m<tiltCount)chVals[pf.startAddress+fa.tiltOffsets[m]]=ept.tilt;}
             }else{
               const trackMovement = (() => {

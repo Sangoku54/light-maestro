@@ -391,5 +391,18 @@ export function computeEfxOverrides(
     }
   }
 
+  // Debug: log once per 30 calls
+  _efxDebugLog(currentTime, result);
+
   return result;
+}
+
+// Debug logger
+let _efxDebugFrame = 0;
+function _efxDebugLog(ct: number, result: Map<string, { pan: number; tilt: number }>) {
+  _efxDebugFrame++;
+  if (_efxDebugFrame % 30 === 0 && result.size > 0) {
+    const first = result.values().next().value;
+    if (first) console.log('EFX compute frame', _efxDebugFrame, 'ct', ct.toFixed(2), 'pan', first.pan, 'tilt', first.tilt, 'entries', result.size);
+  }
 }
