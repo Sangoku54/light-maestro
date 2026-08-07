@@ -2619,19 +2619,20 @@ if (editBlock) { setEditBlock(null); return; }
             return (
               <div
                 key={pf.id}
-                className="flex items-center"
+                className="flex items-center cursor-pointer"
                 style={{ height: TRACK_HEIGHT, paddingLeft: 4, width: LABEL_WIDTH - 4 }}
-                onMouseDown={e => e.stopPropagation()}
-                onClick={e => e.stopPropagation()}
+                onClick={() => onToggleFixture?.(pf.id)}
+                onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
+                onMouseUp={e => { e.preventDefault(); e.stopPropagation(); }}
+                title={disabled
+                  ? `Activer "${pf.name}" — la fixture est désactivée`
+                  : `Désactiver "${pf.name}" — la fixture est active`}
               >
                 <input
                   type="checkbox"
                   checked={!disabled}
-                  onChange={() => onToggleFixture?.(pf.id)}
-                  title={disabled
-                    ? `Activer "${pf.name}" — la fixture est désactivée`
-                    : `Désactiver "${pf.name}" — la fixture est active`}
-                  className="w-3.5 h-3.5 accent-purple-500 cursor-pointer"
+                  readOnly
+                  className="w-3.5 h-3.5 accent-purple-500 pointer-events-none"
                 />
               </div>
             );
