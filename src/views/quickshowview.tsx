@@ -1762,15 +1762,18 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   }, [pushHistory, audioFile]);
 
   /* ─── Custom palettes ────────────────────────────── */
-  const [autoPal, setAutoPal] = useState<string>('');
-  const lastAnalysisKeyRef = useRef<string>('');
+  const lastAnalysisGenreRef = useRef<string>('');
 
   useEffect(() => {
-    if (resolvedAnalysis?.key && resolvedAnalysis.key !== lastAnalysisKeyRef.current) {
-      lastAnalysisKeyRef.current = resolvedAnalysis.key;
-      const pal = keyToPalette[resolvedAnalysis.key];
-      if (pal && pal !== qs.colorScheme && qs.colorScheme === 'auto') {
-        setAutoPal(pal);
+    if (resolvedAnalysis?.genre && resolvedAnalysis.genre !== lastAnalysisGenreRef.current) {
+      lastAnalysisGenreRef.current = resolvedAnalysis.genre;
+      if (qs.colorScheme === 'auto' || !qs.colorScheme) {
+        try {
+          const g = JSON.parse(resolvedAnalysis.genre);
+          if (g.palette) {
+            setQs({ colorScheme: g.palette });
+          }
+        } catch {}
       }
     }
   }, [resolvedAnalysis, qs.colorScheme]);
@@ -2871,17 +2874,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         >
           {[1, 2, 4, 8].map(d => (
             <option key={d} value={d}>1/{d}</option>
-          ))}
-        </select>
-
-        {/* Intensity */}
-        <select
-          value={qs.intensity || 'dynamic'}
-          onChange={e => setQs({ intensity: e.target.value as any })}
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300"
-        >
-          {['very-low', 'low', 'medium', 'high', 'very-high', 'dynamic'].map(i => (
-            <option key={i} value={i}>{i}</option>
           ))}
         </select>
 
