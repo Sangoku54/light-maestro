@@ -328,8 +328,11 @@ function generateEfxPanTilt(
   // Scale and offset → DMX 0-255
   const w = width || 1;       // fallback: full amplitude if not set
   const h = height || 1;      // fallback: full amplitude if not set
-  const prePan = Math.round(128 + rx * w * 127 + (xOffset || 0) * 127);
-  const preTilt = Math.round(128 + ry * h * 127 + (yOffset || 0) * 127);
+  // xOffset/yOffset are in DMX range [-255, 255]; normalize to [-1, 1]
+  const ox = (xOffset || 0) / 255;
+  const oy = (yOffset || 0) / 255;
+  const prePan = Math.round(128 + rx * w * 127 + ox * 127);
+  const preTilt = Math.round(128 + ry * h * 127 + oy * 127);
 
   // Debug: log intermediates every 30 compute calls
   _efxDebugFrame++;
