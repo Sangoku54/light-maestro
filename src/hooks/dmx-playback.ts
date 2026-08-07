@@ -13,6 +13,17 @@ import { useEffect, useRef } from 'react';
 import type { PatchedFixture, FixtureTier } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureCapability } from './dmx-cues';
 import { resolveTrackTargets, computeEfxOverrides, type EfxTrackRef, type FixtureTrack, type MovementBlock } from './fixture-tracks';
+
+// ─── Color Track ref type (for DMX playback resolution) ──
+export interface ColorTrackRef {
+  id: string;
+  entries: Array<{ id: string; time: number; endTime: number; color: string }>;
+  targetFixtures: {
+    type: 'all' | 'group' | 'fixture';
+    groupId?: string;
+    fixtureIds?: string[];
+  };
+}
 import type { SavedEffect } from '../stores/showStore';
 import { useAppStore } from '../stores/appstore';
 import { dmxBridge } from '../utils/dmx-bridge';
@@ -261,9 +272,10 @@ export function useDmxPlayback(options: {
   efxTracksRef?: React.MutableRefObject<EfxTrackRef[]>; // EFX track pan/tilt overrides
   effectsRef?: React.MutableRefObject<SavedEffect[]>; // Saved effect definitions
   fixtureGroupsRef?: React.MutableRefObject<{ id: string; fixtureIds: string[] }[]>;
+  colorTracksRef?: React.MutableRefObject<ColorTrackRef[]>; // Color track overrides
   onVirtualDmx?: (universe: number, channelValues: Record<number, number>) => void; // Mirror for 3D view
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,onVirtualDmx}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,onVirtualDmx}=options;
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
 
@@ -398,6 +410,31 @@ export function useDmxPlayback(options: {
         }
       }
       const efxMap=efxActive||{};
+
+      // Pre-compute color track overrides for this frame
+      let colorTrackColors = new Map<string, string>();
+      if (colorTracksRef?.current && colorTracksRef.current.length > 0) {
+        for (const ctItem of colorTracksRef.current) {
+          // Find active entry for this frame
+          const activeEntry = ctItem.entries.find(e => ct >= e.time && ct < e.endTime);
+          if (!activeEntry || !ctItem.targetFixtures) continue;
+          // Resolve target fixtures
+          const tf = ctItem.targetFixtures;
+          let targets: string[] = [];
+          if (tf.type === 'all') {
+            targets = patchedFixtures.map(f => f.id);
+          } else if (tf.type === 'group' && tf.groupId) {
+            const groups = fixtureGroupsRef?.current || [];
+            const group = groups.find(g => g.id === tf.groupId);
+            targets = group?.fixtureIds || [];
+          } else if (tf.type === 'fixture' && tf.fixtureIds) {
+            targets = tf.fixtureIds;
+          }
+          for (const fid of targets) {
+            colorTrackColors.set(fid, activeEntry.color);
+          }
+        }
+      }
 
       for(const[uniIdx,fixtures]of analysis.byUniverse.entries()){
         const uid=analysis.uniIds[uniIdx];if(!uid)continue;
@@ -695,7 +732,9 @@ export function computeDmxForCue(
       }
 
       const tierColorIdx = pf.tier === 'secondary' ? 1 : pf.tier === 'tertiary' ? 2 : 0;
-      let paletteColor = (fixtureTrackOverrides?.forcedColors?.has(pf.id))
+      let paletteColor = (colorTrackColors?.has(pf.id))
+        ? colorTrackColors.get(pf.id)!
+        : (fixtureTrackOverrides?.forcedColors?.has(pf.id))
         ? fixtureTrackOverrides.forcedColors.get(pf.id)!
         // Use the exact cue color so fixtures match what the UI shows
         : (() => {

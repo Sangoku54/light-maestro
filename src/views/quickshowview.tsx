@@ -591,6 +591,7 @@ async function saveProject(
   manualCues: DmxCue[],
   efxTracks: EfxTrack[],
   fixtureTracks: FixtureTrack[],
+  colorTracks: ColorTrack[],
 ): Promise<void> {
   if (!analysis) return;
   const data: any = {
@@ -599,6 +600,7 @@ async function saveProject(
     quickShow: qs,
     manualCues,
     efxTracks,
+    colorTracks,
     fixtureTracks,
     audioFileName: analysis.fileName,
     timestamp: new Date().toISOString(),
@@ -628,7 +630,7 @@ async function saveProject(
   } catch (e) {
     // localStorage full — try without large arrays
     try {
-      const slim = { ...localData, manualCues: [], efxTracks: [], fixtureTracks: [] };
+      const slim = { ...localData, manualCues: [], efxTracks: [], colorTracks: [], fixtureTracks: [] };
       localStorage.setItem('light-maestro:lastProject', JSON.stringify(slim));
       console.log('[saveProject] Auto-saved (slim) to localStorage');
     } catch (e2) {
@@ -665,6 +667,7 @@ async function loadProject(
   setManualCues: (cues: DmxCue[]) => void,
   setEfxTracks: (tracks: EfxTrack[]) => void,
   setFixtureTracks: (tracks: FixtureTrack[]) => void,
+  setColorTracks: (tracks: ColorTrack[]) => void,
 ): Promise<void> {
   return new Promise((resolve) => {
     const inp = document.createElement('input');
@@ -680,6 +683,7 @@ async function loadProject(
         if (data.sections) setSections(data.sections);
         if (data.manualCues) setManualCues(data.manualCues);
         if (data.efxTracks) setEfxTracks(data.efxTracks);
+        if (data.colorTracks) setColorTracks(data.colorTracks);
         if (data.fixtureTracks) setFixtureTracks(data.fixtureTracks);
         if (data.analysis) {
           if (data.audioDataBase64) {
@@ -1477,8 +1481,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const firedRef = useRef<Set<string>>(new Set());
 
   /* ─── Undo/redo ──────────────────────────────────── */
-  const undoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[] }[]>([]);
-  const redoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[] }[]>([]);
+  const undoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[] }[]>([]);
+  const redoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[] }[]>([]);
   const canUndo = undoHistoryRef.current.length > 0;
   const canRedo = redoHistoryRef.current.length > 0;
 
@@ -1488,35 +1492,39 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       manual: [...manualCues],
       efx: [...efxTracks],
       fixtureTracks: [...fixtureTracks],
+      colorTracks: [...colorTracks],
     });
     redoHistoryRef.current = [];
-  }, [sections, manualCues, efxTracks, fixtureTracks]);
+  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks]);
 
   const undo = useCallback(() => {
     const state = undoHistoryRef.current.pop();
     if (!state) return;
-    redoHistoryRef.current.push({ sections: [...sections], manual: [...manualCues], efx: [...efxTracks], fixtureTracks: [...fixtureTracks] });
+    redoHistoryRef.current.push({ sections: [...sections], manual: [...manualCues], efx: [...efxTracks], fixtureTracks: [...fixtureTracks], colorTracks: [...colorTracks] });
     setSections(state.sections);
     setManualCues(state.manual);
     setEfxTracks(state.efx);
     setFixtureTracks(state.fixtureTracks);
-  }, [sections, manualCues, efxTracks, fixtureTracks]);
+    setColorTracks(state.colorTracks);
+  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks]);
 
   const redo = useCallback(() => {
     const state = redoHistoryRef.current.pop();
     if (!state) return;
-    undoHistoryRef.current.push({ sections: [...sections], manual: [...manualCues], efx: [...efxTracks], fixtureTracks: [...fixtureTracks] });
+    undoHistoryRef.current.push({ sections: [...sections], manual: [...manualCues], efx: [...efxTracks], fixtureTracks: [...fixtureTracks], colorTracks: [...colorTracks] });
     setSections(state.sections);
     setManualCues(state.manual);
     setEfxTracks(state.efx);
     setFixtureTracks(state.fixtureTracks);
-  }, [sections, manualCues, efxTracks, fixtureTracks]);
+    setColorTracks(state.colorTracks);
+  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks]);
 
   const clearAudio = useCallback(() => {
     pushHistory();
     setSections([]);
     setManualCues([]);
     setEfxTracks([]);
+    setColorTracks([]);
     setFixtureTracks([]);
     // Reset audio file + analysis
     audioFile.clear();
@@ -1628,6 +1636,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           if (data.sections) setSections(data.sections);
           if (data.manualCues) setManualCues(data.manualCues);
           if (data.efxTracks) setEfxTracks(data.efxTracks);
+          if (data.colorTracks) setColorTracks(data.colorTracks);
           if (data.fixtureTracks) setFixtureTracks(data.fixtureTracks);
           let audioDataUrl = '';
           if (data.analysis) {
@@ -1660,6 +1669,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             trackAnalysis: data.analysis,
             sections: data.sections || [],
             efxTracks: data.efxTracks || [],
+            colorTracks: data.colorTracks || [],
             manualCues: data.manualCues || [],
             createdAt: new Date().toISOString(),
           }]);
@@ -1904,6 +1914,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     efxTracksRef,
     effectsRef,
     fixtureGroupsRef,
+    colorTracksRef: colorTracksRef as any,
     colorFadeMs: qs.colorFadeMs ?? 250,
     onVirtualDmx: (uni, chVals) => {
       useAppStore.getState().setUniverseData(uni, chVals);
@@ -2315,10 +2326,10 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         </button>
 
         {/* Save / Load */}
-        <button title={t('save') || 'Save'} onClick={() => saveProject(resolvedAnalysis, sections, qs, audioFile, manualCues, efxTracks, fixtureTracks)} className="p-1 rounded text-gray-400 hover:text-white">
+        <button title={t('save') || 'Save'} onClick={() => saveProject(resolvedAnalysis, sections, qs, audioFile, manualCues, efxTracks, fixtureTracks, colorTracks)} className="p-1 rounded text-gray-400 hover:text-white">
           <Save className="w-3.5 h-3.5" />
         </button>
-        <button title={t('open') || 'Open'} onClick={() => loadProject(setQs, audioFile, setSections, setManualCues, setEfxTracks, setFixtureTracks)} className="p-1 rounded text-gray-400 hover:text-white">
+        <button title={t('open') || 'Open'} onClick={() => loadProject(setQs, audioFile, setSections, setManualCues, setEfxTracks, setFixtureTracks, setColorTracks)} className="p-1 rounded text-gray-400 hover:text-white">
           <FolderOpen className="w-3.5 h-3.5" />
         </button>
         <button title={t('clear') || 'Clear'} onClick={clearAudio} className="p-1 rounded text-gray-400 hover:text-red-400">
@@ -2820,6 +2831,80 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             Cancel
           </button>
         </div>
+      )}
+
+      {/* Color Track context menu — insert entry */}
+      {colorContextMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setColorContextMenu(null)} />
+          <div
+            ref={colorContextRef}
+            className="fixed z-50 bg-[#1a1a2e] border border-pink-700/50 rounded-lg shadow-xl py-1 min-w-[200px]"
+            style={{ left: colorContextMenu.x, top: colorContextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1.5 text-[10px] text-pink-400 uppercase tracking-wider border-b border-gray-800">
+              Insert Color at {colorContextMenu.time.toFixed(1)}s
+            </div>
+            <div className="px-2 py-1 max-h-32 overflow-y-auto">
+              {['#FF0000','#FF6600','#FFCC00','#00FF00','#00FFFF','#0066FF','#9900FF','#FF00FF','#FFFFFF','#FF9999','#99FF99','#99CCFF','#FFB366','#FF66B2','#66FFB2','#B266FF'].map(c => (
+                <button key={c}
+                  onClick={() => handleInsertColorToTrack(colorContextMenu.trackId, colorContextMenu.time, c)}
+                  className="flex items-center gap-2 w-full text-left px-3 py-1 text-xs text-gray-300 hover:bg-gray-800"
+                >
+                  <span className="w-4 h-4 rounded border border-gray-600 inline-block" style={{ backgroundColor: c }} />
+                  {c}
+                </button>
+              ))}
+            </div>
+            <div className="border-t border-gray-800 my-0.5" />
+            <button
+              onClick={() => handleRemoveColorTrack(colorContextMenu.trackId)}
+              className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
+            >
+              Delete track
+            </button>
+            <button
+              onClick={() => setColorContextMenu(null)}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Color entry context menu */}
+      {colorEntryMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setColorEntryMenu(null)} />
+          <div
+            ref={colorEntryMenuRef}
+            className="fixed z-50 bg-[#1a1a2e] border border-pink-700/50 rounded-lg shadow-xl py-1 min-w-[160px]"
+            style={{ left: colorEntryMenu.x, top: colorEntryMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1.5 text-[10px] text-pink-400 uppercase tracking-wider border-b border-gray-800">
+              <span className="w-3 h-3 rounded inline-block mr-1 align-middle" style={{ backgroundColor: colorEntryMenu.entry.color }} />
+              {colorEntryMenu.entry.color}
+            </div>
+            <div className="px-3 py-1 text-[9px] text-gray-600">
+              {colorEntryMenu.entry.time.toFixed(1)}s – {colorEntryMenu.entry.endTime.toFixed(1)}s
+            </div>
+            <button
+              onClick={() => handleRemoveColorEntry(colorEntryMenu.trackId, colorEntryMenu.entry.time)}
+              className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
+            >
+              Remove entry
+            </button>
+            <button
+              onClick={() => setColorEntryMenu(null)}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </>
       )}
 
       {/* Click-away listeners */}
