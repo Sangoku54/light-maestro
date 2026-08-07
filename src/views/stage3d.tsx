@@ -171,6 +171,7 @@ export const Stage3D: React.FC = () => {
   const timerRef = useRef<THREE.Timer>(new THREE.Timer());
   const animFrameRef = useRef<number>(0);
   const lastDmxPollRef = useRef<number>(0);
+  const dmxLastActivityRef = useRef<number>(0);
   const particlesRef = useRef<THREE.Points | null>(null);
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
@@ -956,8 +957,15 @@ export const Stage3D: React.FC = () => {
       if (!rawData) {
         if (f3d.pointLight) f3d.pointLight.intensity = 0;
         if (f3d.beamCone) { (f3d.beamCone.material as THREE.MeshBasicMaterial).opacity = 0; }
-        // Apply static tilt even without DMX
-        if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._mountTilt + (f3d._staticTilt ?? 0);
+        // Auto-sweep: slow stage scan when no DMX for 3+ seconds
+        const idleSec = (performance.now() - dmxLastActivityRef.current) / 1000;
+        if (idleSec > 3 && f3d.armGroup && f3d.headGroup) {
+          const t = performance.now() * 0.001;
+          const panTarget = Math.sin(t * 0.4) * 0.7 * Math.PI;
+          const tiltTarget = f3d._mountTilt + Math.sin(t * 0.35 + 1.2) * 0.35 * Math.PI + (f3d._staticTilt ?? 0);
+          f3d.armGroup.rotation.y += (panTarget - f3d.armGroup.rotation.y) * 0.15;
+          f3d.headGroup.rotation.x += (tiltTarget - f3d.headGroup.rotation.x) * 0.15;
+        }
         continue;
       }
       // Normalize data to Uint8Array-like access
@@ -999,9 +1007,10 @@ export const Stage3D: React.FC = () => {
       // --- Pan/Tilt (QLC+ model: arm=pan/Y, head=tilt/X) ---
       const panVal = cm.panOffset !== null ? (data[baseAddr + cm.panOffset] ?? 128) : 128;
       const tiltVal = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128) : 128;
+      dmxLastActivityRef.current = performance.now();
+
       if (f3d.armGroup) {
-        const panTarget = ((panVal / 255) - 0.5) * Math.PI * 3;
-        f3d.armGroup.rotation.y += (panTarget - f3d.armGroup.rotation.y) * 0.3;
+        f3d.armGroup.rotation.y += ((((panVal / 255) - 0.5) * Math.PI * 3) - f3d.armGroup.rotation.y) * 0.3;
       }
       if (f3d.headGroup) {
         const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI * 1.5;
