@@ -3049,6 +3049,27 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           EFX Track
         </button>
         <button
+          onClick={openColorTrackModal}
+          className="ml-1 px-2 py-0.5 rounded text-[10px] text-pink-400 border border-pink-700/50 hover:bg-pink-400/10 cursor-pointer flex items-center gap-1"
+        >
+          <Plus className="w-3 h-3" />
+          Color Track
+        </button>
+        <button
+          onClick={openStrobeTrackModal}
+          className="ml-1 px-2 py-0.5 rounded text-[10px] text-purple-400 border border-purple-700/50 hover:bg-purple-400/10 cursor-pointer flex items-center gap-1"
+        >
+          <Plus className="w-3 h-3" />
+          Strobe Track
+        </button>
+        <button
+          onClick={openDimmerTrackModal}
+          className="ml-1 px-2 py-0.5 rounded text-[10px] text-orange-400 border border-orange-700/50 hover:bg-orange-400/10 cursor-pointer flex items-center gap-1"
+        >
+          <Plus className="w-3 h-3" />
+          Dimmer Track
+        </button>
+        <button
           onClick={() => setFadeModal(!fadeModal)}
           className="ml-1 px-2 py-0.5 rounded text-[10px] text-purple-400 border border-purple-700/50 hover:bg-purple-400/10 cursor-pointer flex items-center gap-1"
           title="Fondu"
