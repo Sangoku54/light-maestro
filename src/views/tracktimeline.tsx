@@ -63,7 +63,8 @@ export interface ColorTrackEntry {
   id: string;
   time: number;
   endTime: number;
-  color: string;
+  color: string;       // start color
+  endColor?: string;   // end color (defaults to color if not set)
 }
 
 export interface ColorTrack {
@@ -104,6 +105,8 @@ interface TrackTimelineProps {
   onColorEntryClick?: (trackId: string, entry: ColorTrackEntry) => void;
   /** Called when user right-clicks a color track entry */
   onColorEntryContextMenu?: (trackId: string, entry: ColorTrackEntry, clientX: number, clientY: number) => void;
+  /** Called when user drag-resizes or drag-moves a color entry */
+  onColorEntryChange?: (trackId: string, entryIndex: number, newTime: number, newEndTime: number) => void;
   /** Called when user drags a section boundary to resize */
   onSectionsChange?: (sections: TrackSection[]) => void;
   /** Fixture tracks (override lanes drawn inside fixture tracks) */
@@ -445,6 +448,16 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
     entryEndTime: number;
   } | null>(null);
 
+  // ── Color entry drag state (parallel to EFX drag) ──
+  const colorDragRef = useRef<{
+    trackId: string;
+    entryIndex: number;
+    mode: 'move' | 'resize-left' | 'resize-right';
+    startX: number;
+    entryTime: number;
+    entryEndTime: number;
+  } | null>(null);
+
   // ── Cue lookup for hover/click ───────────────────────
   const getCueAtPosition = useCallback(
     (clientX: number, clientY: number): { cue: Cue; fixtureName?: string; efxEntry?: EfxTrackEntry; trackName?: string } | null => {
@@ -600,6 +613,28 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         } else if (drag.mode === 'resize-right') {
           const newEnd = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
           onEfxEntryChange?.(drag.trackId, drag.entryIndex, { endTime: newEnd });
+        }
+        return;
+      }
+
+            // Color entry drag/resize (parallel to EFX)
+      if (colorDragRef.current) {
+        const c = containerRef.current; if (!c) return;
+        const rect = c.getBoundingClientRect();
+        const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
+        if (drawW <= 0) return;
+        const dx = (e.clientX - colorDragRef.current.startX) / drawW * duration;
+        const drag = colorDragRef.current;
+        if (drag.mode === 'move') {
+          const newTime = Math.max(0, drag.entryTime + dx);
+          const newEnd = drag.entryEndTime + dx;
+          onColorEntryChange?.(drag.trackId, drag.entryIndex, newTime, newEnd);
+        } else if (drag.mode === 'resize-left') {
+          const newTime = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          onColorEntryChange?.(drag.trackId, drag.entryIndex, newTime, drag.entryEndTime);
+        } else if (drag.mode === 'resize-right') {
+          const newEnd = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          onColorEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
         }
         return;
       }
@@ -1040,6 +1075,47 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
+        // -- Color entry drag detection (parallel to EFX) --
+    {
+      const c3 = containerRef.current;
+      if (c3 && onColorEntryChange) {
+        const rect3 = c3.getBoundingClientRect();
+        const x3 = e.clientX - rect3.left - LABEL_WIDTH;
+        const y3 = e.clientY - rect3.top;
+        const drawW3 = rect3.width - LABEL_WIDTH;
+        const eT = efxTracks || [];
+        const cT = colorTracks || [];
+        if (cT.length > 0 && drawW3 > 0 && x3 >= 0 && y3 >= HEADER_HEIGHT) {
+          const efxBase = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT;
+          const colorBase = efxBase + eT.length * EFX_TRACK_HEIGHT;
+          if (y3 >= colorBase) {
+            const cIdx = Math.floor((y3 - colorBase) / COLOR_TRACK_HEIGHT);
+            if (cIdx >= 0 && cIdx < cT.length) {
+              const cTrack = cT[cIdx];
+              for (let ei = 0; ei < cTrack.entries.length; ei++) {
+                const entry = cTrack.entries[ei];
+                const ex1 = (entry.time / duration) * drawW3;
+                const ex2 = (entry.endTime / duration) * drawW3;
+                const EDGE = 5;
+                if (Math.abs(x3 - ex1) < EDGE) {
+                  colorDragRef.current = { trackId: cTrack.id, entryIndex: ei, mode: 'resize-left', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (Math.abs(x3 - ex2) < EDGE) {
+                  colorDragRef.current = { trackId: cTrack.id, entryIndex: ei, mode: 'resize-right', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (x3 > ex1 + EDGE && x3 < ex2 - EDGE) {
+                  colorDragRef.current = { trackId: cTrack.id, entryIndex: ei, mode: 'move', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     if (!onSectionsChange) return;
     const c = containerRef.current;
     if (!c) return;
@@ -1072,12 +1148,18 @@ if (editBlock) { setEditBlock(null); return; }
         return;
       }
     }
-  }, [sections, duration, onSectionsChange]);
+  }, [sections, duration, onSectionsChange, efxTracks, colorTracks, onEfxEntryChange, onColorEntryChange]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Clear EFX drag
     if (efxDragRef.current) {
       efxDragRef.current = null;
+      return;
+    }
+
+    // Color entry drag end
+    if (colorDragRef.current) {
+      colorDragRef.current = null;
       return;
     }
 
@@ -1775,19 +1857,34 @@ if (editBlock) { setEditBlock(null); return; }
           const barY = trackY + pad;
           const barH = COLOR_TRACK_HEIGHT - pad * 2;
 
-          // Entry background bar with the actual color
-          ctx.fillStyle = entry.color;
-          ctx.globalAlpha = 0.7;
-          ctx.beginPath();
-          ctx.roundRect(ex, barY, entryW, barH, 3);
-          ctx.fill();
-          ctx.globalAlpha = 1;
+          const endColor = entry.endColor || entry.color;
 
-          // Left edge accent (brighter shade)
+          // Gradient bar from start color to end color
+          if (entryW > 2) {
+            const grad = ctx.createLinearGradient(ex, 0, endX, 0);
+            grad.addColorStop(0, entry.color);
+            grad.addColorStop(1, endColor);
+            ctx.fillStyle = grad;
+            ctx.globalAlpha = 0.7;
+            ctx.beginPath();
+            ctx.roundRect(ex, barY, entryW, barH, 3);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+          }
+
+          // Left edge accent
           ctx.fillStyle = entry.color;
           ctx.globalAlpha = 0.9;
           ctx.beginPath();
           ctx.roundRect(ex, barY, 3, barH, [3, 0, 0, 3]);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+
+          // Right edge accent
+          ctx.fillStyle = endColor;
+          ctx.globalAlpha = 0.9;
+          ctx.beginPath();
+          ctx.roundRect(endX - 3, barY, 3, barH, [0, 3, 3, 0]);
           ctx.fill();
           ctx.globalAlpha = 1;
 
@@ -1796,7 +1893,8 @@ if (editBlock) { setEditBlock(null); return; }
             ctx.fillStyle = '#ffffff';
             ctx.font = '7px -apple-system, sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(entry.color, ex + entryW / 2, trackY + COLOR_TRACK_HEIGHT / 2 + 3);
+            const lbl = entry.color === endColor ? entry.color : entry.color + ' → ' + endColor;
+            ctx.fillText(lbl, ex + entryW / 2, trackY + COLOR_TRACK_HEIGHT / 2 + 3);
           }
 
           // Start/end diamonds

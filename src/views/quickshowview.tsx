@@ -733,6 +733,77 @@ const Chip: React.FC<{
   </button>
 );
 
+/* ─── ColorTrackInsertMenu ────────────────────────── */
+
+const COLOR_PALETTE = ['#FF0000','#FF6600','#FFCC00','#00FF00','#00FFFF','#0066FF','#9900FF','#FF00FF','#FFFFFF','#FF9999','#99FF99','#99CCFF','#FFB366','#FF66B2','#66FFB2','#B266FF'];
+
+const ColorTrackInsertMenu: React.FC<{
+  onInsert: (startColor: string, endColor: string) => void;
+  onCancel: () => void;
+}> = ({ onInsert, onCancel }) => {
+  const [startColor, setStartColor] = useState('#FF0000');
+  const [endColor, setEndColor] = useState('#FF0000');
+
+  return (
+    <div className="px-2 py-1.5">
+      {/* Start Color */}
+      <div className="mb-2">
+        <div className="text-[9px] text-gray-500 uppercase mb-1">Start Color</div>
+        <div className="flex gap-1 flex-wrap max-w-[320px]">
+          {COLOR_PALETTE.map(c => (
+            <button key={'s'+c}
+              onClick={() => setStartColor(c)}
+              className={`w-5 h-5 rounded border transition-all ${startColor === c ? 'border-white scale-110' : 'border-gray-600 hover:border-gray-400'}`}
+              style={{ backgroundColor: c }}
+              title={c}
+            />
+          ))}
+        </div>
+        <div className="text-[9px] text-gray-500 mt-0.5">{startColor}</div>
+      </div>
+
+      <div className="border-t border-gray-800 my-1" />
+
+      {/* End Color */}
+      <div className="mb-2">
+        <div className="text-[9px] text-gray-500 uppercase mb-1">End Color</div>
+        <div className="flex gap-1 flex-wrap max-w-[320px]">
+          {COLOR_PALETTE.map(c => (
+            <button key={'e'+c}
+              onClick={() => setEndColor(c)}
+              className={`w-5 h-5 rounded border transition-all ${endColor === c ? 'border-white scale-110' : 'border-gray-600 hover:border-gray-400'}`}
+              style={{ backgroundColor: c }}
+              title={c}
+            />
+          ))}
+        </div>
+        <div className="text-[9px] text-gray-500 mt-0.5">{endColor}</div>
+      </div>
+
+      {/* Preview gradient */}
+      <div className="flex items-center gap-2 mb-2">
+        <div className="flex-1 h-4 rounded" style={{ background: `linear-gradient(to right, ${startColor}, ${endColor})` }} />
+        <span className="text-[9px] text-gray-500">preview</span>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          onClick={() => onInsert(startColor, endColor)}
+          className="flex-1 px-3 py-1.5 text-xs bg-pink-600 hover:bg-pink-500 text-white rounded"
+        >
+          Insert
+        </button>
+        <button
+          onClick={onCancel}
+          className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800 rounded"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+};
+
 /* ─── QuickShowView wrapper ─────────────────────────── */
 
 export const QuickShowView: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoader> }> = ({ audioFile }) => {
@@ -2114,7 +2185,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setColorTracks(prev => prev.filter(t => t.id !== trackId));
   }, [pushHistory]);
 
-  const handleInsertColorToTrack = useCallback((trackId: string, time: number, color: string) => {
+  const handleInsertColorToTrack = useCallback((trackId: string, time: number, color: string, endColor?: string) => {
     setColorTracks(prev => prev.map(t => {
       if (t.id !== trackId) return t;
       return {
@@ -2124,11 +2195,23 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           time,
           endTime: Math.min(time + 4, resolvedAnalysis?.duration || 120),
           color,
+          endColor: endColor || undefined,
         }].sort((a, b) => a.time - b.time),
       };
     }));
     setColorContextMenu(null);
   }, [resolvedAnalysis]);
+
+  const handleColorEntryChange = useCallback((trackId: string, entryIndex: number, newTime: number, newEndTime: number) => {
+    setColorTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      const entries = [...t.entries];
+      if (entryIndex >= 0 && entryIndex < entries.length) {
+        entries[entryIndex] = { ...entries[entryIndex], time: newTime, endTime: newEndTime };
+      }
+      return { ...t, entries };
+    }));
+  }, []);
 
   const handleColorTrackContextMenu = useCallback((trackId: string, time: number, clientX: number, clientY: number) => {
     setColorContextMenu({ trackId, time, x: clientX, y: clientY });
@@ -2577,6 +2660,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           onEfxEntryContextMenu={handleEfxEntryContextMenu}
           colorTracks={colorTracks}
           onColorTrackContextMenu={handleColorTrackContextMenu}
+          onColorEntryChange={handleColorEntryChange}
           onColorEntryContextMenu={handleColorEntryContextMenu}
           onSectionsChange={(newSecs: TrackSection[]) => { pushHistory(); setSections(newSecs); }}
           fixtureTracks={fixtureTracks}
@@ -2833,42 +2917,32 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         </div>
       )}
 
-      {/* Color Track context menu — insert entry */}
+      {/* Color Track context menu — insert entry with start+end colors */}
       {colorContextMenu && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setColorContextMenu(null)} />
           <div
             ref={colorContextRef}
-            className="fixed z-50 bg-[#1a1a2e] border border-pink-700/50 rounded-lg shadow-xl py-1 min-w-[200px]"
+            className="fixed z-50 bg-[#1a1a2e] border border-pink-700/50 rounded-lg shadow-xl py-1 min-w-[360px]"
             style={{ left: colorContextMenu.x, top: colorContextMenu.y }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-1.5 text-[10px] text-pink-400 uppercase tracking-wider border-b border-gray-800">
               Insert Color at {colorContextMenu.time.toFixed(1)}s
             </div>
-            <div className="px-2 py-1 max-h-32 overflow-y-auto">
-              {['#FF0000','#FF6600','#FFCC00','#00FF00','#00FFFF','#0066FF','#9900FF','#FF00FF','#FFFFFF','#FF9999','#99FF99','#99CCFF','#FFB366','#FF66B2','#66FFB2','#B266FF'].map(c => (
-                <button key={c}
-                  onClick={() => handleInsertColorToTrack(colorContextMenu.trackId, colorContextMenu.time, c)}
-                  className="flex items-center gap-2 w-full text-left px-3 py-1 text-xs text-gray-300 hover:bg-gray-800"
-                >
-                  <span className="w-4 h-4 rounded border border-gray-600 inline-block" style={{ backgroundColor: c }} />
-                  {c}
-                </button>
-              ))}
-            </div>
-            <div className="border-t border-gray-800 my-0.5" />
+            <ColorTrackInsertMenu
+              onInsert={(startColor, endColor) => {
+                handleInsertColorToTrack(colorContextMenu.trackId, colorContextMenu.time, startColor, endColor);
+                setColorContextMenu(null);
+              }}
+              onCancel={() => setColorContextMenu(null)}
+            />
+            <div className="border-t border-gray-800" />
             <button
               onClick={() => handleRemoveColorTrack(colorContextMenu.trackId)}
               className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
             >
               Delete track
-            </button>
-            <button
-              onClick={() => setColorContextMenu(null)}
-              className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
-            >
-              Cancel
             </button>
           </div>
         </>

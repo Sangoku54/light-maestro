@@ -17,7 +17,7 @@ import { resolveTrackTargets, computeEfxOverrides, type EfxTrackRef, type Fixtur
 // ─── Color Track ref type (for DMX playback resolution) ──
 export interface ColorTrackRef {
   id: string;
-  entries: Array<{ id: string; time: number; endTime: number; color: string }>;
+  entries: Array<{ id: string; time: number; endTime: number; color: string; endColor?: string }>;
   targetFixtures: {
     type: 'all' | 'group' | 'fixture';
     groupId?: string;
@@ -400,7 +400,21 @@ export function useDmxPlayback(options: {
           } else if (tf.type === 'fixture' && tf.fixtureIds) {
             targets = tf.fixtureIds;
           }
-          for (const fid of targets) colorTrackColors.set(fid, activeEntry.color);
+          for (const fid of targets) {
+            // Interpolate between start and end color
+            if (activeEntry.endColor && activeEntry.endColor !== activeEntry.color) {
+              const dur = activeEntry.endTime - activeEntry.time;
+              const t = dur > 0 ? Math.max(0, Math.min(1, (ct - activeEntry.time) / dur)) : 1;
+              const [sr, sg, sb] = hexToRgb(activeEntry.color);
+              const [er, eg, eb] = hexToRgb(activeEntry.endColor);
+              const r = Math.round(sr + (er - sr) * t);
+              const g = Math.round(sg + (eg - sg) * t);
+              const b = Math.round(sb + (eb - sb) * t);
+              colorTrackColors.set(fid, `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`);
+            } else {
+              colorTrackColors.set(fid, activeEntry.color);
+            }
+          }
         }
       }
 
