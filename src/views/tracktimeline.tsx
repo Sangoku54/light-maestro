@@ -285,6 +285,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   onColorTrackContextMenu,
   onColorEntryClick,
   onColorEntryContextMenu,
+  onColorEntryChange,
   onSectionsChange,
   fixtureTracks,
   onFixtureTracksChange,
