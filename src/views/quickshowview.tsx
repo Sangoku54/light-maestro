@@ -362,6 +362,8 @@ function genCues(
     // ═══════════════════════════════════════════════════════
     // AUDIO-REACTIVE ENGINE v2
     // ═══════════════════════════════════════════════════════
+    const seedSrc = sections.map(s => s.type + s.startTime).join('') + (regenSeed ?? '');
+    const rng = mulberry32(hash(seedSrc));
     let prevColor = basePal[0];
     let prevIntensity = 'medium';
     let cueGlobalIdx = 0; // across all sections, guarantees palette[3] (green) is reached
@@ -428,7 +430,7 @@ function genCues(
         // Color cycle: audio-driven timing — centroid speeds up high-energy, RMS governs swap rate
         const colorCycleSpeed = 0.5 + centroid * 1.5 + rms * 2.0; // 0.5-4.0 cycles per section
         const sectionProgressNorm = dur > 0 ? (t - section.startTime) / dur : 0;
-        const paletteIdx = Math.floor(sectionProgressNorm * sectionPal.length * colorCycleSpeed) % sectionPal.length;
+        const paletteIdx = (Math.floor(sectionProgressNorm * sectionPal.length * colorCycleSpeed) + Math.floor(rng() * 3)) % sectionPal.length;
         prevColor = sectionPal[paletteIdx];
         // Gradient interpolation: blend start→end color across section duration
         const gradient = cfg.customGradients?.[section.type] as { start: string; end: string } | undefined;
