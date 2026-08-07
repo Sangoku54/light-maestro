@@ -383,6 +383,27 @@ export function useDmxPlayback(options: {
       const analysis=analysisRef.current;
       if(!analysis||c.length===0){rafRef.current=requestAnimationFrame(tick);return;}
 
+      // ── Color track forced colors (compute early, used later in palette resolution) ──
+      const colorTrackColors = new Map<string, string>();
+      if (colorTracksRef?.current) {
+        for (const ctItem of colorTracksRef.current) {
+          const activeEntry = ctItem.entries.find(e => ct >= e.time && ct < e.endTime);
+          if (!activeEntry || !ctItem.targetFixtures) continue;
+          const tf = ctItem.targetFixtures;
+          let targets: string[] = [];
+          if (tf.type === 'all') {
+            targets = patchedFixtures.map(f => f.id);
+          } else if (tf.type === 'group' && tf.groupId) {
+            const groups = fixtureGroupsRef?.current || [];
+            const group = groups.find(g => g.id === tf.groupId);
+            targets = group?.fixtureIds || [];
+          } else if (tf.type === 'fixture' && tf.fixtureIds) {
+            targets = tf.fixtureIds;
+          }
+          for (const fid of targets) colorTrackColors.set(fid, activeEntry.color);
+        }
+      }
+
       // Find active cue: direct latest-before-ct, NO section grouping
       let active:CuePlayback|null=null;
       for(const cue of c){if(cue.time<=ct&&(!active||cue.time>active.time))active=cue;}
@@ -410,31 +431,6 @@ export function useDmxPlayback(options: {
         }
       }
       const efxMap=efxActive||{};
-
-      // Pre-compute color track overrides for this frame
-      let colorTrackColors = new Map<string, string>();
-      if (colorTracksRef?.current && colorTracksRef.current.length > 0) {
-        for (const ctItem of colorTracksRef.current) {
-          // Find active entry for this frame
-          const activeEntry = ctItem.entries.find(e => ct >= e.time && ct < e.endTime);
-          if (!activeEntry || !ctItem.targetFixtures) continue;
-          // Resolve target fixtures
-          const tf = ctItem.targetFixtures;
-          let targets: string[] = [];
-          if (tf.type === 'all') {
-            targets = patchedFixtures.map(f => f.id);
-          } else if (tf.type === 'group' && tf.groupId) {
-            const groups = fixtureGroupsRef?.current || [];
-            const group = groups.find(g => g.id === tf.groupId);
-            targets = group?.fixtureIds || [];
-          } else if (tf.type === 'fixture' && tf.fixtureIds) {
-            targets = tf.fixtureIds;
-          }
-          for (const fid of targets) {
-            colorTrackColors.set(fid, activeEntry.color);
-          }
-        }
-      }
 
       for(const[uniIdx,fixtures]of analysis.byUniverse.entries()){
         const uid=analysis.uniIds[uniIdx];if(!uid)continue;
@@ -732,11 +728,11 @@ export function computeDmxForCue(
       }
 
       const tierColorIdx = pf.tier === 'secondary' ? 1 : pf.tier === 'tertiary' ? 2 : 0;
-      let paletteColor = (colorTrackColors?.has(pf.id))
+      // Color track > fixture track > cue color
+      let paletteColor = (colorTrackColors.has(pf.id))
         ? colorTrackColors.get(pf.id)!
         : (fixtureTrackOverrides?.forcedColors?.has(pf.id))
         ? fixtureTrackOverrides.forcedColors.get(pf.id)!
-        // Use the exact cue color so fixtures match what the UI shows
         : (() => {
           return (cue as any).forcedColor || cue.color || cue.colors?.[0] || undefined;
         })();
