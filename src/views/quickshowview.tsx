@@ -2918,62 +2918,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
 
       {/* Row 2: Controls */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-800/30 bg-[#0a0a0f] flex-wrap">
-        {/* Color track toggle */}
-        <Chip
-          active={qs.showColorTrack}
-          onClick={() => setQs({ showColorTrack: !qs.showColorTrack })}
-          label="Color"
-          icon={<Palette className="w-3 h-3" />}
-          color="pink"
-        />
-        <Chip
-          active={qs.showStrobeTrack}
-          onClick={() => setQs({ showStrobeTrack: !qs.showStrobeTrack })}
-          label="Strobe"
-          icon={<Zap className="w-3 h-3" />}
-          color="yellow"
-        />
-        <Chip
-          active={qs.showDimmerTrack}
-          onClick={() => setQs({ showDimmerTrack: !qs.showDimmerTrack })}
-          label="Dimmer"
-          icon={<Sun className="w-3 h-3" />}
-          color="cyan"
-        />
-
-        <div className="h-4 border-l border-gray-700 mx-1" />
-
-        {/* Entity insert buttons */}
-        <Chip
-          label="Scene"
-          onClick={() => setShowScenePicker(v => !v)}
-          icon={<Plus className="w-3 h-3" />}
-        />
-        {showScenePicker && entitySceneList.length > 0 && (
-          <div ref={scenePickerRef} className="absolute z-40 bg-[#1a1a2e] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[140px] max-h-44 overflow-y-auto" style={{ marginTop: '80px' }}>
-            {entitySceneList.map(s => (
-              <button key={s.id} onClick={() => { handleInsertEntity(0, resolvedAnalysis?.duration || 60, 'scene', s.id); setShowScenePicker(false); }} className="w-full text-left px-3 py-1 text-[11px] text-gray-300 hover:bg-gray-800">
-                {s.name}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <Chip
-          label="Chaser"
-          onClick={() => setShowChaserPicker(v => !v)}
-          icon={<Repeat className="w-3 h-3" />}
-        />
-        {showChaserPicker && entityChaserList.length > 0 && (
-          <div ref={chaserPickerRef} className="absolute z-40 bg-[#1a1a2e] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[140px] max-h-44 overflow-y-auto" style={{ marginTop: '80px' }}>
-            {entityChaserList.map(c => (
-              <button key={c.id} onClick={() => { handleInsertEntity(0, resolvedAnalysis?.duration || 60, 'chaser', c.id); setShowChaserPicker(false); }} className="w-full text-left px-3 py-1 text-[11px] text-gray-300 hover:bg-gray-800">
-                {c.name}
-              </button>
-            ))}
-          </div>
-        )}
-
         {/* Tier mix */}
         <details className="text-xs text-gray-500 cursor-pointer">
           <summary className="text-[10px]">{t('tierMix') || 'Tier Mix'}</summary>
@@ -3103,27 +3047,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         >
           <Plus className="w-3 h-3" />
           EFX Track
-        </button>
-        <button
-          onClick={openColorTrackModal}
-          className="ml-1 px-2 py-0.5 rounded text-[10px] text-pink-400 border border-pink-700/50 hover:bg-pink-400/10 cursor-pointer flex items-center gap-1"
-        >
-          <Plus className="w-3 h-3" />
-          Color Track
-        </button>
-        <button
-          onClick={openStrobeTrackModal}
-          className="ml-1 px-2 py-0.5 rounded text-[10px] text-purple-400 border border-purple-700/50 hover:bg-purple-400/10 cursor-pointer flex items-center gap-1"
-        >
-          <Plus className="w-3 h-3" />
-          Strobe Track
-        </button>
-        <button
-          onClick={openDimmerTrackModal}
-          className="ml-1 px-2 py-0.5 rounded text-[10px] text-orange-400 border border-orange-700/50 hover:bg-orange-400/10 cursor-pointer flex items-center gap-1"
-        >
-          <Plus className="w-3 h-3" />
-          Dimmer Track
         </button>
         <button
           onClick={() => setFadeModal(!fadeModal)}
@@ -3393,12 +3316,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       )}
       {efxEntryMenu && (
         <div className="fixed inset-0 z-40" onClick={() => setEfxEntryMenu(null)} />
-      )}
-      {showScenePicker && (
-        <div className="fixed inset-0 z-40" onClick={() => setShowScenePicker(false)} />
-      )}
-      {showChaserPicker && (
-        <div className="fixed inset-0 z-40" onClick={() => setShowChaserPicker(false)} />
       )}
       {showForceColor && (
         <div className="fixed inset-0 z-40" onClick={() => setShowForceColor(false)} />
