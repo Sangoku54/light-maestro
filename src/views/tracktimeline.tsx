@@ -57,6 +57,26 @@ export interface EfxTrack {
   };
 }
 
+// ─── Color Track types ──────────────────────────────────
+
+export interface ColorTrackEntry {
+  id: string;
+  time: number;
+  endTime: number;
+  color: string;
+}
+
+export interface ColorTrack {
+  id: string;
+  name: string;
+  entries: ColorTrackEntry[];
+  targetFixtures: {
+    type: 'all' | 'group' | 'fixture';
+    groupId?: string;
+    fixtureIds?: string[];
+  };
+}
+
 interface TrackTimelineProps {
   cues: Cue[];
   dmxCues?: DmxCue[];
@@ -76,6 +96,14 @@ interface TrackTimelineProps {
   onEfxEntryChange?: (trackId: string, entryIndex: number, updates: Partial<EfxTrackEntry>) => void;
   /** Called when user right-clicks an EFX entry */
   onEfxEntryContextMenu?: (trackId: string, entry: EfxTrackEntry, clientX: number, clientY: number) => void;
+  /** Color tracks to render below EFX tracks */
+  colorTracks?: ColorTrack[];
+  /** Called when user right-clicks on a color track row */
+  onColorTrackContextMenu?: (trackId: string, time: number, clientX: number, clientY: number) => void;
+  /** Called when user left-clicks a color track entry */
+  onColorEntryClick?: (trackId: string, entry: ColorTrackEntry) => void;
+  /** Called when user right-clicks a color track entry */
+  onColorEntryContextMenu?: (trackId: string, entry: ColorTrackEntry, clientX: number, clientY: number) => void;
   /** Called when user drags a section boundary to resize */
   onSectionsChange?: (sections: TrackSection[]) => void;
   /** Fixture tracks (override lanes drawn inside fixture tracks) */
@@ -100,6 +128,7 @@ const TRACK_HEIGHT = 30;
 const HEADER_HEIGHT = 32;
 const AUTOSCRIPT_TRACK_HEIGHT = 40;
 const EFX_TRACK_HEIGHT = 28;
+const COLOR_TRACK_HEIGHT = 26;
 const LABEL_WIDTH = 90;
 
 const fmt = (s: number) =>
@@ -213,6 +242,26 @@ function findEfxEntryAt(
   return best;
 }
 
+function findColorEntryAt(
+  track: ColorTrack,
+  timeAtX: number,
+  duration: number,
+): ColorTrackEntry | null {
+  const threshold = Math.min(2, duration * 0.05);
+  let best: ColorTrackEntry | null = null;
+  let bestDist = Infinity;
+  for (const entry of track.entries) {
+    const entryMid = (entry.time + entry.endTime) / 2;
+    const halfLen = (entry.endTime - entry.time) / 2 + 0.1;
+    const d = Math.abs(entryMid - timeAtX);
+    if (d < halfLen + threshold && d < bestDist) {
+      best = entry;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
 // ─── Component ────────────────────────────────────────────
 
 const TrackTimeline: React.FC<TrackTimelineProps> = ({
@@ -229,6 +278,10 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   onEfxEntryClick,
   onEfxEntryChange,
   onEfxEntryContextMenu,
+  colorTracks,
+  onColorTrackContextMenu,
+  onColorEntryClick,
+  onColorEntryContextMenu,
   onSectionsChange,
   fixtureTracks,
   onFixtureTracksChange,
@@ -278,7 +331,8 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
 
   const numFixtures = patchedFixtures.length;
   const numEfxTracks = efxTracks?.length ?? 0;
-  const totalHeight = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT;
+  const numColorTracks = colorTracks?.length ?? 0;
+  const totalHeight = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT;
 
   // ── Fixture → cue mapping (memoized) ─────────────────
   const fixtureCueMap = useMemo(
@@ -823,7 +877,7 @@ if (editBlock) { setEditBlock(null); return; }
       }
 
       const eTracks = efxTracks || [];
-      if (eTracks.length === 0) return;
+      const cTracks = colorTracks || [];
       const efxTracksStart = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT;
 
       if (y >= efxTracksStart) {
@@ -843,6 +897,28 @@ if (editBlock) { setEditBlock(null); return; }
               e.clientX,
               e.clientY,
             );
+          }
+          return;
+        }
+        // Check color tracks (below EFX tracks)
+        const colorTrackBaseY = efxTracksStart + eTracks.length * EFX_TRACK_HEIGHT;
+        if (y >= colorTrackBaseY && cTracks.length > 0) {
+          const cTrackIdx = Math.floor((y - colorTrackBaseY) / COLOR_TRACK_HEIGHT);
+          if (cTrackIdx >= 0 && cTrackIdx < cTracks.length) {
+            e.preventDefault();
+            const timeAtX = (x / drawW) * duration;
+            const cTrack = cTracks[cTrackIdx];
+            const entry = findColorEntryAt(cTrack, timeAtX, duration);
+            if (entry && onColorEntryContextMenu) {
+              onColorEntryContextMenu(cTrack.id, entry, e.clientX, e.clientY);
+            } else {
+              onColorTrackContextMenu?.(
+                cTrack.id,
+                Math.max(0, Math.min(duration, timeAtX)),
+                e.clientX,
+                e.clientY,
+              );
+            }
           }
         }
       }
@@ -1611,6 +1687,116 @@ if (editBlock) { setEditBlock(null); return; }
                 : entry.effectName;
             }
             ctx.fillText(label, ex + entryW / 2, trackY + EFX_TRACK_HEIGHT / 2 + 3);
+          }
+
+          // Start/end diamonds
+          ctx.fillStyle = '#ffffff';
+          const diamondSize = 3;
+          ctx.beginPath();
+          ctx.moveTo(ex, barY + barH / 2 - diamondSize);
+          ctx.lineTo(ex + diamondSize, barY + barH / 2);
+          ctx.lineTo(ex, barY + barH / 2 + diamondSize);
+          ctx.lineTo(ex - diamondSize, barY + barH / 2);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.moveTo(endX, barY + barH / 2 - diamondSize);
+          ctx.lineTo(endX + diamondSize, barY + barH / 2);
+          ctx.lineTo(endX, barY + barH / 2 + diamondSize);
+          ctx.lineTo(endX - diamondSize, barY + barH / 2);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
+
+    // ── Color tracks ────────────────────────────────
+    if (numColorTracks > 0) {
+      const colorTrackBaseY = autoY + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT;
+      for (let ci = 0; ci < numColorTracks; ci++) {
+        const cTrack = colorTracks![ci];
+        const trackY = colorTrackBaseY + ci * COLOR_TRACK_HEIGHT;
+
+        // Track background
+        ctx.fillStyle = ci % 2 === 0 ? 'rgba(236, 72, 153, 0.04)' : 'rgba(236, 72, 153, 0.02)';
+        ctx.fillRect(LABEL_WIDTH, trackY, drawW, COLOR_TRACK_HEIGHT);
+
+        // Top separator
+        ctx.strokeStyle = 'rgba(236, 72, 153, 0.25)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY);
+        ctx.lineTo(w, trackY);
+        ctx.stroke();
+
+        // Track label
+        ctx.fillStyle = '#ec4899';
+        ctx.font = '9px -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+        const cLabel = cTrack.name.length > 11 ? cTrack.name.substring(0, 10) + '\u2026' : cTrack.name;
+        ctx.fillText('CLR: ' + cLabel, 6, trackY + 12);
+
+        // Target badge
+        const tf = cTrack.targetFixtures;
+        let targetLabel = '';
+        if (tf?.type === 'group') {
+          const store = (window as any).__useShowStore?.getState?.();
+          const groups = store?.fixtureGroups || [];
+          const g = groups.find((gg: any) => gg.id === tf.groupId);
+          targetLabel = g ? '📁 ' + (g.name.length > 8 ? g.name.slice(0,7)+'…' : g.name) : '📁 ?';
+        } else if (tf?.type === 'fixture') {
+          targetLabel = '💡 ×1';
+        } else {
+          targetLabel = '🌐 all';
+        }
+        if (targetLabel) {
+          ctx.fillStyle = '#6b7280';
+          ctx.font = '8px -apple-system, sans-serif';
+          ctx.fillText(targetLabel, 72, trackY + 12);
+        }
+
+        // Bottom separator
+        ctx.strokeStyle = 'rgba(75, 85, 99, 0.1)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY + COLOR_TRACK_HEIGHT);
+        ctx.lineTo(w, trackY + COLOR_TRACK_HEIGHT);
+        ctx.stroke();
+
+        // Draw entries
+        for (const entry of cTrack.entries) {
+          const ex = LABEL_WIDTH + (entry.time / duration) * drawW;
+          const endX = LABEL_WIDTH + (entry.endTime / duration) * drawW;
+          const entryW = Math.max(4, endX - ex);
+          if (ex < LABEL_WIDTH - 10 || ex > w + 10) continue;
+
+          const pad = 3;
+          const barY = trackY + pad;
+          const barH = COLOR_TRACK_HEIGHT - pad * 2;
+
+          // Entry background bar with the actual color
+          ctx.fillStyle = entry.color;
+          ctx.globalAlpha = 0.7;
+          ctx.beginPath();
+          ctx.roundRect(ex, barY, entryW, barH, 3);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+
+          // Left edge accent (brighter shade)
+          ctx.fillStyle = entry.color;
+          ctx.globalAlpha = 0.9;
+          ctx.beginPath();
+          ctx.roundRect(ex, barY, 3, barH, [3, 0, 0, 3]);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+
+          // Color hex label
+          if (entryW > 50) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '7px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(entry.color, ex + entryW / 2, trackY + COLOR_TRACK_HEIGHT / 2 + 3);
           }
 
           // Start/end diamonds

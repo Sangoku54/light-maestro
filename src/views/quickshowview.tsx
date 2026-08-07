@@ -13,7 +13,7 @@ import { loadFixtureDefinitions, clearFixtureDefCache, type DmxCue, type DmxFixt
 import { useDmxPlayback, computeDmxForCue } from '../hooks/dmx-playback';
 import { Stage3D } from './Stage3D';
 import TrackTimeline from './TrackTimeline';
-import type { EfxTrack, EfxTrackEntry } from './TrackTimeline';
+import type { EfxTrack, EfxTrackEntry, ColorTrack, ColorTrackEntry } from './TrackTimeline';
 
 type EnrichedCue = DmxCue;
 
@@ -1430,6 +1430,9 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const chaserPickerRef = useRef<HTMLDivElement>(null);
   const [manualCues, setManualCues] = useState<DmxCue[]>([]);
   const [efxTracks, setEfxTracks] = useState<EfxTrack[]>([]);
+  const [colorTracks, setColorTracks] = useState<ColorTrack[]>([]);
+  const colorTracksRef = useRef<ColorTrack[]>([]);
+  colorTracksRef.current = colorTracks;
   const [fixtureTracks, setFixtureTracks] = useState<FixtureTrack[]>([]);
   const fixtureTracksRef = useRef<FixtureTrack[]>([]);
   fixtureTracksRef.current = fixtureTracks;
@@ -1926,6 +1929,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
 
   /* ─── EFX handlers ──────────────────────────────── */
   const [efxTrackModal, setEfxTrackModal] = useState(false);
+  const [colorTrackModal, setColorTrackModal] = useState(false);
   const [fadeModal, setFadeModal] = useState(false);
   const [efxTrackName, setEfxTrackName] = useState('');
   const [efxTargetType, setEfxTargetType] = useState<'all' | 'group' | 'fixture'>('all');
@@ -1933,6 +1937,18 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [efxTargetFixtureIds, setEfxTargetFixtureIds] = useState<string[]>([]);
   const [efxPattern, setEfxPattern] = useState<'static' | 'sweep' | 'circle' | 'pulse' | 'wave' | 'bounce' | 'figure8' | 'spiral' | 'zigzag' | 'heartbeat' | 'randomWalk' | 'diamond' | 'custom'>('static');
   const [efxCustomEffectId, setEfxCustomEffectId] = useState('');
+
+  // Color track modal state
+  const [colorTrackName, setColorTrackName] = useState('');
+  const [colorTargetType, setColorTargetType] = useState<'all' | 'group' | 'fixture'>('all');
+  const [colorTargetGroupId, setColorTargetGroupId] = useState('');
+  const [colorTargetFixtureIds, setColorTargetFixtureIds] = useState<string[]>([]);
+
+  // Color track context menus
+  const [colorContextMenu, setColorContextMenu] = useState<{ trackId: string; time: number; x: number; y: number } | null>(null);
+  const [colorEntryMenu, setColorEntryMenu] = useState<{ trackId: string; entry: ColorTrackEntry; x: number; y: number } | null>(null);
+  const colorContextRef = useRef<HTMLDivElement>(null);
+  const colorEntryMenuRef = useRef<HTMLDivElement>(null);
 
   // Resolve target fixture names for display + DMX filtering
   const efxTargetFixtureNames = useMemo(() => {
@@ -2049,6 +2065,74 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       return { ...t, entries: t.entries.filter(e => e.time !== entryTime) };
     }));
     setEfxEntryMenu(null);
+  }, []);
+
+  // ─── Color Track handlers ─────────────────────────
+  const handleAddColorTrack = useCallback(() => {
+    const name = colorTrackName.trim();
+    if (!name) return;
+    pushHistory();
+    const newTrack: ColorTrack = {
+      id: `clrt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name,
+      entries: [],
+      targetFixtures: {
+        type: colorTargetType,
+        ...(colorTargetType === 'group' ? { groupId: colorTargetGroupId } : {}),
+        ...(colorTargetType === 'fixture' ? { fixtureIds: colorTargetFixtureIds } : {}),
+      },
+    };
+    setColorTracks(prev => [...prev, newTrack]);
+    setColorTrackModal(false);
+    setColorTrackName('');
+    setColorTargetType('all');
+    setColorTargetGroupId('');
+    setColorTargetFixtureIds([]);
+  }, [pushHistory, colorTrackName, colorTargetType, colorTargetGroupId, colorTargetFixtureIds]);
+
+  const openColorTrackModal = useCallback(() => {
+    setColorTrackName('');
+    setColorTargetType('all');
+    setColorTargetGroupId('');
+    setColorTargetFixtureIds([]);
+    setColorTrackModal(true);
+  }, []);
+
+  const handleRemoveColorTrack = useCallback((trackId: string) => {
+    pushHistory();
+    setColorTracks(prev => prev.filter(t => t.id !== trackId));
+  }, [pushHistory]);
+
+  const handleInsertColorToTrack = useCallback((trackId: string, time: number, color: string) => {
+    setColorTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      return {
+        ...t,
+        entries: [...t.entries, {
+          id: `clre-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          time,
+          endTime: Math.min(time + 4, resolvedAnalysis?.duration || 120),
+          color,
+        }].sort((a, b) => a.time - b.time),
+      };
+    }));
+    setColorContextMenu(null);
+  }, [resolvedAnalysis]);
+
+  const handleColorTrackContextMenu = useCallback((trackId: string, time: number, clientX: number, clientY: number) => {
+    setColorContextMenu({ trackId, time, x: clientX, y: clientY });
+  }, []);
+
+  const handleColorEntryContextMenu = useCallback((trackId: string, entry: ColorTrackEntry, clientX: number, clientY: number) => {
+    setColorEntryMenu({ trackId, entry, x: clientX, y: clientY });
+  }, []);
+
+  const handleRemoveColorEntry = useCallback((trackId: string, entryTime: number) => {
+    setColorTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      return { ...t, entries: t.entries.filter(e => e.time !== entryTime) };
+    }));
+    setColorEntryMenu(null);
   }, []);
 
   /* ─── Insert entity handler ──────────────────────── */
@@ -2480,6 +2564,9 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           efxTracks={efxTracks}
           onEfxTrackContextMenu={handleEfxTrackContextMenu}
           onEfxEntryContextMenu={handleEfxEntryContextMenu}
+          colorTracks={colorTracks}
+          onColorTrackContextMenu={handleColorTrackContextMenu}
+          onColorEntryContextMenu={handleColorEntryContextMenu}
           onSectionsChange={(newSecs: TrackSection[]) => { pushHistory(); setSections(newSecs); }}
           fixtureTracks={fixtureTracks}
           onFixtureTracksChange={setFixtureTracks}
@@ -2532,6 +2619,13 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         >
           <Plus className="w-3 h-3" />
           EFX Track
+        </button>
+        <button
+          onClick={openColorTrackModal}
+          className="ml-1 px-2 py-0.5 rounded text-[10px] text-pink-400 border border-pink-700/50 hover:bg-pink-400/10 cursor-pointer flex items-center gap-1"
+        >
+          <Plus className="w-3 h-3" />
+          Color Track
         </button>
         <button
           onClick={() => setFadeModal(!fadeModal)}
@@ -2916,6 +3010,105 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             </div>
           </div>
           <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setEfxTrackModal(false)} />
+        </>
+      )}
+
+      {/* ── Color Track Target Modal ── */}
+      {colorTrackModal && (
+        <>
+          <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
+            <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm font-semibold text-gray-200">New Color Track</span>
+                <button onClick={() => setColorTrackModal(false)} className="text-gray-500 hover:text-white">✕</button>
+              </div>
+
+              <label className="block text-[10px] text-gray-400 mb-1">Track Name</label>
+              <input
+                autoFocus
+                value={colorTrackName}
+                onChange={e => setColorTrackName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && colorTrackName.trim()) handleAddColorTrack();
+                  if (e.key === 'Escape') setColorTrackModal(false);
+                }}
+                placeholder="e.g. Blue Wash"
+                className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none mb-4"
+              />
+
+              <label className="block text-[10px] text-gray-400 mb-1">Apply Color To</label>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {([
+                  { type: 'all' as const, label: 'All Fixtures', icon: '🌐' },
+                  { type: 'group' as const, label: 'Group', icon: '📁' },
+                  { type: 'fixture' as const, label: 'Single Fixture', icon: '💡' },
+                ]).map(opt => (
+                  <button key={opt.type}
+                    onClick={() => {
+                      setColorTargetType(opt.type);
+                      if (opt.type !== 'group') setColorTargetGroupId('');
+                      if (opt.type !== 'fixture') setColorTargetFixtureIds([]);
+                    }}
+                    className={`px-3 py-2.5 rounded-lg text-xs font-medium border transition-all ${
+                      colorTargetType === opt.type
+                        ? 'bg-pink-600/20 border-pink-500/50 text-pink-300'
+                        : 'bg-gray-800/40 border-gray-700/40 text-gray-400 hover:border-gray-600'
+                    }`}
+                  >
+                    <div className="text-lg mb-0.5">{opt.icon}</div>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {colorTargetType === 'group' && (
+                <div className="mb-3">
+                  <label className="block text-[10px] text-gray-400 mb-1">Select Group</label>
+                  <select
+                    value={colorTargetGroupId}
+                    onChange={e => setColorTargetGroupId(e.target.value)}
+                    className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
+                  >
+                    <option value="">-- Choose group --</option>
+                    {fixtureGroups.map(g => (
+                      <option key={g.id} value={g.id}>{g.name} ({g.fixtureIds.length} fixtures)</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {colorTargetType === 'fixture' && (
+                <div className="mb-3">
+                  <label className="block text-[10px] text-gray-400 mb-1">Select Fixture</label>
+                  <select
+                    value={colorTargetFixtureIds[0] || ''}
+                    onChange={e => setColorTargetFixtureIds(e.target.value ? [e.target.value] : [])}
+                    className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
+                  >
+                    <option value="">-- Choose fixture --</option>
+                    {patchedFixtures.filter(f => f.enabled !== false).map(f => (
+                      <option key={f.id} value={f.id}>{f.name} ({f.universeId} ch.{f.startAddress})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setColorTrackModal(false)}
+                  className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddColorTrack}
+                  disabled={!colorTrackName.trim()}
+                  className="px-4 py-1.5 rounded-lg text-xs font-medium bg-pink-600 text-white hover:bg-pink-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Add Track
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setColorTrackModal(false)} />
         </>
       )}
     </div>
