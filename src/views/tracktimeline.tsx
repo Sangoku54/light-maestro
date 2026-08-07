@@ -880,15 +880,15 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
       // ── Fixture enable/disable checkbox click (canvas-drawn) ──
       const _dtf = onToggleFixtureRef.current;
       const _dfx = disabledFixturesRef2.current;
-      if (_dtf && _dfx) {
+      if (_dtf) {
         const c = containerRef.current; if (c) {
           const rect = c.getBoundingClientRect();
           const mx = e.clientX - rect.left;
           const my = e.clientY - rect.top;
-          const cbX = 74; const cbSize = 11; const cbHitPad = 4;
-          if (my >= HEADER_HEIGHT && mx >= cbX - cbHitPad && mx <= cbX + cbSize + cbHitPad) {
+          if (my >= HEADER_HEIGHT && mx < LABEL_WIDTH) {
             const fi = Math.floor((my - HEADER_HEIGHT) / TRACK_HEIGHT);
             if (fi >= 0 && fi < numFixtures) {
+              console.log('[handleClick] Checkbox toggle:', patchedFixtures[fi].id, patchedFixtures[fi].name);
               _dtf(patchedFixtures[fi].id);
               return;
             }
