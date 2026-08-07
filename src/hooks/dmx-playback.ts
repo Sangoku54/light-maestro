@@ -12,7 +12,7 @@
 import { useEffect, useRef } from 'react';
 import type { PatchedFixture, FixtureTier } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureCapability } from './dmx-cues';
-import { resolveTrackTargets, computeFixtureTrackOverrides, computeEfxOverrides, type EfxTrackRef, type FixtureTrack, type MovementBlock } from './fixture-tracks';
+import { resolveTrackTargets, computeEfxOverrides, type EfxTrackRef, type FixtureTrack, type MovementBlock } from './fixture-tracks';
 import type { SavedEffect } from '../stores/showStore';
 import { useAppStore } from '../stores/appstore';
 import { dmxBridge } from '../utils/dmx-bridge';
