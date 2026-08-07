@@ -371,8 +371,15 @@ export function computeEfxOverrides(
     const effect = effectMap.get(activeEntry.effectId);
     if (!effect) continue;
 
+    // Debug: log effect params on first frame
+    if (_efxDebugFrame <= 1) console.log('EFX effect', effect.name, 'pattern', effect.pattern, 'speed', effect.speed, 'width', effect.width, 'height', effect.height, 'rotation', effect.rotation, 'entryTime', activeEntry.time.toFixed(2), 'ct', currentTime.toFixed(2));
+
     // Compute relative time: how far into the effect we are (in cycles)
-    const relTime = (currentTime - activeEntry.time) * effect.speed;
+    const speed = effect.speed || 0.5; // fallback: 0.5 Hz if speed not set
+    const relTime = (currentTime - activeEntry.time) * speed;
+
+    // Debug: log relTime once per 30 frames
+    if (_efxDebugFrame <= 1 || _efxDebugFrame % 30 === 0) console.log('EFX relTime', relTime.toFixed(3), 'speed', speed);
 
     // Generate pan/tilt for this effect
     const pt = generateEfxPanTilt(
