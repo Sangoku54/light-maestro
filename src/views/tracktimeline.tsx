@@ -681,7 +681,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         setTooltip(null);
       }
     },
-    [getCueAtPosition, duration, sections, onSectionsChange, onEfxEntryChange],
+    [getCueAtPosition, duration, sections, onSectionsChange, onEfxEntryChange, onColorEntryChange],
   );
 
   const handleClick = useCallback(
