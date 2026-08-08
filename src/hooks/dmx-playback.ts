@@ -256,6 +256,32 @@ function hexToRgb(hex: string): [number, number, number] {
   return [parseInt(h.substring(0,2),16), parseInt(h.substring(2,4),16), parseInt(h.substring(4,6),16)];
 }
 
+/** Hue shift: rotate color on HSL wheel. Preserves brightness. */
+function applyHueShift([r,g,b]: [number,number,number], deg: number): [number,number,number] {
+  if (deg === 0) return [r,g,b];
+  const nr=r/255,ng=g/255,nb=b/255;
+  const mx=Math.max(nr,ng,nb),mn=Math.min(nr,ng,nb);
+  const l=(mx+mn)/2;
+  if (mx===mn) return [r,g,b];
+  const d=mx-mn;
+  const s=l>0.5?d/(2-mx-mn):d/(mx+mn);
+  let h:number;
+  if (mx===nr) h=((ng-nb)/d+(ng<nb?6:0))*60;
+  else if (mx===ng) h=((nb-nr)/d+2)*60;
+  else h=((nr-ng)/d+4)*60;
+  h=(h+deg)%360;if(h<0) h+=360;
+  const c=(1-Math.abs(2*l-1))*s;
+  const x=c*(1-Math.abs((h/60)%2-1));
+  const m=l-c/2;
+  let r2,g2,b2:number;
+  if(h<60){r2=c;g2=x;b2=0;}else if(h<120){r2=x;g2=c;b2=0;}
+  else if(h<180){r2=0;g2=c;b2=x;}else if(h<240){r2=0;g2=x;b2=c;}
+  else if(h<300){r2=x;g2=0;b2=c;}else{r2=c;g2=0;b2=x;}
+  return [Math.round((r2+m)*255),Math.round((g2+m)*255),Math.round((b2+m)*255)];
+}
+
+const TIER_HUE = { primary: 0, secondary: 120, tertiary: 240 } as const;
+
 function colorDistance(hex1: string, hex2: string): number {
   const [r1,g1,b1]=hexToRgb(hex1); const [r2,g2,b2]=hexToRgb(hex2);
   return Math.sqrt(2*(r1-r2)**2 + 4*(g1-g2)**2 + 3*(b1-b2)**2);
@@ -326,9 +352,7 @@ function analyzeChannels(pf: PatchedFixture, def: DmxFixtureDefinition|undefined
     if(isShutterDimmer && fa.intensityOffset === null){fa.intensityOffset = off;}
     if(startsWithRgb.test(chName)||ch.type==='Colour'||(ch.type==='Beam'&&hasColorWord.test(chName))){colourChannels.push({offset:off,name:chName,caps:ch.capabilities});continue;}
     switch(ch.type){case'Intensity':if(fa.intensityOffset===null)fa.intensityOffset=off;break;case'Shutter':case'Effect':if(fa.shutterOffset===null)fa.shutterOffset=off;break;case'Pan':fa.panOffsets.push(off);break;case'Tilt':fa.tiltOffsets.push(off);break;case'Gobo':if(fa.goboOffset===null){fa.goboOffset=off;fa.goboCaps=ch.capabilities??[];}break;case'Prism':if(fa.prismOffset===null)fa.prismOffset=off;break;case'Zoom':if(fa.zoomOffset===null)fa.zoomOffset=off;break;case'Frost':case'Focus':if(fa.frostOffset===null)fa.frostOffset=off;break;case'Iris':if(fa.irisOffset===null)fa.irisOffset=off;break;}}
-  // TRACE: dump channel analysis once per fixture
-  const allNames=channels.map(c=>`${c.name||'?'}[${c.type||'?'}]`).join(', ');
-  const colourNames=colourChannels.map(c=>c.name).join(', ');
+  // Build RGB segments from detected colour channels
   if(colourChannels.length>0){const hasRgbStart=colourChannels.some(c=>startsWithRgb.test(c.name));
     const hasRgbWords=colourChannels.some(c=>isRed.test(c.name))&&colourChannels.some(c=>isGreen.test(c.name))&&colourChannels.some(c=>isBlue.test(c.name));
     const hasRgbNames=(hasRgbStart||hasRgbWords)&&colourChannels.length>=3;
@@ -592,7 +616,6 @@ export function useDmxPlayback(options: {
           }
           if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=dimmerVal;}
 
-          const tierColorIdx=pf.tier==='secondary'?1:pf.tier==='tertiary'?2:0;
           let paletteColor = (() => {
             // Color track override (highest priority)
             if (colorTrackColors.has(pf.id)) {
@@ -633,6 +656,7 @@ export function useDmxPlayback(options: {
 
           if(fa.rgbSegments.length>0&&paletteColor){
             let[r,g,b]=hexToRgb(paletteColor);
+            [r,g,b] = applyHueShift([r,g,b], TIER_HUE[pf.tier]);
             for(const po of fa.presetOverrideOffsets){chVals[pf.startAddress+po]=0;}
             // If intensityOffset was detected (including Dimmer/Shutter), set it
             if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=dimmerVal;}
@@ -886,7 +910,6 @@ export function computeDmxForCue(
         if (!chVals[addr] || dimmerVal > chVals[addr]) chVals[addr] = dimmerVal;
       }
 
-      const tierColorIdx = pf.tier === 'secondary' ? 1 : pf.tier === 'tertiary' ? 2 : 0;
       // Color track > fixture track > cue color
       let paletteColor = (colorTrackColors?.has(pf.id))
         ? colorTrackColors.get(pf.id)!
@@ -898,7 +921,8 @@ export function computeDmxForCue(
 
       if (fa.rgbSegments.length > 0 && paletteColor) {
         let [r, g, b] = hexToRgb(paletteColor);
-        // Force Color Preset/Macro channels to 255 (RGB/DMX mode) for raw RGB control
+        [r, g, b] = applyHueShift([r, g, b], TIER_HUE[pf.tier]);
+        // Force Color Preset/Macro channels to 0 for raw RGB control
         for (const po of fa.presetOverrideOffsets) { chVals[pf.startAddress + po] = 0; }
         for (const seg of fa.rgbSegments) {
           chVals[pf.startAddress + seg.r] = r;
