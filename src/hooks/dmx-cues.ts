@@ -425,15 +425,6 @@ function colorNameMatchScore(capName: string, targetCat: string): number {
   return 0;
 }
 
-const INTENSITY_VALUES: Record<string, number> = {
-  low: 180,    // energy 0.2–0.4 -> DMX 160–180
-  medium: 210, // energy 0.4–0.6 -> DMX 180–210
-  high: 255,   // energy 0.6–0.9 -> DMX 210–255
-};
-
-// Minimum intensity floor for dynamic mode - ensures fixtures are always visible
-const MIN_DYNAMIC_INTENSITY = 140;
-
 // ABSOLUTE minimum DMX intensity for any fixture on any section.
 // SoundSwitch principle: every patched fixture always receives dimmer >= 50% (128).
 const ABSOLUTE_MIN_INTENSITY = 60;
