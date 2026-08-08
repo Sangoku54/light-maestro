@@ -1668,30 +1668,9 @@ if (editBlock) { setEditBlock(null); return; }
       ctx.lineTo(w, trackY + TRACK_HEIGHT);
       ctx.stroke();
 
-      // Fixture name label
-      ctx.fillStyle = '#6b7280';
-      ctx.font = '10px -apple-system, sans-serif';
-      ctx.textAlign = 'left';
-      const displayName =
-        fixture.name.length > 12
-          ? fixture.name.substring(0, 11) + '\u2026'
-          : fixture.name;
-      ctx.fillText(displayName, 6, trackY + TRACK_HEIGHT / 2 + 4);
-
-      // Tier badge
-      const tierColors: Record<string, string> = {
-        primary: '#a855f7',
-        secondary: '#3b82f6',
-        tertiary: '#6b7280',
-      };
-      const tierColor = tierColors[fixture.tier] || '#6b7280';
-      ctx.fillStyle = tierColor + '40';
-      ctx.font = '8px -apple-system, sans-serif';
-      ctx.fillText(fixture.tier.substring(0, 1).toUpperCase(), 72, trackY + TRACK_HEIGHT / 2 + 4);
-
-      // ── Enable/Disable checkbox (canvas-drawn) ──
-      const cbSize = 11;
-      const cbX = 74;
+      // ── Enable/Disable checkbox (canvas-drawn, left of name) ──
+      const cbSize = 14;
+      const cbX = 4;
       const cbY = trackY + (TRACK_HEIGHT - cbSize) / 2;
       const isDisabled = disabledFixtures?.has(fixture.id) ?? false;
       // Box background
@@ -1706,10 +1685,38 @@ if (editBlock) { setEditBlock(null); return; }
         ctx.strokeStyle = '#a855f7';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.moveTo(cbX + 2.5, cbY + cbSize / 2);
-        ctx.lineTo(cbX + cbSize / 2 - 1, cbY + cbSize - 3);
-        ctx.lineTo(cbX + cbSize - 2, cbY + 3);
+        ctx.moveTo(cbX + 3, cbY + cbSize / 2);
+        ctx.lineTo(cbX + 5.5, cbY + cbSize - 3.5);
+        ctx.lineTo(cbX + cbSize - 3, cbY + 3.5);
         ctx.stroke();
+      }
+
+      // Fixture name label (right of checkbox)
+      const nameX = cbX + cbSize + 6;
+      ctx.fillStyle = isDisabled ? '#4b5563' : '#6b7280';
+      ctx.font = '10px -apple-system, sans-serif';
+      ctx.textAlign = 'left';
+      const displayName =
+        fixture.name.length > 10
+          ? fixture.name.substring(0, 9) + '…'
+          : fixture.name;
+      ctx.fillText(displayName, nameX, trackY + TRACK_HEIGHT / 2 + 4);
+
+      // Tier badge
+      const tierColors: Record<string, string> = {
+        primary: '#a855f7',
+        secondary: '#3b82f6',
+        tertiary: '#6b7280',
+      };
+      const tierColor = tierColors[fixture.tier] || '#6b7280';
+      ctx.fillStyle = tierColor + '40';
+      ctx.font = '8px -apple-system, sans-serif';
+      ctx.fillText(fixture.tier.substring(0, 1).toUpperCase(), nameX + ctx.measureText(displayName).width + 4, trackY + TRACK_HEIGHT / 2 + 4);
+
+      // ── Track graying overlay when disabled ──
+      if (isDisabled && drawW > 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.fillRect(LABEL_WIDTH, trackY, drawW, TRACK_HEIGHT);
       }
 
       // ── EFX overlay: show EFX entry blocks on targeted fixture tracks ──

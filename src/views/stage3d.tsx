@@ -162,8 +162,10 @@ interface Fixture3D {
 
 // ─── Component ────────────────────────────────────────────────
 
-export const Stage3D: React.FC = () => {
+export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabledFixtures }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const disabledRef = useRef<Set<string>>(new Set());
+  disabledRef.current = disabledFixtures ?? new Set();
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -1029,6 +1031,7 @@ export const Stage3D: React.FC = () => {
       }
 
       if (blackout) intensity = 0;
+      if (disabledRef.current.has(f3d.id)) intensity = 0;
       intensity = intensity * (grandMaster / 255);
 
       // Apply strobe blink

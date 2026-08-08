@@ -3374,7 +3374,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             </div>
           </div>
           <div className="flex-1 min-h-0 relative">
-            <Stage3D />
+            <Stage3D disabledFixtures={disabledFixtures} />
             {/* Resize handle */}
             <div
               className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
