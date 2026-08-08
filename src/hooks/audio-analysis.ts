@@ -800,18 +800,30 @@ function trackBeats(
     rectDiff[i] = Math.max(0, smoothed[i] - smoothed[i - 1]);
   }
 
-  // ── Step 3: Autocorrelation on rectified derivative ──
+  // ── Step 3: Autocorrelation on BOTH rectified derivative AND ODF ──
+  // Using dual signals (energy derivative + onset detection function)
+  // greatly improves BPM accuracy across genres — energy catches kick drums,
+  // ODF catches snares/hi-hats/melodic onsets.
   // BPM range 50-240 → lag range 0.25-1.2 s at analysisRate samples/sec
   const minBpm = 50, maxBpm = 240;
   const minLag = Math.floor((60 * rate) / maxBpm);
   const maxLag = Math.floor((60 * rate) / minBpm);
-  const acorr = autocorrelation(rectDiff, maxLag + 1);
+  const maxLagV = maxLag + 1;
+  const acorrEnergy = autocorrelation(rectDiff, maxLagV);
+  const acorrOdf = autocorrelation(odf, Math.min(maxLagV, odf.length));
 
-  // ── Step 4: Pick highest autocorrelation peak in the lag range ──
+  // Merge: average the two autocorrelations for combined tempo evidence
+  const acorr = new Array(maxLagV).fill(0);
+  const odfLen = Math.min(maxLagV, odf.length);
+  for (let lag = 0; lag < maxLagV; lag++) {
+    const e = acorrEnergy[lag] || 0;
+    const o = lag < odfLen ? acorrOdf[lag] : 0;
+    acorr[lag] = e * 0.5 + o * 0.5;
+  }
+
+  // ── Step 4: Collect all peaks with harmonic scoring ──
   let bestLag = minLag;
-  let bestPeak = -Infinity;
   const peaks: { lag: number; score: number; bpm: number }[] = [];
-
   for (let lag = minLag + 1; lag < maxLag; lag++) {
     const isPeak = acorr[lag] > acorr[lag - 1] && acorr[lag] > acorr[lag + 1];
     if (isPeak) {
@@ -819,46 +831,48 @@ function trackBeats(
     }
   }
 
+  // Fallback if no peaks found
   if (peaks.length === 0) {
-    // Fallback: pick the highest correlation value anywhere in the range
     let maxCorr = -Infinity;
     for (let lag = minLag; lag <= maxLag; lag++) {
       if (acorr[lag] > maxCorr) { maxCorr = acorr[lag]; bestLag = lag; }
     }
   } else {
-    peaks.sort((a, b) => b.score - a.score);
-    bestLag = peaks[0].lag;
-    bestPeak = peaks[0].score;
-  }
-
-  // ── Step 5: Anti-octave check ──
-  // If a peak at half or double the lag is stronger, prefer the one
-  // that falls in the 60-180 BPM "sweet spot" range.
-  if (peaks.length > 1) {
+    // ── Step 5: Multi-hypothesis tempo scoring ──
     const sweetLo = 60, sweetHi = 180;
-    const doubleLag = bestLag * 2;
-    const halfLag = Math.round(bestLag / 2);
 
-    const doublePeak = peaks.find(p => p.lag >= doubleLag * 0.93 && p.lag <= doubleLag * 1.07);
-    const halfPeak = peaks.find(p => p.lag >= halfLag * 0.93 && p.lag <= halfLag * 1.07);
+    const findNearby = (targetLag: number, tolerance = 0.07) =>
+      peaks.find(p => Math.abs(p.lag - targetLag) / targetLag <= tolerance);
 
-    const bestBpmTemp = 60 * rate / bestLag;
-    const bestInSweet = bestBpmTemp >= sweetLo && bestBpmTemp <= sweetHi;
+    const scored = peaks.map(p => {
+      const bpm = p.bpm;
+      let total = p.score;
 
-    if (doublePeak && doublePeak.score > bestPeak * 1.1) {
-      const dbBpm = 60 * rate / doublePeak.lag;
-      if (dbBpm >= sweetLo && dbBpm <= sweetHi && !bestInSweet) {
-        bestLag = doublePeak.lag;
-        bestPeak = doublePeak.score;
+      const dbl = findNearby(p.lag * 2);
+      const half = findNearby(p.lag / 2);
+      const triple = findNearby(p.lag * 3);
+      const third = findNearby(p.lag / 3);
+
+      if (dbl) total += dbl.score * 0.6;
+      if (half) total += half.score * 0.3;
+      if (triple) total += triple.score * 0.2;
+      if (third) total += third.score * 0.15;
+
+      if (bpm >= sweetLo && bpm <= sweetHi) {
+        total *= 1.25;
+      } else if (bpm > 200) {
+        total *= 0.55;
+      } else if (bpm > 180) {
+        total *= 0.80;
+      } else if (bpm < 55) {
+        total *= 0.70;
       }
-    }
-    if (halfPeak && halfPeak.score > bestPeak * 1.1) {
-      const hbBpm = 60 * rate / halfPeak.lag;
-      if (hbBpm >= sweetLo && hbBpm <= sweetHi && !bestInSweet) {
-        bestLag = halfPeak.lag;
-        bestPeak = halfPeak.score;
-      }
-    }
+
+      return { ...p, score: total };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    bestLag = scored[0].lag;
   }
 
   const bestBpm = Math.round(60 * rate / bestLag);
@@ -1083,6 +1097,7 @@ function detectGenre(
 
   let best = genres[0];
   let bestScore = -Infinity;
+  const allScores: { genre: string; total: number; bpmS: number; bassS: number; evarS: number; bregS: number; centroidS: number; onsetS: number; harmonicS: number; subBassS: number; growthS: number }[] = [];
   for (const g of genres) {
     const bpmRange = g.bMax - g.bMin;
     const bpmS = bpm >= g.bMin && bpm <= g.bMax
@@ -1100,8 +1115,30 @@ function detectGenre(
     const score = bpmS * 0.18 + bassS * 0.15 + evarS * 0.10 + bregS * 0.12 +
                   centroidS * 0.12 + onsetS * 0.10 + harmonicS * 0.08 +
                   subBassS * 0.08 + growthS * 0.07;
+    allScores.push({ genre: g.genre, total: score, bpmS, bassS, evarS, bregS, centroidS, onsetS, harmonicS, subBassS, growthS });
     if (score > bestScore) { bestScore = score; best = g; }
   }
+
+  // Debug: log top 3 genre scores
+  console.log(
+    `%c[detectGenre] BPM=${bpm} bassRatio=${r4(bassRatio)}→norm=${r4(bassRatioNorm)}%c`,
+    'color:#facc15;font-weight:bold', ''
+  );
+  console.table(
+    allScores.sort((a, b) => b.total - a.total).slice(0, 5).map(s => ({
+      genre: s.genre,
+      total: r4(s.total),
+      bpm: r4(s.bpmS),
+      bass: r4(s.bassS),
+      evar: r4(s.evarS),
+      breg: r4(s.bregS),
+      cent: r4(s.centroidS),
+      onst: r4(s.onsetS),
+      harm: r4(s.harmonicS),
+      subB: r4(s.subBassS),
+      grow: r4(s.growthS),
+    }))
+  );
 
   return {
     ...best,
