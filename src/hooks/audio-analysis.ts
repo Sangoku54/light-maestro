@@ -861,10 +861,6 @@ function trackBeats(
         const refinedLag = bestLag + offset;
         const refinedBpm = Math.round(60 * rate / refinedLag);
         if (refinedBpm >= 50 && refinedBpm <= 240 && refinedBpm !== bestBpm) {
-          console.log(
-            `[trackBeats] Parabolic interpolation: lag ${bestLag} → ${refinedLag.toFixed(2)}, BPM ${bestBpm} → ${refinedBpm}`,
-            `(acorr[${bestLag - 1}]=${a0.toFixed(4)}, acorr[${bestLag}]=${a1.toFixed(4)}, acorr[${bestLag + 1}]=${a2.toFixed(4)}, offset=${offset.toFixed(3)})`,
-          );
           bestBpm = refinedBpm;
           bestLag = Math.round(refinedLag);
         }
@@ -887,21 +883,11 @@ function trackBeats(
       if (halfNorm > 0.12) {
         const halfPrior = tempoPrior(halfBpm);
         const halfScore = halfNorm * halfPrior;
-        console.log(
-          `[trackBeats] Octave corrected: ${bestBpm} → ${halfBpm}`,
-          `(ODF norm@half=${halfNorm.toFixed(3)}, prior@half=${halfPrior.toFixed(3)}, score ratio=${(halfScore / bestScore).toFixed(3)})`,
-        );
         bestBpm = halfBpm;
         bestLag = halfLag;
       }
     }
   }
-
-  console.log(
-    `[trackBeats] ODF autocorrelation + log-Gaussian tempo prior: bestBpm=${bestBpm}`,
-    `(lag=${bestLag}, norm=${(acorr[bestLag] / maxAcorr).toFixed(3)}, prior=${tempoPrior(bestBpm).toFixed(3)})`,
-  );
-  console.table(debugCandidates.sort((a, b) => b.score - a.score).slice(0, 10));
 
   // ── Step 6: Build multiOdf for beat peak refinement only (not BPM) ──
   const multiOdf = new Array(n).fill(0);
@@ -1146,26 +1132,6 @@ function detectGenre(
   }
 
   // Debug: log top 3 genre scores
-  console.log(
-    `%c[detectGenre] BPM=${bpm} bassRatio=${r4(bassRatio)}→norm=${r4(bassRatioNorm)}%c`,
-    'color:#facc15;font-weight:bold', ''
-  );
-  console.table(
-    allScores.sort((a, b) => b.total - a.total).slice(0, 5).map(s => ({
-      genre: s.genre,
-      total: r4(s.total),
-      bpm: r4(s.bpmS),
-      bass: r4(s.bassS),
-      evar: r4(s.evarS),
-      breg: r4(s.bregS),
-      cent: r4(s.centroidS),
-      onst: r4(s.onsetS),
-      harm: r4(s.harmonicS),
-      subB: r4(s.subBassS),
-      grow: r4(s.growthS),
-    }))
-  );
-
   return {
     ...best,
     confidence: Math.round(Math.min(100, Math.max(25, bestScore * 100))),
