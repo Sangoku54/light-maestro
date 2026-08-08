@@ -334,20 +334,6 @@ function generateEfxPanTilt(
   const prePan = Math.round(128 + rx * w * 127 + ox * 127);
   const preTilt = Math.round(128 + ry * h * 127 + oy * 127);
 
-  // Debug: log intermediates every 30 compute calls
-  _efxDebugFrame++;
-  if (_efxDebugFrame % 30 === 0) {
-    console.log('EFX gen raw', JSON.stringify({
-      t: t.toFixed(3),
-      rawPan: rx.toFixed(3),
-      rawTilt: ry.toFixed(3),
-      pan_before_clamp: prePan,
-      tilt_before_clamp: preTilt,
-      w, h,
-      xOffset, yOffset,
-    }));
-  }
-
   return {
     pan: Math.max(0, Math.min(255, prePan)),
     tilt: Math.max(0, Math.min(255, preTilt)),
@@ -390,29 +376,9 @@ export function computeEfxOverrides(
     const effect = effectMap.get(activeEntry.effectId);
     if (!effect) continue;
 
-    // Debug: log effect params + intermediate values every 30 ticks
-    if (_efxDebugFrame % 30 === 0) {
-      const speed = effect.speed || 0.5;
-      const relTime = (currentTime - activeEntry.time) * speed;
-      console.log('EFX FULL', JSON.stringify({
-        effect: effect.name,
-        pattern: effect.pattern,
-        speed,
-        relTime: relTime.toFixed(3),
-        width: effect.width,
-        height: effect.height,
-        rotation: effect.rotation,
-        xOffset: effect.xOffset,
-        yOffset: effect.yOffset,
-      }));
-    }
-
     // Compute relative time: how far into the effect we are (in cycles)
     const speed = effect.speed || 0.5; // fallback: 0.5 Hz if speed not set
     const relTime = (currentTime - activeEntry.time) * speed;
-
-    // Debug: log relTime once per 30 frames
-    if (_efxDebugFrame % 30 === 0) console.log('EFX relTime', relTime.toFixed(3), 'speed', speed);
 
     // Generate pan/tilt for this effect
     const pt = generateEfxPanTilt(
@@ -431,17 +397,5 @@ export function computeEfxOverrides(
     }
   }
 
-  // Debug: log once per 30 calls
-  _efxDebugLog(currentTime, result);
-
   return result;
-}
-
-// Debug logger
-let _efxDebugFrame = 0;
-function _efxDebugLog(ct: number, result: Map<string, { pan: number; tilt: number }>) {
-  if (_efxDebugFrame % 30 === 0 && result.size > 0) {
-    const first = result.values().next().value;
-    if (first) console.log('EFX compute frame', _efxDebugFrame, 'ct', ct.toFixed(2), 'pan', first.pan, 'tilt', first.tilt, 'entries', result.size);
-  }
 }

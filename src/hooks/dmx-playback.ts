@@ -158,7 +158,6 @@ import type { SavedEffect } from '../stores/showStore';
 import { useAppStore } from '../stores/appstore';
 import { dmxBridge } from '../utils/dmx-bridge';
 
-let _efxNoOverrideFrame = 0;
 
 /**
  * Dispatch DMX channel values to the correct universe based on fixture address ranges.
@@ -547,7 +546,7 @@ export function useDmxPlayback(options: {
       if (!efxPtOverrides || efxPtOverrides.size === 0) {
         if (efxTracksRef?.current && efxTracksRef.current.length > 0 && effectsRef?.current && effectsRef.current.length > 0) {
           const hasEntries = efxTracksRef.current.some(t => t.entries.length > 0);
-          if (hasEntries && _efxNoOverrideFrame++ % 60 === 0) console.log('EFX no-override frame', _efxNoOverrideFrame, 'ct', ct.toFixed(2), 'tracks', efxTracksRef.current.length, 'effects', effectsRef.current.length, 'anyEntries', hasEntries);
+          if (hasEntries) ;
         }
       }
       const efxMap=efxActive||{};
@@ -699,7 +698,6 @@ export function useDmxPlayback(options: {
             }else if(efxPtOverrides?.has(pf.id)){
               // EFX track pan/tilt override (from saved effects on timeline)
               const ept = efxPtOverrides.get(pf.id)!;
-              if (pf.id === patchedFixtures[0]?.id) console.log('EFX pt', ct.toFixed(2), 'pan', ept.pan, 'tilt', ept.tilt);
               for(let m=0;m<motorCount;m++){if(m<panCount)chVals[pf.startAddress+fa.panOffsets[m]]=ept.pan;if(m<tiltCount)chVals[pf.startAddress+fa.tiltOffsets[m]]=ept.tilt;}
             }else{
               const trackMovement = (() => {

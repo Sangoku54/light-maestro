@@ -167,7 +167,6 @@ export function useRgbMatrixPlayback() {
             const uniIdx = universes.findIndex(u => u.id === fixture.universeId);
             if (uniIdx >= 0) {
               const addr = fixture.startAddress;
-              if(r>0||g>0||b>0) console.log(`[RGB-MATRIX OVWRITE] ${fixture.id} R@${addr+rCh}=${r} G@${addr+gCh}=${g} B@${addr+bCh}=${b}`);
               dmx.setChannel(uniIdx, addr + rCh, r);
               dmx.setChannel(uniIdx, addr + gCh, g);
               dmx.setChannel(uniIdx, addr + bCh, b);
