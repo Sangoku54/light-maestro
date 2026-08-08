@@ -759,7 +759,7 @@ function computeOnsetFunction(frames: SpectralFrame[]): number[] {
     }
 
     // Blend: RMS onset dominates (70%), spectral flux refines (30%)
-    odf[i] = rmsDiff * 0.7 + flux * 0.3;
+    odf[i] = rmsDiff * 0.4 + flux * 0.6; // spectral-flux-weighted: reduces double-time bias
   }
 
   return odf;
@@ -810,7 +810,7 @@ function trackBeats(
   // Log-Gaussian tempo prior centered at 120 BPM
   // prior(bpm) = exp(-0.5 * ((log2(bpm/mu)) / sigma)²)
   // mu=120 BPM (most common global tempo), sigma=0.5 (covers 60-240 range)
-  const muBpm = 120, sigmaLog = 0.5;
+  const muBpm = 120, sigmaLog = 0.35; // tight: prior(200)≈0.11, prior(110)≈0.94
   const tempoPrior = (bpm: number) =>
     Math.exp(-0.5 * ((Math.log2(bpm / muBpm)) / sigmaLog) ** 2);
 
