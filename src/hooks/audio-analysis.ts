@@ -841,6 +841,33 @@ function trackBeats(
 
   let bestBpm = Math.round(60 * rate / bestLag);
 
+  // ══ Parabolic interpolation: sub-lag BPM precision ══
+  // The ODF autocorrelation is sampled at integer lags (e.g., 5 → 120 BPM,
+  // 6 → 100 BPM), but the true tempo often falls between two lags
+  // (110 BPM → ideal lag ≈ 5.45). This misses the true autocorrelation peak.
+  // Parabolic interpolation estimates the continuous peak from 3 adjacent lags.
+  if (bestLag > minLag && bestLag < maxLag) {
+    const a0 = acorr[bestLag - 1];
+    const a1 = acorr[bestLag];
+    const a2 = acorr[bestLag + 1];
+    const denom = 2 * (a0 - 2 * a1 + a2);
+    if (Math.abs(denom) > 1e-9 && a1 > 0) {
+      const offset = (a0 - a2) / denom;
+      if (Math.abs(offset) > 0.01 && Math.abs(offset) < 0.5) {
+        const refinedLag = bestLag + offset;
+        const refinedBpm = Math.round(60 * rate / refinedLag);
+        if (refinedBpm >= 50 && refinedBpm <= 240 && refinedBpm !== bestBpm) {
+          console.log(
+            `[trackBeats] Parabolic interpolation: lag ${bestLag} → ${refinedLag.toFixed(2)}, BPM ${bestBpm} → ${refinedBpm}`,
+            `(acorr[${bestLag - 1}]=${a0.toFixed(4)}, acorr[${bestLag}]=${a1.toFixed(4)}, acorr[${bestLag + 1}]=${a2.toFixed(4)}, offset=${offset.toFixed(3)})`,
+          );
+          bestBpm = refinedBpm;
+          bestLag = Math.round(refinedLag);
+        }
+      }
+    }
+  }
+
   // ══ Octave correction: check ODF autocorrelation at BPM/2 ══
   // The normalized low-band curve was unreliable (all curves compressed to [0,1]).
   // Instead, directly check if there's significant ODF autocorrelation at half the detected BPM.
