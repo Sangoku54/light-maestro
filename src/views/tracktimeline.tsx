@@ -888,7 +888,6 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
           if (my >= HEADER_HEIGHT && mx < LABEL_WIDTH) {
             const fi = Math.floor((my - HEADER_HEIGHT) / TRACK_HEIGHT);
             if (fi >= 0 && fi < numFixtures) {
-              console.log('[handleClick] Checkbox toggle:', patchedFixtures[fi].id, patchedFixtures[fi].name);
               _dtf(patchedFixtures[fi].id);
               return;
             }

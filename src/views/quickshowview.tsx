@@ -2977,8 +2977,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           scenes={entitySceneList}
           chasers={entityChaserList}
           cueLists={entityCueListList}
-          disabledFixtures={disabledFixtures}
-          onToggleFixture={handleToggleFixture}
           effects={entityEffectList}
         />
       </div>
@@ -3038,6 +3036,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
               return { ...t, entries };
             }));
           }}
+          disabledFixtures={disabledFixtures}
+          onToggleFixture={handleToggleFixture}
         />
       </div>
 
