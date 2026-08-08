@@ -778,104 +778,74 @@ function trackBeats(
   if (n < 10) return { beats: [], bpm: 120, beatStrengths: [] };
   const rate = analysisRate;
 
-  // ── Step 1: Low-pass filter the energy curve (raw RMS, not normalized) ──
-  // Moving-average window ~8 samples at 10 Hz = 0.8 s — smooths out noise
-  // while preserving the rhythmic energy envelope.
-  const windowSize = 8;
-  const smoothed: number[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const ws = Math.max(0, i - Math.floor(windowSize / 2));
-    const we = Math.min(n - 1, i + Math.floor(windowSize / 2));
-    let sum = 0;
-    for (let j = ws; j <= we; j++) sum += energyCurve[j];
-    smoothed[i] = sum / (we - ws + 1);
-  }
-
-  // ── Step 2: Half-wave rectified derivative ──
-  // diff[t] = max(0, smoothed[t] - smoothed[t-1])
-  // Only rising energy matters for beat detection.
-  const rectDiff: number[] = new Array(n);
-  rectDiff[0] = 0;
-  for (let i = 1; i < n; i++) {
-    rectDiff[i] = Math.max(0, smoothed[i] - smoothed[i - 1]);
-  }
-
-  // ── Step 3: Autocorrelation on BOTH rectified derivative AND ODF ──
-  // Using dual signals (energy derivative + onset detection function)
-  // greatly improves BPM accuracy across genres — energy catches kick drums,
-  // ODF catches snares/hi-hats/melodic onsets.
+  // ═══════════════════════════════════════════════════════════════
+  // BPM DETECTION — ODF autocorrelation + log-Gaussian tempo prior
+  // ═══════════════════════════════════════════════════════════════
+  // Industry-standard approach (librosa, essentia, voice.ai):
+  // 1. Autocorrelation on onset detection function (spectral flux)
+  // 2. Normalize to [0, 1]
+  // 3. Multiply by log-Gaussian tempo prior (center=120 BPM, sigma=0.5)
+  // 4. Pick argmax
+  //
+  // This is fundamentally different from the energy-derivative approach
+  // which captures ALL onsets (incl. eighth-notes) and produces octave errors.
+  // The ODF weights spectral changes over simple volume changes, and the
+  // log-Gaussian prior mathematically guarantees preference for 60-180 BPM.
+  //
   // BPM range 50-240 → lag range 0.25-1.2 s at analysisRate samples/sec
   const minBpm = 50, maxBpm = 240;
   const minLag = Math.floor((60 * rate) / maxBpm);
   const maxLag = Math.floor((60 * rate) / minBpm);
-  const maxLagV = maxLag + 1;
-  const acorrEnergy = autocorrelation(rectDiff, maxLagV);
-  const acorrOdf = autocorrelation(odf, Math.min(maxLagV, odf.length));
 
-  // Merge: average the two autocorrelations for combined tempo evidence
-  const acorr = new Array(maxLagV).fill(0);
-  const odfLen = Math.min(maxLagV, odf.length);
-  for (let lag = 0; lag < maxLagV; lag++) {
-    const e = acorrEnergy[lag] || 0;
-    const o = lag < odfLen ? acorrOdf[lag] : 0;
-    acorr[lag] = e * 0.5 + o * 0.5;
+  // Autocorrelation on ODF only (onset detection function = spectral flux + RMS blend)
+  const acorr = autocorrelation(odf, maxLag + 1);
+
+  // Normalize autocorrelation to [0, 1] so scores are comparable across signals
+  let maxAcorr = 0;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    if (acorr[lag] > maxAcorr) maxAcorr = acorr[lag];
   }
+  if (maxAcorr === 0) maxAcorr = 1;
 
-  // ── Step 4: Collect all peaks with harmonic scoring ──
+  // Log-Gaussian tempo prior centered at 120 BPM
+  // prior(bpm) = exp(-0.5 * ((log2(bpm/mu)) / sigma)²)
+  // mu=120 BPM (most common global tempo), sigma=0.5 (covers 60-240 range)
+  const muBpm = 120, sigmaLog = 0.5;
+  const tempoPrior = (bpm: number) =>
+    Math.exp(-0.5 * ((Math.log2(bpm / muBpm)) / sigmaLog) ** 2);
+
+  // Score every lag: normalized autocorrelation × tempo prior
   let bestLag = minLag;
-  const peaks: { lag: number; score: number; bpm: number }[] = [];
-  for (let lag = minLag + 1; lag < maxLag; lag++) {
-    const isPeak = acorr[lag] > acorr[lag - 1] && acorr[lag] > acorr[lag + 1];
-    if (isPeak) {
-      peaks.push({ lag, score: acorr[lag], bpm: Math.round(60 * rate / lag) });
-    }
-  }
+  let bestScore = -Infinity;
+  const debugCandidates: { lag: number; bpm: number; acorr: number; norm: number; prior: number; score: number }[] = [];
 
-  // Fallback if no peaks found
-  if (peaks.length === 0) {
-    let maxCorr = -Infinity;
-    for (let lag = minLag; lag <= maxLag; lag++) {
-      if (acorr[lag] > maxCorr) { maxCorr = acorr[lag]; bestLag = lag; }
-    }
-  } else {
-    // ── Step 5: Multi-hypothesis tempo scoring ──
-    const sweetLo = 60, sweetHi = 180;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    const bpm = 60 * rate / lag;
+    const norm = acorr[lag] / maxAcorr;
+    const prior = tempoPrior(bpm);
+    const score = norm * prior;
 
-    const findNearby = (targetLag: number, tolerance = 0.07) =>
-      peaks.find(p => Math.abs(p.lag - targetLag) / targetLag <= tolerance);
-
-    const scored = peaks.map(p => {
-      const bpm = p.bpm;
-      let total = p.score;
-
-      const dbl = findNearby(p.lag * 2);
-      const half = findNearby(p.lag / 2);
-      const triple = findNearby(p.lag * 3);
-      const third = findNearby(p.lag / 3);
-
-      if (dbl) total += dbl.score * 0.6;
-      if (half) total += half.score * 0.3;
-      if (triple) total += triple.score * 0.2;
-      if (third) total += third.score * 0.15;
-
-      if (bpm >= sweetLo && bpm <= sweetHi) {
-        total *= 1.25;
-      } else if (bpm > 200) {
-        total *= 0.55;
-      } else if (bpm > 180) {
-        total *= 0.80;
-      } else if (bpm < 55) {
-        total *= 0.70;
-      }
-
-      return { ...p, score: total };
+    debugCandidates.push({
+      lag, bpm: Math.round(bpm),
+      acorr: Number(acorr[lag].toFixed(4)),
+      norm: Number(norm.toFixed(4)),
+      prior: Number(prior.toFixed(4)),
+      score: Number(score.toFixed(4)),
     });
 
-    scored.sort((a, b) => b.score - a.score);
-    bestLag = scored[0].lag;
+    if (score > bestScore) {
+      bestScore = score;
+      bestLag = lag;
+    }
   }
 
   const bestBpm = Math.round(60 * rate / bestLag);
+
+  console.log(
+    `[trackBeats] ODF autocorrelation + log-Gaussian tempo prior: bestBpm=${bestBpm}`,
+    `(lag=${bestLag}, norm=${(acorr[bestLag] / maxAcorr).toFixed(3)}, prior=${tempoPrior(bestBpm).toFixed(3)})`,
+  );
+  console.table(debugCandidates.sort((a, b) => b.score - a.score).slice(0, 10));
 
   // ── Step 6: Build multiOdf for beat peak refinement only (not BPM) ──
   const multiOdf = new Array(n).fill(0);
