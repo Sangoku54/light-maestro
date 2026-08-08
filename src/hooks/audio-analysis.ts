@@ -1011,9 +1011,12 @@ function detectGenre(
   spectralCentroidCurve: number[],
   spectralFluxCurve: number[],
   rmsCurve: number[],
+  rawBassRatio: number,
 ): GenreProfile {
   const n = energy.length;
-  const bassRatio = mean(low.map((v, i) => v / (mid[i] + high[i] + 0.001)));
+  const bassRatio = rawBassRatio;
+  // Map raw bass ratio (can be 0.1–10+) to [0,1] via tanh so genre bassW values (0.2–0.95) match
+  const bassRatioNorm = Math.tanh(bassRatio * 0.45);
   const eMean = mean(energy);
   const eVar = mean(energy.map(v => (v - eMean) ** 2));
   const eVarNorm = Math.min(2, eVar / (eMean * eMean + 0.001));
@@ -1081,10 +1084,11 @@ function detectGenre(
   let best = genres[0];
   let bestScore = -Infinity;
   for (const g of genres) {
+    const bpmRange = g.bMax - g.bMin;
     const bpmS = bpm >= g.bMin && bpm <= g.bMax
-      ? 1 - Math.abs(bpm - (g.bMin + g.bMax) / 2) / ((g.bMax - g.bMin) / 2 + 1)
-      : Math.max(0, 1 - Math.min(Math.abs(bpm - g.bMin), Math.abs(bpm - g.bMax)) / 25);
-    const bassS = 1 - Math.abs(bassRatio - g.bassW);
+      ? 1.0
+      : Math.max(0, 1 - Math.min(Math.abs(bpm - g.bMin), Math.abs(bpm - g.bMax)) / Math.max(bpmRange * 0.25, 5));
+    const bassS = 1 - Math.abs(bassRatioNorm - g.bassW);
     const evarS = 1 - Math.abs(eVarNorm - g.evarW);
     const bregS = 1 - Math.abs(beatReg - g.bregW);
     const centroidS = 1 - Math.abs(avgCentroid - g.centroidW);
@@ -1524,6 +1528,11 @@ export function analyzeAudioBuffer(
   const normMid = normalize(midCurve);
   const normHigh = normalize(highCurve);
   const spectralFluxCurve = normalize(spectralFluxCurveRaw);
+
+  // Bass ratio from RAW data (before independent normalization destroys band relationships)
+  const rawBassRatio = lowCurve.length > 0
+    ? lowCurve.reduce((s, v, i) => s + v / (midCurve[i] + highCurve[i] + 0.001), 0) / lowCurve.length
+    : 0.5;
   const rmsCurve = normalize(rmsCurveRaw);
 
   // ══ Phase B: Novelty curve & section boundaries ══
@@ -1655,7 +1664,7 @@ export function analyzeAudioBuffer(
   }
 
   // ══ Phase K: Genre, key, section analysis, atmosphere ══
-  const genre = detectGenre(normEnergy, normLow, normMid, normHigh, bpm, beats, spectralCentroidCurve, spectralFluxCurve, rmsCurve);
+  const genre = detectGenre(normEnergy, normLow, normMid, normHigh, bpm, beats, spectralCentroidCurve, spectralFluxCurve, rmsCurve, rawBassRatio);
 
   const keyResult = detectKey(data, sampleRate);
   const sectionAnalyses = analyzeSections(buffer, sections, beats, onsets);
