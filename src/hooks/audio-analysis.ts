@@ -853,7 +853,11 @@ function trackBeats(
     const denom = 2 * (a0 - 2 * a1 + a2);
     if (Math.abs(denom) > 1e-9 && a1 > 0) {
       const offset = (a0 - a2) / denom;
-      if (Math.abs(offset) > 0.01 && Math.abs(offset) < 0.5) {
+      // Allow up to 0.95 lag offset: the score prior can push bestLag one slot
+      // away from the raw acorr peak. E.g., a 105 BPM track has higher raw acorr
+      // at lag=6 (100 BPM) than lag=5 (120 BPM), but the prior favors 120.
+      // Parabola through [4,5,6] finds the true peak at lag≈5.71 → 105 BPM.
+      if (Math.abs(offset) > 0.01 && Math.abs(offset) < 0.95) {
         const refinedLag = bestLag + offset;
         const refinedBpm = Math.round(60 * rate / refinedLag);
         if (refinedBpm >= 50 && refinedBpm <= 240 && refinedBpm !== bestBpm) {
