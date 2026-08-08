@@ -839,11 +839,42 @@ function trackBeats(
     }
   }
 
-  const bestBpm = Math.round(60 * rate / bestLag);
+  let bestBpm = Math.round(60 * rate / bestLag);
+
+  // ══ Octave correction: cross-check with low-band energy (kick/bass = reliable tempo indicator) ══
+  // Low frequencies carry the true tempo — kick drums and bass lines are almost always
+  // on quarter/eighth notes, never on 16th/32nd subdivisions. We compute autocorrelation
+  // on the low-band energy curve and verify that the ODF result isn't a double-time error.
+  const lowAcorr = autocorrelation(lowCurve.slice(0, n), maxLag + 1);
+  let lowMax = 0, lowBestLag = minLag, lowBestScore = -Infinity;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    if (lowAcorr[lag] > lowMax) lowMax = lowAcorr[lag];
+  }
+  if (lowMax === 0) lowMax = 1;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    const bpm = 60 * rate / lag;
+    const score = (lowAcorr[lag] / lowMax) * tempoPrior(bpm);
+    if (score > lowBestScore) { lowBestScore = score; lowBestLag = lag; }
+  }
+  const lowBpm = Math.round(60 * rate / lowBestLag);
+
+  // If ODF says fast but low-band says slow, trust low-band (bass never lies about tempo)
+  if (bestBpm > 150 && lowBpm < 150 && lowBpm > 60) {
+    const ratio = bestBpm / lowBpm;
+    // Only correct if lowBpm is roughly half (octave error) or close to ODF/2
+    if (ratio > 1.6 || (ratio > 1.15 && ratio < 1.35)) {
+      console.log(
+        `[trackBeats] Octave corrected via low-band: ${bestBpm} → ${lowBpm}`,
+        `(ratio=${ratio.toFixed(2)}, ODF norm=${(acorr[bestLag]/maxAcorr).toFixed(3)}, low norm=${(lowAcorr[lowBestLag]/lowMax).toFixed(3)})`,
+      );
+      bestBpm = lowBpm;
+      bestLag = lowBestLag;
+    }
+  }
 
   console.log(
     `[trackBeats] ODF autocorrelation + log-Gaussian tempo prior: bestBpm=${bestBpm}`,
-    `(lag=${bestLag}, norm=${(acorr[bestLag] / maxAcorr).toFixed(3)}, prior=${tempoPrior(bestBpm).toFixed(3)})`,
+    `(lag=${bestLag}, norm=${(acorr[bestLag] / maxAcorr).toFixed(3)}, prior=${tempoPrior(bestBpm).toFixed(3)}, lowBpm=${lowBpm})`,
   );
   console.table(debugCandidates.sort((a, b) => b.score - a.score).slice(0, 10));
 
