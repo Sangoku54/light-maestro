@@ -1692,6 +1692,7 @@ if (editBlock) { setEditBlock(null); return; }
 
     for (let fi = 0; fi < numFixtures; fi++) {
       const fixture = patchedFixtures[fi];
+      const tierDeg = TIER_HUE_DEG[fixture.tier] ?? 0;
       const trackY = HEADER_HEIGHT + fi * TRACK_HEIGHT;
 
       // Track background (alternating)
@@ -1811,7 +1812,6 @@ if (editBlock) { setEditBlock(null); return; }
           if (!targetsFixture) continue;
 
                     // Draw color blocks
-          const tierDeg = TIER_HUE_DEG[fixture.tier] ?? 0;
           for (const cb of ft.colorBlocks) {
             const cx = LABEL_WIDTH + (cb.time / duration) * drawW;
             const ce = LABEL_WIDTH + (cb.endTime / duration) * drawW;
@@ -1898,19 +1898,20 @@ if (editBlock) { setEditBlock(null); return; }
 
         const iH = intensityToBarHeight(cue.intensity);
         const barY = trackY + (TRACK_HEIGHT - iH) / 2;
+        const sc = hueShiftHex(cue.color, tierDeg);
 
         // Glow
         ctx.save();
-        ctx.shadowColor = cue.color + '66';
+        ctx.shadowColor = sc + '66';
         ctx.shadowBlur = 4;
-        ctx.fillStyle = cue.color + 'CC';
+        ctx.fillStyle = sc + 'CC';
         ctx.beginPath();
         ctx.roundRect(cx - barW / 2, barY, barW, iH, 2);
         ctx.fill();
         ctx.restore();
 
         // Core bar
-        ctx.fillStyle = cue.color;
+        ctx.fillStyle = sc;
         ctx.beginPath();
         ctx.roundRect(cx - barW / 2, barY, barW, iH, 2);
         ctx.fill();
@@ -1918,8 +1919,8 @@ if (editBlock) { setEditBlock(null); return; }
         // Top highlight
         const grad = ctx.createLinearGradient(cx, barY, cx, barY + iH);
         grad.addColorStop(0, 'rgba(255,255,255,0.35)');
-        grad.addColorStop(0.5, cue.color);
-        grad.addColorStop(1, cue.color + '80');
+        grad.addColorStop(0.5, sc);
+        grad.addColorStop(1, sc + '80');
         ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.roundRect(
@@ -1946,7 +1947,8 @@ if (editBlock) { setEditBlock(null); return; }
           const totalDotsW = cue.colors.length * (dotR * 2 + 2) - 2;
           let dotX = cx - totalDotsW / 2 + dotR;
           for (const cc of cue.colors) {
-            ctx.fillStyle = cc;
+            const sc2 = hueShiftHex(cc, tierDeg);
+            ctx.fillStyle = sc2;
             ctx.beginPath();
             ctx.arc(dotX, dotY, dotR, 0, Math.PI * 2);
             ctx.fill();
