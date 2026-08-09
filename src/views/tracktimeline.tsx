@@ -500,7 +500,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const numColorTracks = colorTracks?.length ?? 0;
   const numStrobeTracks = strobeTracks?.length ?? 0;
   const numDimmerTracks = dimmerTracks?.length ?? 0;
-  const totalHeight = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT + numDimmerTracks * DIMMER_TRACK_HEIGHT;
+  const totalHeight = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT + numDimmerTracks * DIMMER_TRACK_HEIGHT;
 
   // ── Fixture → cue mapping (memoized) ─────────────────
   const fixtureCueMap = useMemo(
@@ -1182,29 +1182,8 @@ if (editBlock) { setEditBlock(null); return; }
           }
           return;
         }
-        // Check color tracks (below EFX tracks)
-        const colorTrackBaseY = efxTracksStart + eTracks.length * EFX_TRACK_HEIGHT;
-        if (y >= colorTrackBaseY && cTracks.length > 0) {
-          const cTrackIdx = Math.floor((y - colorTrackBaseY) / COLOR_TRACK_HEIGHT);
-          if (cTrackIdx >= 0 && cTrackIdx < cTracks.length) {
-            e.preventDefault();
-            const timeAtX = (x / drawW) * duration;
-            const cTrack = cTracks[cTrackIdx];
-            const entry = findColorEntryAt(cTrack, timeAtX, duration);
-            if (entry && onColorEntryContextMenu) {
-              onColorEntryContextMenu(cTrack.id, entry, e.clientX, e.clientY);
-            } else {
-              onColorTrackContextMenu?.(
-                cTrack.id,
-                Math.max(0, Math.min(duration, timeAtX)),
-                e.clientX,
-                e.clientY,
-              );
-            }
-          }
-        }
-        // Check strobe tracks (below color tracks)
-        const strobeTrackBaseY = colorTrackBaseY + cTracks.length * COLOR_TRACK_HEIGHT;
+        // Check strobe tracks (below EFX tracks)
+        const strobeTrackBaseY = efxTracksStart + eTracks.length * EFX_TRACK_HEIGHT;
         const sTracks = strobeTracks || [];
         if (y >= strobeTrackBaseY && sTracks.length > 0) {
           const sTrackIdx = Math.floor((y - strobeTrackBaseY) / STROBE_TRACK_HEIGHT);
@@ -1239,7 +1218,7 @@ if (editBlock) { setEditBlock(null); return; }
         }
       }
     },
-    [duration, efxTracks, colorTracks, strobeTracks, dimmerTracks, numFixtures, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu, onDimmerTrackContextMenu, onDimmerEntryContextMenu],
+    [duration, efxTracks, strobeTracks, dimmerTracks, numFixtures, onEfxTrackContextMenu, onEfxEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu, onDimmerTrackContextMenu, onDimmerEntryContextMenu],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -1356,47 +1335,6 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
-        // -- Color entry drag detection (parallel to EFX) --
-    {
-      const c3 = containerRef.current;
-      if (c3 && onColorEntryChange) {
-        const rect3 = c3.getBoundingClientRect();
-        const x3 = e.clientX - rect3.left - LABEL_WIDTH;
-        const y3 = e.clientY - rect3.top;
-        const drawW3 = rect3.width - LABEL_WIDTH;
-        const eT = efxTracks || [];
-        const cT = colorTracks || [];
-        if (cT.length > 0 && drawW3 > 0 && x3 >= 0 && y3 >= HEADER_HEIGHT) {
-          const efxBase = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT;
-          const colorBase = efxBase + eT.length * EFX_TRACK_HEIGHT;
-          if (y3 >= colorBase) {
-            const cIdx = Math.floor((y3 - colorBase) / COLOR_TRACK_HEIGHT);
-            if (cIdx >= 0 && cIdx < cT.length) {
-              const cTrack = cT[cIdx];
-              for (let ei = 0; ei < cTrack.entries.length; ei++) {
-                const entry = cTrack.entries[ei];
-                const ex1 = (entry.time / duration) * drawW3;
-                const ex2 = (entry.endTime / duration) * drawW3;
-                const EDGE = 5;
-                if (Math.abs(x3 - ex1) < EDGE) {
-                  colorDragRef.current = { trackId: cTrack.id, entryIndex: ei, mode: 'resize-left', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
-                  e.preventDefault(); e.stopPropagation(); return;
-                }
-                if (Math.abs(x3 - ex2) < EDGE) {
-                  colorDragRef.current = { trackId: cTrack.id, entryIndex: ei, mode: 'resize-right', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
-                  e.preventDefault(); e.stopPropagation(); return;
-                }
-                if (x3 > ex1 + EDGE && x3 < ex2 - EDGE) {
-                  colorDragRef.current = { trackId: cTrack.id, entryIndex: ei, mode: 'move', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
-                  e.preventDefault(); e.stopPropagation(); return;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
     // -- Strobe entry drag detection (parallel to EFX) --
     {
       const c4 = containerRef.current;
@@ -1406,12 +1344,10 @@ if (editBlock) { setEditBlock(null); return; }
         const y4 = e.clientY - rect4.top;
         const drawW4 = rect4.width - LABEL_WIDTH;
         const eT = efxTracks || [];
-        const cT = colorTracks || [];
         const sT = strobeTracks || [];
         if (sT.length > 0 && drawW4 > 0 && x4 >= 0 && y4 >= HEADER_HEIGHT) {
           const efxBase = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT;
-          const colorBase = efxBase + eT.length * EFX_TRACK_HEIGHT;
-          const strobeBase = colorBase + cT.length * COLOR_TRACK_HEIGHT;
+          const strobeBase = efxBase + eT.length * EFX_TRACK_HEIGHT;
           if (y4 >= strobeBase) {
             const sIdx = Math.floor((y4 - strobeBase) / STROBE_TRACK_HEIGHT);
             if (sIdx >= 0 && sIdx < sT.length) {
@@ -1449,14 +1385,11 @@ if (editBlock) { setEditBlock(null); return; }
         const y5 = e.clientY - rect5.top;
         const drawW5 = rect5.width - LABEL_WIDTH;
         const eT = efxTracks || [];
-        const cT = colorTracks || [];
         const sT = strobeTracks || [];
         const dT = dimmerTracks || [];
         if (dT.length > 0 && drawW5 > 0 && x5 >= 0 && y5 >= HEADER_HEIGHT) {
           const efxBase = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT;
-          const colorBase = efxBase + eT.length * EFX_TRACK_HEIGHT;
-          const strobeBase = colorBase + cT.length * COLOR_TRACK_HEIGHT;
-          const dimmerBase = strobeBase + sT.length * STROBE_TRACK_HEIGHT;
+          const dimmerBase = efxBase + eT.length * EFX_TRACK_HEIGHT + sT.length * STROBE_TRACK_HEIGHT;
           if (y5 >= dimmerBase) {
             const dIdx = Math.floor((y5 - dimmerBase) / DIMMER_TRACK_HEIGHT);
             if (dIdx >= 0 && dIdx < dT.length) {
@@ -1517,7 +1450,7 @@ if (editBlock) { setEditBlock(null); return; }
         return;
       }
     }
-  }, [sections, duration, onSectionsChange, efxTracks, colorTracks, strobeTracks, dimmerTracks, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange]);
+  }, [sections, duration, onSectionsChange, efxTracks, strobeTracks, dimmerTracks, onEfxEntryChange, onStrobeEntryChange, onDimmerEntryChange]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Clear EFX drag
@@ -2209,139 +2142,11 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
-    // ── Color tracks ────────────────────────────────
-    if (numColorTracks > 0) {
-      const colorTrackBaseY = autoY + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT;
-      for (let ci = 0; ci < numColorTracks; ci++) {
-        const cTrack = colorTracks![ci];
-        const trackY = colorTrackBaseY + ci * COLOR_TRACK_HEIGHT;
-
-        // Track background
-        ctx.fillStyle = ci % 2 === 0 ? 'rgba(236, 72, 153, 0.04)' : 'rgba(236, 72, 153, 0.02)';
-        ctx.fillRect(LABEL_WIDTH, trackY, drawW, COLOR_TRACK_HEIGHT);
-
-        // Top separator
-        ctx.strokeStyle = 'rgba(236, 72, 153, 0.25)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(LABEL_WIDTH, trackY);
-        ctx.lineTo(w, trackY);
-        ctx.stroke();
-
-        // Track label
-        ctx.fillStyle = '#ec4899';
-        ctx.font = '9px -apple-system, sans-serif';
-        ctx.textAlign = 'left';
-        const cLabel = cTrack.name.length > 11 ? cTrack.name.substring(0, 10) + '\u2026' : cTrack.name;
-        ctx.fillText('CLR: ' + cLabel, 6, trackY + 12);
-
-        // Target badge
-        const tf = cTrack.targetFixtures;
-        let targetLabel = '';
-        if (tf?.type === 'group') {
-          const store = (window as any).__useShowStore?.getState?.();
-          const groups = store?.fixtureGroups || [];
-          const g = groups.find((gg: any) => gg.id === tf.groupId);
-          targetLabel = g ? '📁 ' + (g.name.length > 8 ? g.name.slice(0,7)+'…' : g.name) : '📁 ?';
-        } else if (tf?.type === 'fixture') {
-          targetLabel = '💡 ×1';
-        } else {
-          targetLabel = '🌐 all';
-        }
-        if (targetLabel) {
-          ctx.fillStyle = '#6b7280';
-          ctx.font = '8px -apple-system, sans-serif';
-          ctx.fillText(targetLabel, 72, trackY + 12);
-        }
-
-        // Bottom separator
-        ctx.strokeStyle = 'rgba(75, 85, 99, 0.1)';
-        ctx.lineWidth = 0.5;
-        ctx.beginPath();
-        ctx.moveTo(LABEL_WIDTH, trackY + COLOR_TRACK_HEIGHT);
-        ctx.lineTo(w, trackY + COLOR_TRACK_HEIGHT);
-        ctx.stroke();
-
-        // Draw entries
-        for (const entry of cTrack.entries) {
-          const ex = LABEL_WIDTH + (entry.time / duration) * drawW;
-          const endX = LABEL_WIDTH + (entry.endTime / duration) * drawW;
-          const entryW = Math.max(4, endX - ex);
-          if (ex < LABEL_WIDTH - 10 || ex > w + 10) continue;
-
-          const pad = 3;
-          const barY = trackY + pad;
-          const barH = COLOR_TRACK_HEIGHT - pad * 2;
-
-          const endColor = entry.endColor || entry.color;
-
-          // Gradient bar from start color to end color
-          if (entryW > 2) {
-            const grad = ctx.createLinearGradient(ex, 0, endX, 0);
-            grad.addColorStop(0, entry.color);
-            grad.addColorStop(1, endColor);
-            ctx.fillStyle = grad;
-            ctx.globalAlpha = 0.7;
-            ctx.beginPath();
-            ctx.roundRect(ex, barY, entryW, barH, 3);
-            ctx.fill();
-            ctx.globalAlpha = 1;
-          }
-
-          // Left edge accent
-          ctx.fillStyle = entry.color;
-          ctx.globalAlpha = 0.9;
-          ctx.beginPath();
-          ctx.roundRect(ex, barY, 3, barH, [3, 0, 0, 3]);
-          ctx.fill();
-          ctx.globalAlpha = 1;
-
-          // Right edge accent
-          ctx.fillStyle = endColor;
-          ctx.globalAlpha = 0.9;
-          ctx.beginPath();
-          ctx.roundRect(endX - 3, barY, 3, barH, [0, 3, 3, 0]);
-          ctx.fill();
-          ctx.globalAlpha = 1;
-
-          // Color hex label
-          if (entryW > 50) {
-            ctx.fillStyle = '#ffffff';
-            ctx.font = '7px -apple-system, sans-serif';
-            ctx.textAlign = 'center';
-            const lbl = entry.color === endColor ? entry.color : entry.color + ' → ' + endColor;
-            ctx.fillText(lbl, ex + entryW / 2, trackY + COLOR_TRACK_HEIGHT / 2 + 3);
-          }
-
-          // Start/end diamonds
-          ctx.fillStyle = '#ffffff';
-          const diamondSize = 3;
-          ctx.beginPath();
-          ctx.moveTo(ex, barY + barH / 2 - diamondSize);
-          ctx.lineTo(ex + diamondSize, barY + barH / 2);
-          ctx.lineTo(ex, barY + barH / 2 + diamondSize);
-          ctx.lineTo(ex - diamondSize, barY + barH / 2);
-          ctx.closePath();
-          ctx.fill();
-
-          ctx.beginPath();
-          ctx.moveTo(endX, barY + barH / 2 - diamondSize);
-          ctx.lineTo(endX + diamondSize, barY + barH / 2);
-          ctx.lineTo(endX, barY + barH / 2 + diamondSize);
-          ctx.lineTo(endX - diamondSize, barY + barH / 2);
-          ctx.closePath();
-          ctx.fill();
-        }
-      }
-    }
-
     // ── Strobe tracks ───────────────────────────────
     if (numStrobeTracks > 0) {
       const eT = efxTracks || [];
-      const cT = colorTracks || [];
       const efxBase = autoY + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT;
-      const colorBase = efxBase + cT.length * COLOR_TRACK_HEIGHT;
-      const strobeTrackBaseY = colorBase;
+      const strobeTrackBaseY = efxBase;
       for (let si = 0; si < numStrobeTracks; si++) {
         const sTrack = strobeTracks![si];
         const trackY = strobeTrackBaseY + si * STROBE_TRACK_HEIGHT;
@@ -2453,11 +2258,9 @@ if (editBlock) { setEditBlock(null); return; }
     // ── Dimmer tracks ───────────────────────────────
     if (numDimmerTracks > 0) {
       const eT = efxTracks || [];
-      const cT = colorTracks || [];
       const sT = strobeTracks || [];
       const efxBase = autoY + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT;
-      const colorBase = efxBase + cT.length * COLOR_TRACK_HEIGHT;
-      const strobeBase = colorBase + sT.length * STROBE_TRACK_HEIGHT;
+      const strobeBase = efxBase + sT.length * STROBE_TRACK_HEIGHT;
       const dimmerTrackBaseY = strobeBase;
       for (let di = 0; di < numDimmerTracks; di++) {
         const dTrack = dimmerTracks![di];
@@ -2612,8 +2415,6 @@ if (editBlock) { setEditBlock(null); return; }
     getCuesForFixture,
     efxTracks,
     numEfxTracks,
-    colorTracks,
-    numColorTracks,
     strobeTracks,
     numStrobeTracks,
     dimmerTracks,
