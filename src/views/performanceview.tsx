@@ -181,10 +181,17 @@ const VirtualConsolePanel: React.FC = () => {
       showPlaybackRef.current = null;
       delete (window as any).__lm_perfPlayActive;
       try {
-        const allZero: Record<number, number> = {};
-        for (let i = 1; i <= 512; i++) allZero[i] = 0;
-        const s = useShowStore.getState();
-        sendChannelsToHardware(allZero, s.patchedFixtures, s.universes).catch(() => {});
+        const dmx = (window as any).lightMaestro?.dmx;
+        if (dmx) {
+          const z: Record<number,number> = {};
+          for (let i = 1; i <= 512; i++) z[i] = 0;
+          const s = useShowStore.getState();
+          const uniIds = s.universes.map((u:any) => String(u.id));
+          for (const pf of s.patchedFixtures) {
+            const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
+            try { dmx.setChannels(uniNum, z); } catch {}
+          }
+        }
       } catch {}
     };
 
@@ -1535,9 +1542,17 @@ const VCButtonWidget: React.FC<{
         cancelAnimationFrame(autoRafRef.current);
         autoAudioRef.current = null;
         try {
-          const black: Record<number, number> = {};
-          for (let i = 1; i <= 512; i++) black[i] = 0;
-          sendChannelsToHardware(black, useShowStore.getState().patchedFixtures, useShowStore.getState().universes).catch(() => {});
+          const dmx = (window as any).lightMaestro?.dmx;
+          if (dmx) {
+            const z: Record<number,number> = {};
+            for (let i = 1; i <= 512; i++) z[i] = 0;
+            const s = useShowStore.getState();
+            const uniIds = s.universes.map((u:any) => String(u.id));
+            for (const pf of s.patchedFixtures) {
+              const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
+              try { dmx.setChannels(uniNum, z); } catch {}
+            }
+          }
         } catch {}
         setActive(false);
         return;
@@ -1780,9 +1795,17 @@ const VCButtonWidget: React.FC<{
       cancelAnimationFrame(autoRafRef.current);
       autoAudioRef.current = null;
       try {
-        const black: Record<number, number> = {};
-        for (let i = 1; i <= 512; i++) black[i] = 0;
-        sendChannelsToHardware(black, useShowStore.getState().patchedFixtures, useShowStore.getState().universes).catch(() => {});
+        const dmx = (window as any).lightMaestro?.dmx;
+        if (dmx) {
+          const z: Record<number,number> = {};
+          for (let i = 1; i <= 512; i++) z[i] = 0;
+          const s = useShowStore.getState();
+          const uniIds = s.universes.map((u:any) => String(u.id));
+          for (const pf of s.patchedFixtures) {
+            const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
+            try { dmx.setChannels(uniNum, z); } catch {}
+          }
+        }
       } catch {}
     }
     // Stop playSong playback
@@ -1792,9 +1815,17 @@ const VCButtonWidget: React.FC<{
       cancelAnimationFrame(songRafRef.current);
       songAudioRef.current = null;
       try {
-        const black: Record<number, number> = {};
-        for (let i = 1; i <= 512; i++) black[i] = 0;
-        sendChannelsToHardware(black, useShowStore.getState().patchedFixtures, useShowStore.getState().universes).catch(() => {});
+        const dmx = (window as any).lightMaestro?.dmx;
+        if (dmx) {
+          const z: Record<number,number> = {};
+          for (let i = 1; i <= 512; i++) z[i] = 0;
+          const s = useShowStore.getState();
+          const uniIds = s.universes.map((u:any) => String(u.id));
+          for (const pf of s.patchedFixtures) {
+            const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
+            try { dmx.setChannels(uniNum, z); } catch {}
+          }
+        }
       } catch {}
     }
   };
@@ -2589,9 +2620,17 @@ const CueListViewPanel: React.FC = () => {
     if (!cueList) return;
     updateCueList(cueList.id, { currentCueIndex: -1 });
     try {
-      const allZero: Record<number, number> = {};
-      for (let i = 1; i <= 512; i++) allZero[i] = 0;
-      sendChannelsToHardware(allZero, useShowStore.getState().patchedFixtures, useShowStore.getState().universes).catch(() => {});
+      const dmx = (window as any).lightMaestro?.dmx;
+      if (dmx) {
+        const z: Record<number,number> = {};
+        for (let i = 1; i <= 512; i++) z[i] = 0;
+        const s = useShowStore.getState();
+        const uniIds = s.universes.map((u:any) => String(u.id));
+        for (const pf of s.patchedFixtures) {
+          const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
+          try { dmx.setChannels(uniNum, z); } catch {}
+        }
+      }
     } catch { /* */ }
   };
 
