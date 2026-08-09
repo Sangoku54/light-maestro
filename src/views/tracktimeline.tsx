@@ -18,6 +18,44 @@ import type { FixtureTrack, ColorBlock, DimmerBlock, StrobeBlock, MovementBlock 
 import { resolveTrackTargets, createFixtureTrack } from '../hooks/fixture-tracks';
 import { useAppStore } from '../stores/appStore';
 
+// ─── Tier hue-shift helpers ────────────────────────────────
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  if (h.length === 3) return [parseInt(h[0]+h[0],16), parseInt(h[1]+h[1],16), parseInt(h[2]+h[2],16)];
+  return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
+}
+
+function hueShiftHex(hex: string, deg: number): string {
+  if (deg === 0) return hex;
+  const [r, g, b] = hexToRgb(hex);
+  const nr = r/255, ng = g/255, nb = b/255;
+  const mx = Math.max(nr,ng,nb), mn = Math.min(nr,ng,nb);
+  const l = (mx+mn)/2;
+  if (mx === mn) return hex;
+  const d = mx-mn;
+  const s = l > 0.5 ? d/(2-mx-mn) : d/(mx+mn);
+  let h: number;
+  if (mx===nr) h = ((ng-nb)/d + (ng<nb?6:0)) * 60;
+  else if (mx===ng) h = ((nb-nr)/d + 2) * 60;
+  else h = ((nr-ng)/d + 4) * 60;
+  h = (h + deg) % 360; if (h < 0) h += 360;
+  const c = (1-Math.abs(2*l-1))*s;
+  const x = c*(1-Math.abs((h/60)%2-1));
+  const m = l-c/2;
+  let r2: number, g2: number, b2: number;
+  if (h<60) { r2=c; g2=x; b2=0; }
+  else if (h<120) { r2=x; g2=c; b2=0; }
+  else if (h<180) { r2=0; g2=c; b2=x; }
+  else if (h<240) { r2=0; g2=x; b2=c; }
+  else if (h<300) { r2=x; g2=0; b2=c; }
+  else { r2=c; g2=0; b2=x; }
+  return '#' + [Math.round((r2+m)*255), Math.round((g2+m)*255), Math.round((b2+m)*255)]
+    .map(v => v.toString(16).padStart(2,'0')).join('');
+}
+
+const TIER_HUE_DEG = { primary: 0, secondary: 120, tertiary: 240 } as const;
+
 // ─── Types ─────────────────────────────────────────────────
 
 interface Cue {
@@ -1773,24 +1811,27 @@ if (editBlock) { setEditBlock(null); return; }
           if (!targetsFixture) continue;
 
                     // Draw color blocks
+          const tierDeg = TIER_HUE_DEG[fixture.tier] ?? 0;
           for (const cb of ft.colorBlocks) {
             const cx = LABEL_WIDTH + (cb.time / duration) * drawW;
             const ce = LABEL_WIDTH + (cb.endTime / duration) * drawW;
             if (ce < LABEL_WIDTH || cx > w) continue;
             const bw = Math.max(3, ce - cx);
+            const c1 = hueShiftHex(cb.color, tierDeg);
             if (cb.endColor && cb.endColor !== cb.color) {
+              const c2 = hueShiftHex(cb.endColor, tierDeg);
               // Gradient block: draw a color gradient bar
               const grad = ctx.createLinearGradient(Math.max(LABEL_WIDTH, cx), trackY, Math.max(LABEL_WIDTH, cx) + bw, trackY);
-              grad.addColorStop(0, cb.color);
-              grad.addColorStop(1, cb.endColor);
+              grad.addColorStop(0, c1);
+              grad.addColorStop(1, c2);
               ctx.fillStyle = grad;
             } else {
-              ctx.fillStyle = cb.color + 'CC';
+              ctx.fillStyle = c1 + 'CC';
             }
             ctx.fillRect(Math.max(LABEL_WIDTH, cx), trackY + 1, bw, TRACK_HEIGHT - 2);
             if (bw > 20) {
               ctx.fillStyle = '#ffffff'; ctx.font = '7px sans-serif'; ctx.textAlign = 'center';
-              ctx.fillText(cb.endColor ? cb.color + '→' + cb.endColor : cb.color, cx + bw/2, trackY + TRACK_HEIGHT - 5);
+              ctx.fillText(cb.endColor ? c1 + '→' + c2 : c1, cx + bw/2, trackY + TRACK_HEIGHT - 5);
             }
           }
 // Draw dimmer blocks
