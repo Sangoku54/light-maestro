@@ -1272,7 +1272,7 @@ const VCButtonWidget: React.FC<{
       }
       if (!audio.paused && !audio.ended) autoRafRef.current = requestAnimationFrame(fireAutoDmx);
     };
-    audio.onplay = () => { startTime = performance.now(); fireAutoDmx(); };
+    audio.onplay = () => { startTime = performance.now(); const b: Record<number,number>={}; for(let i=1;i<=512;i++)b[i]=0; sendChannelsToHardware(b, useShowStore.getState().patchedFixtures, useShowStore.getState().universes).catch(()=>{}); fireAutoDmx(); };
     audio.onended = () => {
       cancelAnimationFrame(autoRafRef.current);
       try {
@@ -1461,7 +1461,7 @@ const VCButtonWidget: React.FC<{
           if (!audio.paused && !audio.ended) songRafRef.current = requestAnimationFrame(fireDmx);
         };
 
-        audio.onplay = () => { startTime = performance.now(); void waitForDmx(); fireDmx(); };
+        audio.onplay = () => { startTime = performance.now(); const b: Record<number,number>={}; for(let i=1;i<=512;i++)b[i]=0; sendChannelsToHardware(b, useShowStore.getState().patchedFixtures, useShowStore.getState().universes).catch(()=>{}); void waitForDmx(); fireDmx(); };
         audio.onended = () => {
           cancelAnimationFrame(songRafRef.current);
           try {
