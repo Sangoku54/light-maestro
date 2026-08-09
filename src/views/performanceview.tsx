@@ -1257,9 +1257,25 @@ const VCButtonWidget: React.FC<{
     const audio = new Audio(config.audioDataUrl);
     autoAudioRef.current = audio;
     let startTime = 0;
+    let firstFrameDone = false;
     const firedCues = new Set<string>();
     const fireAutoDmx = () => {
       const elapsed = (performance.now() - startTime) / 1000;
+      // Blackout all universes to 0 on first frame
+      if (!firstFrameDone) {
+        firstFrameDone = true;
+        const dmx = (window as any).lightMaestro?.dmx;
+        if (dmx) {
+          const z: Record<number,number> = {};
+          for (let i = 1; i <= 512; i++) z[i] = 0;
+          const s = useShowStore.getState();
+          const uniIds = s.universes.map((u:any) => String(u.id));
+          for (const pf of s.patchedFixtures) {
+            const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
+            try { dmx.setChannels(uniNum, z); } catch {}
+          }
+        }
+      }
       for (const cue of cues) {
         const key = `${cue.time.toFixed(2)}-${cue.universe}`;
         if (firedCues.has(key)) continue;
@@ -1272,14 +1288,21 @@ const VCButtonWidget: React.FC<{
       }
       if (!audio.paused && !audio.ended) autoRafRef.current = requestAnimationFrame(fireAutoDmx);
     };
-    audio.onplay = () => { startTime = performance.now(); const b: Record<number,number>={}; for(let i=1;i<=512;i++)b[i]=0; sendChannelsToHardware(b, useShowStore.getState().patchedFixtures, useShowStore.getState().universes).catch(()=>{}); fireAutoDmx(); };
+    audio.onplay = () => { startTime = performance.now(); fireAutoDmx(); };
     audio.onended = () => {
       cancelAnimationFrame(autoRafRef.current);
       try {
-        const black: Record<number, number> = {};
-        for (let i = 1; i <= 512; i++) black[i] = 0;
-        const s = useShowStore.getState();
-        sendChannelsToHardware(black, s.patchedFixtures, s.universes).catch(() => {});
+        const dmx = (window as any).lightMaestro?.dmx;
+        if (dmx) {
+          const z: Record<number,number> = {};
+          for (let i = 1; i <= 512; i++) z[i] = 0;
+          const s = useShowStore.getState();
+          const uniIds = s.universes.map((u:any) => String(u.id));
+          for (const pf of s.patchedFixtures) {
+            const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
+            try { dmx.setChannels(uniNum, z); } catch {}
+          }
+        }
       } catch {}
       autoAudioRef.current = null;
       setActive(false);
@@ -1388,9 +1411,17 @@ const VCButtonWidget: React.FC<{
         cancelAnimationFrame(songRafRef.current);
         songAudioRef.current = null;
         try {
-          const black: Record<number, number> = {};
-          for (let i = 1; i <= 512; i++) black[i] = 0;
-          sendChannelsToHardware(black, useShowStore.getState().patchedFixtures, useShowStore.getState().universes).catch(() => {});
+          const dmx = (window as any).lightMaestro?.dmx;
+          if (dmx) {
+            const z: Record<number,number> = {};
+            for (let i = 1; i <= 512; i++) z[i] = 0;
+            const s = useShowStore.getState();
+            const uniIds = s.universes.map((u:any) => String(u.id));
+            for (const pf of s.patchedFixtures) {
+              const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
+              try { dmx.setChannels(uniNum, z); } catch {}
+            }
+          }
         } catch {}
         setActive(false);
         return;
@@ -1436,6 +1467,8 @@ const VCButtonWidget: React.FC<{
 
         // Wait for DMX engine to be fully started before firing cues
         let dmxReady = false;
+        let firstFrameDone = false;
+        const uniIds = useShowStore.getState().universes.map((u:any) => String(u.id));
         const waitForDmx = async () => {
           for (let i = 0; i < 50; i++) {
             try {
@@ -1450,6 +1483,16 @@ const VCButtonWidget: React.FC<{
           if (!dmxReady) { songRafRef.current = requestAnimationFrame(fireDmx); return; }
           const dmx = (window as any).lightMaestro?.dmx;
           if (!dmx) { songRafRef.current = requestAnimationFrame(fireDmx); return; }
+          // Blackout all universes to 0 on first frame
+          if (!firstFrameDone) {
+            firstFrameDone = true;
+            const z: Record<number,number> = {};
+            for (let i = 1; i <= 512; i++) z[i] = 0;
+            for (const pf of useShowStore.getState().patchedFixtures) {
+              const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
+              try { dmx.setChannels(uniNum, z); } catch {}
+            }
+          }
           for (const cue of cues) {
             const key = `${cue.time.toFixed(2)}-${cue.universe}`;
             if (firedCues.has(key)) continue;
@@ -1461,13 +1504,19 @@ const VCButtonWidget: React.FC<{
           if (!audio.paused && !audio.ended) songRafRef.current = requestAnimationFrame(fireDmx);
         };
 
-        audio.onplay = () => { startTime = performance.now(); const b: Record<number,number>={}; for(let i=1;i<=512;i++)b[i]=0; sendChannelsToHardware(b, useShowStore.getState().patchedFixtures, useShowStore.getState().universes).catch(()=>{}); void waitForDmx(); fireDmx(); };
+        audio.onplay = () => { startTime = performance.now(); void waitForDmx(); fireDmx(); };
         audio.onended = () => {
           cancelAnimationFrame(songRafRef.current);
           try {
-            const black: Record<number, number> = {};
-            for (let i = 1; i <= 512; i++) black[i] = 0;
-            sendChannelsToHardware(black, useShowStore.getState().patchedFixtures, useShowStore.getState().universes).catch(() => {});
+            const dmx = (window as any).lightMaestro?.dmx;
+            if (dmx) {
+              const z: Record<number,number> = {};
+              for (let i = 1; i <= 512; i++) z[i] = 0;
+              for (const pf of useShowStore.getState().patchedFixtures) {
+                const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
+                try { dmx.setChannels(uniNum, z); } catch {}
+              }
+            }
           } catch {}
           songAudioRef.current = null;
           setActive(false);
