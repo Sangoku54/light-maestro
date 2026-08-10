@@ -68,18 +68,23 @@ function analyzeFixtureChannels(
   };
 
   const colourChannels: { offset: number; name: string; caps?: DmxFixtureCapability[] }[] = [];
+  const startsWithRgb = /^(red|green|blue|white|amber|uv|warm\s*white|cool\s*white)/i;
+  const hasColorWord = /\b(red|green|blue|white|amber|colour|color|rgb|uv|warm|cool)\b/i;
 
   for (let i = 0; i < channels.length; i++) {
     const ch = channels[i];
+    const chName = ch.name || '';
+    const hasColorCaps = ch.capabilities?.some(cap => cap.color);
+    if (startsWithRgb.test(chName) || ch.type === 'Colour' || (ch.type === 'Beam' && hasColorWord.test(chName)) || hasColorCaps) {
+      colourChannels.push({ offset: i, name: chName, caps: ch.capabilities });
+      continue;
+    }
     switch (ch.type) {
       case 'Intensity':
         if (result.intensityOffset === null) result.intensityOffset = i;
         break;
       case 'Shutter':
         if (result.shutterOffset === null) result.shutterOffset = i;
-        break;
-      case 'Colour':
-        colourChannels.push({ offset: i, name: ch.name, caps: ch.capabilities });
         break;
       case 'Pan':
         if (result.panOffset === null) result.panOffset = i;
