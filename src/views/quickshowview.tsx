@@ -692,8 +692,9 @@ async function loadProject(
         if (data.sections) setSections(data.sections);
         if (data.manualCues) setManualCues(data.manualCues);
         if (data.efxTracks) setEfxTracks(data.efxTracks);
-        // colorTracks and dimmerTracks are auto-generated — skip preset restore
+        // colorTracks are deprecated — skip preset restore
         if (data.strobeTracks) setStrobeTracks(data.strobeTracks);
+        if (data.dimmerTracks) setDimmerTracks(data.dimmerTracks);
         if (data.fixtureTracks) setFixtureTracks(data.fixtureTracks);
         if (data.disabledFixtures && setDisabledFixtures) setDisabledFixtures(new Set(data.disabledFixtures));
         if (data.analysis) {
@@ -1666,25 +1667,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [dimmerTracks, setDimmerTracks] = useState<DimmerTrack[]>([]);
   const dimmerTracksRef = useRef<DimmerTrackRef[]>([]);
   useEffect(() => { dimmerTracksRef.current = dimmerTracks; }, [dimmerTracks]);
-  // Auto-generate one dimmer track per patched tier
-  useEffect(() => {
-    const tiers = Array.from(new Set(patchedFixtures.map(f => f.tier).filter(Boolean)));
-    if (tiers.length === 0) return;
-    setDimmerTracks(prev => {
-      const allAuto = prev.length > 0 && prev.every(t => t.id.startsWith('dimmer-auto-'));
-      if (allAuto) return prev;
-      const tierNameMap: Record<string, string> = { primary: 'Primary', secondary: 'Secondaire', tertiary: 'Tertiaire' };
-      return tiers.map(tier => ({
-        id: `dimmer-auto-${tier}`,
-        name: tierNameMap[tier] || tier,
-        entries: [],
-        targetFixtures: {
-          type: 'fixture' as const,
-          fixtureIds: patchedFixtures.filter(f => f.tier === tier).map(f => f.id),
-        },
-      }));
-    });
-  }, [patchedFixtures]);
   const [fixtureTracks, setFixtureTracks] = useState<FixtureTrack[]>([]);
   const fixtureTracksRef = useRef<FixtureTrack[]>([]);
   fixtureTracksRef.current = fixtureTracks;
