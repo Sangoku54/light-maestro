@@ -1587,15 +1587,6 @@ const QuickSettingsPanel: React.FC = () => {
           </select>
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-400">Color Track Visible</label>
-          <input
-            type="checkbox"
-            checked={qs.showColorTrack || false}
-            onChange={e => setQs({ showColorTrack: e.target.checked })}
-            className="w-4 h-4"
-          />
-        </div>
-        <div className="flex items-center gap-2">
           <label className="text-xs text-gray-400">Strobe Track Visible</label>
           <input
             type="checkbox"
@@ -1893,7 +1884,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           if (data.sections) setSections(data.sections);
           if (data.manualCues) setManualCues(data.manualCues);
           if (data.efxTracks) setEfxTracks(data.efxTracks);
-          if (data.colorTracks) setColorTracks(data.colorTracks);
+          // colorTracks deprecated — skip restore
           if (data.strobeTracks) setStrobeTracks(data.strobeTracks);
           if (data.dimmerTracks) setDimmerTracks(data.dimmerTracks);
           if (data.fixtureTracks) setFixtureTracks(data.fixtureTracks);
@@ -1928,7 +1919,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             trackAnalysis: data.analysis,
             sections: data.sections || [],
             efxTracks: data.efxTracks || [],
-            colorTracks: data.colorTracks || [],
             strobeTracks: data.strobeTracks || [],
             dimmerTracks: data.dimmerTracks || [],
             manualCues: data.manualCues || [],
@@ -2050,8 +2040,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     if (manualCuesData) setManualCues(manualCuesData);
     if (efxTracksData) setEfxTracks(efxTracksData);
     if (fixtureTracksData) setFixtureTracks(fixtureTracksData);
-    const colorTracksPreset = preset?.data?.colorTracks || preset?.colorTracks;
-    if (colorTracksPreset) setColorTracks(colorTracksPreset);
+    // colorTracks deprecated
     const strobeTracksPreset = preset?.data?.strobeTracks || preset?.strobeTracks;
     if (strobeTracksPreset) setStrobeTracks(strobeTracksPreset);
     const dimmerTracksPreset = preset?.data?.dimmerTracks || preset?.dimmerTracks;
@@ -2995,10 +2984,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           efxTracks={efxTracks}
           onEfxTrackContextMenu={handleEfxTrackContextMenu}
           onEfxEntryContextMenu={handleEfxEntryContextMenu}
-          colorTracks={colorTracks}
-          onColorTrackContextMenu={handleColorTrackContextMenu}
-          onColorEntryChange={handleColorEntryChange}
-          onColorEntryContextMenu={handleColorEntryContextMenu}
           strobeTracks={strobeTracks}
           onStrobeTrackContextMenu={handleStrobeTrackContextMenu}
           onStrobeEntryClick={(trackId, entry) => {
@@ -3014,13 +2999,10 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           onSectionsChange={(newSecs: TrackSection[]) => { pushHistory(); setSections(newSecs); }}
           fixtureTracks={fixtureTracks}
           onFixtureTracksChange={setFixtureTracks}
-          showColorTrack={qs.showColorTrack}
           showStrobeTrack={qs.showStrobeTrack}
           showDimmerTrack={qs.showDimmerTrack}
-          forcedColors={qs.forcedColors}
           forcedDimmer={qs.forcedDimmer}
           forcedStrobe={qs.forcedStrobe}
-          colorEntries={qs.colorEntries}
           dimmerEntries={qs.dimmerEntries}
           strobeEntries={qs.strobeEntries}
           onEfxEntryClick={(trackId, entry) => {
