@@ -360,7 +360,8 @@ function analyzeChannels(pf: PatchedFixture, def: DmxFixtureDefinition|undefined
     // Detect Dimmer in Shutter channels (fixtures like "Dimmer / Strobe")
     const isShutterDimmer = /\bdimmer\b/i.test(chName) && ch.type === 'Shutter';
     if(isShutterDimmer && fa.intensityOffset === null){fa.intensityOffset = off;}
-    if(startsWithRgb.test(chName)||ch.type==='Colour'||(ch.type==='Beam'&&hasColorWord.test(chName))){colourChannels.push({offset:off,name:chName,caps:ch.capabilities});continue;}
+    const hasColorCaps=ch.capabilities?.some(cap=>cap.color);
+    if(startsWithRgb.test(chName)||ch.type==='Colour'||(ch.type==='Beam'&&hasColorWord.test(chName))||hasColorCaps){colourChannels.push({offset:off,name:chName,caps:ch.capabilities});continue;}
     switch(ch.type){case'Intensity':if(fa.intensityOffset===null)fa.intensityOffset=off;break;case'Shutter':case'Effect':if(fa.shutterOffset===null)fa.shutterOffset=off;break;case'Pan':fa.panOffsets.push(off);break;case'Tilt':fa.tiltOffsets.push(off);break;case'Gobo':if(fa.goboOffset===null){fa.goboOffset=off;fa.goboCaps=ch.capabilities??[];}break;case'Prism':if(fa.prismOffset===null)fa.prismOffset=off;break;case'Zoom':if(fa.zoomOffset===null)fa.zoomOffset=off;break;case'Frost':case'Focus':if(fa.frostOffset===null)fa.frostOffset=off;break;case'Iris':if(fa.irisOffset===null)fa.irisOffset=off;break;}}
   // Build RGB segments from detected colour channels
   if(colourChannels.length>0){const hasRgbStart=colourChannels.some(c=>startsWithRgb.test(c.name));
@@ -374,6 +375,20 @@ function analyzeChannels(pf: PatchedFixture, def: DmxFixtureDefinition|undefined
     
   }
   if(fa.wheelOffset!==null&&fa.wheelCaps.length===0){const ch=channels.find(c=>(c.offset??channels.indexOf(c))===fa.wheelOffset);if(ch?.capabilities&&ch.capabilities.length>0)fa.wheelCaps=ch.capabilities;}
+  // Diagnostic: log channel analysis for every fixture (once)
+  if (!(analyzeChannels as any)._logged) {
+    (analyzeChannels as any)._logged = new Set<string>();
+  }
+  const logged = (analyzeChannels as any)._logged as Set<string>;
+  if (!logged.has(pf.id)) {
+    logged.add(pf.id);
+    console.log(`[analyzeChannels] ${pf.name} (${pf.fixtureType}, tier=${pf.tier}, addr=${pf.startAddress})`,
+      `| colourChannels: ${colourChannels.length} [${colourChannels.map(c=>`${c.name}@${c.offset}`).join(', ')}]`,
+      `| rgbSegments: ${fa.rgbSegments.length>0?fa.rgbSegments.map(s=>`R${s.r}G${s.g}B${s.b}`).join('; '):'none'}`,
+      `| wheelOffset: ${fa.wheelOffset} (caps:${fa.wheelCaps.length})`,
+      `| intensityOffset: ${fa.intensityOffset} shutterOffset: ${fa.shutterOffset}`,
+      `| panOffsets: [${fa.panOffsets.join(',')}] tiltOffsets: [${fa.tiltOffsets.join(',')}]`);
+  }
   return fa;
 }
 
