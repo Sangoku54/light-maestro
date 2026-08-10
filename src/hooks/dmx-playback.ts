@@ -124,6 +124,7 @@ export function computeColorTrackColors(
 ): Map<string, string> {
   const result = new Map<string, string>();
   for (const ctItem of colorTracks) {
+    if (!ctItem.entries || ctItem.entries.length === 0) continue;
     const activeEntry = ctItem.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
     if (!activeEntry || !ctItem.targetFixtures) continue;
     const tf = ctItem.targetFixtures;
@@ -133,6 +134,9 @@ export function computeColorTrackColors(
     } else if (tf.type === 'group' && tf.groupId) {
       const group = fixtureGroups.find(g => g.id === tf.groupId);
       targets = group?.fixtureIds || [];
+      if (targets.length === 0) {
+        console.warn('[colorTrack] group', tf.groupId, 'not found or empty; available groups:', fixtureGroups.map(g => g.id));
+      }
     } else if (tf.type === 'fixture' && tf.fixtureIds) {
       targets = tf.fixtureIds;
     }

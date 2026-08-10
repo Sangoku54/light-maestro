@@ -692,7 +692,7 @@ async function loadProject(
         if (data.sections) setSections(data.sections);
         if (data.manualCues) setManualCues(data.manualCues);
         if (data.efxTracks) setEfxTracks(data.efxTracks);
-        // colorTracks are deprecated - skip preset restore
+        if (data.colorTracks) setColorTracks(data.colorTracks);
         if (data.strobeTracks) setStrobeTracks(data.strobeTracks);
         if (data.dimmerTracks) setDimmerTracks(data.dimmerTracks);
         if (data.fixtureTracks) setFixtureTracks(data.fixtureTracks);
