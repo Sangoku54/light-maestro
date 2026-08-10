@@ -116,7 +116,6 @@ export function computeDimmerTrackOverrides(
 }
 
 /** Compute per-fixture forced colors from active color track entries at a given time. */
-let _colorLogTick = 0;
 export function computeColorTrackColors(
   colorTracks: ColorTrackRef[],
   currentTime: number,
@@ -127,11 +126,7 @@ export function computeColorTrackColors(
   for (const ctItem of colorTracks) {
     if (!ctItem.entries || ctItem.entries.length === 0) continue;
     const activeEntry = ctItem.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
-    if (!activeEntry || !ctItem.targetFixtures) {
-      _colorLogTick++;
-      if (_colorLogTick === 1 || _colorLogTick % 60 === 0) console.log('[colorTrack] tracks=%d entries=%d activeEntry:%s tgt:%s ct=%.2f', colorTracks.length, ctItem.entries.length, activeEntry ? 'YES' : 'NO', ctItem.targetFixtures ? 'YES' : 'NO', currentTime);
-      continue;
-    }
+    if (!activeEntry || !ctItem.targetFixtures) continue;
     const tf = ctItem.targetFixtures;
     let targets: string[] = [];
     if (tf.type === 'all') {
@@ -139,16 +134,6 @@ export function computeColorTrackColors(
     } else if (tf.type === 'group' && tf.groupId) {
       const group = fixtureGroups.find(g => g.id === tf.groupId);
       targets = group?.fixtureIds || [];
-      // Log group resolve details once per track per tick
-      _colorLogTick++;
-      if (_colorLogTick <= 3 || _colorLogTick % 120 === 0) {
-        console.log('[colorTrack] groupResolve trackId=%s trackGroupId=%s groupsAvailable=%s matched=%s targets=%s',
-          ctItem.id, tf.groupId, fixtureGroups.map(g => g.id + ':' + g.fixtureIds.join(',')).join('|'),
-          group ? 'YES' : 'NO', targets.join(','));
-      }
-      if (targets.length === 0) {
-        console.warn('[colorTrack] group', tf.groupId, 'not found or empty; available groups:', fixtureGroups.map(g => g.id));
-      }
     } else if (tf.type === 'fixture' && tf.fixtureIds) {
       targets = tf.fixtureIds;
     }
@@ -167,7 +152,6 @@ export function computeColorTrackColors(
       }
     }
   }
-  if (_colorLogTick === 1 || _colorLogTick % 60 === 0) console.log('[colorTrack] result: %d fixtures, ids=%s', result.size, [...result.keys()].join(','));
   return result;
 }
 
@@ -636,11 +620,8 @@ export function useDmxPlayback(options: {
           let paletteColor = (() => {
             // Color track override (highest priority)
             if (colorTrackColors.has(pf.id)) {
-              if (_colorLogTick <= 2 || _colorLogTick % 120 === 0) console.log('[colorTrack] APPLIED to %s tier=%s color=%s', pf.id, pf.tier, colorTrackColors.get(pf.id));
               return colorTrackColors.get(pf.id)!;
             }
-            // Diagnostic: why isn't secondary getting color?
-            if (pf.tier === 'secondary' && _colorLogTick <= 5) console.log('[colorTrack] SKIP %s tier=secondary hasRGB=%s hasWheel=%s inMap=%s', pf.id, fa.rgbSegments.length > 0, fa.wheelOffset !== null, colorTrackColors.has(pf.id));
             // Fixture track override check
             if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
               for (const ft of fixtureTracksRef.current) {
