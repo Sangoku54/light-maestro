@@ -306,7 +306,7 @@ function expandEntityToCues(
       }
     }
   }
-  
+
 
   return cues;
 }
@@ -427,7 +427,7 @@ function genCues(
           case 'outro': sectionEnergyMult = 0.3 + (1 - sectionProgress) * 0.3; break;
         }
 
-        // Color cycle: audio-driven timing — centroid speeds up high-energy, RMS governs swap rate
+        // Color cycle: audio-driven timing - centroid speeds up high-energy, RMS governs swap rate
         const colorCycleSpeed = 0.5 + centroid * 1.5 + rms * 2.0; // 0.5-4.0 cycles per section
         const sectionProgressNorm = dur > 0 ? (t - section.startTime) / dur : 0;
         const paletteIdx = (Math.floor(sectionProgressNorm * sectionPal.length * colorCycleSpeed) + Math.floor(rng() * 3)) % sectionPal.length;
@@ -550,7 +550,7 @@ function genCues(
     }
   }
 
-  // Manual cues (override) — common to both paths
+  // Manual cues (override) - common to both paths
   if (manualCues && manualCues.length > 0) {
     for (const mc of manualCues) {
       cues.push({
@@ -628,13 +628,13 @@ async function saveProject(
   }
 
   // ── Auto-save to localStorage for next launch ──
-  // Exclude audioDataBase64 — it can be 10+ MB and exceeds localStorage quota
+  // Exclude audioDataBase64 - it can be 10+ MB and exceeds localStorage quota
   const { audioDataBase64: _, ...localData } = data;
   try {
     localStorage.setItem('light-maestro:lastProject', JSON.stringify(localData));
     console.log('[saveProject] Auto-saved to localStorage');
   } catch (e) {
-    // localStorage full — try without large arrays
+    // localStorage full - try without large arrays
     try {
       const slim = { ...localData, manualCues: [], efxTracks: [], colorTracks: [], strobeTracks: [], dimmerTracks: [], fixtureTracks: [] };
       localStorage.setItem('light-maestro:lastProject', JSON.stringify(slim));
@@ -692,7 +692,7 @@ async function loadProject(
         if (data.sections) setSections(data.sections);
         if (data.manualCues) setManualCues(data.manualCues);
         if (data.efxTracks) setEfxTracks(data.efxTracks);
-        // colorTracks are deprecated — skip preset restore
+        // colorTracks are deprecated - skip preset restore
         if (data.strobeTracks) setStrobeTracks(data.strobeTracks);
         if (data.dimmerTracks) setDimmerTracks(data.dimmerTracks);
         if (data.fixtureTracks) setFixtureTracks(data.fixtureTracks);
@@ -1071,7 +1071,7 @@ const AudioSourcePanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoad
           )}
         </div>
         {systemAudioSupported && (
-          <p className="text-[10px] text-green-500/70 mt-2">Capture système (loopback) détectée — le son de vos applications sera analysé.</p>
+          <p className="text-[10px] text-green-500/70 mt-2">Capture système (loopback) détectée - le son de vos applications sera analysé.</p>
         )}
         {!systemAudioSupported && devices.length > 0 && (
           <p className="text-[10px] text-amber-500/70 mt-2">Aucun périphérique loopback détecté. Activez « Mixage stéréo » dans les paramètres audio Windows pour capturer le son système.</p>
@@ -1281,7 +1281,7 @@ const ColorPresetsPanel: React.FC = () => {
                     }}
                     className="w-10 h-10 rounded-full border-2 border-gray-600 hover:border-purple-400 hover:scale-110 transition-all cursor-pointer shadow-lg"
                     style={{ backgroundColor: color }}
-                    title={`${color} — clic pour modifier`}
+                    title={`${color} - clic pour modifier`}
                   />
                   <button
                     onClick={(e) => { e.stopPropagation(); handleRemoveActiveColor(i); }}
@@ -1360,7 +1360,7 @@ const ColorPresetsPanel: React.FC = () => {
                           onClick={() => handleSectionColorEdit(st, ci)}
                           className="w-9 h-9 rounded-full border-2 border-gray-600 hover:border-purple-400 hover:scale-110 transition-all cursor-pointer"
                           style={{ backgroundColor: color }}
-                          title={`${color} — clic pour modifier`}
+                          title={`${color} - clic pour modifier`}
                         />
                         <button
                           onClick={(e) => { e.stopPropagation(); handleSectionColorRemove(st, ci); }}
@@ -1585,6 +1585,15 @@ const QuickSettingsPanel: React.FC = () => {
           >
             {['smooth','sharp','dynamic'].map(m => <option key={m} value={m}>{m}</option>)}
           </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-400">Color Track Visible</label>
+          <input
+            type="checkbox"
+            checked={qs.showColorTrack || false}
+            onChange={e => setQs({ showColorTrack: e.target.checked })}
+            className="w-4 h-4"
+          />
         </div>
         <div className="flex items-center gap-2">
           <label className="text-xs text-gray-400">Strobe Track Visible</label>
@@ -1884,7 +1893,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           if (data.sections) setSections(data.sections);
           if (data.manualCues) setManualCues(data.manualCues);
           if (data.efxTracks) setEfxTracks(data.efxTracks);
-          // colorTracks deprecated — skip restore
+          if (data.colorTracks) setColorTracks(data.colorTracks);
           if (data.strobeTracks) setStrobeTracks(data.strobeTracks);
           if (data.dimmerTracks) setDimmerTracks(data.dimmerTracks);
           if (data.fixtureTracks) setFixtureTracks(data.fixtureTracks);
@@ -1919,6 +1928,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             trackAnalysis: data.analysis,
             sections: data.sections || [],
             efxTracks: data.efxTracks || [],
+            colorTracks: data.colorTracks || [],
             strobeTracks: data.strobeTracks || [],
             dimmerTracks: data.dimmerTracks || [],
             manualCues: data.manualCues || [],
@@ -2012,7 +2022,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         };
         if (audioBase64Raw) data.audioDataBase64 = audioBase64Raw;
         const api = (window as any).lightMaestro?.presets;
-        if (!api) { console.error('IPC presets API not available — window.lightMaestro.presets is undefined'); alert('Preset save failed: IPC bridge not loaded.'); return; }
+        if (!api) { console.error('IPC presets API not available - window.lightMaestro.presets is undefined'); alert('Preset save failed: IPC bridge not loaded.'); return; }
         const list = await api.load();
         const newPreset = { name, timestamp: new Date().toISOString(), data };
         const updated = [...(Array.isArray(list) ? list : []), newPreset];
@@ -2040,7 +2050,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     if (manualCuesData) setManualCues(manualCuesData);
     if (efxTracksData) setEfxTracks(efxTracksData);
     if (fixtureTracksData) setFixtureTracks(fixtureTracksData);
-    // colorTracks deprecated
+    const colorTracksPreset = preset?.data?.colorTracks || preset?.colorTracks;
+    if (colorTracksPreset) setColorTracks(colorTracksPreset);
     const strobeTracksPreset = preset?.data?.strobeTracks || preset?.strobeTracks;
     if (strobeTracksPreset) setStrobeTracks(strobeTracksPreset);
     const dimmerTracksPreset = preset?.data?.dimmerTracks || preset?.dimmerTracks;
@@ -2102,7 +2113,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
 
   // Deprecated: keep the old color-preset handler for ColorPresetsPanel compatibility
   const handleSelectPreset = useCallback((_preset: ColorPreset) => {
-    // no-op — replaced by full preset save/load
+    // no-op - replaced by full preset save/load
   }, []);
 
   /* ─── Cues generation ────────────────────────────── */
@@ -2596,7 +2607,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   }, []);
 
   const handleDimmerEntryClick = useCallback((trackId: string, entry: DimmerTrackEntry) => {
-    // Same as strobe — seek to entry time
+    // Same as strobe - seek to entry time
   }, []);
 
   const handleDimmerEntryContextMenu = useCallback((trackId: string, entry: DimmerTrackEntry, clientX: number, clientY: number) => {
@@ -2984,6 +2995,10 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           efxTracks={efxTracks}
           onEfxTrackContextMenu={handleEfxTrackContextMenu}
           onEfxEntryContextMenu={handleEfxEntryContextMenu}
+          colorTracks={colorTracks}
+          onColorTrackContextMenu={handleColorTrackContextMenu}
+          onColorEntryChange={handleColorEntryChange}
+          onColorEntryContextMenu={handleColorEntryContextMenu}
           strobeTracks={strobeTracks}
           onStrobeTrackContextMenu={handleStrobeTrackContextMenu}
           onStrobeEntryClick={(trackId, entry) => {
@@ -3001,8 +3016,11 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           onFixtureTracksChange={setFixtureTracks}
           showStrobeTrack={qs.showStrobeTrack}
           showDimmerTrack={qs.showDimmerTrack}
+          showColorTrack={qs.showColorTrack}
+          forcedColors={qs.forcedColors}
           forcedDimmer={qs.forcedDimmer}
           forcedStrobe={qs.forcedStrobe}
+          colorEntries={qs.colorEntries}
           dimmerEntries={qs.dimmerEntries}
           strobeEntries={qs.strobeEntries}
           onEfxEntryClick={(trackId, entry) => {
@@ -3247,7 +3265,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             {efxEntryMenu.entry.effectName} ({efxEntryMenu.entry.pattern})
           </div>
           <div className="px-3 py-1 text-[9px] text-gray-600">
-            {efxEntryMenu.entry.time.toFixed(1)}s – {efxEntryMenu.entry.endTime.toFixed(1)}s
+            {efxEntryMenu.entry.time.toFixed(1)}s - {efxEntryMenu.entry.endTime.toFixed(1)}s
           </div>
           <button
             onClick={() => handleRemoveEfxEntry(efxEntryMenu.trackId, efxEntryMenu.entry.time)}
@@ -3264,7 +3282,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         </div>
       )}
 
-      {/* Color Track context menu — insert entry with start+end colors */}
+      {/* Color Track context menu - insert entry with start+end colors */}
       {colorContextMenu && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setColorContextMenu(null)} />
@@ -3310,7 +3328,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
               {colorEntryMenu.entry.color}
             </div>
             <div className="px-3 py-1 text-[9px] text-gray-600">
-              {colorEntryMenu.entry.time.toFixed(1)}s – {colorEntryMenu.entry.endTime.toFixed(1)}s
+              {colorEntryMenu.entry.time.toFixed(1)}s - {colorEntryMenu.entry.endTime.toFixed(1)}s
             </div>
             <button
               onClick={() => handleRemoveColorEntry(colorEntryMenu.trackId, colorEntryMenu.entry.time)}
@@ -3560,7 +3578,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
               )}
             </div>
             <div className="px-3 py-1 text-[9px] text-gray-600">
-              {strobeEntryMenu.entry.time.toFixed(1)}s – {strobeEntryMenu.entry.endTime.toFixed(1)}s
+              {strobeEntryMenu.entry.time.toFixed(1)}s - {strobeEntryMenu.entry.endTime.toFixed(1)}s
             </div>
             <button
               onClick={() => handleRemoveStrobeEntry(strobeEntryMenu.trackId, strobeEntryMenu.entry.id)}
@@ -3625,7 +3643,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
               )}
             </div>
             <div className="px-3 py-1 text-[9px] text-gray-600">
-              {dimmerEntryMenu.entry.time.toFixed(1)}s – {dimmerEntryMenu.entry.endTime.toFixed(1)}s
+              {dimmerEntryMenu.entry.time.toFixed(1)}s - {dimmerEntryMenu.entry.endTime.toFixed(1)}s
             </div>
             <button
               onClick={() => handleRemoveDimmerEntry(dimmerEntryMenu.trackId, dimmerEntryMenu.entry.id)}
