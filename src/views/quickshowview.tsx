@@ -1,9 +1,9 @@
 
 import React, { useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Save, FolderOpen, RefreshCw, Undo2, Redo2, Trash2, Zap, ZapOff, Pencil, Plus, Palette, Sun, Layers, Repeat, Upload, Music, Crosshair, Disc, Settings } from 'lucide-react';
+import { Save, FolderOpen, RefreshCw, Undo2, Redo2, Trash2, Zap, ZapOff, Pencil, Plus, Palette, Sun, Layers, Repeat, Upload, Music, Crosshair, Disc, Settings, ChevronRight } from 'lucide-react';
 import { useAppStore, type CustomPalette, type ColorPreset } from '../stores/appStore';
-import { useShowStore, type PatchedFixture } from '../stores/showStore';
+import { useShowStore, getFixtureColor, type PatchedFixture } from '../stores/showStore';
 import { AudioFileUpload, useAudioFileLoader } from '../hooks/useAudioFileLoader';
 import { useAudioCapture } from '../hooks/useAudioCapture';
 import { TrackAnalysis, TrackSection, SECTION_COLORS, keyToPalette, SectionAnalysis, AtmosphereType } from '../hooks/audio-analysis';
@@ -1618,6 +1618,105 @@ const QuickSettingsPanel: React.FC = () => {
   );
 };
 
+/* ─── FixtureGroupFolders ─────────────────────────── */
+
+const FixtureGroupFolders: React.FC<{
+  fixtureGroups: { id: string; name: string; fixtureIds: string[] }[];
+  patchedFixtures: PatchedFixture[];
+  fixtureGroupsRef: React.MutableRefObject<{ id: string; fixtureIds: string[] }[]>;
+  disabledFixtures: Set<string>;
+  onToggleFixture: (fid: string) => void;
+  expandedGroups: Set<string>;
+  setExpandedGroups: React.Dispatch<React.SetStateAction<Set<string>>>;
+  getFixtureColor: (idx: number) => string;
+}> = ({ fixtureGroups, patchedFixtures, fixtureGroupsRef, disabledFixtures, onToggleFixture, expandedGroups, setExpandedGroups, getFixtureColor }) => {
+  const toggleGroup = (gid: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      next.has(gid) ? next.delete(gid) : next.add(gid);
+      return next;
+    });
+  };
+
+  // Map fixtures to groups, and collect ungrouped
+  const grouped = useMemo(() => {
+    const groups = fixtureGroupsRef.current;
+    const assignedIds = new Set<string>();
+    const result = groups.map(g => {
+      const fixtures = g.fixtureIds.map(fid => patchedFixtures.find(pf => pf.id === fid)).filter(Boolean) as PatchedFixture[];
+      fixtures.forEach(f => assignedIds.add(f.id));
+      return { id: g.id, name: g.name, fixtures };
+    }).filter(g => g.fixtures.length > 0);
+    // Ungrouped fixtures
+    const ungrouped = patchedFixtures.filter(f => !assignedIds.has(f.id));
+    if (ungrouped.length > 0) {
+      result.push({ id: '__ungrouped__', name: 'Ungrouped', fixtures: ungrouped });
+    }
+    return result;
+  }, [patchedFixtures, fixtureGroupsRef]);
+
+  // Auto-expand on first render
+  useEffect(() => {
+    if (grouped.length > 0 && expandedGroups.size === 0) {
+      setExpandedGroups(new Set(grouped.map(g => g.id)));
+    }
+  }, [grouped.length]);
+
+  if (grouped.length === 0) return null;
+
+  return (
+    <div className="px-3 py-1.5 border-b border-gray-800/30 bg-[#080810]">
+      <span className="text-[9px] text-gray-500 uppercase tracking-wider">Fixtures</span>
+      <div className="flex items-start gap-2 mt-1 flex-wrap">
+        {grouped.map((g, gi) => {
+          const isOpen = expandedGroups.has(g.id);
+          return (
+            <div key={g.id} className="bg-[#0d0d14] border border-gray-800/40 rounded-lg overflow-hidden">
+              {/* Folder header */}
+              <button
+                onClick={() => toggleGroup(g.id)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-gray-800/30 transition-colors w-full text-left"
+              >
+                <span className="text-gray-500 transition-transform" style={{ transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+                  <ChevronRight size={10} />
+                </span>
+                <span className="text-[10px] font-medium text-gray-300">{g.name}</span>
+                <span className="text-[9px] text-gray-600">({g.fixtures.length})</span>
+              </button>
+              {/* Fixture list */}
+              {isOpen && (
+                <div className="border-t border-gray-800/30">
+                  {g.fixtures.map((f, fi) => (
+                    <div
+                      key={f.id}
+                      className={`flex items-center gap-1.5 px-3 py-1 text-[10px] transition-colors ${
+                        disabledFixtures.has(f.id) ? 'text-gray-700' : 'text-gray-400 hover:bg-gray-800/20'
+                      }`}
+                      onClick={() => onToggleFixture(f.id)}
+                      title="Click to toggle fixture on/off"
+                    >
+                      <span
+                        className="w-2 h-2 rounded-sm shrink-0"
+                        style={{ backgroundColor: getFixtureColor(gi * 20 + fi) }}
+                      />
+                      <span className="truncate flex-1">{f.name}</span>
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          disabledFixtures.has(f.id) ? 'bg-red-500/50' : 'bg-green-500/70'
+                        }`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 /* ─── AutoScriptPanel ───────────────────────────────── */
 
 const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoader> }> = ({ audioFile }) => {
@@ -1627,6 +1726,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [sections, setSections] = useState<TrackSection[]>([]);
   const [key, setKey] = useState(0);
   const [picker, setPicker] = useState<{ idx: number; x: number; y: number } | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const [gradientPicker, setGradientPicker] = useState(null);  const a = audioFile.analysis;
   const [hasEverHadAnalysis, setHasEverHadAnalysis] = useState(false);
@@ -2965,6 +3065,20 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           {resolvedAnalysis?.atmosphere && ` · ${resolvedAnalysis.atmosphere}`}
         </span>
       </div>
+
+      {/* Grouped fixture folders */}
+      {fixtureGroups.length > 0 && (
+        <FixtureGroupFolders
+          fixtureGroups={fixtureGroups}
+          patchedFixtures={patchedFixtures}
+          fixtureGroupsRef={fixtureGroupsRef}
+          disabledFixtures={disabledFixtures}
+          onToggleFixture={handleToggleFixture}
+          expandedGroups={expandedGroups}
+          setExpandedGroups={setExpandedGroups}
+          getFixtureColor={getFixtureColor}
+        />
+      )}
 
       {/* Audio waveform + upload */}
       <div className="px-3 pt-2">
