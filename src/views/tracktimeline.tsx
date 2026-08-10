@@ -488,6 +488,16 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const [editBlock, setEditBlock] = useState<{ trackIdx: number; blockId: string; blockType: string } | null>(null);
 
   const [zoomLevel, setZoomLevel] = useState(1);
+  // Non-passive wheel listener for Ctrl+zoom (React synthetic events are passive)
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheelNonPassive = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); setZoomLevel(prev => Math.max(0.25, Math.min(8, prev + (e.deltaY < 0 ? 0.25 : -0.25)))); }
+    };
+    el.addEventListener('wheel', onWheelNonPassive, { passive: false });
+    return () => el.removeEventListener('wheel', onWheelNonPassive);
+  }, []);
   const [clipboard, setClipboard] = useState<any>(null);  const ftDragStart = useRef(0);
   const ftDragFixture = useRef(-1);
   const isFtDragging = useRef(false);
@@ -2772,7 +2782,6 @@ if (editBlock) { setEditBlock(null); return; }
         onMouseUp={handleMouseUp}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
-        onWheel={(e) => { if (e.ctrlKey) { e.preventDefault(); setZoomLevel(prev => Math.max(0.25, Math.min(8, prev + (e.deltaY < 0 ? 0.25 : -0.25)))); } }}
       >
         <canvas ref={canvasRef} className="w-full h-full" />
       </div>
