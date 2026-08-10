@@ -2930,9 +2930,6 @@ if (editBlock) { setEditBlock(null); return; }
       )}
       {/* ── Color Lane ── */}
       <div className="relative flex border-t-2 border-pink-900/40 bg-[#0a0a0f] overflow-hidden select-none" style={{ height: 40, paddingLeft: LABEL_WIDTH }}>
-        <div className="absolute left-0 top-0 w-[90px] h-full flex items-center px-2 bg-[#0d0d18] z-10 border-r-2 border-pink-900/30">
-          <span className="text-[10px] text-pink-400 font-bold tracking-wide">🎨 COLORS</span>
-        </div>
         <div className="flex-1 relative h-full">
           {(colorEntries && colorEntries.length > 0 ? colorEntries : cues.filter(c => c.color).map((cue, i) => ({
             id: `cue-color-${i}`,
