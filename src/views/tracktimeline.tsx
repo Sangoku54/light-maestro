@@ -2684,6 +2684,7 @@ if (editBlock) { setEditBlock(null); return; }
     dimmerTracks,
     numDimmerTracks,
     fixtureTracks,
+    disabledFixtures,
     ftSelStart,
     ftSelEnd,
     ftSelFixture,
