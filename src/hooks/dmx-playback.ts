@@ -693,14 +693,6 @@ export function useDmxPlayback(options: {
             return active.forcedColor || active.color || undefined;
           })();
 
-          // Diagnostic: log palette resolution for Tonio 6 arm every 120 frames
-          if (_diagFrame2 % 120 === 0 && pf.name?.includes('6 arm')) {
-            const source = colorTrackColors.has(pf.id) ? 'colorTrack' :
-              (() => { if (fixtureTracksRef?.current && fixtureGroupsRef?.current) { for (const ft of fixtureTracksRef.current) { if (!ft.enabled) continue; const targets = resolveTrackTargets(ft, patchedFixtures, fixtureGroupsRef.current); if (targets.includes(pf.id)) { const ab = ft.colorBlocks.find(b => ct >= b.time && ct < b.endTime); if (ab) return 'fixtureTrack'; } } } return null; })() || 'cue';
-            console.log(`[palette] Tonio 6 arm source=${source} color=${paletteColor || 'NONE'}`,
-              `| rgbSegments=${fa.rgbSegments.length>0?fa.rgbSegments.map(s=>`R${pf.startAddress+s.r}=${chVals[pf.startAddress+s.r]??0}`).join(' '):'none'}`);
-          }
-
           const isColorTrack = colorTrackColors.has(pf.id);
           if(fa.rgbSegments.length>0&&paletteColor){
             let[r,g,b]=hexToRgb(paletteColor);
@@ -721,6 +713,15 @@ export function useDmxPlayback(options: {
             if(caps.length>0){const bestCap=findBestWheelCap(caps,paletteColor);wheelVal=bestCap?Math.round((bestCap.min+bestCap.max)/2):(()=>{const[r,g,b]=hexToRgb(paletteColor);const cat2=classifyColor(r,g,b);const catMap:Record<string,number>={red:0.10,orange:0.20,yellow:0.30,green:0.42,cyan:0.55,blue:0.68,magenta:0.78,purple:0.78,white:0.02};const wPos=catMap[cat2]??0.5;const capIdx=Math.floor(wPos*caps.length)%caps.length;return Math.round((caps[capIdx].min+caps[capIdx].max)/2);})();}
             else{const[r,g,b]=hexToRgb(paletteColor);const cat2=classifyColor(r,g,b);const catMap:Record<string,number>={red:0.10,orange:0.20,yellow:0.30,green:0.42,cyan:0.55,blue:0.68,magenta:0.78,purple:0.78,white:0.02};const wPos=catMap[cat2]??0.5;wheelVal=Math.round(wPos*255);}
             chVals[pf.startAddress+fa.wheelOffset]=wheelVal;
+          }
+
+          // Diagnostic: log actual RGB output for Tonio 6 arm after write
+          const _diagFrame = (tick as any)._armDiagFrame ?? 0;
+          (tick as any)._armDiagFrame = _diagFrame + 1;
+          if (_diagFrame % 120 === 0 && pf.name?.includes('6 arm')) {
+            const isCT = colorTrackColors.has(pf.id);
+            console.log(`[dmx-out] Tonio 6 arm | source=${isCT?'colorTrack':'cue'} palette=${paletteColor||'NONE'} dimmer=${dimmerVal}`,
+              `| rgbSegments=${fa.rgbSegments.length>0?fa.rgbSegments.map(s=>`R${pf.startAddress+s.r}=${chVals[pf.startAddress+s.r]??0} G${pf.startAddress+s.g}=${chVals[pf.startAddress+s.g]??0} B${pf.startAddress+s.b}=${chVals[pf.startAddress+s.b]??0}`).join('; '):'none'}`);
           }
 
           // Shutter
