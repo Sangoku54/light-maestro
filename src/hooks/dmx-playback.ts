@@ -139,6 +139,13 @@ export function computeColorTrackColors(
     } else if (tf.type === 'group' && tf.groupId) {
       const group = fixtureGroups.find(g => g.id === tf.groupId);
       targets = group?.fixtureIds || [];
+      // Log group resolve details once per track per tick
+      _colorLogTick++;
+      if (_colorLogTick <= 3 || _colorLogTick % 120 === 0) {
+        console.log('[colorTrack] groupResolve trackId=%s trackGroupId=%s groupsAvailable=%s matched=%s targets=%s',
+          ctItem.id, tf.groupId, fixtureGroups.map(g => g.id + ':' + g.fixtureIds.join(',')).join('|'),
+          group ? 'YES' : 'NO', targets.join(','));
+      }
       if (targets.length === 0) {
         console.warn('[colorTrack] group', tf.groupId, 'not found or empty; available groups:', fixtureGroups.map(g => g.id));
       }
