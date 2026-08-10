@@ -2957,47 +2957,98 @@ if (editBlock) { setEditBlock(null); return; }
           })}
         </div>
       </div>
-      {/* ── Dimmer Lane ── */}
-      <div className="relative flex border-t border-gray-800/50 bg-[#0a0a0f] overflow-hidden select-none" style={{ height: 50, paddingLeft: LABEL_WIDTH }}>
-        <div className="absolute left-0 top-0 w-[90px] h-full flex items-center px-2 bg-[#0a0a0f] z-10 border-r border-gray-800/50">
-          <span className="text-[10px] text-cyan-400 font-semibold">💡 DIMMER</span>
-        </div>
-        <div className="flex-1 relative h-full">
-          {(dimmerEntries && dimmerEntries.length > 0
-            ? dimmerEntries
-            : cues.map((cue, i) => ({
-                id: `cue-dimmer-${i}`,
-                time: cue.time,
-                endTime: cues[i + 1]?.time || duration,
-                value: Math.round(intensityToValue(cue.intensity) * 255),
-              }))
-          ).map(de => {
-            const leftPct = (de.time / duration) * 100;
-            const widthPct = ((de.endTime - de.time) / duration) * 100;
-            const pct = Math.round(de.value / 255 * 100);
-            const barH = Math.max(4, (de.value / 255) * 40);
-            return (
-              <div key={de.id}
-                className="absolute bottom-1 flex flex-col items-center cursor-pointer border-r border-white/5 hover:brightness-110 transition-all"
-                style={{
-                  left: `${leftPct}%`,
-                  width: `${Math.max(widthPct, 0.5)}%`,
-                }}
-              >
-                {/* vertical bar proportional to intensity */}
-                <div
-                  className="w-[70%] rounded-t-sm"
+      {/* ── Per-group Dimmer Lanes ── */}
+      {(dimmerTracks && dimmerTracks.length > 0 ? dimmerTracks.map((dt, di) => {
+        const tf = dt.targetFixtures;
+        let label = 'DIMMER';
+        if (tf?.type === 'group') {
+          const store = (window as any).__useShowStore?.getState?.();
+          const groups: any[] = store?.fixtureGroups || [];
+          const g = groups.find((gg: any) => gg.id === tf.groupId);
+          label = g ? g.name : 'DIMMER';
+        }
+        const entries = dt.entries.filter(e => e.value !== undefined);
+        return (
+          <div key={dt.id}
+            className="relative flex border-t border-gray-800/50 bg-[#0a0a0f] overflow-hidden select-none"
+            style={{ height: 50, paddingLeft: LABEL_WIDTH }}>
+            <div className="absolute left-0 top-0 w-[90px] h-full flex items-center px-2 bg-[#0a0a0f] z-10 border-r border-gray-800/50">
+              <span className="text-[10px] text-cyan-400 font-semibold truncate">💡 {label}</span>
+            </div>
+            <div className="flex-1 relative h-full">
+              {entries.length > 0 ? entries.map((de: DimmerTrackEntry) => {
+                const leftPct = (de.time / duration) * 100;
+                const widthPct = ((de.endTime - de.time) / duration) * 100;
+                const pct = Math.round(de.value / 100 * 100);
+                const barH = Math.max(4, (de.value / 100) * 40);
+                return (
+                  <div key={de.id}
+                    className="absolute bottom-1 flex flex-col items-center cursor-pointer border-r border-white/5 hover:brightness-110 transition-all"
+                    style={{
+                      left: `${leftPct}%`,
+                      width: `${Math.max(widthPct, 0.5)}%`,
+                    }}
+                  >
+                    <div
+                      className="w-[70%] rounded-t-sm"
+                      style={{
+                        height: barH,
+                        background: `linear-gradient(180deg, rgba(6,182,212,${0.3 + pct/100 * 0.6}) 0%, rgba(6,182,212,0.15) 100%)`,
+                        borderTop: pct > 0 ? '1px solid rgba(6,182,212,0.6)' : 'none',
+                      }}
+                    />
+                  </div>
+                );
+              }) : (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-[10px] text-gray-600">empty</span>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }) : (
+        /* Fallback: merged Dimmer Lane from cues / dimmerEntries */
+        <div className="relative flex border-t border-gray-800/50 bg-[#0a0a0f] overflow-hidden select-none" style={{ height: 50, paddingLeft: LABEL_WIDTH }}>
+          <div className="absolute left-0 top-0 w-[90px] h-full flex items-center px-2 bg-[#0a0a0f] z-10 border-r border-gray-800/50">
+            <span className="text-[10px] text-cyan-400 font-semibold">💡 DIMMER</span>
+          </div>
+          <div className="flex-1 relative h-full">
+            {(dimmerEntries && dimmerEntries.length > 0
+              ? dimmerEntries
+              : cues.map((cue, i) => ({
+                  id: `cue-dimmer-${i}`,
+                  time: cue.time,
+                  endTime: cues[i + 1]?.time || duration,
+                  value: Math.round(intensityToValue(cue.intensity) * 255),
+                }))
+            ).map(de => {
+              const leftPct = (de.time / duration) * 100;
+              const widthPct = ((de.endTime - de.time) / duration) * 100;
+              const pct = Math.round(de.value / 255 * 100);
+              const barH = Math.max(4, (de.value / 255) * 40);
+              return (
+                <div key={de.id}
+                  className="absolute bottom-1 flex flex-col items-center cursor-pointer border-r border-white/5 hover:brightness-110 transition-all"
                   style={{
-                    height: barH,
-                    background: `linear-gradient(180deg, rgba(6,182,212,${0.3 + pct/100 * 0.6}) 0%, rgba(6,182,212,0.15) 100%)`,
-                    borderTop: pct > 0 ? '1px solid rgba(6,182,212,0.6)' : 'none',
+                    left: `${leftPct}%`,
+                    width: `${Math.max(widthPct, 0.5)}%`,
                   }}
-                />
-              </div>
-            );
-          })}
+                >
+                  <div
+                    className="w-[70%] rounded-t-sm"
+                    style={{
+                      height: barH,
+                      background: `linear-gradient(180deg, rgba(6,182,212,${0.3 + pct/100 * 0.6}) 0%, rgba(6,182,212,0.15) 100%)`,
+                      borderTop: pct > 0 ? '1px solid rgba(6,182,212,0.6)' : 'none',
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      ))}
       {/* ── Gradient Color Picker Modal ── */}
       {gradientPicker !== null && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center">
