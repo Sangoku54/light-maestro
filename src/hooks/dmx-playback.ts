@@ -572,6 +572,19 @@ export function useDmxPlayback(options: {
         patchedFixtures,
         fixtureGroupsRef?.current || [],
       );
+      // Diagnostic: log color tracks once every 120 frames (~2s)
+      const _diagFrame2 = (tick as any)._ctDiagFrame ?? 0;
+      (tick as any)._ctDiagFrame = _diagFrame2 + 1;
+      if (_diagFrame2 % 120 === 0 && ctRefData.length > 0) {
+        for (const ctItem of ctRefData) {
+          const activeEntry = ctItem.entries.find(e => ct >= e.time && ct < e.endTime);
+          console.log(`[colorTrack] "${ctItem.name}" targets=${ctItem.targetFixtures?.type} entries=${ctItem.entries.length} activeAt=${ct.toFixed(1)}: ${activeEntry ? `${activeEntry.color}→${activeEntry.endColor || 'N/A'} [${activeEntry.time.toFixed(1)}-${activeEntry.endTime.toFixed(1)}]` : 'none'}`);
+        }
+        const armId = patchedFixtures.find(f => f.name?.includes('6 arm'))?.id;
+        if (armId) {
+          console.log(`[colorTrack] Tonio 6 arm (${armId}) hasColorTrack: ${colorTrackColors.has(armId)} → ${colorTrackColors.get(armId) || 'NONE'}`);
+        }
+      }
 
       // Find active cue: direct latest-before-ct, NO section grouping
       let active:CuePlayback|null=null;
@@ -679,6 +692,14 @@ export function useDmxPlayback(options: {
             }
             return active.forcedColor || active.color || undefined;
           })();
+
+          // Diagnostic: log palette resolution for Tonio 6 arm every 120 frames
+          if (_diagFrame2 % 120 === 0 && pf.name?.includes('6 arm')) {
+            const source = colorTrackColors.has(pf.id) ? 'colorTrack' :
+              (() => { if (fixtureTracksRef?.current && fixtureGroupsRef?.current) { for (const ft of fixtureTracksRef.current) { if (!ft.enabled) continue; const targets = resolveTrackTargets(ft, patchedFixtures, fixtureGroupsRef.current); if (targets.includes(pf.id)) { const ab = ft.colorBlocks.find(b => ct >= b.time && ct < b.endTime); if (ab) return 'fixtureTrack'; } } } return null; })() || 'cue';
+            console.log(`[palette] Tonio 6 arm source=${source} color=${paletteColor || 'NONE'}`,
+              `| rgbSegments=${fa.rgbSegments.length>0?fa.rgbSegments.map(s=>`R${pf.startAddress+s.r}=${chVals[pf.startAddress+s.r]??0}`).join(' '):'none'}`);
+          }
 
           const isColorTrack = colorTrackColors.has(pf.id);
           if(fa.rgbSegments.length>0&&paletteColor){
