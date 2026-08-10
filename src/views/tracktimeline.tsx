@@ -1202,7 +1202,6 @@ if (editBlock) { setEditBlock(null); return; }
               );
             }
           }
-          return;
         }
         // Check strobe tracks (below color tracks)
         const strobeTrackBaseY = colorTrackBaseY + cTracks.length * COLOR_TRACK_HEIGHT;
