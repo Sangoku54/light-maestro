@@ -128,7 +128,7 @@ export function computeColorTrackColors(
     if (ctItem.entries && ctItem.entries.length > 0) {
       const ae = ctItem.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
       hasActive = !!ae;
-      if (ae && (typeof (window as any).__ctDetailTick === 'undefined' || (window as any).__ctDetailTick++ % 120 === 0)) {
+      if (ae && (typeof (window as any).__ctDetailTick === 'undefined' || (window as any).__ctDetailTick++ % 10 === 0)) {
         (window as any).__ctDetailTick = (window as any).__ctDetailTick ?? 0;
         console.log('[colorTrack] ACTIVE entry t=%.1f..%.1f color=%s ct=%.1f', ae.time, ae.endTime, ae.color, currentTime);
       }
@@ -551,7 +551,7 @@ export function useDmxPlayback(options: {
 
       // ── Color track forced colors (compute early, used later in palette resolution) ──
       const ctRefData = colorTracksRef?.current || [];
-      if (ctRefData.length > 0 && (typeof (window as any).__ctLogTick === 'undefined' || (window as any).__ctLogTick++ % 180 === 0)) {
+      if (ctRefData.length > 0 && (typeof (window as any).__ctLogTick === 'undefined' || (window as any).__ctLogTick++ % 10 === 0)) {
         (window as any).__ctLogTick = (window as any).__ctLogTick ?? 0;
         const summary = ctRefData.map((t: any) => `[${t.id.slice(-6)} e:${t.entries?.length || 0} tg:${t.targetFixtures?.groupId?.slice(-8) || t.targetFixtures?.type}]`).join(' ');
         console.log('[colorTrack] TICK refData=%d tracks: %s', ctRefData.length, summary);
@@ -637,6 +637,10 @@ export function useDmxPlayback(options: {
             if (colorTrackColors.has(pf.id)) {
               return colorTrackColors.get(pf.id)!;
             }
+            if (colorTrackColors.size > 0 && (typeof (window as any).__ctMiss === 'undefined' || (window as any).__ctMiss++ % 10 === 0)) {
+              (window as any).__ctMiss = (window as any).__ctMiss ?? 0;
+              console.log('[colorTrack] MISS for %s (map has: %s)', pf.id, [...colorTrackColors.keys()].join(', '));
+            }
             // Fixture track override check
             if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
               for (const ft of fixtureTracksRef.current) {
@@ -673,7 +677,7 @@ export function useDmxPlayback(options: {
           if(fa.rgbSegments.length>0&&paletteColor){
             let[r,g,b]=hexToRgb(paletteColor);
             [r,g,b] = applyHueShift([r,g,b], TIER_HUE[pf.tier]);
-            if (colorTrackColors.has(pf.id) && (typeof (window as any).__ctApplied === 'undefined' || (window as any).__ctApplied++ % 60 === 0)) {
+            if (colorTrackColors.has(pf.id) && (typeof (window as any).__ctApplied === 'undefined' || (window as any).__ctApplied++ % 10 === 0)) {
               (window as any).__ctApplied = (window as any).__ctApplied ?? 0;
               console.log('[colorTrack] DMX WRITE %s raw=%s shifted=%d,%d,%d rgbLen=%d', pf.id, paletteColor, r, g, b, fa.rgbSegments.length);
             }
