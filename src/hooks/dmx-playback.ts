@@ -369,7 +369,7 @@ function analyzeChannels(pf: PatchedFixture, def: DmxFixtureDefinition|undefined
     const hasColorCaps=colourChannels.some(c=>c.caps?.some(cap=>cap.color));
     if(hasRgbNames){fa.rgbSegments=buildRgbSegments(colourChannels);}
     else if(hasColorCaps){const wheel=colourChannels.find(c=>c.caps?.some(cap=>cap.color));if(wheel){fa.wheelOffset=wheel.offset;fa.wheelCaps=wheel.caps??[];}}
-    else if(colourChannels.length>=3){fa.rgbSegments=buildRgbSegments(colourChannels);}
+    else if(colourChannels.length>=3){fa.rgbSegments=buildRgbSegments(colourChannels);if(fa.rgbSegments.length===0){fa.rgbSegments=[{r:colourChannels[0].offset,g:colourChannels[1].offset,b:colourChannels[2].offset,w:null}];}}
     else{fa.wheelOffset=colourChannels[0].offset;const ch=channels.find(c=>(c.offset??channels.indexOf(c))===colourChannels[0].offset);if(ch?.capabilities&&ch.capabilities.length>0)fa.wheelCaps=ch.capabilities;}
     
   }
