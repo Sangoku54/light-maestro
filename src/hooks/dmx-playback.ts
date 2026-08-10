@@ -130,7 +130,7 @@ export function computeColorTrackColors(
       hasActive = !!ae;
       if (ae && (typeof (window as any).__ctDetailTick === 'undefined' || (window as any).__ctDetailTick++ % 10 === 0)) {
         (window as any).__ctDetailTick = (window as any).__ctDetailTick ?? 0;
-        console.log('[colorTrack] ACTIVE entry t=%.1f..%.1f color=%s ct=%.1f', ae.time, ae.endTime, ae.color, currentTime);
+        console.log('[colorTrack] ACTIVE entry RAW', JSON.stringify({ id: ae.id, time: ae.time, endTime: ae.endTime, color: ae.color, endColor: (ae as any).endColor }, null, 0));
       }
     }
     if (!ctItem.entries || ctItem.entries.length === 0) continue;
