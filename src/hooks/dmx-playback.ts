@@ -124,15 +124,6 @@ export function computeColorTrackColors(
 ): Map<string, string> {
   const result = new Map<string, string>();
   for (const ctItem of colorTracks) {
-    let hasActive = false;
-    if (ctItem.entries && ctItem.entries.length > 0) {
-      const ae = ctItem.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
-      hasActive = !!ae;
-      if (ae && (typeof (window as any).__ctDetailTick === 'undefined' || (window as any).__ctDetailTick++ % 10 === 0)) {
-        (window as any).__ctDetailTick = (window as any).__ctDetailTick ?? 0;
-        console.log('[colorTrack] ACTIVE entry RAW', JSON.stringify({ id: ae.id, time: ae.time, endTime: ae.endTime, color: ae.color, endColor: (ae as any).endColor }, null, 0));
-      }
-    }
     if (!ctItem.entries || ctItem.entries.length === 0) continue;
     const activeEntry = ctItem.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
     if (!activeEntry || !ctItem.targetFixtures) continue;
@@ -146,18 +137,27 @@ export function computeColorTrackColors(
     } else if (tf.type === 'fixture' && tf.fixtureIds) {
       targets = tf.fixtureIds;
     }
+    // Sanitize color field: handle 0, undefined, or non-string values
+    const entryColor = (typeof activeEntry.color === 'string' && activeEntry.color.startsWith('#'))
+      ? activeEntry.color
+      : (typeof (activeEntry as any).endColor === 'string' && (activeEntry as any).endColor?.startsWith('#'))
+        ? (activeEntry as any).endColor
+        : undefined;
+    const entryEndColor = (typeof activeEntry.endColor === 'string' && activeEntry.endColor.startsWith('#'))
+      ? activeEntry.endColor
+      : undefined;
     for (const fid of targets) {
-      if (activeEntry.endColor && activeEntry.endColor !== activeEntry.color) {
+      if (entryEndColor && entryColor && entryEndColor !== entryColor) {
         const dur = activeEntry.endTime - activeEntry.time;
         const t = dur > 0 ? Math.max(0, Math.min(1, (currentTime - activeEntry.time) / dur)) : 1;
-        const [sr, sg, sb] = hexToRgb(activeEntry.color);
-        const [er, eg, eb] = hexToRgb(activeEntry.endColor);
+        const [sr, sg, sb] = hexToRgb(entryColor);
+        const [er, eg, eb] = hexToRgb(entryEndColor);
         const r = Math.round(sr + (er - sr) * t);
         const g = Math.round(sg + (eg - sg) * t);
         const b = Math.round(sb + (eb - sb) * t);
         result.set(fid, `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`);
-      } else {
-        result.set(fid, activeEntry.color);
+      } else if (entryColor) {
+        result.set(fid, entryColor);
       }
     }
   }
@@ -551,11 +551,6 @@ export function useDmxPlayback(options: {
 
       // ── Color track forced colors (compute early, used later in palette resolution) ──
       const ctRefData = colorTracksRef?.current || [];
-      if (ctRefData.length > 0 && (typeof (window as any).__ctLogTick === 'undefined' || (window as any).__ctLogTick++ % 10 === 0)) {
-        (window as any).__ctLogTick = (window as any).__ctLogTick ?? 0;
-        const summary = ctRefData.map((t: any) => `[${t.id.slice(-6)} e:${t.entries?.length || 0} tg:${t.targetFixtures?.groupId?.slice(-8) || t.targetFixtures?.type}]`).join(' ');
-        console.log('[colorTrack] TICK refData=%d tracks: %s', ctRefData.length, summary);
-      }
       const colorTrackColors = computeColorTrackColors(
         ctRefData,
         ct,
@@ -637,10 +632,6 @@ export function useDmxPlayback(options: {
             if (colorTrackColors.has(pf.id)) {
               return colorTrackColors.get(pf.id)!;
             }
-            if (colorTrackColors.size > 0 && (typeof (window as any).__ctMiss === 'undefined' || (window as any).__ctMiss++ % 10 === 0)) {
-              (window as any).__ctMiss = (window as any).__ctMiss ?? 0;
-              console.log('[colorTrack] MISS for %s (map has: %s)', pf.id, [...colorTrackColors.keys()].join(', '));
-            }
             // Fixture track override check
             if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
               for (const ft of fixtureTracksRef.current) {
@@ -674,12 +665,12 @@ export function useDmxPlayback(options: {
             return active.forcedColor || active.color || undefined;
           })();
 
+          const isColorTrack = colorTrackColors.has(pf.id);
           if(fa.rgbSegments.length>0&&paletteColor){
             let[r,g,b]=hexToRgb(paletteColor);
-            [r,g,b] = applyHueShift([r,g,b], TIER_HUE[pf.tier]);
-            if (colorTrackColors.has(pf.id) && (typeof (window as any).__ctApplied === 'undefined' || (window as any).__ctApplied++ % 10 === 0)) {
-              (window as any).__ctApplied = (window as any).__ctApplied ?? 0;
-              console.log('[colorTrack] DMX WRITE %s raw=%s shifted=%d,%d,%d rgbLen=%d', pf.id, paletteColor, r, g, b, fa.rgbSegments.length);
+            // Only apply tier hue shift to cue colors, NOT to user-specified color track colors
+            if (!isColorTrack) {
+              [r,g,b] = applyHueShift([r,g,b], TIER_HUE[pf.tier]);
             }
             for(const po of fa.presetOverrideOffsets){chVals[pf.startAddress+po]=0;}
             // If intensityOffset was detected (including Dimmer/Shutter), set it
@@ -944,7 +935,10 @@ export function computeDmxForCue(
 
       if (fa.rgbSegments.length > 0 && paletteColor) {
         let [r, g, b] = hexToRgb(paletteColor);
-        [r, g, b] = applyHueShift([r, g, b], TIER_HUE[pf.tier]);
+        // Skip tier hue shift for user-specified color track colors
+        if (!colorTrackColors?.has(pf.id)) {
+          [r, g, b] = applyHueShift([r, g, b], TIER_HUE[pf.tier]);
+        }
         // Force Color Preset/Macro channels to 0 for raw RGB control
         for (const po of fa.presetOverrideOffsets) { chVals[pf.startAddress + po] = 0; }
         for (const seg of fa.rgbSegments) {
