@@ -2928,34 +2928,6 @@ if (editBlock) { setEditBlock(null); return; }
           )}
         </div>
       )}
-      {/* ── Color Lane ── */}
-      <div className="relative flex border-t-2 border-pink-900/40 bg-[#0a0a0f] overflow-hidden select-none" style={{ height: 40, paddingLeft: LABEL_WIDTH }}>
-        <div className="flex-1 relative h-full">
-          {(colorEntries && colorEntries.length > 0 ? colorEntries : cues.filter(c => c.color).map((cue, i) => ({
-            id: `cue-color-${i}`,
-            time: cue.time,
-            endTime: cues[i + 1]?.time || duration,
-            color: cue.color,
-          }))).map(ce => {
-            const leftPct = (ce.time / duration) * 100;
-            const widthPct = ((ce.endTime - ce.time) / duration) * 100;
-            const wPct = Math.max(widthPct, 0.4);
-            return (
-              <div key={ce.id}
-                className="absolute top-0 h-full flex items-center justify-center cursor-pointer hover:brightness-125 transition-all shadow-lg"
-                style={{
-                  left: `${leftPct}%`,
-                  width: `${wPct}%`,
-                  background: `linear-gradient(180deg, ${ce.color}dd, ${ce.color}88)`,
-                  borderLeft: '1px solid rgba(255,255,255,0.15)',
-                  borderRight: '1px solid rgba(255,255,255,0.1)',
-                }}
-              >
-              </div>
-            );
-          })}
-        </div>
-      </div>
       {/* ── Strobe Lane ── */}
       <div className="relative flex border-t-2 border-amber-900/40 bg-[#0a0a0f] overflow-hidden select-none" style={{ height: 28, paddingLeft: LABEL_WIDTH }}>
         <div className="absolute left-0 top-0 w-[90px] h-full flex items-center px-2 bg-[#0d0d18] z-10 border-r-2 border-amber-900/30">
