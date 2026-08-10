@@ -500,7 +500,32 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const numColorTracks = colorTracks?.length ?? 0;
   const numStrobeTracks = strobeTracks?.length ?? 0;
   const numDimmerTracks = dimmerTracks?.length ?? 0;
-  const totalHeight = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT + numDimmerTracks * DIMMER_TRACK_HEIGHT;
+  const TIER_ORDER: Record<string, number> = { primary: 0, secondary: 1, tertiary: 2 };
+  const [collapsedTiers, setCollapsedTiers] = useState<Set<string>>(new Set());
+  // Sort fixtures by tier, compute header positions
+  const tieredLayout = useMemo(() => {
+    const sorted = [...patchedFixtures].sort((a, b) => (TIER_ORDER[a.tier] ?? 99) - (TIER_ORDER[b.tier] ?? 99));
+    const seen = new Set<string>();
+    const list: ({ type: 'header'; tier: string } | { type: 'fixture'; fi: number })[] = [];
+    for (let i = 0; i < sorted.length; i++) {
+      const t = sorted[i].tier;
+      if (!seen.has(t)) { seen.add(t); list.push({ type: 'header', tier: t }); }
+      if (!collapsedTiers.has(t)) list.push({ type: 'fixture', fi: i });
+    }
+    return { sorted: sorted, list, count: list.length };
+  }, [patchedFixtures, collapsedTiers]);
+  const totalHeight = HEADER_HEIGHT + tieredLayout.count * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT + numDimmerTracks * DIMMER_TRACK_HEIGHT;
+
+  // Helper: resolve Y position to display row (header or fixture)
+  const resolveDisplayRow = useCallback((y: number) => {
+    const di = Math.floor((y - HEADER_HEIGHT) / TRACK_HEIGHT);
+    if (di < 0 || di >= tieredLayout.list.length) return null;
+    const row = tieredLayout.list[di];
+    if (row.type === 'header') return { type: 'header' as const, tier: row.tier, di };
+    return { type: 'fixture' as const, fixture: tieredLayout.sorted[row.fi], fi: row.fi, di };
+  }, [tieredLayout]);
+
+  const fixtureAreaHeight = tieredLayout.count * TRACK_HEIGHT; // replaces fixtureAreaHeight
 
   // ── Fixture → cue mapping (memoized) ─────────────────
   const fixtureCueMap = useMemo(
@@ -658,11 +683,13 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
       const timeAtX = (x / drawW) * duration;
 
       // Check which track we're on
-      const trackIdx = Math.floor((y - HEADER_HEIGHT) / TRACK_HEIGHT);
+      const displayIdx = Math.floor((y - HEADER_HEIGHT) / TRACK_HEIGHT);
 
       // If on a fixture track
-      if (trackIdx >= 0 && trackIdx < numFixtures) {
-        const fixture = patchedFixtures[trackIdx];
+      if (displayIdx >= 0 && displayIdx < tieredLayout.list.length) {
+        const row = tieredLayout.list[displayIdx];
+        if (row.type === 'header') return null;
+        const fixture = tieredLayout.sorted[row.fi];
         const fixtureCues = getCuesForFixture(fixture.name);
         let best: Cue | null = null;
         let bestDist = Infinity;
@@ -678,7 +705,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
       }
 
       // AutoScript track
-      const autoTrackStart = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT;
+      const autoTrackStart = HEADER_HEIGHT + fixtureAreaHeight;
       if (y >= autoTrackStart && y < autoTrackStart + AUTOSCRIPT_TRACK_HEIGHT) {
         let best: Cue | null = null;
         let bestDist = Infinity;
@@ -695,7 +722,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
 
       // EFX tracks
       const eTracks = efxTracks || [];
-      const efxTracksStart = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT;
+      const efxTracksStart = HEADER_HEIGHT + fixtureAreaHeight + AUTOSCRIPT_TRACK_HEIGHT;
       if (y >= efxTracksStart && eTracks.length > 0) {
         const eTrackIdx = Math.floor((y - efxTracksStart) / EFX_TRACK_HEIGHT);
         if (eTrackIdx >= 0 && eTrackIdx < eTracks.length) {
@@ -721,7 +748,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
 
       return null;
     },
-    [duration, numFixtures, patchedFixtures, getCuesForFixture, cues, efxTracks],
+    [duration, tieredLayout, getCuesForFixture, cues, efxTracks],
   );
 
   // ── Event handlers ───────────────────────────────────
@@ -924,10 +951,14 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
           const mx = e.clientX - rect.left;
           const my = e.clientY - rect.top;
           if (my >= HEADER_HEIGHT && mx < LABEL_WIDTH) {
-            const fi = Math.floor((my - HEADER_HEIGHT) / TRACK_HEIGHT);
-            if (fi >= 0 && fi < numFixtures) {
-              _dtf(patchedFixtures[fi].id);
-              return;
+            const di = Math.floor((my - HEADER_HEIGHT) / TRACK_HEIGHT);
+            if (di >= 0 && di < tieredLayout.list.length) {
+              const row = tieredLayout.list[di];
+              if (row.type === 'fixture') { _dtf(tieredLayout.sorted[row.fi].id); return; }
+              if (row.type === 'header') {
+                setCollapsedTiers(prev => { const n=new Set(prev); n.has(row.tier)?n.delete(row.tier):n.add(row.tier); return n; });
+                return;
+              }
             }
           }
         }
@@ -981,9 +1012,10 @@ if (editBlock) { setEditBlock(null); return; }
           const duration2 = duration || 120000;
           const drawW2 = canvas2.width - LABEL_WIDTH;
           if (y2 >= HEADER_HEIGHT && x2 >= LABEL_WIDTH) {
-            const trackIdx2 = Math.floor((y2 - HEADER_HEIGHT) / TRACK_HEIGHT);
-            if (trackIdx2 >= 0 && trackIdx2 < numFixtures) {
-              const fixture2 = patchedFixtures[trackIdx2];
+            const di2 = Math.floor((y2 - HEADER_HEIGHT) / TRACK_HEIGHT);
+            if (di2 >= 0 && di2 < tieredLayout.list.length && tieredLayout.list[di2].type === 'fixture') {
+              const fixture2 = tieredLayout.sorted[(tieredLayout.list[di2] as any).fi];
+              const fi2 = (tieredLayout.list[di2] as any).fi;
               const timeAtX2 = ((x2 - LABEL_WIDTH) / drawW2) * duration2;
               for (let fti2 = 0; fti2 < fixtureTracks.length; fti2++) {
                 const ft2 = fixtureTracks[fti2];
@@ -1000,9 +1032,9 @@ if (editBlock) { setEditBlock(null); return; }
                     // Also select the time range
                     setFtSelStart(blk2.time);
                     setFtSelEnd(blk2.endTime);
-                    setFtSelFixture(trackIdx2);
+                    setFtSelFixture(fi2);
                     setFtSelTrack({ ...ft2, fixtureNames: [fixture2.name] });
-                    ftSelRef.current = { start: blk2.time, end: blk2.endTime, fixture: trackIdx2, track: { ...ft2, fixtureNames: [fixture2.name] } };
+                    ftSelRef.current = { start: blk2.time, end: blk2.endTime, fixture: fi2, track: { ...ft2, fixtureNames: [fixture2.name] } };
                     return;
                   }
                 }
@@ -1011,9 +1043,9 @@ if (editBlock) { setEditBlock(null); return; }
                     setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'dimmer' });
                     setFtSelStart(blk2.time);
                     setFtSelEnd(blk2.endTime);
-                    setFtSelFixture(trackIdx2);
+                    setFtSelFixture(fi2);
                     setFtSelTrack({ ...ft2, fixtureNames: [fixture2.name] });
-                    ftSelRef.current = { start: blk2.time, end: blk2.endTime, fixture: trackIdx2, track: { ...ft2, fixtureNames: [fixture2.name] } };
+                    ftSelRef.current = { start: blk2.time, end: blk2.endTime, fixture: fi2, track: { ...ft2, fixtureNames: [fixture2.name] } };
                     return;
                   }
                 }
@@ -1022,9 +1054,9 @@ if (editBlock) { setEditBlock(null); return; }
                     setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'strobe' });
                     setFtSelStart(blk2.time);
                     setFtSelEnd(blk2.endTime);
-                    setFtSelFixture(trackIdx2);
+                    setFtSelFixture(fi2);
                     setFtSelTrack({ ...ft2, fixtureNames: [fixture2.name] });
-                    ftSelRef.current = { start: blk2.time, end: blk2.endTime, fixture: trackIdx2, track: { ...ft2, fixtureNames: [fixture2.name] } };
+                    ftSelRef.current = { start: blk2.time, end: blk2.endTime, fixture: fi2, track: { ...ft2, fixtureNames: [fixture2.name] } };
                     return;
                   }
                 }
@@ -1033,9 +1065,9 @@ if (editBlock) { setEditBlock(null); return; }
                     setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'movement' });
                     setFtSelStart(blk2.time);
                     setFtSelEnd(blk2.endTime);
-                    setFtSelFixture(trackIdx2);
+                    setFtSelFixture(fi2);
                     setFtSelTrack({ ...ft2, fixtureNames: [fixture2.name] });
-                    ftSelRef.current = { start: blk2.time, end: blk2.endTime, fixture: trackIdx2, track: { ...ft2, fixtureNames: [fixture2.name] } };
+                    ftSelRef.current = { start: blk2.time, end: blk2.endTime, fixture: fi2, track: { ...ft2, fixtureNames: [fixture2.name] } };
                     return;
                   }
                 }
@@ -1055,9 +1087,9 @@ if (editBlock) { setEditBlock(null); return; }
           const trackDuration = duration || 120000; // from props
           const drawW = canvas.width - LABEL_WIDTH;
           if (y >= HEADER_HEIGHT && x >= LABEL_WIDTH) {
-            const trackIdx = Math.floor((y - HEADER_HEIGHT) / TRACK_HEIGHT);
-            if (trackIdx >= 0 && trackIdx < numFixtures) {
-              const fixture = patchedFixtures[trackIdx];
+            const di3 = Math.floor((y - HEADER_HEIGHT) / TRACK_HEIGHT);
+            if (di3 >= 0 && di3 < tieredLayout.list.length && tieredLayout.list[di3].type === 'fixture') {
+              const fixture = tieredLayout.sorted[(tieredLayout.list[di3] as any).fi];
               const timeAtX = ((x - LABEL_WIDTH) / drawW) * trackDuration;
               for (let fti = 0; fti < fixtureTracks.length; fti++) {
                 const ft = fixtureTracks[fti];
@@ -1150,8 +1182,8 @@ if (editBlock) { setEditBlock(null); return; }
 
       // Fixture track: if we have a selection, show override menu
       if (fixtureTracks && onFixtureTracksChange && ftSelRef.current.start < ftSelRef.current.end) {
-        const tIdx = Math.floor((y - HEADER_HEIGHT) / TRACK_HEIGHT);
-        if (tIdx >= 0 && tIdx < numFixtures) {
+        const tDi = Math.floor((y - HEADER_HEIGHT) / TRACK_HEIGHT);
+        if (tDi >= 0 && tDi < tieredLayout.list.length && tieredLayout.list[tDi].type === 'fixture') {
           e.preventDefault();
           setFtMenu({ x: e.clientX, y: e.clientY, trackIdx: tIdx, timeAtX });
           return;
@@ -1160,7 +1192,7 @@ if (editBlock) { setEditBlock(null); return; }
 
       const eTracks = efxTracks || [];
       const cTracks = colorTracks || [];
-      const efxTracksStart = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT;
+      const efxTracksStart = HEADER_HEIGHT + fixtureAreaHeight + AUTOSCRIPT_TRACK_HEIGHT;
 
       if (y >= efxTracksStart) {
         const eTrackIdx = Math.floor((y - efxTracksStart) / EFX_TRACK_HEIGHT);
@@ -1239,7 +1271,7 @@ if (editBlock) { setEditBlock(null); return; }
         }
       }
     },
-    [duration, efxTracks, colorTracks, strobeTracks, dimmerTracks, numFixtures, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu, onDimmerTrackContextMenu, onDimmerEntryContextMenu],
+    [duration, efxTracks, colorTracks, strobeTracks, dimmerTracks, tieredLayout, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu, onDimmerTrackContextMenu, onDimmerEntryContextMenu],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -1258,16 +1290,17 @@ if (editBlock) { setEditBlock(null); return; }
       const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
       if (drawW <= 0) return;
       const trackIdx = Math.floor((y - HEADER_HEIGHT) / TRACK_HEIGHT);
-      if (trackIdx >= 0 && trackIdx < numFixtures) {
+      if (trackIdx >= 0 && trackIdx < tieredLayout.list.length && tieredLayout.list[trackIdx].type === 'fixture') {
+        const fixture = tieredLayout.sorted[(tieredLayout.list[trackIdx] as any).fi];
+        const fiIdx = (tieredLayout.list[trackIdx] as any).fi;
         const timeAtX = Math.max(0, x) / drawW * duration;
         const t = Math.max(0, Math.min(duration, timeAtX));
         isFtDragging.current = true;
         ftDragStart.current = t;
-        ftDragFixture.current = trackIdx;
-        ftSelRef.current = { start: t, end: t, fixture: trackIdx, track: null };
+        ftDragFixture.current = fiIdx;
+        ftSelRef.current = { start: t, end: t, fixture: fiIdx, track: null };
         setFtSelStart(t); setFtSelEnd(t);
-        setFtSelFixture(trackIdx);
-        const fixture = patchedFixtures[trackIdx];
+        setFtSelFixture(fiIdx);
         const existingFt = (fixtureTracks || []).find(ft => resolveTrackTargets(ft, patchedFixtures, []).includes(fixture.id));
         setFtSelTrack(existingFt || null);
         ftSelRef.current.track = existingFt || null;
@@ -1286,8 +1319,8 @@ if (editBlock) { setEditBlock(null); return; }
         var dwb2 = (rb2.width - LABEL_WIDTH) * zoomLevel;
         if (yb2 >= HEADER_HEIGHT && xb2 >= 0 && dwb2 > 0) {
           var tb2 = Math.floor((yb2 - HEADER_HEIGHT) / TRACK_HEIGHT);
-          if (tb2 >= 0 && tb2 < numFixtures) {
-            var fixb2 = patchedFixtures[tb2];
+          if (tb2 >= 0 && tb2 < tieredLayout.list.length && tieredLayout.list[tb2].type === 'fixture') {
+            var fixb2 = tieredLayout.sorted[(tieredLayout.list[tb2] as any).fi];
             var timeAtXb2 = (xb2 / dwb2) * duration;
             for (var fti2 = 0; fti2 < fixtureTracks.length; fti2++) {
               var ft2 = fixtureTracks[fti2];
@@ -1327,7 +1360,7 @@ if (editBlock) { setEditBlock(null); return; }
         const drawW2 = rect2.width - LABEL_WIDTH;
         const eTracks = efxTracks || [];
         if (eTracks.length > 0 && drawW2 > 0 && x2 >= 0 && y2 >= HEADER_HEIGHT) {
-          const efxTracksStartY = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT;
+          const efxTracksStartY = HEADER_HEIGHT + fixtureAreaHeight + AUTOSCRIPT_TRACK_HEIGHT;
           if (y2 >= efxTracksStartY) {
             const eIdx = Math.floor((y2 - efxTracksStartY) / EFX_TRACK_HEIGHT);
             if (eIdx >= 0 && eIdx < eTracks.length) {
@@ -1367,7 +1400,7 @@ if (editBlock) { setEditBlock(null); return; }
         const eT = efxTracks || [];
         const cT = colorTracks || [];
         if (cT.length > 0 && drawW3 > 0 && x3 >= 0 && y3 >= HEADER_HEIGHT) {
-          const efxBase = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT;
+          const efxBase = HEADER_HEIGHT + fixtureAreaHeight + AUTOSCRIPT_TRACK_HEIGHT;
           const colorBase = efxBase + eT.length * EFX_TRACK_HEIGHT;
           if (y3 >= colorBase) {
             const cIdx = Math.floor((y3 - colorBase) / COLOR_TRACK_HEIGHT);
@@ -1408,7 +1441,7 @@ if (editBlock) { setEditBlock(null); return; }
         const eT = efxTracks || [];
         const sT = strobeTracks || [];
         if (sT.length > 0 && drawW4 > 0 && x4 >= 0 && y4 >= HEADER_HEIGHT) {
-          const efxBase = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT;
+          const efxBase = HEADER_HEIGHT + fixtureAreaHeight + AUTOSCRIPT_TRACK_HEIGHT;
           const colorBase = efxBase + eT.length * EFX_TRACK_HEIGHT;
           const strobeBase = colorBase + (colorTracks?.length ?? 0) * COLOR_TRACK_HEIGHT;
           if (y4 >= strobeBase && y4 < strobeBase + sT.length * STROBE_TRACK_HEIGHT) {
@@ -1451,7 +1484,7 @@ if (editBlock) { setEditBlock(null); return; }
         const sT = strobeTracks || [];
         const dT = dimmerTracks || [];
         if (dT.length > 0 && drawW5 > 0 && x5 >= 0 && y5 >= HEADER_HEIGHT) {
-          const efxBase = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT;
+          const efxBase = HEADER_HEIGHT + fixtureAreaHeight + AUTOSCRIPT_TRACK_HEIGHT;
           const colorBase = efxBase + (efxTracks?.length ?? 0) * EFX_TRACK_HEIGHT;
           const strobeBase = colorBase + (colorTracks?.length ?? 0) * COLOR_TRACK_HEIGHT;
           const dimmerBase = strobeBase + sT.length * STROBE_TRACK_HEIGHT;
@@ -1685,16 +1718,50 @@ if (editBlock) { setEditBlock(null); return; }
       ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
     }
 
-    // ── Per-fixture tracks ──────────────────────────
+    // ── Per-fixture tracks (tiered: headers + sorted fixtures) ──
     const barW = Math.max(3, Math.min(10, drawW / Math.max(1, cues.length) * 0.6));
 
-    for (let fi = 0; fi < numFixtures; fi++) {
-      const fixture = patchedFixtures[fi];
+    for (let di = 0; di < tieredLayout.list.length; di++) {
+      const row = tieredLayout.list[di];
+      const trackY = HEADER_HEIGHT + di * TRACK_HEIGHT;
+
+      // ── Tier header row ──
+      if (row.type === 'header') {
+        const isCollapsed = collapsedTiers.has(row.tier);
+        const tierHue = TIER_HUE_DEG[row.tier] ?? 0;
+        const hc = `hsl(${tierHue}, 60%, 45%)`;
+        ctx.fillStyle = hc + '10';
+        ctx.fillRect(LABEL_WIDTH, trackY, drawW, TRACK_HEIGHT);
+        ctx.strokeStyle = hc + '30';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY + TRACK_HEIGHT);
+        ctx.lineTo(w, trackY + TRACK_HEIGHT);
+        ctx.stroke();
+        // Chevron
+        ctx.fillStyle = hc;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(isCollapsed ? '▶' : '▼', 8, trackY + TRACK_HEIGHT / 2 + 4);
+        // Tier name
+        ctx.fillStyle = '#d1d5db';
+        ctx.font = 'bold 10px -apple-system, sans-serif';
+        ctx.fillText(row.tier.charAt(0).toUpperCase() + row.tier.slice(1), 24, trackY + TRACK_HEIGHT / 2 + 4);
+        // Fixture count
+        const count = tieredLayout.sorted.filter(f => f.tier === row.tier).length;
+        ctx.fillStyle = '#6b7280';
+        ctx.font = '8px -apple-system, sans-serif';
+        ctx.fillText(`(${count})`, ctx.measureText(row.tier.charAt(0).toUpperCase() + row.tier.slice(1)).width + 28, trackY + TRACK_HEIGHT / 2 + 4);
+        continue;
+      }
+
+      // ── Fixture row ──
+      const fi = row.fi;
+      const fixture = tieredLayout.sorted[fi];
       const tierDeg = TIER_HUE_DEG[fixture.tier] ?? 0;
-      const trackY = HEADER_HEIGHT + fi * TRACK_HEIGHT;
 
       // Track background (alternating)
-      ctx.fillStyle = fi % 2 === 0 ? 'rgba(255,255,255,0.015)' : 'rgba(0,0,0,0.1)';
+      ctx.fillStyle = di % 2 === 0 ? 'rgba(255,255,255,0.015)' : 'rgba(0,0,0,0.1)';
       ctx.fillRect(LABEL_WIDTH, trackY, drawW, TRACK_HEIGHT);
 
       // Horizontal track separator
@@ -1876,7 +1943,7 @@ if (editBlock) { setEditBlock(null); return; }
       }
 
       // ── Fixture track selection highlight ──
-      if (ftSelStart !== null && ftSelEnd !== null && ftSelFixture === fi) {
+      if (ftSelStart !== null && ftSelEnd !== null && ftSelFixture === di) {
         const ss = Math.min(ftSelStart, ftSelEnd);
         const se = Math.max(ftSelStart, ftSelEnd);
         const sx = LABEL_WIDTH + (ss / duration) * drawW;
@@ -1960,7 +2027,7 @@ if (editBlock) { setEditBlock(null); return; }
     }
 
     // ── AutoScript track ────────────────────────────
-    const autoY = HEADER_HEIGHT + numFixtures * TRACK_HEIGHT;
+    const autoY = HEADER_HEIGHT + tieredLayout.count * TRACK_HEIGHT;
 
     // Track background
     ctx.fillStyle = 'rgba(139, 92, 246, 0.04)';
@@ -2603,7 +2670,7 @@ if (editBlock) { setEditBlock(null); return; }
     duration,
     currentTime,
     patchedFixtures,
-    numFixtures,
+    tieredLayout,
     bpm,
     totalHeight,
     autoScriptData,
@@ -2717,7 +2784,7 @@ if (editBlock) { setEditBlock(null); return; }
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-1.5 text-[10px] text-purple-400 uppercase tracking-wider border-b border-gray-800">
-            {fmt(ftSelRef.current.start)} → {fmt(ftSelRef.current.end)} · {patchedFixtures[ftMenu.trackIdx]?.name}
+            {fmt(ftSelRef.current.start)} → {fmt(ftSelRef.current.end)} · {tieredLayout.sorted[ftMenu.trackIdx]?.name}
           </div>
           {/* Color */}
           <button className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2"
@@ -2744,7 +2811,7 @@ if (editBlock) { setEditBlock(null); return; }
                 const startVal = Number(rng1.value);
                 const endVal = Number(rng2.value);
                 const block: DimmerBlock = { id: `db-${Date.now()}`, time: ftSelRef.current.start, endTime: ftSelRef.current.end, value: startVal, endValue: startVal !== endVal ? endVal : undefined };
-                const fixture = patchedFixtures[ftMenu.trackIdx];
+                const fixture = tieredLayout.sorted[ftMenu.trackIdx];
                 const existing = fixtureTracks.find(ft => resolveTrackTargets(ft, patchedFixtures, []).includes(fixture.id));
                 if (existing) {
                   onFixtureTracksChange(fixtureTracks.map(ft => ft.id === existing.id ? { ...existing, dimmerBlocks: [...existing.dimmerBlocks, block] } : ft));
@@ -2775,7 +2842,7 @@ if (editBlock) { setEditBlock(null); return; }
                 const startSpeed = Number(rng1.value);
                 const endSpeed = Number(rng2.value);
                 const block: StrobeBlock = { id: `sb-${Date.now()}`, time: ftSelRef.current.start, endTime: ftSelRef.current.end, speed: startSpeed, endSpeed: startSpeed !== endSpeed ? endSpeed : undefined };
-                const fixture = patchedFixtures[ftMenu.trackIdx];
+                const fixture = tieredLayout.sorted[ftMenu.trackIdx];
                 const existing = fixtureTracks.find(ft => resolveTrackTargets(ft, patchedFixtures, []).includes(fixture.id));
                 if (existing) {
                   onFixtureTracksChange(fixtureTracks.map(ft => ft.id === existing.id ? { ...existing, strobeBlocks: [...existing.strobeBlocks, block] } : ft));
@@ -2807,7 +2874,7 @@ if (editBlock) { setEditBlock(null); return; }
                 document.body.removeChild(popup);
                 const p1 = sel1.value, p2 = sel2.value, a1 = Number(rng1.value), a2 = Number(rng2.value);
                 const block: MovementBlock = { id: `mb-${Date.now()}`, time: ftSelRef.current.start, endTime: ftSelRef.current.end, pattern: p1 as MovementBlock['pattern'], amplitude: a1, endPattern: p1 !== p2 ? p2 : undefined, endAmplitude: a1 !== a2 ? a2 : undefined };
-                const fixture = patchedFixtures[ftMenu.trackIdx];
+                const fixture = tieredLayout.sorted[ftMenu.trackIdx];
                 const existing = fixtureTracks.find(ft => resolveTrackTargets(ft, patchedFixtures, []).includes(fixture.id));
                 if (existing) {
                   onFixtureTracksChange(fixtureTracks.map(ft => ft.id === existing.id ? { ...existing, movementBlocks: [...existing.movementBlocks, block] } : ft));
@@ -2824,7 +2891,7 @@ if (editBlock) { setEditBlock(null); return; }
           <div className="border-t border-gray-800 my-0.5" />
           <button className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800 flex items-center gap-2"
             onClick={() => {
-              const fixture = patchedFixtures[ftMenu.trackIdx];
+              const fixture = tieredLayout.sorted[ftMenu.trackIdx];
               const existing = fixtureTracks.find(ft => resolveTrackTargets(ft, patchedFixtures, []).includes(fixture.id));
               if (existing) {
                 const s = ftSelRef.current.start;
@@ -3112,7 +3179,7 @@ if (editBlock) { setEditBlock(null); return; }
                 if (!gradientPicker) return;
                 const { endColor, startColor } = gradientPicker;
                 const block = { id: 'cb-' + Date.now(), time: ftSelRef.current.start, endTime: ftSelRef.current.end, color: startColor, endColor: startColor !== endColor ? endColor : undefined };
-                const fixture = patchedFixtures[gradientPicker.trackIdx];
+                const fixture = tieredLayout.sorted[gradientPicker.trackIdx];
                 const existing = fixtureTracks.find(ft => resolveTrackTargets(ft, patchedFixtures, []).includes(fixture.id));
                 if (existing) {
                   onFixtureTracksChange(fixtureTracks.map(ft => ft.id === existing.id ? { ...existing, colorBlocks: [...existing.colorBlocks, block] } : ft));
@@ -3130,7 +3197,7 @@ if (editBlock) { setEditBlock(null); return; }
       {editBlock && editBlock.blockType === 'color' && fixtureTracks && (() => {
         const ft = fixtureTracks[editBlock.trackIdx];
         const cb = ft?.colorBlocks.find(b => b.id === editBlock.blockId);
-        const fixture = patchedFixtures[ftSelRef.current.fixture];
+        const fixture = tieredLayout.sorted[ftSelRef.current.fixture];
         if (!cb || !fixture) return null;
         return (
           <div className="fixed inset-0 z-[9999] flex items-center justify-center">
