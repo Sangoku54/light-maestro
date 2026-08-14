@@ -25,6 +25,8 @@ import type { BrowserWindow } from 'electron';
 /** Statut du serveur LAN, retourné par `RemoteServer.getStatus()` et l'IPC `remote:getStatus`. */
 export interface RemoteStatus {
   running: boolean;
+  /** Vrai pendant la fenêtre asynchrone entre `listen()` et l'event `listening`/`error`. */
+  starting: boolean;
   port: number;
   /** Timestamp (ms) du dernier démarrage, null si arrêté. */
   startedAt: number | null;
@@ -87,9 +89,12 @@ export class RemoteServer {
   static readonly DEFAULT_PORT = 8080;
 
   private server: http.Server | null = null;
+  private onListening: (() => void) | null = null;
+  private onError: ((err: Error) => void) | null = null;
   private token = '';
   private port = RemoteServer.DEFAULT_PORT;
   private running = false;
+  private starting = false;
   private startedAt: number | null = null;
   private lastError: string | null = null;
   private snapshot: RemoteStateSnapshot | null = null;
@@ -110,7 +115,7 @@ export class RemoteServer {
 
   /** Démarre le serveur HTTP (0.0.0.0, port par défaut 8080). Idempotent. */
   start(): RemoteStatus {
-    if (this.running && this.server) return this.getStatus();
+    if ((this.running || this.starting) && this.server) return this.getStatus();
     // Nettoie un éventuel serveur resté dans un état mort (ex. EADDRINUSE).
     this.stop();
 
@@ -132,12 +137,13 @@ export class RemoteServer {
     });
     this.server = srv;
 
-    srv.on('listening', () => {
+    this.onListening = () => {
       this.running = true;
+      this.starting = false;
       // Pas d'IP ni de token ici : l'URL complète s'affiche côté renderer.
       console.log(`[remote] serveur HTTP LAN démarré sur le port ${this.port}`);
-    });
-    srv.on('error', (err: Error) => {
+    };
+    this.onError = (err: Error) => {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'EADDRINUSE') {
         this.lastError = `Port ${this.port} déjà utilisé (EADDRINUSE) - serveur LAN non démarré`;
@@ -147,10 +153,15 @@ export class RemoteServer {
         console.error('[remote] erreur serveur HTTP:', err.message);
       }
       this.running = false;
-    });
+      this.starting = false;
+    };
+    srv.on('listening', this.onListening);
+    srv.on('error', this.onError);
 
+    // L'écoute est asynchrone : on expose l'état transitoire `starting` (honnête),
+    // puis `running` bascule à l'event `listening` (ou `lastError` à l'event `error`).
+    this.starting = true;
     srv.listen(this.port, '0.0.0.0');
-    this.running = true; // intentionnel : l'écoute est asynchrone ; une erreur repassera running=false
     return this.getStatus();
   }
 
@@ -161,9 +172,16 @@ export class RemoteServer {
     const srv = this.server;
     this.server = null;
     this.running = false;
+    this.starting = false;
     this.startedAt = null;
     this.token = '';
     this.snapshot = null;
+    // Détache les handlers de l'ancien serveur avant fermeture : un event résiduel
+    // (ex. EADDRINUSE tardif) ne doit pas corrompre l'état d'un re-start rapide.
+    if (this.onListening) srv.off('listening', this.onListening);
+    if (this.onError) srv.off('error', this.onError);
+    this.onListening = null;
+    this.onError = null;
     try {
       srv.closeAllConnections();
       srv.close(() => {});
@@ -176,6 +194,7 @@ export class RemoteServer {
   getStatus(): RemoteStatus {
     return {
       running: this.running,
+      starting: this.starting,
       port: this.port,
       startedAt: this.startedAt,
       urls: [],
@@ -206,7 +225,14 @@ export class RemoteServer {
       return this.sendHtml(res, 200, REMOTE_PAGE_HTML);
     }
     if (req.method === 'GET' && url.pathname === '/api/state') {
-      return this.sendJson(res, 200, this.snapshot ?? {});
+      // Tant qu'aucun snapshot horodaté n'a été poussé par le renderer, la page
+      // reçoit `{ pending: true }` et affiche « Synchronisation… » au lieu d'un
+      // état vide trompeur (scènes absentes, blackout off, GM 100).
+      const snap = this.snapshot;
+      if (!snap || typeof snap.timestamp !== 'number') {
+        return this.sendJson(res, 200, { pending: true });
+      }
+      return this.sendJson(res, 200, snap);
     }
 
     if (req.method === 'POST') {
@@ -242,7 +268,9 @@ export class RemoteServer {
     if (typeof action !== 'string' || !SCENE_ACTIONS.has(action)) {
       return this.sendJson(res, 400, { ok: false, error: "action must be 'play' | 'stop' | 'toggle'" });
     }
-    this.emitCommand({ type: 'scene', id, action: action as 'play' | 'stop' | 'toggle' });
+    if (!this.emitCommand({ type: 'scene', id, action: action as 'play' | 'stop' | 'toggle' })) {
+      return this.sendJson(res, 503, { ok: false, error: 'renderer indisponible' });
+    }
     this.sendJson(res, 200, { ok: true });
   }
 
@@ -251,7 +279,9 @@ export class RemoteServer {
     if (typeof action !== 'string' || !CHASER_ACTIONS.has(action)) {
       return this.sendJson(res, 400, { ok: false, error: "action must be 'play' | 'stop' | 'next' | 'previous'" });
     }
-    this.emitCommand({ type: 'chaser', id, action: action as 'play' | 'stop' | 'next' | 'previous' });
+    if (!this.emitCommand({ type: 'chaser', id, action: action as 'play' | 'stop' | 'next' | 'previous' })) {
+      return this.sendJson(res, 503, { ok: false, error: 'renderer indisponible' });
+    }
     this.sendJson(res, 200, { ok: true });
   }
 
@@ -260,7 +290,9 @@ export class RemoteServer {
     if (typeof on !== 'boolean') {
       return this.sendJson(res, 400, { ok: false, error: 'on must be a boolean' });
     }
-    this.emitCommand({ type: 'blackout', on });
+    if (!this.emitCommand({ type: 'blackout', on })) {
+      return this.sendJson(res, 503, { ok: false, error: 'renderer indisponible' });
+    }
     this.sendJson(res, 200, { ok: true });
   }
 
@@ -269,7 +301,9 @@ export class RemoteServer {
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
       return this.sendJson(res, 400, { ok: false, error: 'value must be a number in [0, 1]' });
     }
-    this.emitCommand({ type: 'grandMaster', value });
+    if (!this.emitCommand({ type: 'grandMaster', value })) {
+      return this.sendJson(res, 503, { ok: false, error: 'renderer indisponible' });
+    }
     this.sendJson(res, 200, { ok: true });
   }
 
@@ -325,8 +359,16 @@ export class RemoteServer {
     req.on('error', () => {});
   }
 
-  private emitCommand(command: RemoteCommand): void {
-    this.mainWindow?.webContents.send('remote:command', command);
+  /**
+   * Émet une commande au renderer. Retourne false si la fenêtre cible est
+   * absente ou détruite (le renderer ne peut plus recevoir la commande) :
+   * les handlers répondent alors 503 au lieu d'un 200 mensonger.
+   */
+  private emitCommand(command: RemoteCommand): boolean {
+    const win = this.mainWindow;
+    if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return false;
+    win.webContents.send('remote:command', command);
+    return true;
   }
 
   private sendJson(res: http.ServerResponse, status: number, data: unknown): void {
@@ -529,6 +571,12 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
 
   function render() {
     if (!state) return;
+    // Pas encore de snapshot horodaté côté serveur : la page reste en
+    // « Synchronisation… » au lieu d'afficher un état vide trompeur.
+    if (state.pending) {
+      statusEl.textContent = 'Synchronisation...';
+      return;
+    }
     lastGood = Date.now();
     statusEl.textContent = 'Connecté - MAJ ' + new Date().toLocaleTimeString('fr-FR');
     blackoutBtn.classList.toggle('on', !!state.blackout);

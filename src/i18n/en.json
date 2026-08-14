@@ -619,6 +619,7 @@
       "loading": "Loading…",
       "statusActive": "Active",
       "statusStopped": "Stopped",
+    "statusStarting": "Starting…",
       "controlUrls": "Control URLs",
       "noUrls": "No URLs available",
       "token": "Token",

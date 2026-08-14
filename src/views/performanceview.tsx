@@ -3087,6 +3087,8 @@ const MIDIMappingPanel: React.FC = () => {
  */
 interface RemoteStatus {
   running: boolean;
+  /** Vrai pendant la fenêtre asynchrone listen() (avant l'event listening/error). */
+  starting?: boolean;
   port: number;
   startedAt: number | null;
   urls: string[];
@@ -3235,6 +3237,16 @@ const RemotePanel: React.FC = () => {
 
   const apiAvailable = getRemoteApi() !== null;
   const running = !!status?.running;
+  const starting = !!status?.starting;
+  // Badge d'état : « Démarrage… » pendant la fenêtre asynchrone listen(),
+  // avant que l'event `listening` (running=true) ou `error` (lastError) arrive.
+  const badge = loading
+    ? t('perform.remote.loading')
+    : starting
+      ? t('perform.remote.statusStarting')
+      : running
+        ? t('perform.remote.statusActive')
+        : t('perform.remote.statusStopped');
   // Le token n'est pas un champ du statut : il est embarqué dans les URLs
   // (`?token=`) — extraction depuis la première URL pour l'affichage dédié.
   const tokenFromUrls: string | null = (() => {
@@ -3252,10 +3264,10 @@ const RemotePanel: React.FC = () => {
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">{t('perform.remote.subtitle')}</p>
         </div>
-        <div className={`flex items-center gap-2 bg-[#0d0d14] border rounded-lg px-3 py-1.5 ${running ? 'border-green-500/30' : 'border-gray-800/50'}`}>
-          <span className={`w-2 h-2 rounded-full ${running ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.9)]' : 'bg-gray-700'}`} />
-          <span className={`text-[10px] font-medium ${running ? 'text-green-400' : 'text-gray-500'}`}>
-            {loading ? t('perform.remote.loading') : running ? t('perform.remote.statusActive') : t('perform.remote.statusStopped')}
+        <div className={`flex items-center gap-2 bg-[#0d0d14] border rounded-lg px-3 py-1.5 ${running || starting ? 'border-green-500/30' : 'border-gray-800/50'}`}>
+          <span className={`w-2 h-2 rounded-full ${running ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.9)]' : starting ? 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)]' : 'bg-gray-700'}`} />
+          <span className={`text-[10px] font-medium ${running ? 'text-green-400' : starting ? 'text-amber-300' : 'text-gray-500'}`}>
+            {badge}
           </span>
         </div>
       </div>

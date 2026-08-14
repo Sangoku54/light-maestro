@@ -59,6 +59,8 @@ export interface SacnNetworkStatus {
 /** Statut du serveur LAN retourné par `remote.getStatus()`. */
 export interface RemoteStatus {
   running: boolean;
+  /** Vrai pendant la fenêtre asynchrone entre `listen()` et l'event `listening`/`error`. */
+  starting: boolean;
   port: number;
   /** Timestamp (ms) du dernier démarrage, null si arrêté. */
   startedAt: number | null;
