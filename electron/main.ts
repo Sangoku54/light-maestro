@@ -1,7 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { execSync } from 'child_process';
+import { RemoteServer, type RemoteStateSnapshot } from './remote/server';
 import { DMXEngine } from './dmx/engine';
 import { FixtureLibrary } from './fixtures/library';
 import { checkForFixtureUpdates, getUpdateStatus as getFixtureUpdateStatus } from './fixtures/updater';
@@ -50,6 +52,7 @@ const midiManager = new MidiManager();
 // Restore the persisted MIDI mapping at boot (file I/O, safe before ready)
 void midiManager.loadMapping();
 const audioAnalyzer = new AudioAnalyzer();
+const remoteServer = new RemoteServer();
 
 function createWindow() {
   const isDev = !app.isPackaged;
@@ -71,6 +74,7 @@ function createWindow() {
       sandbox: false
     }
   });
+  remoteServer.setMainWindow(mainWindow);
 
   // Maximize at launch
   mainWindow.maximize();
@@ -102,7 +106,7 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  mainWindow.on('closed', () => { mainWindow = null; remoteServer.setMainWindow(null); });
 
   // ─── Close guard: intercept close, let renderer decide ───
   mainWindow.on('close', (e) => {
@@ -124,6 +128,38 @@ function createTray() {
   ]));
 }
 
+// ─── IPC Handlers: Remote web LAN ────────────────────────────
+// Serveur HTTP embarqué (0.0.0.0:8080, token d'auth). Les commandes
+// reçues par HTTP sont émises au renderer par le serveur lui-même
+// (fenêtre cible fournie via setMainWindow — cf. electron/remote/server.ts).
+ipcMain.handle('remote:start', () => remoteServer.start());
+ipcMain.handle('remote:stop', () => {
+  remoteServer.stop();
+  return remoteServer.getStatus();
+});
+ipcMain.handle('remote:getStatus', () => {
+  const status = remoteServer.getStatus();
+  if (!status.running) return status;
+  // URLs LAN : http://<ip>:<port>/?token=<token> pour chaque IPv4 non-internal.
+  const urls: string[] = [];
+  const token = remoteServer.getToken();
+  for (const ifaces of Object.values(os.networkInterfaces())) {
+    for (const iface of ifaces ?? []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        urls.push(`http://${iface.address}:${status.port}/?token=${encodeURIComponent(token)}`);
+      }
+    }
+  }
+  return { ...status, urls };
+});
+// Le renderer pousse le snapshot (scènes/chasers/blackout/GM) vers le cache
+// HTTP. Supporte les deux formes : { state: snapshot } ou snapshot direct.
+// Réponse sans contenu (équivalent 204) : le push est fire-and-forget.
+ipcMain.handle('remote:state', (_event, payload: unknown) => {
+  const wrapped = payload as { state?: unknown } | null;
+  remoteServer.setSnapshot((wrapped && 'state' in wrapped ? wrapped.state : payload) as RemoteStateSnapshot | null);
+});
+
 // ─── IPC Handlers: DMX ───────────────────────────────────────
 ipcMain.handle('dmx:start', async () => {
   try { await dmxEngine.start(); } catch (e: any) {
@@ -140,6 +176,9 @@ ipcMain.handle('dmx:setChannels', async (_, universe: number, channels: Record<n
   dmxEngine.setChannels(universe, channels);
 });
 ipcMain.handle('dmx:isRunning', async () => dmxEngine.isRunning());
+ipcMain.handle('dmx:applyGrandMaster', async (_e, level: number) => {
+  dmxEngine.applyGrandMaster(Number.isFinite(level) ? Math.max(0, Math.min(1, level)) : 0);
+});
 ipcMain.handle('dmx:blackout', async () => dmxEngine.blackout());
 ipcMain.handle('dmx:restore', async () => dmxEngine.restore());
 ipcMain.handle('dmx:getUniverses', async () => dmxEngine.getUniverseConfigs());
@@ -510,6 +549,7 @@ app.on('window-all-closed', async () => {
   await dmxEngine.stop();
   midiManager.disconnect();
   audioAnalyzer.stopCapture();
+  remoteServer.stop();
   if (process.platform !== 'darwin') app.quit();
 });
 

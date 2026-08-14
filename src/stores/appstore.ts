@@ -15,7 +15,7 @@ export type AppMode = 'quick' | 'design' | 'perform';
 // Sidebar tab keys per mode
 export type QuickSidebarTab = 'autoscript' | 'efx' | 'colors';
 export type DesignSidebarTab = 'fixtures' | 'groups' | 'scenes' | 'chasers' | 'show' | 'cuelists' | 'rgbmatrix' | 'efx' | 'stage' | 'settings';
-export type PerformSidebarTab = 'vconsole' | 'midi' | 'simpledesk' | 'stage' | 'cuelist' | 'settings';
+export type PerformSidebarTab = 'vconsole' | 'midi' | 'remote' | 'simpledesk' | 'stage' | 'cuelist' | 'settings';
 export type SidebarTab = QuickSidebarTab | DesignSidebarTab | PerformSidebarTab;
 
 // Custom color palette per section type

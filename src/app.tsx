@@ -12,6 +12,7 @@ import { AudioCaptureProvider } from './hooks/useAudioCapture';
 import { useAudioFileLoader } from './hooks/useAudioFileLoader';
 import { useRgbMatrixPlayback } from './hooks/rgb-matrix-playback';
 import { useMidiTriggers } from './hooks/midi-trigger';
+import { useRemoteTriggers } from './hooks/remote-trigger';
 import { getLatencyMs } from './utils/latency-meter';
 import { dmxBridge } from './utils/dmx-bridge';
 import './styles/global.css';
@@ -133,6 +134,9 @@ const App: React.FC = () => {
 
   // MIDI triggers — global (scènes/chasers/cuelists/autoscript/widgets)
   useMidiTriggers();
+
+  // Remote web LAN (lot #17) — commandes HTTP du serveur + push d'état
+  useRemoteTriggers();
 
   // Clear old persisted widgets from localStorage (now saved in project file)
   useEffect(() => {

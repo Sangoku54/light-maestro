@@ -9,11 +9,15 @@
  * widgets) est dispatché ici depuis useMidiTriggers() (src/hooks/midi-trigger.ts).
  *
  * Sources arbiter dédiées :
- *   - 'midi'        (LTP 75) → scènes + cue lists
- *   - 'midi-chaser' (LTP 75) → chasers
+ *   - 'midi'          (LTP 75) → scènes + cue lists
+ *   - 'midi-chaser'   (LTP 75) → chasers
+ *   - 'remote'        (LTP 70) → scènes (Remote web LAN, lot #17)
+ *   - 'remote-chaser' (LTP 70) → chasers (Remote web LAN, lot #17)
  * Priorité 75 = juste sous le Virtual Console ('vc', 80) : un bouton VC
  * physique l'emporte sur un trigger MIDI sur les mêmes canaux ; au-dessus de
  * 'default' (50) et des sources HTP (quickshow 40, song-preset 45...).
+ * Remote est sous MIDI (70) : un trigger MIDI concurrent reprend la main sur
+ * une commande web, qui reste elle-même au-dessus de 'default' et des HTP.
  *
  * DETTE DOCUMENTÉE (backlog) : le moteur vivant scènes/chasers (fades, hold,
  * loop) est encapsulé dans VCButtonWidget (performanceview.tsx ~L1490-1900)
@@ -69,6 +73,8 @@ export interface MidiTriggerEvent {
 
 export const MIDI_SOURCE_ID = 'midi'; // scènes + cue lists
 export const MIDI_CHASER_SOURCE_ID = 'midi-chaser'; // chasers
+export const REMOTE_SOURCE_ID = 'remote'; // scènes — Remote web LAN (lot #17)
+export const REMOTE_CHASER_SOURCE_ID = 'remote-chaser'; // chasers — Remote web LAN (lot #17)
 
 let _sourcesRegistered = false;
 function ensureSourcesRegistered(): void {
@@ -77,6 +83,9 @@ function ensureSourcesRegistered(): void {
   // LTP 75 : sous 'vc' (80), au-dessus de 'default' (50) et des HTP.
   dmxBridge.registerSource(MIDI_SOURCE_ID, 'ltp', 75);
   dmxBridge.registerSource(MIDI_CHASER_SOURCE_ID, 'ltp', 75);
+  // LTP 70 : sous 'midi' (75), au-dessus de 'default' (50) et des HTP.
+  dmxBridge.registerSource(REMOTE_SOURCE_ID, 'ltp', 70);
+  dmxBridge.registerSource(REMOTE_CHASER_SOURCE_ID, 'ltp', 70);
 }
 ensureSourcesRegistered();
 
@@ -118,9 +127,11 @@ interface SceneHandle {
   raf: number;
   timer: ReturnType<typeof setTimeout> | null;
   channels: Record<number, number>;
+  /** Source arbitre écrivaine ('midi' | 'remote') — sert au stop/toggle. */
+  sourceId: string;
 }
 
-/** Scènes actuellement jouées (source 'midi') — sert au toggle/stop. */
+/** Scènes actuellement jouées (toutes sources) — sert au toggle/stop. */
 const activeScenes = new Map<string, SceneHandle>();
 
 function cancelSceneHandle(handle: SceneHandle | undefined): void {
@@ -129,17 +140,17 @@ function cancelSceneHandle(handle: SceneHandle | undefined): void {
   if (handle.timer) clearTimeout(handle.timer);
 }
 
-/** Écrit le niveau 0..1 de la scène vers hardware + store (source 'midi'). */
-function applySceneLevel(level: number, channels: Record<number, number>): void {
+/** Écrit le niveau 0..1 de la scène vers hardware + store (source arbitre). */
+function applySceneLevel(level: number, channels: Record<number, number>, sourceId: string): void {
   const { fixtures, universes } = getShowState();
   const scaled: Record<number, number> = {};
   for (const [addrStr, val] of Object.entries(channels)) {
     scaled[Number(addrStr)] = Math.round(Number(val) * level);
   }
-  sendChannelsToHardwareAndStore(scaled, fixtures, universes, MIDI_SOURCE_ID).catch(() => {});
+  sendChannelsToHardwareAndStore(scaled, fixtures, universes, sourceId).catch(() => {});
 }
 
-export function midiPlayScene(sceneId: string): void {
+export function midiPlayScene(sceneId: string, sourceId: string = MIDI_SOURCE_ID): void {
   ensureSourcesRegistered();
   const { scenes } = getShowState();
   const scene = scenes.find((s) => s.id === sceneId);
@@ -155,7 +166,7 @@ export function midiPlayScene(sceneId: string): void {
 
   // Une nouvelle lecture remplace la lecture en cours de cette scène
   cancelSceneHandle(activeScenes.get(sceneId));
-  const handle: SceneHandle = { raf: 0, timer: null, channels };
+  const handle: SceneHandle = { raf: 0, timer: null, channels, sourceId };
   activeScenes.set(sceneId, handle);
 
   const fadeIn = Math.max(0, scene.fadeIn || 0);
@@ -166,7 +177,7 @@ export function midiPlayScene(sceneId: string): void {
 
   const done = () => {
     activeScenes.delete(sceneId);
-    flushZeros(channels, MIDI_SOURCE_ID);
+    flushZeros(channels, sourceId);
   };
 
   const scheduleFadeOut = (delay: number) => {
@@ -175,7 +186,7 @@ export function midiPlayScene(sceneId: string): void {
         const start = performance.now();
         const anim = () => {
           const p = Math.min(1, (performance.now() - start) / fadeOut);
-          applySceneLevel(1 - p, channels);
+          applySceneLevel(1 - p, channels, sourceId);
           if (p < 1) handle.raf = requestAnimationFrame(anim);
           else done();
         };
@@ -190,20 +201,20 @@ export function midiPlayScene(sceneId: string): void {
     const start = performance.now();
     const anim = () => {
       const p = Math.min(1, (performance.now() - start) / fadeIn);
-      applySceneLevel(p, channels);
+      applySceneLevel(p, channels, sourceId);
       if (p < 1) handle.raf = requestAnimationFrame(anim);
       else {
-        applySceneLevel(1, channels);
+        applySceneLevel(1, channels, sourceId);
         if (!infinite) scheduleFadeOut(hold);
       }
     };
     handle.raf = requestAnimationFrame(anim);
   } else {
-    applySceneLevel(1, channels);
+    applySceneLevel(1, channels, sourceId);
     if (!infinite) scheduleFadeOut(hold);
   }
   console.debug(
-    `[midi] scene play : "${scene.name}" (${sceneId}) fadeIn=${fadeIn}ms hold=${hold}ms fadeOut=${fadeOut}ms`
+    `[midi] scene play : "${scene.name}" (${sceneId}) fadeIn=${fadeIn}ms hold=${hold}ms fadeOut=${fadeOut}ms source=${sourceId}`
   );
 }
 
@@ -215,25 +226,27 @@ export function midiStopScene(sceneId: string): void {
   }
   cancelSceneHandle(handle);
   activeScenes.delete(sceneId);
-  flushZeros(handle.channels, MIDI_SOURCE_ID);
+  flushZeros(handle.channels, handle.sourceId);
   console.debug(`[midi] scene stop : ${sceneId}`);
 }
 
-export function midiToggleScene(sceneId: string): void {
+export function midiToggleScene(sceneId: string, sourceId: string = MIDI_SOURCE_ID): void {
   if (activeScenes.has(sceneId)) midiStopScene(sceneId);
-  else midiPlayScene(sceneId);
+  else midiPlayScene(sceneId, sourceId);
 }
 
-/** Stop de toutes les scènes MIDI (utilisé par cueList stop). */
+/** Stop de toutes les scènes (utilisé par cueList stop) — flush par source. */
 export function midiStopAllScenes(): void {
   if (activeScenes.size === 0) return;
-  const all: Record<number, number> = {};
+  const bySource = new Map<string, Record<number, number>>();
   for (const handle of activeScenes.values()) {
     cancelSceneHandle(handle);
-    Object.assign(all, handle.channels);
+    const acc = bySource.get(handle.sourceId) ?? {};
+    Object.assign(acc, handle.channels);
+    bySource.set(handle.sourceId, acc);
   }
   activeScenes.clear();
-  flushZeros(all, MIDI_SOURCE_ID);
+  for (const [sid, chans] of bySource) flushZeros(chans, sid);
 }
 
 // ─── MIDI clock → tempo des chasers (M5) ──────────────────────────────────
@@ -266,6 +279,8 @@ interface ChaserHandle {
   raf: number;
   stepIndex: number;
   dir: 1 | -1; // sens courant (utile pour direction 'bounce')
+  /** Source arbitre écrivaine ('midi-chaser' | 'remote-chaser'). */
+  sourceId: string;
 }
 
 const activeChasers = new Map<string, ChaserHandle>();
@@ -292,7 +307,7 @@ function nextStepIndex(chaser: SavedChaser, handle: ChaserHandle): number {
   return idx;
 }
 
-function runChaserStep(chaserId: string, startIndex: number): void {
+function runChaserStep(chaserId: string, startIndex: number, sourceId: string = MIDI_CHASER_SOURCE_ID): void {
   const { chasers, scenes, fixtures, universes } = getShowState();
   const chaser = chasers.find((c) => c.id === chaserId);
   if (!chaser || chaser.steps.length === 0) {
@@ -301,8 +316,13 @@ function runChaserStep(chaserId: string, startIndex: number): void {
   }
   let handle = activeChasers.get(chaserId);
   if (!handle) {
-    handle = { timer: null, raf: 0, stepIndex: 0, dir: 1 };
+    handle = { timer: null, raf: 0, stepIndex: 0, dir: 1, sourceId };
     activeChasers.set(chaserId, handle);
+  } else {
+    // Reprise d'un chaser déjà actif : le déclencheur le plus récent devient
+    // l'écrivain arbitre (LTP) — un trigger MIDI concurrent reprend la main
+    // sur une commande web et inversement.
+    handle.sourceId = sourceId;
   }
   cancelChaserStep(handle);
   handle.stepIndex = ((startIndex % chaser.steps.length) + chaser.steps.length) % chaser.steps.length;
@@ -328,7 +348,7 @@ function runChaserStep(chaserId: string, startIndex: number): void {
     for (const [addrStr, val] of Object.entries(targetChannels)) {
       scaled[Number(addrStr)] = Math.round(Number(val) * level);
     }
-    sendChannelsToHardwareAndStore(scaled, fixtures, universes, MIDI_CHASER_SOURCE_ID).catch(() => {});
+    sendChannelsToHardwareAndStore(scaled, fixtures, universes, sourceId).catch(() => {});
   };
 
   const next = () => runChaserStep(chaserId, nextStepIndex(chaser, handle));
@@ -368,7 +388,7 @@ function runChaserStep(chaserId: string, startIndex: number): void {
   }
 }
 
-export function midiPlayChaser(chaserId: string): void {
+export function midiPlayChaser(chaserId: string, sourceId: string = MIDI_CHASER_SOURCE_ID): void {
   ensureSourcesRegistered();
   const { chasers } = getShowState();
   const chaser = chasers.find((c) => c.id === chaserId);
@@ -382,8 +402,8 @@ export function midiPlayChaser(chaserId: string): void {
   }
   // Si déjà actif, on repart du step courant (relance proprement)
   const existing = activeChasers.get(chaserId);
-  runChaserStep(chaserId, existing ? existing.stepIndex : 0);
-  console.debug(`[midi] chaser play : "${chaser.name}" (${chaserId}) steps=${chaser.steps.length} dir=${chaser.direction}`);
+  runChaserStep(chaserId, existing ? existing.stepIndex : 0, sourceId);
+  console.debug(`[midi] chaser play : "${chaser.name}" (${chaserId}) steps=${chaser.steps.length} dir=${chaser.direction} source=${sourceId}`);
 }
 
 export function midiStopChaser(chaserId: string): void {
@@ -394,7 +414,7 @@ export function midiStopChaser(chaserId: string): void {
   }
   cancelChaserStep(handle);
   activeChasers.delete(chaserId);
-  // Zéro transitoire sur tous les canaux des scènes du chaser
+  // Zéro transitoire sur tous les canaux des scènes du chaser (source du handle)
   const { chasers, scenes } = getShowState();
   const chaser = chasers.find((c) => c.id === chaserId);
   if (chaser) {
@@ -403,33 +423,85 @@ export function midiStopChaser(chaserId: string): void {
       const scene = scenes.find((s) => s.id === step.sceneId);
       if (scene) Object.assign(all, toChannelMap(scene.channels));
     }
-    flushZeros(all, MIDI_CHASER_SOURCE_ID);
+    flushZeros(all, handle.sourceId);
   }
   console.debug(`[midi] chaser stop : ${chaserId}`);
 }
 
-export function midiChaserNext(chaserId: string): void {
+export function midiChaserNext(chaserId: string, sourceId: string = MIDI_CHASER_SOURCE_ID): void {
   const { chasers } = getShowState();
   const chaser = chasers.find((c) => c.id === chaserId);
   if (!chaser || chaser.steps.length === 0) return;
   const handle = activeChasers.get(chaserId);
   if (!handle) {
-    runChaserStep(chaserId, 0); // pas en cours → démarrer au premier step
+    runChaserStep(chaserId, 0, sourceId); // pas en cours → démarrer au premier step
     return;
   }
-  runChaserStep(chaserId, (handle.stepIndex + 1) % chaser.steps.length);
+  runChaserStep(chaserId, (handle.stepIndex + 1) % chaser.steps.length, handle.sourceId);
 }
 
-export function midiChaserPrevious(chaserId: string): void {
+export function midiChaserPrevious(chaserId: string, sourceId: string = MIDI_CHASER_SOURCE_ID): void {
   const { chasers } = getShowState();
   const chaser = chasers.find((c) => c.id === chaserId);
   if (!chaser || chaser.steps.length === 0) return;
   const handle = activeChasers.get(chaserId);
   if (!handle) {
-    runChaserStep(chaserId, chaser.steps.length - 1); // pas en cours → dernier step
+    runChaserStep(chaserId, chaser.steps.length - 1, sourceId); // pas en cours → dernier step
     return;
   }
-  runChaserStep(chaserId, (handle.stepIndex - 1 + chaser.steps.length) % chaser.steps.length);
+  runChaserStep(chaserId, (handle.stepIndex - 1 + chaser.steps.length) % chaser.steps.length, handle.sourceId);
+}
+
+// ═══════════════════════════════════════════════════════════
+// Remote web LAN (lot #17) — wrappers sources 'remote' / 'remote-chaser'
+// ═══════════════════════════════════════════════════════════
+// Le hook useRemoteTriggers() (src/hooks/remote-trigger.ts) consomme le canal
+// `remote:command` et dispatch vers ces wrappers, qui délèguent au même
+// moteur fade/hold que MIDI mais avec les sources arbitre dédiées (LTP 70,
+// sous 'midi' 75). Le stop/toggle réutilise la source stockée dans le handle
+// (la source qui a démarré la lecture), donc aucun comportement MIDI ne change.
+
+export function remotePlayScene(sceneId: string): void {
+  midiPlayScene(sceneId, REMOTE_SOURCE_ID);
+}
+
+export function remoteStopScene(sceneId: string): void {
+  midiStopScene(sceneId);
+}
+
+export function remoteToggleScene(sceneId: string): void {
+  midiToggleScene(sceneId, REMOTE_SOURCE_ID);
+}
+
+export function remotePlayChaser(chaserId: string): void {
+  midiPlayChaser(chaserId, REMOTE_CHASER_SOURCE_ID);
+}
+
+export function remoteStopChaser(chaserId: string): void {
+  midiStopChaser(chaserId);
+}
+
+export function remoteChaserNext(chaserId: string): void {
+  midiChaserNext(chaserId, REMOTE_CHASER_SOURCE_ID);
+}
+
+export function remoteChaserPrevious(chaserId: string): void {
+  midiChaserPrevious(chaserId, REMOTE_CHASER_SOURCE_ID);
+}
+
+/** Ids des scènes actuellement jouées (toutes sources : midi + remote). */
+export function getActiveSceneIds(): string[] {
+  return [...activeScenes.keys()];
+}
+
+export interface ActiveChaserInfo {
+  id: string;
+  stepIndex: number;
+}
+
+/** Chasers actuellement en boucle (toutes sources), avec le step courant. */
+export function getActiveChasers(): ActiveChaserInfo[] {
+  return [...activeChasers.entries()].map(([id, h]) => ({ id, stepIndex: h.stepIndex }));
 }
 
 // ═══════════════════════════════════════════════════════════

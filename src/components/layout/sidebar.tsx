@@ -13,6 +13,7 @@ import {
   Users,
   Play,
   Eye,
+  Wifi,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -153,6 +154,7 @@ function getSidebarItems(mode: AppMode, t: (key: string) => string): SidebarItem
       return [
         { key: 'vconsole', label: t('sidebar.virtualConsole'), icon: <LayoutGrid size={16} /> },
         { key: 'midi', label: t('sidebar.midiMapping'), icon: <Sliders size={16} /> },
+        { key: 'remote', label: t('sidebar.remote'), icon: <Wifi size={16} /> },
         { key: 'simpledesk', label: t('sidebar.simpleDesk'), icon: <Sliders size={16} /> },
         { key: 'stage', label: t('sidebar.stageView'), icon: <Eye size={16} /> },
         { key: 'cuelist', label: t('sidebar.cueList'), icon: <ListMusic size={16} /> },

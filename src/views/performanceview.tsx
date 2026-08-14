@@ -4,7 +4,7 @@ import {
   Grid, Sliders, Crosshair, Music, Zap, ChevronRight, Settings,
   Plus, MousePointer2, ToggleLeft, GripHorizontal, Columns, Trash2,
   Copy, Maximize2, Minimize2, Square, Keyboard, Eye, EyeOff,
-  ChevronUp, ChevronDown, Hash, Download, Upload, RotateCcw, Loader
+  ChevronUp, ChevronDown, Hash, Download, Upload, RotateCcw, Loader, Wifi
 } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { useShowStore, type SavedCueList, type CueListCue, type SongPreset } from '../stores/showStore';
@@ -28,6 +28,11 @@ import {
 
 export const PerformanceView: React.FC = () => {
   const activeTab = useAppStore((s) => s.performSidebarTab);
+
+  // #17 — Remote LAN : le type PerformSidebarTab (appStore) n'inclut pas
+  // encore 'remote' (lot serveur en parallèle) ; comparaison élargie pour
+  // enregistrer le panneau dans le même conteneur que MIDIMappingPanel.
+  if ((activeTab as string) === 'remote') return <RemotePanel />;
 
   switch (activeTab) {
     case 'vconsole': return <VirtualConsolePanel />;
@@ -3063,6 +3068,276 @@ const MIDIMappingPanel: React.FC = () => {
             );
           })
         )}
+      </div>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════
+// REMOTE PANEL — Contrôle LAN (#17)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * État du serveur Remote — miroir du contrat réel (électron/remote/server.ts +
+ * src/types.d.ts, posés par le lot serveur). Le token n'est PAS un champ du
+ * statut : il est embarqué dans chaque URL (`http://<ip>:<port>/?token=<token>`)
+ * et extrait localement pour l'affichage dédié. Note : `remote:getStatus`
+ * renvoie les urls remplies côté main ; `remote:start`/`remote:stop` renvoient
+ * un statut à urls vides → relecture via getStatus() après start/stop.
+ */
+interface RemoteStatus {
+  running: boolean;
+  port: number;
+  startedAt: number | null;
+  urls: string[];
+  lastError?: string | null;
+}
+
+interface RemoteApiContract {
+  getStatus: () => Promise<RemoteStatus>;
+  start: () => Promise<RemoteStatus>;
+  stop: () => Promise<RemoteStatus>;
+}
+
+/**
+ * #17 — Accès typé à `window.lightMaestro.remote`. Le lot serveur a ajouté
+ * remote à src/types.d.ts en parallèle ; le cast local (même pattern que
+ * getMidiApi()) garde ce panneau indépendant du timing de cet ajout et
+ * d'un éventuel revert/rebase du typage partagé.
+ */
+function getRemoteApi(): RemoteApiContract | null {
+  const api = (window.lightMaestro as unknown as { remote?: RemoteApiContract }).remote;
+  return api ?? null;
+}
+
+/** Copie dans le presse-papiers, avec repli execCommand (contextes non sécurisés). */
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* on retente via le repli */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+const RemotePanel: React.FC = () => {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<RemoteStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const [copiedToken, setCopiedToken] = useState(false);
+  const copyTimer = useRef<number | null>(null);
+  const lastStatus = useRef<RemoteStatus | null>(null);
+
+  // Polling : état au montage puis toutes les 3 s (pas de push côté main).
+  useEffect(() => {
+    const api = getRemoteApi();
+    let cancelled = false;
+
+    const refresh = async () => {
+      if (!api) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      try {
+        const st = await api.getStatus();
+        if (cancelled) return;
+        lastStatus.current = st;
+        setStatus(st);
+        // P2-1 (résiduel) : ne pas effacer une erreur de démarrage (ex.
+        // EADDRINUSE) tant qu'elle est encore exposée par le serveur.
+        setError(st.lastError ?? null);
+      } catch {
+        // Échec de polling : signalé seulement si l'état n'a jamais été lu
+        // (évite de flasher une erreur en boucle pendant un redémarrage).
+        if (!cancelled && lastStatus.current === null) {
+          setError(t('perform.remote.errors.status'));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    refresh();
+    const id = window.setInterval(refresh, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      if (copyTimer.current) window.clearTimeout(copyTimer.current);
+    };
+  }, [t]);
+
+  const handleStart = async () => {
+    const api = getRemoteApi();
+    if (!api || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.start();
+      // `remote:start` renvoie un statut à urls vides (remplies uniquement par
+      // `remote:getStatus`) → relecture immédiate pour afficher les URLs LAN.
+      const st = await api.getStatus();
+      lastStatus.current = st;
+      setStatus(st);
+      // P2-1 : si le démarrage a échoué (ex. EADDRINUSE), le serveur expose
+      // lastError dans le statut - on le remonte à l'UI au lieu de rester muet.
+      if (st.lastError) setError(st.lastError);
+    } catch {
+      setError(t('perform.remote.errors.start'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleStop = async () => {
+    const api = getRemoteApi();
+    if (!api || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const st = await api.stop();
+      lastStatus.current = st;
+      setStatus(st);
+    } catch {
+      setError(t('perform.remote.errors.stop'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCopy = async (text: string, kind: 'url' | 'token', urlId?: string) => {
+    const ok = await copyTextToClipboard(text);
+    if (!ok) return;
+    if (kind === 'url') setCopiedUrl(urlId ?? null);
+    else setCopiedToken(true);
+    if (copyTimer.current) window.clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => {
+      setCopiedUrl(null);
+      setCopiedToken(false);
+    }, 1800);
+  };
+
+  const apiAvailable = getRemoteApi() !== null;
+  const running = !!status?.running;
+  // Le token n'est pas un champ du statut : il est embarqué dans les URLs
+  // (`?token=`) — extraction depuis la première URL pour l'affichage dédié.
+  const tokenFromUrls: string | null = (() => {
+    const first = status && status.urls.length > 0 ? status.urls[0] : null;
+    if (!first) return null;
+    try { return new URL(first).searchParams.get('token'); } catch { return null; }
+  })();
+
+  return (
+    <div className="h-full p-8 overflow-y-auto">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <Wifi size={20} className="text-purple-400" /> {t('perform.remote.title')}
+          </h2>
+          <p className="text-xs text-gray-500 mt-0.5">{t('perform.remote.subtitle')}</p>
+        </div>
+        <div className={`flex items-center gap-2 bg-[#0d0d14] border rounded-lg px-3 py-1.5 ${running ? 'border-green-500/30' : 'border-gray-800/50'}`}>
+          <span className={`w-2 h-2 rounded-full ${running ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.9)]' : 'bg-gray-700'}`} />
+          <span className={`text-[10px] font-medium ${running ? 'text-green-400' : 'text-gray-500'}`}>
+            {loading ? t('perform.remote.loading') : running ? t('perform.remote.statusActive') : t('perform.remote.statusStopped')}
+          </span>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-4 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400">
+          {error}
+        </div>
+      )}
+
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden mb-5">
+        <div className="px-4 py-2.5 border-b border-gray-800/50 flex items-center justify-between">
+          <span className="text-xs font-medium text-gray-300">{t('perform.remote.server')}</span>
+          <span className="text-[10px] font-mono text-gray-600">
+            {running && status && status.port > 0 ? `:${status.port}` : t('perform.remote.offline')}
+          </span>
+        </div>
+
+        {loading ? (
+          <div className="px-4 py-6 text-xs text-gray-600 flex items-center gap-2">
+            <Loader size={14} className="animate-spin text-gray-500" /> {t('perform.remote.loading')}
+          </div>
+        ) : !apiAvailable ? (
+          <div className="px-4 py-6 text-xs text-gray-600">{t('perform.remote.unavailable')}</div>
+        ) : running ? (
+          <div className="p-4 space-y-4">
+            <div>
+              <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-2">{t('perform.remote.controlUrls')}</div>
+              <div className="space-y-1.5">
+                {status && status.urls.length === 0 ? (
+                  <div className="text-xs text-gray-600">{t('perform.remote.noUrls')}</div>
+                ) : (
+                  status?.urls.map((url) => (
+                    <div key={url} className="flex items-center gap-2 bg-[#0a0a0f] border border-gray-800/60 rounded-lg px-3 py-2">
+                      <span className="flex-1 min-w-0 text-xs font-mono text-purple-300 truncate" title={url}>{url}</span>
+                      <button
+                        onClick={() => handleCopy(url, 'url', url)}
+                        className="shrink-0 px-2 py-1 text-[10px] rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
+                      >
+                        {copiedUrl === url ? t('perform.remote.copied') : t('perform.remote.copy')}
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {tokenFromUrls && (
+              <div>
+                <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-2">{t('perform.remote.token')}</div>
+                <div className="flex items-center gap-2 bg-[#0a0a0f] border border-gray-800/60 rounded-lg px-3 py-2">
+                  <span className="flex-1 min-w-0 text-xs font-mono text-gray-300 truncate" title={tokenFromUrls}>{tokenFromUrls}</span>
+                  <button
+                    onClick={() => handleCopy(tokenFromUrls, 'token')}
+                    className="shrink-0 px-2 py-1 text-[10px] rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
+                  >
+                    {copiedToken ? t('perform.remote.copied') : t('perform.remote.copy')}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <p className="text-[10px] text-gray-600">{t('perform.remote.connectHint')}</p>
+          </div>
+        ) : (
+          <div className="px-4 py-6 text-xs text-gray-600">{t('perform.remote.stoppedHint')}</div>
+        )}
+
+        <div className="px-4 py-3 border-t border-gray-800/50 flex items-center justify-end">
+          <button
+            onClick={running ? handleStop : handleStart}
+            disabled={busy || loading}
+            className={`px-4 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center gap-2 ${
+              running
+                ? 'border border-red-500/30 text-red-400 hover:bg-red-500/10'
+                : 'bg-purple-600/20 text-purple-300 hover:bg-purple-600/30'
+            }`}
+          >
+            {busy && <Loader size={13} className="animate-spin" />}
+            {busy ? t('perform.remote.working') : running ? t('perform.remote.stop') : t('perform.remote.start')}
+          </button>
+        </div>
       </div>
     </div>
   );

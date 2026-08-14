@@ -2,7 +2,7 @@
 
 // NOTE: `export {}` makes this file a module so the `declare global`
 // augmentation below is legal (TS2669 otherwise) and actually applied
-// to Window — without it, `window.lightMaestro` stays unknown everywhere.
+// to Window - without it, `window.lightMaestro` stays unknown everywhere.
 
 export {};
 
@@ -45,11 +45,57 @@ export interface SacnNetworkUniverse {
   mergeOutput: boolean;
 }
 
-/** `getStatus().network` — global sACN monitoring snapshot. */
+/** `getStatus().network` - global sACN monitoring snapshot. */
 export interface SacnNetworkStatus {
   enabled: boolean;
   errors: string[];
   universes: SacnNetworkUniverse[];
+}
+
+// ─── Remote web LAN (serveur HTTP embarqué, électron/remote/server.ts) ─────
+// Miroir du contrat défini dans le main process : les types y sont définis
+// dans electron/remote/server.ts et servis par l'IPC `remote:getStatus`.
+
+/** Statut du serveur LAN retourné par `remote.getStatus()`. */
+export interface RemoteStatus {
+  running: boolean;
+  port: number;
+  /** Timestamp (ms) du dernier démarrage, null si arrêté. */
+  startedAt: number | null;
+  /** URLs d'accès LAN `http://<ip>:<port>/?token=<token>` (une par IPv4 non-internal). */
+  urls: string[];
+  /** Erreur du dernier démarrage (ex. EADDRINUSE), null si aucun souci. */
+  lastError: string | null;
+}
+
+/** Entrée d'une scène dans le snapshot poussé au serveur HTTP. */
+export interface RemoteSceneEntry {
+  id: string;
+  name?: string;
+  active?: boolean;
+}
+
+/** Entrée d'un chaser dans le snapshot poussé au serveur HTTP. */
+export interface RemoteChaserEntry {
+  id: string;
+  name?: string;
+  active?: boolean;
+}
+
+/**
+ * Snapshot servi par `GET /api/state` - le renderer le pousse sur le canal
+ * `remote:state` (forme `{ state: RemoteStateSnapshot }` ou snapshot direct,
+ * cf. src/hooks/remote-trigger.ts qui pousse la forme directe).
+ */
+export interface RemoteStateSnapshot {
+  scenes?: RemoteSceneEntry[];
+  chasers?: RemoteChaserEntry[];
+  blackout?: boolean;
+  grandMaster?: number;
+  /** Latence renderer (latency-meter), null si aucun échantillon. */
+  latencyMs?: number | null;
+  dmxRunning?: boolean;
+  timestamp?: number;
 }
 
 interface LightMaestroAPI {
@@ -69,8 +115,8 @@ interface LightMaestroAPI {
     setSacnReceive: (id: string, enabled: boolean) => Promise<any>;
     listSerialPorts: () => Promise<any[]>;
     isRunning: () => Promise<boolean>;
-    /** Not exposed by preload today — present only if the main process adds it later. */
-    applyGrandMaster?: (value: number) => Promise<void>;
+    /** Grand master 0..1 appliqué au moteur DMX (canal ajouté lot #17). */
+    applyGrandMaster: (value: number) => Promise<void>;
     onError: (callback: (msg: string) => void) => () => void;
   };
   fixtures: {
@@ -135,6 +181,18 @@ interface LightMaestroAPI {
   app: {
     onBeforeClose: (callback: () => void) => () => void;
     closeAction: (action: 'save-and-quit' | 'discard') => Promise<void>;
+  };
+  remote: {
+    /** Statut du serveur LAN (running, port, URLs d'accès avec token). */
+    getStatus: () => Promise<RemoteStatus>;
+    /** Démarre le serveur HTTP embarqué. */
+    start: () => Promise<RemoteStatus>;
+    /** Arrête le serveur HTTP embarqué. */
+    stop: () => Promise<RemoteStatus>;
+    /** Commande reçue par le serveur LAN, forwardée au renderer (désabonnement). */
+    onCommand: (callback: (cmd: unknown) => void) => () => void;
+    /** Snapshot d'état poussé par le renderer vers le serveur LAN (cache HTTP). */
+    pushState: (snapshot: RemoteStateSnapshot) => void;
   };
 }
 

@@ -90,6 +90,7 @@
     "efx": "EFX",
     "virtualConsole": "Virtual Console",
     "midiMapping": "MIDI Mapping",
+    "remote": "Remote",
     "simpleDesk": "Simple Desk",
     "stageView": "Stage View",
     "cueList": "Cue List"
@@ -609,6 +610,31 @@
       "grandMasterFadeDesc": "Smooth grand master transitions",
       "vcLock": "VC Lock",
       "vcLockDesc": "Prevent accidental widget moves"
+    },
+    "remote": {
+      "title": "Remote",
+      "subtitle": "Control Light Maestro from your phone or tablet on your local network",
+      "server": "LAN Server",
+      "offline": "Server stopped",
+      "loading": "Loading…",
+      "statusActive": "Active",
+      "statusStopped": "Stopped",
+      "controlUrls": "Control URLs",
+      "noUrls": "No URLs available",
+      "token": "Token",
+      "copy": "Copy",
+      "copied": "Copied ✓",
+      "connectHint": "Connect your phone/tablet to the same Wi-Fi and open the URL.",
+      "stoppedHint": "The server is stopped. Start it to control Light Maestro from another device.",
+      "start": "Start server",
+      "stop": "Stop server",
+      "working": "Working…",
+      "unavailable": "Remote module unavailable (preload not connected)",
+      "errors": {
+        "start": "Failed to start the server (port in use?)",
+        "stop": "Failed to stop the server",
+        "status": "Failed to read server status"
+      }
     }
   },
   "colorPanel": {

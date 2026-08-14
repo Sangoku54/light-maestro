@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('lightMaestro', {
       ipcRenderer.invoke('dmx:setSacnReceive', id, enabled),
     listSerialPorts: () => ipcRenderer.invoke('dmx:listSerialPorts'),
     isRunning: () => ipcRenderer.invoke('dmx:isRunning'),
+    applyGrandMaster: (level: number) => ipcRenderer.invoke('dmx:applyGrandMaster', level),
     onError: (callback: (msg: string) => void) => {
       const handler = (_: any, msg: string) => callback(msg);
       ipcRenderer.on('dmx:error', handler);
@@ -140,5 +141,20 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     },
     closeAction: (action: 'save-and-quit' | 'discard') =>
       ipcRenderer.invoke('app:close-action', action),
+  },
+
+  // Remote web server (contrôle LAN — panneau UI en polling sur getStatus)
+  remote: {
+    getStatus: () => ipcRenderer.invoke('remote:getStatus'),
+    start: () => ipcRenderer.invoke('remote:start'),
+    stop: () => ipcRenderer.invoke('remote:stop'),
+    // Commandes HTTP reçues par le serveur LAN, forwardées au renderer
+    onCommand: (callback: (cmd: any) => void) => {
+      const handler = (_: any, cmd: any) => callback(cmd);
+      ipcRenderer.on('remote:command', handler);
+      return () => { ipcRenderer.removeListener('remote:command', handler); };
+    },
+    // Snapshot d'état poussé par le renderer vers le serveur LAN (cache HTTP)
+    pushState: (snapshot: any) => { ipcRenderer.send('remote:state', snapshot); },
   },
 });
