@@ -6,10 +6,11 @@
  *  2. All attributes work (pan/tilt/color/strobe/dimmer)
  *
  * Uses standard industry sequence: Dimmer → Pan → Tilt → Colour → Strobe → Reset.
- * DMX values are sent directly via window.lightMaestro.dmx.setChannel().
+ * DMX values are written through the output arbiter (fixture-test LTP source).
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { dmxBridge } from '../utils/dmx-bridge';
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -87,14 +88,19 @@ export function useFixtureTest() {
   }, []);
 
   const setDmxChannel = useCallback((universeIndex: number, address: number, value: number) => {
-    const api = (window as any).lightMaestro?.dmx;
-    if (!api) return;
-    api.setChannel(universeIndex, address, value).catch(() => {});
+    // Written through the fixture-test arbiter source (LTP) so the test
+    // overrides every other source while it runs. MERGE per channel so the
+    // dimmer written at the previous step stays on during pan/tilt/colour
+    // steps (write-replace would drop it), and pan+panFine co-exist in the
+    // same frame.
+    dmxBridge.writeMerge('fixture-test', universeIndex, { [address]: value });
   }, []);
 
   const stopTest = useCallback(() => {
     stoppedRef.current = true;
     cancelAnimationFrame(rafRef.current);
+    // Give control back to the other sources once the test stops
+    dmxBridge.release('fixture-test');
     setTestState({
       isRunning: false,
       currentStep: 'idle',

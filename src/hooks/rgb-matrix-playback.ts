@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useRgbMatrixStore } from '../stores/rgbmatrixStore';
 import { useShowStore } from '../stores/showStore';
+import { dmxBridge } from '../utils/dmx-bridge';
 
 function hexToRgb(hex: string): [number, number, number] {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -102,9 +103,6 @@ export function useRgbMatrixPlayback() {
   const lastFrameRef = useRef<number>(0);
 
   useEffect(() => {
-    const dmx = (window as any).lightMaestro?.dmx;
-    if (!dmx) return;
-
     startTimeRef.current = performance.now();
     lastFrameRef.current = 0;
 
@@ -127,6 +125,10 @@ export function useRgbMatrixPlayback() {
       const fixtures = useShowStore.getState().patchedFixtures;
       const groups = useShowStore.getState().fixtureGroups;
       const universes = useShowStore.getState().universes;
+
+      // Aggregate per-universe channel writes, then send ONE arbitrated frame
+      // per universe instead of one setChannel per RGB channel.
+      const perUniverse = new Map<number, Record<number, number>>();
 
       for (const matrix of matrices) {
         const group = groups.find(g => g.id === matrix.groupId);
@@ -167,12 +169,19 @@ export function useRgbMatrixPlayback() {
             const uniIdx = universes.findIndex(u => u.id === fixture.universeId);
             if (uniIdx >= 0) {
               const addr = fixture.startAddress;
-              dmx.setChannel(uniIdx, addr + rCh, r);
-              dmx.setChannel(uniIdx, addr + gCh, g);
-              dmx.setChannel(uniIdx, addr + bCh, b);
+              let uniVals = perUniverse.get(uniIdx);
+              if (!uniVals) { uniVals = {}; perUniverse.set(uniIdx, uniVals); }
+              uniVals[addr + rCh] = r;
+              uniVals[addr + gCh] = g;
+              uniVals[addr + bCh] = b;
             }
           }
         }
+      }
+
+      // Send one arbitrated frame per universe through the output arbiter
+      for (const [uniIdx, vals] of perUniverse) {
+        dmxBridge.write('rgb-matrix', uniIdx, vals);
       }
 
       rafRef.current = requestAnimationFrame(tick);

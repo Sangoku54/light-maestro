@@ -135,7 +135,7 @@ export const ShowManager: React.FC = () => {
     try {
       const allZero: Record<number, number> = {};
       for (let i = 1; i <= 512; i++) allZero[i] = 0;
-      sendChannelsToHardware(allZero, useShowStore.getState().patchedFixtures, useShowStore.getState().universes).catch(() => {});
+      sendChannelsToHardware(allZero, useShowStore.getState().patchedFixtures, useShowStore.getState().universes, 'show-manager').catch(() => {});
     } catch {}
   }, []);
 
@@ -230,7 +230,7 @@ export const ShowManager: React.FC = () => {
             if (scene) {
               const faded: Record<number, number> = {};
               for (const [addr, val] of Object.entries(scene.channels)) faded[Number(addr)] = Math.round(val * intensity);
-              sendChannelsToHardware(faded, currentState.patchedFixtures, currentState.universes).catch(() => {})
+              sendChannelsToHardware(faded, currentState.patchedFixtures, currentState.universes, 'show-manager').catch(() => {})
             }
           }
 
@@ -253,7 +253,7 @@ export const ShowManager: React.FC = () => {
                   if (stepScene) {
                     const faded: Record<number, number> = {};
                     for (const [addr, val] of Object.entries(stepScene.channels)) faded[Number(addr)] = Math.round(val * si * intensity);
-                    sendChannelsToHardware(faded, currentState.patchedFixtures, currentState.universes).catch(() => {})
+                    sendChannelsToHardware(faded, currentState.patchedFixtures, currentState.universes, 'show-manager').catch(() => {})
                   }
                   break;
                 }
@@ -343,7 +343,7 @@ export const ShowManager: React.FC = () => {
                   if (tiltOff >= 0) vals[pf.startAddress + tiltOff] = dmxTilt;
                   if (panFineOff >= 0) vals[pf.startAddress + panFineOff] = dmxPan;
                   if (tiltFineOff >= 0) vals[pf.startAddress + tiltFineOff] = dmxTilt;
-                  sendChannelsToHardware(vals, currentState.patchedFixtures, currentState.universes).catch(() => {})
+                  sendChannelsToHardware(vals, currentState.patchedFixtures, currentState.universes, 'show-manager').catch(() => {})
                 }
               }
             }

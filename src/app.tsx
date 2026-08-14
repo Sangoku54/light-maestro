@@ -11,6 +11,8 @@ import { PerformanceView } from './views/PerformanceView';
 import { AudioCaptureProvider } from './hooks/useAudioCapture';
 import { useAudioFileLoader } from './hooks/useAudioFileLoader';
 import { useRgbMatrixPlayback } from './hooks/rgb-matrix-playback';
+import { getLatencyMs } from './utils/latency-meter';
+import { dmxBridge } from './utils/dmx-bridge';
 import './styles/global.css';
 
 class ErrorBoundary extends React.Component<
@@ -343,6 +345,15 @@ const App: React.FC = () => {
   };
 
   const handleModeChange = useCallback((newMode: AppMode) => {
+    // Leaving the design tools (or any view) releases the design-only
+    // arbiter sources so the playback engine regains control — a scene
+    // preview or fixture-on in the design panel must not keep pinning
+    // channels (LTP) once the user switches to Perform/Quick.
+    if (newMode !== 'design') {
+      dmxBridge.release('design-test');
+      dmxBridge.release('design-efx');
+      dmxBridge.release('fixture-onoff');
+    }
     setMode(newMode);
   }, [setMode]);
 
@@ -462,12 +473,15 @@ const StatusBar: React.FC = () => {
     universes: Array<{ id: string; name: string; type: string; serialPort: string; artnetIP: string; sacnUniverse: number; active: boolean }>;
     lastError: string | null;
   } | null>(null);
+  // Audio→DMX latency (renderer pipeline, rolling average over ~30 samples)
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
   useEffect(() => {
     let alive = true;
     const tick = async () => {
       const api = (window as any).lightMaestro?.dmx;
       if (!api?.getStatus) return;
       try { const s = await api.getStatus(); if (alive) setDmxStatus(s); } catch {}
+      setLatencyMs(getLatencyMs());
     };
     tick();
     const id = setInterval(tick, 1000);
@@ -500,6 +514,20 @@ const StatusBar: React.FC = () => {
             : dmxStatus?.running
             ? `${t('statusBar.dmxOn')} ${dmxStatus.frameRate} fps`
             : t('statusBar.dmxOff')}
+        </span>
+        <span
+          className={
+            latencyMs === null
+              ? 'text-gray-600'
+              : latencyMs < 30
+              ? 'text-green-400'
+              : latencyMs < 80
+              ? 'text-amber-400'
+              : 'text-red-400'
+          }
+          title="Latence pipeline renderer : lecture de l'état audio → trame DMX émise (IPC). N'inclut pas la latence matérielle (USB/ArtNet/sACN)."
+        >
+          {latencyMs === null ? 'Latence audio→DMX : —' : `Latence audio→DMX : ${Math.round(latencyMs)} ms`}
         </span>
       </div>
       {blackout && (

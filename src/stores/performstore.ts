@@ -7,6 +7,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { dmxBridge } from '../utils/dmx-bridge';
 
 /**
  * Resolve the DMX engine universe index (0-based) for a Simple Desk universe id.
@@ -258,10 +259,13 @@ export const usePerformStore = create<PerformState>()(
     set({
       sdChannelValues: { ...sdChannelValues, [sdUniverseId]: uniValues },
     });
-    // Send to DMX output
+    // Send to DMX output through the output arbiter (Simple Desk is the
+    // highest-priority LTP control source). Send the FULL current channel
+    // map (not just this channel) so moving fader A then fader B keeps both
+    // — the arbiter's write() replaces the source's whole contribution.
     try {
       const universeNum = resolveUniverseIndex(sdUniverseId);
-      window.lightMaestro?.dmx?.setChannel(universeNum, channel, clamped);
+      dmxBridge.write('simple-desk', universeNum, uniValues);
     } catch { /* DMX output not available in browser dev */ }
   },
 
@@ -274,10 +278,10 @@ export const usePerformStore = create<PerformState>()(
     set({
       sdChannelValues: { ...sdChannelValues, [sdUniverseId]: uniValues },
     });
-    // Send to DMX output
+    // Send to DMX output through the output arbiter
     try {
       const universeNum = resolveUniverseIndex(sdUniverseId);
-      window.lightMaestro?.dmx?.setChannels(universeNum, values);
+      dmxBridge.write('simple-desk', universeNum, uniValues);
     } catch { /* */ }
   },
 
@@ -291,12 +295,14 @@ export const usePerformStore = create<PerformState>()(
     set({
       sdChannelValues: { ...sdChannelValues, [sdUniverseId]: blank },
     });
-    // Send all-zero to DMX
+    // Send all-zero to DMX through the output arbiter, TRANSIENT: release
+    // after 2 s so the playback engine regains control (a persistent LTP
+    // zero block would keep the show dark forever after a simple reset).
     try {
       const universeNum = resolveUniverseIndex(sdUniverseId);
       const allZero: Record<number, number> = {};
       for (let i = 1; i <= 512; i++) allZero[i] = 0;
-      window.lightMaestro?.dmx?.setChannels(universeNum, allZero);
+      dmxBridge.writeTransient('simple-desk', universeNum, allZero);
     } catch { /* */ }
   },
 
@@ -311,10 +317,10 @@ export const usePerformStore = create<PerformState>()(
     set({
       sdChannelValues: { ...sdChannelValues, [sdUniverseId]: { ...sdClipboard } },
     });
-    // Send to DMX
+    // Send to DMX through the output arbiter
     try {
       const universeNum = resolveUniverseIndex(sdUniverseId);
-      window.lightMaestro?.dmx?.setChannels(universeNum, sdClipboard);
+      dmxBridge.write('simple-desk', universeNum, sdClipboard);
     } catch { /* */ }
   },
 

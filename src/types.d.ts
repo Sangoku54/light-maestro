@@ -6,6 +6,48 @@
 
 export {};
 
+/** One external sACN source seen on a monitored universe. */
+export interface SacnNetworkSource {
+  cid: string;
+  name: string;
+  address: string;
+  priority: number;
+  active: boolean;
+  lastSeenAt: number;
+  packets: number;
+  fps: number;
+}
+
+/** Per-universe sACN network state: what leaves (tx) and what arrives (rx). */
+export interface SacnNetworkUniverse {
+  universe: number;
+  universeId: string;
+  name: string;
+  priority: number;
+  // TX side
+  outputEnabled: boolean;
+  txActive: boolean;
+  txFps: number;
+  txPackets: number;
+  txLastSendAt: number;
+  // RX side
+  receiveEnabled: boolean;
+  receiving: boolean;
+  rxFps: number;
+  rxPps: number;
+  rxPackets: number;
+  rxLastFrameAt: number;
+  sources: SacnNetworkSource[];
+  mergeOutput: boolean;
+}
+
+/** `getStatus().network` — global sACN monitoring snapshot. */
+export interface SacnNetworkStatus {
+  enabled: boolean;
+  errors: string[];
+  universes: SacnNetworkUniverse[];
+}
+
 interface LightMaestroAPI {
   dmx: {
     start: () => Promise<void>;
@@ -19,6 +61,8 @@ interface LightMaestroAPI {
     addUniverse: (config: any) => Promise<void>;
     syncUniverses: (configs: any[]) => Promise<void>;
     removeUniverse: (id: string) => Promise<void>;
+    /** Toggle sACN reception for a universe; returns the fresh status. */
+    setSacnReceive: (id: string, enabled: boolean) => Promise<any>;
     listSerialPorts: () => Promise<any[]>;
     isRunning: () => Promise<boolean>;
     /** Not exposed by preload today — present only if the main process adds it later. */

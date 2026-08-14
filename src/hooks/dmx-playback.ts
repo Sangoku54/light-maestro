@@ -273,6 +273,7 @@ import { analyzeChannels } from '../engine/dmx-channel';
 import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSmartMovement } from '../engine/dmx-movement';
 import { useAppStore } from '../stores/appstore';
 import { dmxBridge } from '../utils/dmx-bridge';
+import { recordAudioTick } from '../utils/latency-meter';
 
 
 /**
@@ -369,11 +370,15 @@ export function useDmxPlayback(options: {
   dryRunMode?: boolean; // Skip hardware DMX output, keep store/3D updates
   frozenRef?: React.MutableRefObject<boolean>; // Freeze: hold current DMX frame
   forceDropRef?: React.MutableRefObject<boolean>; // Force next tick to use drop parameters
+  arbiterSource?: string; // Output-arbiter source id this engine writes as (default 'quickshow')
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,dryRunMode=false,frozenRef,forceDropRef}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource}=options;
+  const arbSource = arbiterSource ?? 'quickshow';
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
   const dryRunRef=useRef(dryRunMode);dryRunRef.current=dryRunMode;
+  // Keep the bridge dry-run flag in sync (hardware flush happens in the bridge)
+  useEffect(()=>{ dmxBridge.setDryRun(dryRunMode); },[dryRunMode]);
   const lastChannelsRef=useRef<Map<number,Record<number,number>>>(new Map());
   const freezerRef=useRef(frozenRef);freezerRef.current=frozenRef;
   const forceDropRefLocal=useRef(forceDropRef);forceDropRefLocal.current=forceDropRef;
@@ -451,9 +456,8 @@ export function useDmxPlayback(options: {
               // Final zero
               for(let uniIdx=0;uniIdx<universes.length;uniIdx++){
                 const black:Record<number,number>={};for(let ch=1;ch<=512;ch++)black[ch]=0;
-                if(!dryRunRef.current)api.setChannels(uniIdx,black).catch(()=>{});
                 useAppStore.getState().setUniverseData(uniIdx, black);
-                dmxBridge.push(uniIdx, black);
+                dmxBridge.push(uniIdx, black, arbSource);
                 if(onVirtualDmx)onVirtualDmx(uniIdx,black);
               }
               return;
@@ -465,9 +469,8 @@ export function useDmxPlayback(options: {
               for(const[ch,val]of Object.entries(channels)){
                 faded[Number(ch)]=Math.round(Number(val) * factor);
               }
-              if(!dryRunRef.current)api.setChannels(uniIdx,faded).catch(()=>{});
               useAppStore.getState().setUniverseData(uniIdx, faded);
-              dmxBridge.push(uniIdx, faded);
+              dmxBridge.push(uniIdx, faded, arbSource);
               if(onVirtualDmx)onVirtualDmx(uniIdx,faded);
             }
             requestAnimationFrame(tickFade);
@@ -477,9 +480,8 @@ export function useDmxPlayback(options: {
           // No saved channels: zero immediately (fallback)
           for(let uniIdx=0;uniIdx<universes.length;uniIdx++){
             const black:Record<number,number>={};for(let ch=1;ch<=512;ch++)black[ch]=0;
-            if(api&&!dryRunRef.current)api.setChannels(uniIdx,black).catch(()=>{});
             useAppStore.getState().setUniverseData(uniIdx, black);
-            dmxBridge.push(uniIdx, black);
+            dmxBridge.push(uniIdx, black, arbSource);
             if(onVirtualDmx)onVirtualDmx(uniIdx,black);
           }
         }
@@ -491,7 +493,7 @@ export function useDmxPlayback(options: {
     const api=(typeof window!=='undefined'?(window as any).lightMaestro?.dmx:null);
     if(!api)return;
     // Dry-run mode: skip hardware DMX, keep store/3D updates
-    const pushDmx=(uniIdx:number,vals:Record<number,number>)=>{if(!dryRunRef.current)api.setChannels(uniIdx,vals).catch(()=>{});};
+
 
     // Ensure engine is started (re-attempt on first play tick if needed)
     if(!engineStartedRef.current){
@@ -521,6 +523,9 @@ export function useDmxPlayback(options: {
       const c=cuesRef.current;
       const analysis=analysisRef.current;
       if(!analysis||c.length===0){rafRef.current=requestAnimationFrame(tick);return;}
+      // Latency meter: this cycle reads audio-derived state (audio clock,
+      // section/energy from analysis) — mark the start of the audio→DMX cycle.
+      recordAudioTick();
       // Freeze: hold last DMX frame, skip all computation
       if (freezerRef.current?.current) {
         const lastCh = lastChannelsRef.current;
@@ -529,8 +534,7 @@ export function useDmxPlayback(options: {
             const uIdx = analysis.uniIds.indexOf(String(uId));
             if (uIdx < 0) continue;
             const cpy = { ...chMap };
-            if (!dryRunRef.current && api) api.setChannels(uId, cpy).catch(() => {});
-            dmxBridge.push(uId, cpy);
+            dmxBridge.push(uId, cpy, arbSource);
             if (onVirtualDmx) onVirtualDmx(uId, { ...cpy });
           }
         }
@@ -575,9 +579,8 @@ export function useDmxPlayback(options: {
             const uid=analysis.uniIds[uniIdx];if(!uid)continue;
             const zeroCh:Record<number,number>={};
             for(let ch=1;ch<=512;ch++)zeroCh[ch]=0;
-            pushDmx(uniIdx,zeroCh);
             useAppStore.getState().setUniverseData(uniIdx, zeroCh);
-            dmxBridge.push(uniIdx, zeroCh);
+            dmxBridge.push(uniIdx, zeroCh, arbSource);
             if(onVirtualDmx)onVirtualDmx(uniIdx,zeroCh);
           }
         }
@@ -594,9 +597,8 @@ export function useDmxPlayback(options: {
               const uid=analysis.uniIds[uniIdx];if(!uid)continue;
               const zeroCh:Record<number,number>={};
               for(let ch=1;ch<=512;ch++)zeroCh[ch]=0;
-              pushDmx(uniIdx,zeroCh);
               useAppStore.getState().setUniverseData(uniIdx, zeroCh);
-              dmxBridge.push(uniIdx, zeroCh);
+              dmxBridge.push(uniIdx, zeroCh, arbSource);
               if(onVirtualDmx)onVirtualDmx(uniIdx,zeroCh);
             }
           }
@@ -1024,10 +1026,9 @@ export function useDmxPlayback(options: {
           if(sig!==lastSig){lastSig=sig;
             // Mirror DMX to React store for 3D Stage view
             useAppStore.getState().setUniverseData(uniIdx, chVals);
-            // Direct bridge to Stage3D — bypasses store for guaranteed delivery
-            dmxBridge.push(uniIdx, chVals);
+            // Arbitrated bridge — computes final buffer and flushes to hardware
+            dmxBridge.push(uniIdx, chVals, arbSource);
             if (onVirtualDmx) onVirtualDmx(uniIdx, chVals);
-            pushDmx(uniIdx,chVals);
             // Save for pause fade-out
             lastChannelsRef.current.set(uniIdx, {...chVals});}
         }

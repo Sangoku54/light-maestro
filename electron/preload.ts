@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     addUniverse: (config: any) => ipcRenderer.invoke('dmx:addUniverse', config),
     syncUniverses: (configs: any[]) => ipcRenderer.invoke('dmx:syncUniverses', configs),
     removeUniverse: (id: string) => ipcRenderer.invoke('dmx:removeUniverse', id),
+    setSacnReceive: (id: string, enabled: boolean) =>
+      ipcRenderer.invoke('dmx:setSacnReceive', id, enabled),
     listSerialPorts: () => ipcRenderer.invoke('dmx:listSerialPorts'),
     isRunning: () => ipcRenderer.invoke('dmx:isRunning'),
     onError: (callback: (msg: string) => void) => {

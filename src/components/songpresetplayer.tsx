@@ -14,6 +14,7 @@ import { useShowStore, type SongPreset } from '../stores/showStore';
 import { loadFixtureDefinitions } from '../hooks/dmx-cues';
 import { useDmxPlayback } from '../hooks/dmx-playback';
 import { genCues } from '../views/QuickShowView';
+import { dmxBridge } from '../utils/dmx-bridge';
 
 /**
  * Resolve the playback clock for one frame.
@@ -38,15 +39,17 @@ export function resolvePlaybackTime(
 
 function zeroDmx() {
   try {
-    const dmx = (window as any).lightMaestro?.dmx;
-    if (!dmx) return;
-    const z: Record<number, number> = {};
-    for (let i = 1; i <= 512; i++) z[i] = 0;
     const s = useShowStore.getState();
     const uniIds = s.universes.map((u: any) => String(u.id));
+    const z: Record<number, number> = {};
+    for (let i = 1; i <= 512; i++) z[i] = 0;
+    // Release the source first so the engine's last frame falls back to the
+    // remaining sources, then push zeros so the hardware is flushed to black
+    // when no other source is active.
+    dmxBridge.release('song-preset');
     for (const pf of s.patchedFixtures) {
       const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
-      try { dmx.setChannels(uniNum, z); } catch {}
+      try { dmxBridge.write('song-preset', uniNum, z); } catch {}
     }
   } catch {}
 }
@@ -208,6 +211,7 @@ export const SongPresetPlayer: React.FC<{
     fixtureDefs: defs,
     universes,
     dmxOutputEnabled: true,
+    arbiterSource: 'song-preset',
     overrideCuesRef,
     fixtureTracksRef,
     efxTracksRef,

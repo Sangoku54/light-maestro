@@ -13,6 +13,7 @@ import { computeDmxForCue } from '../hooks/dmx-playback';
 import { SongPresetPlayer } from '../components/SongPresetPlayer';
 import { analyzeAudioBuffer, type TrackAnalysis } from '../hooks/audio-analysis';
 import { sendChannelsToHardware, sendToUniverse } from '../utils/dmx-helpers';
+import { dmxBridge } from '../utils/dmx-bridge';
 import { Stage3D } from './stage3d';
 import {
   usePerformStore,
@@ -37,6 +38,30 @@ export const PerformanceView: React.FC = () => {
     default: return <VirtualConsolePanel />;
   }
 };
+
+/**
+ * Zero every patched universe through the VC arbiter source (LTP).
+ * Replaces the duplicated inline blackout blocks: each universe is written
+ * exactly once instead of once per patched fixture.
+ */
+function vcZeroAllUniverses() {
+  try {
+    const s = useShowStore.getState();
+    const uniIds = s.universes.map((u: any) => String(u.id));
+    const z: Record<number, number> = {};
+    for (let i = 1; i <= 512; i++) z[i] = 0;
+    const seen = new Set<number>();
+    for (const pf of s.patchedFixtures) {
+      const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
+      if (seen.has(uniNum)) continue;
+      seen.add(uniNum);
+      // Transient: the zeros flush the hardware, then the source is released
+      // after 2 s so the playback engine regains control. A persistent LTP
+      // zero block would keep the show dark forever after a routine stop.
+      try { dmxBridge.writeTransient('vc', uniNum, z); } catch {}
+    }
+  } catch {}
+}
 
 // ═══════════════════════════════════════════════════════════
 // VIRTUAL CONSOLE PANEL
@@ -218,19 +243,7 @@ const VirtualConsolePanel: React.FC = () => {
       }
       showPlaybackRef.current = null;
       delete (window as any).__lm_perfPlayActive;
-      try {
-        const dmx = (window as any).lightMaestro?.dmx;
-        if (dmx) {
-          const z: Record<number,number> = {};
-          for (let i = 1; i <= 512; i++) z[i] = 0;
-          const s = useShowStore.getState();
-          const uniIds = s.universes.map((u:any) => String(u.id));
-          for (const pf of s.patchedFixtures) {
-            const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
-            try { dmx.setChannels(uniNum, z); } catch {}
-          }
-        }
-      } catch {}
+      vcZeroAllUniverses();
     };
 
     // Register stop callback
@@ -305,7 +318,7 @@ const VirtualConsolePanel: React.FC = () => {
             if (scene?.channels) {
               const faded: Record<number, number> = {};
               for (const [addr, val] of Object.entries(scene.channels)) faded[Number(addr)] = Math.round(Number(val) * intensity);
-              sendChannelsToHardware(faded, currentState.patchedFixtures, currentState.universes).catch(() => {})
+              sendChannelsToHardware(faded, currentState.patchedFixtures, currentState.universes, 'vc').catch(() => {})
             }
           }
 
@@ -329,7 +342,7 @@ const VirtualConsolePanel: React.FC = () => {
                     if (sc?.channels) {
                       const faded: Record<number, number> = {};
                       for (const [addr, val] of Object.entries(sc.channels)) faded[Number(addr)] = Math.round(Number(val) * intensity * stepIntensity);
-                      sendChannelsToHardware(faded, currentState.patchedFixtures, currentState.universes).catch(() => {})
+                      sendChannelsToHardware(faded, currentState.patchedFixtures, currentState.universes, 'vc').catch(() => {})
                     }
                     break;
                   }
@@ -426,7 +439,7 @@ const VirtualConsolePanel: React.FC = () => {
               if (panFineCh && pf.startAddress != null) ch[pf.startAddress + panFineCh.offset - 1] = Math.round((dmxPan / 256) * 255) || 0;
               if (tiltFineCh && pf.startAddress != null) ch[pf.startAddress + tiltFineCh.offset - 1] = Math.round((dmxTilt / 256) * 255) || 0;
               if (Object.keys(ch).length > 0) {
-                sendChannelsToHardware(ch, currentState.patchedFixtures, currentState.universes).catch(() => {})
+                sendChannelsToHardware(ch, currentState.patchedFixtures, currentState.universes, 'vc').catch(() => {})
               }
             }
           }
@@ -1403,17 +1416,7 @@ const VCButtonWidget: React.FC<{
       // Blackout all universes to 0 on first frame
       if (!firstFrameDone) {
         firstFrameDone = true;
-        const dmx = (window as any).lightMaestro?.dmx;
-        if (dmx) {
-          const z: Record<number,number> = {};
-          for (let i = 1; i <= 512; i++) z[i] = 0;
-          const s = useShowStore.getState();
-          const uniIds = s.universes.map((u:any) => String(u.id));
-          for (const pf of s.patchedFixtures) {
-            const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
-            try { dmx.setChannels(uniNum, z); } catch {}
-          }
-        }
+        vcZeroAllUniverses();
       }
       for (const cue of cues) {
         const key = `${cue.time.toFixed(2)}-${cue.universe}`;
@@ -1421,7 +1424,7 @@ const VCButtonWidget: React.FC<{
         if (elapsed >= cue.time && Object.keys(cue.channelValues).length > 0) {
           firedCues.add(key);
           try {
-            (window as any).lightMaestro?.dmx?.setChannels(cue.universe, cue.channelValues);
+            dmxBridge.write('vc', cue.universe, cue.channelValues);
           } catch {}
         }
       }
@@ -1430,19 +1433,7 @@ const VCButtonWidget: React.FC<{
     audio.onplay = () => { startTime = performance.now(); fireAutoDmx(); };
     audio.onended = () => {
       cancelAnimationFrame(autoRafRef.current);
-      try {
-        const dmx = (window as any).lightMaestro?.dmx;
-        if (dmx) {
-          const z: Record<number,number> = {};
-          for (let i = 1; i <= 512; i++) z[i] = 0;
-          const s = useShowStore.getState();
-          const uniIds = s.universes.map((u:any) => String(u.id));
-          for (const pf of s.patchedFixtures) {
-            const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
-            try { dmx.setChannels(uniNum, z); } catch {}
-          }
-        }
-      } catch {}
+      vcZeroAllUniverses();
       autoAudioRef.current = null;
       setActive(false);
     };
@@ -1567,19 +1558,7 @@ const VCButtonWidget: React.FC<{
         autoAudioRef.current.currentTime = 0;
         cancelAnimationFrame(autoRafRef.current);
         autoAudioRef.current = null;
-        try {
-          const dmx = (window as any).lightMaestro?.dmx;
-          if (dmx) {
-            const z: Record<number,number> = {};
-            for (let i = 1; i <= 512; i++) z[i] = 0;
-            const s = useShowStore.getState();
-            const uniIds = s.universes.map((u:any) => String(u.id));
-            for (const pf of s.patchedFixtures) {
-              const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
-              try { dmx.setChannels(uniNum, z); } catch {}
-            }
-          }
-        } catch {}
+        vcZeroAllUniverses();
         setActive(false);
         return;
       }
@@ -1677,7 +1656,7 @@ const VCButtonWidget: React.FC<{
           for (const [addr, val] of Object.entries(targetChannels)) {
             scaled[Number(addr)] = Math.round(Number(val) * level);
           }
-          sendChannelsToHardware(scaled, currentState.patchedFixtures, currentState.universes).catch(() => {})
+          sendChannelsToHardware(scaled, currentState.patchedFixtures, currentState.universes, 'vc').catch(() => {})
         };
 
         // Clear any existing scene timer
@@ -1757,7 +1736,7 @@ const VCButtonWidget: React.FC<{
         const applyLevel = (level: number) => {
           const scaled: Record<number, number> = {};
           for (const [addr, val] of Object.entries(targetChannels)) scaled[Number(addr)] = Math.round(val * level);
-          sendChannelsToHardware(scaled, currentState.patchedFixtures, currentState.universes).catch(() => {})
+          sendChannelsToHardware(scaled, currentState.patchedFixtures, currentState.universes, 'vc').catch(() => {})
         };
 
         if (fadeIn > 0) {
@@ -1822,19 +1801,7 @@ const VCButtonWidget: React.FC<{
       autoAudioRef.current.currentTime = 0;
       cancelAnimationFrame(autoRafRef.current);
       autoAudioRef.current = null;
-      try {
-        const dmx = (window as any).lightMaestro?.dmx;
-        if (dmx) {
-          const z: Record<number,number> = {};
-          for (let i = 1; i <= 512; i++) z[i] = 0;
-          const s = useShowStore.getState();
-          const uniIds = s.universes.map((u:any) => String(u.id));
-          for (const pf of s.patchedFixtures) {
-            const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
-            try { dmx.setChannels(uniNum, z); } catch {}
-          }
-        }
-      } catch {}
+      vcZeroAllUniverses();
     }
     // Stop playSong playback
     setSongPlayer(null);
@@ -1962,7 +1929,11 @@ const VCSliderWidget: React.FC<{
     if (config.sliderFunction === 'grandMaster') {
       try { window.lightMaestro?.dmx?.applyGrandMaster(clamped / 255); } catch { /* */ }
     } else if (config.channelAddress) {
-      try { window.lightMaestro?.dmx?.setChannel(1, config.channelAddress, clamped); } catch { /* */ }
+      // Merge per channel so two sliders on the same universe don't drop
+      // each other (write-replace would keep only the last one).
+      // NB: universe is hard-coded to 1 (pre-existing bug, documented — the
+      // VC widget config does not store a target universe).
+      try { dmxBridge.writeMerge('vc', 1, { [config.channelAddress]: clamped }); } catch { /* */ }
     }
   };
 
@@ -2640,7 +2611,7 @@ const CueListViewPanel: React.FC = () => {
       if (scene) {
         try {
           const st = useShowStore.getState();
-          sendChannelsToHardware(scene.channels, st.patchedFixtures, st.universes);
+          sendChannelsToHardware(scene.channels, st.patchedFixtures, st.universes, 'vc');
         } catch { /* */ }
       }
     }
@@ -2659,19 +2630,7 @@ const CueListViewPanel: React.FC = () => {
   const handleStop = () => {
     if (!cueList) return;
     updateCueList(cueList.id, { currentCueIndex: -1 });
-    try {
-      const dmx = (window as any).lightMaestro?.dmx;
-      if (dmx) {
-        const z: Record<number,number> = {};
-        for (let i = 1; i <= 512; i++) z[i] = 0;
-        const s = useShowStore.getState();
-        const uniIds = s.universes.map((u:any) => String(u.id));
-        for (const pf of s.patchedFixtures) {
-          const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
-          try { dmx.setChannels(uniNum, z); } catch {}
-        }
-      }
-    } catch { /* */ }
+    vcZeroAllUniverses();
   };
 
   const handleAddCue = (sceneId: string) => {

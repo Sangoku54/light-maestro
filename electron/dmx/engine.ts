@@ -14,6 +14,7 @@ import { EventEmitter } from 'events';
 import { Worker } from 'worker_threads';
 import { ChildProcess, spawn } from 'child_process';
 import path from 'path';
+import { SacnReceiverManager } from './sacn-receiver';
 
 export interface UniverseConfig {
   id: string;
@@ -26,6 +27,11 @@ export interface UniverseConfig {
   artnetUniverse?: number;
   sacnUniverse?: number;
   sacnPriority?: number;
+  /** Listen for incoming sACN data on this universe's `sacnUniverse`.
+   *  Defaults to true for type 'sacn' universes (set to false to disable). */
+  sacnReceive?: boolean;
+  /** HTP-merge the incoming (external) sACN frame into the outgoing frame. */
+  sacnMergeOutput?: boolean;
   serialPort?: string;
   channels: number;
 }
@@ -80,6 +86,12 @@ export class DMXEngine extends EventEmitter {
   // Art-Net / sACN outputs (main process, avoids worker require issues)
   private artnetOutputs: Map<string, ArtNetOutput> = new Map();
   private sacnOutputs: Map<string, SacnOutput> = new Map();
+
+  /** sACN network receiver: monitors + merges incoming external sources. */
+  private sacnReceiver = new SacnReceiverManager();
+
+  /** Per-universe transmit telemetry for sACN outputs (network monitoring). */
+  private sacnTxStats = new Map<string, { txPackets: number; lastSendAt: number; txFps: number }>();
 
   private blackoutState = false;
   /** Saved snapshot before blackout for restore() */
@@ -138,6 +150,12 @@ export class DMXEngine extends EventEmitter {
     await this.startAllOutputs();
     if (this.startCancelled) { await this.stopInternal(); return; }
 
+    // sACN network receiver (monitoring + merge of external sources). The
+    // desired universe set is populated BEFORE construction so the socket
+    // joins multicast groups from its bind callback (no add-before-bind race).
+    this.syncSacnReceiver();
+    this.sacnReceiver.start();
+
     this.worker!.postMessage({ type: 'start' });
     // A successful start clears transient errors from USB retry attempts —
     // unless a USB universe is still without a live output (honest status).
@@ -190,6 +208,8 @@ export class DMXEngine extends EventEmitter {
     this.workerReady = false;
 
     await this.stopAllOutputs();
+    this.sacnReceiver.stop();
+    this.sacnTxStats.clear();
     this.emit('stopped');
   }
 
@@ -520,12 +540,30 @@ export class DMXEngine extends EventEmitter {
       const offset = entry.sabIndex * DMX_CHANNELS;
       const data = this.channelView.subarray(offset, offset + DMX_CHANNELS);
 
-      // Apply Grand Master at output time (non-destructive)
+      // sACN network merge: HTP-inject the merged incoming frame (external
+      // consoles) into the outgoing frame when enabled for this universe.
+      // Only fresh frames are injected — once every source times out the
+      // output falls back to the local data alone (no stale pins).
       let finalData: Uint8Array = data;
+      if (entry.config.type === 'sacn' && entry.config.sacnMergeOutput) {
+        const merged = this.sacnReceiver.getMergedFrame(entry.config.sacnUniverse ?? 1);
+        if (merged) {
+          const mergedOut = new Uint8Array(DMX_CHANNELS);
+          for (let i = 0; i < DMX_CHANNELS; i++) {
+            const v = data[i];
+            mergedOut[i] = merged[i] > v ? merged[i] : v;
+          }
+          finalData = mergedOut;
+        }
+      }
+
+      // Apply Grand Master at output time (non-destructive). Scale the
+      // FINAL data (local + sACN merge) so an external console's input is
+      // not dropped when the GM is below 1.0 (merge-puis-GM, pas merge-ou-GM).
       if (gm < 1.0) {
         const scaled = new Uint8Array(DMX_CHANNELS);
         for (let i = 0; i < DMX_CHANNELS; i++) {
-          scaled[i] = Math.round(data[i] * gm);
+          scaled[i] = Math.round(finalData[i] * gm);
         }
         finalData = scaled;
       }
@@ -568,7 +606,22 @@ export class DMXEngine extends EventEmitter {
   private sendSacnFrame(id: string, data: Uint8Array): void {
     const output = this.sacnOutputs.get(id);
     if (!output) return;
-    try { output.sender.send(Buffer.from(data)); } catch {}
+    try {
+      output.sender.send(Buffer.from(data));
+      // Transmit telemetry for network monitoring (packets + smoothed fps)
+      const now = Date.now();
+      const st = this.sacnTxStats.get(id) ?? { txPackets: 0, lastSendAt: 0, txFps: 0 };
+      st.txPackets++;
+      if (st.lastSendAt > 0) {
+        const dt = now - st.lastSendAt;
+        if (dt > 0) {
+          const inst = 1000 / dt;
+          st.txFps = st.txFps === 0 ? inst : st.txFps * 0.9 + inst * 0.1;
+        }
+      }
+      st.lastSendAt = now;
+      this.sacnTxStats.set(id, st);
+    } catch {}
   }
 
   // ─── Universe Management ─────────────────────────────────
@@ -603,6 +656,7 @@ export class DMXEngine extends EventEmitter {
       this.worker.postMessage({ type: 'addUniverse', index: sabIndex, config: fullConfig });
     }
 
+    this.syncSacnReceiver();
     this.emit('universeAdded', fullConfig);
     return config.id;
   }
@@ -650,11 +704,38 @@ export class DMXEngine extends EventEmitter {
       this.worker.postMessage({ type: 'removeUniverse', index: entry.sabIndex });
     }
     this.universes.delete(id);
+    this.sacnTxStats.delete(id);
+    this.syncSacnReceiver();
     this.emit('universeRemoved', id);
   }
 
   getUniverseConfigs(): UniverseConfig[] {
     return Array.from(this.universes.values()).map((u) => u.config);
+  }
+
+  /** Toggle sACN reception for a universe (runtime, engine-side). */
+  setSacnReceive(id: string, enabled: boolean): void {
+    const entry = this.universes.get(id);
+    if (!entry) return;
+    entry.config.sacnReceive = !!enabled;
+    this.syncSacnReceiver();
+  }
+
+  /** Whether this universe should be listened to for incoming sACN. */
+  private shouldReceiveSacn(config: UniverseConfig): boolean {
+    return config.sacnReceive === true ||
+      (config.type === 'sacn' && config.sacnReceive !== false);
+  }
+
+  /** Reconcile the receiver's universe set with the engine config. */
+  private syncSacnReceiver(): void {
+    const universes = new Set<number>();
+    for (const [, entry] of this.universes) {
+      const cfg = entry.config;
+      if (!this.shouldReceiveSacn(cfg) || cfg.sacnUniverse === undefined) continue;
+      universes.add(cfg.sacnUniverse);
+    }
+    this.sacnReceiver.setUniverses(Array.from(universes));
   }
 
   /** Full output status for the renderer (monitoring panel / status bar). */
@@ -682,12 +763,55 @@ export class DMXEngine extends EventEmitter {
           artnetIP: e.config.artnetIP || '',
           artnetUniverse: e.config.artnetUniverse ?? 0,
           sacnUniverse: e.config.sacnUniverse ?? 1,
+          sacnPriority: e.config.sacnPriority ?? 100,
+          sacnReceive: e.config.sacnReceive !== false && (e.config.type === 'sacn' || e.config.sacnReceive === true),
+          sacnMergeOutput: !!e.config.sacnMergeOutput,
           channels: e.config.channels,
           active: e.active,
           usbState,
         };
       }),
+      network: this.getNetworkStatus(),
       lastError: this.lastError,
+    };
+  }
+
+  /** sACN network monitoring: what leaves (tx) and what arrives (rx). */
+  private getNetworkStatus() {
+    const rxStats = this.sacnReceiver.getStats();
+    const universes = Array.from(this.universes.values())
+      .filter((e) => e.config.type === 'sacn' || this.shouldReceiveSacn(e.config))
+      .map((e) => {
+        const uni = e.config.sacnUniverse ?? 1;
+        const rx = rxStats.universes.find((u) => u.universe === uni);
+        const tx = this.sacnTxStats.get(e.config.id);
+        return {
+          universe: uni,
+          universeId: e.config.id,
+          name: e.config.name,
+          priority: e.config.sacnPriority ?? 100,
+          // TX side — what Light Maestro sends on the network
+          outputEnabled: !!e.config.output,
+          txActive: e.active && !!this.sacnOutputs.get(e.config.id),
+          txFps: tx ? Math.round(tx.txFps) : 0,
+          txPackets: tx?.txPackets ?? 0,
+          txLastSendAt: tx?.lastSendAt ?? 0,
+          // RX side — what arrives from external sources
+          receiveEnabled: this.shouldReceiveSacn(e.config),
+          receiving: rx?.receiving ?? false,
+          rxFps: rx?.rxFps ?? 0,
+          rxPps: rx?.rxPps ?? 0,
+          rxPackets: rx?.rxPackets ?? 0,
+          rxLastFrameAt: rx?.lastFrameAt ?? 0,
+          sources: rx?.sources ?? [],
+          mergeOutput: !!e.config.sacnMergeOutput,
+        };
+      })
+      .sort((a, b) => a.universe - b.universe);
+    return {
+      enabled: rxStats.enabled,
+      errors: rxStats.errors,
+      universes,
     };
   }
 

@@ -11,6 +11,7 @@ import { useFixtureTest } from '../hooks/useFixtureTest';
 import { loadFixtureDefinitions, type DmxFixtureDefinition, clearFixtureDefCache } from '../hooks/dmx-cues';
 import { analyzeChannels } from '../engine/dmx-channel';
 import { sendChannelsToHardware, sendToUniverse, sendFixtureOn, sendFixtureOff, sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
+import { dmxBridge } from '../utils/dmx-bridge';
 import { fixtureTestState } from '../utils/fixture-test-state';
 import { useRgbMatrixStore } from '../stores/rgbmatrixStore';
 
@@ -55,6 +56,8 @@ function universeToEngineConfig(u: any): any {
     artnetUniverse: u.artnetUniverse ?? 0,
     sacnUniverse: u.sacnUniverse ?? 1,
     sacnPriority: u.sacnPriority ?? 100,
+    sacnReceive: u.sacnReceive,
+    sacnMergeOutput: u.sacnMergeOutput,
   };
 }
 
@@ -484,10 +487,13 @@ const SceneEditor: React.FC = () => {
       setEditDuration(5000);
       setEditChannels({});
       latestChannelsRef.current = {};
-      // Blackout — clear entire DMX universe
+      // Blackout — clear entire DMX universe. Transient (2 s): the zeros
+      // flush the hardware, then the design-test source is released so the
+      // playback engine regains control (a persistent LTP zero block would
+      // keep the show dark forever after deselecting the scene).
       const zeros: Record<number, number> = {};
       for (let i = 1; i <= 512; i++) zeros[i] = 0;
-      sendChannelsToHardwareAndStore(zeros, patchedFixtures, universes).catch(() => {});
+      sendChannelsToHardwareAndStore(zeros, patchedFixtures, universes, 'design-test', 2000).catch(() => {});
     }
   }, [scene?.id]);
 
@@ -570,12 +576,15 @@ const SceneEditor: React.FC = () => {
     try {
       await sendChannelsToHardwareAndStore(editChannels, patchedFixtures, universes);
       setTimeout(async () => {
-        // Reset all channels to 0
+        // Reset all channels to 0 — TRANSIENT (2 s): the zeros flush the
+        // hardware, then the design-test source is released so the engine
+        // regains control (a persistent LTP zero block would keep the
+        // tested scene's channels dark forever).
         const zeros: Record<number, number> = {};
         for (const addr of Object.keys(editChannels)) {
           zeros[Number(addr)] = 0;
         }
-        try { await sendChannelsToHardwareAndStore(zeros, patchedFixtures, universes); } catch {}
+        try { await sendChannelsToHardwareAndStore(zeros, patchedFixtures, universes, 'design-test', 2000); } catch {}
         setTestActive(false);
       }, 3000);
     } catch {
@@ -1389,7 +1398,11 @@ const ChaserEditor: React.FC = () => {
       }
     }
     if (Object.keys(zeros).length > 0) {
-      try { sendChannelsToHardware(zeros, patchedFixtures, universes); } catch {}
+      // TRANSIENT (2 s): the zeros flush the hardware, then the design-test
+      // source is released so the engine regains control after stopping the
+      // chaser playback (a persistent LTP zero block would keep those
+      // channels dark forever).
+      try { sendChannelsToHardware(zeros, patchedFixtures, universes, 'design-test', 2000); } catch {}
     }
   }, [editSteps, sceneById]);
 
@@ -1414,7 +1427,7 @@ const ChaserEditor: React.FC = () => {
     // Get initial scene channels
     const initScene = sceneById(step.sceneId);
     if (initScene) {
-      try { sendChannelsToHardware({}, patchedFixtures, universes); } catch {}
+      try { sendChannelsToHardware({}, patchedFixtures, universes, 'design-test'); } catch {}
     }
 
     const tick = () => {
@@ -1448,7 +1461,7 @@ const ChaserEditor: React.FC = () => {
         }
       }
 
-      try { sendChannelsToHardware(targetValues, patchedFixtures, universes); } catch {}
+      try { sendChannelsToHardware(targetValues, patchedFixtures, universes, 'design-test'); } catch {}
 
       setActiveStepIdx(currentIdx);
       setStepProgress(progress);
@@ -2753,9 +2766,6 @@ const EFXEditor: React.FC = () => {
   useEffect(() => {
     if (selectedFixtureIds.size === 0 || fixtureDefs.size === 0) return;
 
-    const api = (window as any).lightMaestro?.dmx;
-    if (!api) return;
-
     let raf = 0;
     let startTime = performance.now();
     const patchedWithDefs = patchedFixtures
@@ -2802,7 +2812,7 @@ const EFXEditor: React.FC = () => {
         }
         for (const [uniId, vals] of byUniverse) {
           const uniNum = Math.max(0, (parseInt(uniId.replace(/\D/g, ''), 10) || 1) - 1);
-          api.setChannels(uniNum, vals).catch(() => {});
+          dmxBridge.write('design-efx', uniNum, vals);
         }
         raf = requestAnimationFrame(animate);
         return;
@@ -2938,7 +2948,7 @@ const EFXEditor: React.FC = () => {
       }
       for (const [uniId, vals] of byUniverse) {
         const uniNum = Math.max(0, (parseInt(uniId.replace(/\D/g, ''), 10) || 1) - 1);
-        api.setChannels(uniNum, vals).catch(() => {});
+        dmxBridge.write('design-efx', uniNum, vals);
       }
       raf = requestAnimationFrame(animate);
     };
@@ -2946,7 +2956,10 @@ const EFXEditor: React.FC = () => {
 
     return () => {
       cancelAnimationFrame(raf);
-      // Blackout selected fixtures on unmount
+      // Blackout selected fixtures on unmount. TRANSIENT: the home/zero
+      // values flush the hardware, then the design-efx source is released
+      // after 2 s so the playback engine regains control (a plain write
+      // would re-pin pan/tilt/dimmer of these fixtures forever).
       const byUniverse = new Map<string, Record<number, number>>();
       for (const f of patchedWithDefs) {
         const uniId = f.fixture.universeId;
@@ -2961,7 +2974,7 @@ const EFXEditor: React.FC = () => {
       }
       for (const [uniId, vals] of byUniverse) {
         const uniNum = Math.max(0, (parseInt(uniId.replace(/\D/g, ''), 10) || 1) - 1);
-        api.setChannels(uniNum, vals).catch(() => {});
+        dmxBridge.writeTransient('design-efx', uniNum, vals);
       }
     };
   }, [selectedFixtureIds, fixtureDefs, patchedFixtures, pattern, width, height, rotation, speed, xOffset, yOffset]);
@@ -3868,6 +3881,9 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
           <Plus size={14} /> Add Fixture
         </button>
       </div>
+
+      {/* Réseau sACN — monitoring de ce qui part / arrive + toggle réception */}
+      <NetworkMonitor />
 
       {/* DMX Address Map */}
       <DmxAddressMap
@@ -6569,3 +6585,181 @@ const ParamField: React.FC<{ label: string; value: number; unit: string; onChang
       </div>
     </div>
   );
+
+// ─── Réseau sACN (Network Monitor) ─────────────────────────
+// Monitoring de ce qui part (émetteur sACN) et de ce qui arrive
+// (récepteur sACN, merge HTP des sources externes) par univers.
+// Données : dmx.getStatus().network (poll 1s). Le toggle réception
+// pilote l'API dmx:setSacnReceive côté moteur.
+
+const fmtNetTime = (ts: number): string =>
+  ts > 0 ? new Date(ts).toLocaleTimeString() : '—';
+
+const fmtNetPackets = (n: number): string => n.toLocaleString('fr-FR');
+
+const NetDot: React.FC<{ ok: boolean; off?: boolean; title: string }> = ({ ok, off, title }) => (
+  <span
+    title={title}
+    className={`inline-block w-2 h-2 rounded-full shrink-0 ${
+      off ? 'bg-gray-700' : ok ? 'bg-green-500' : 'bg-red-500'
+    }`}
+  />
+);
+
+const NetworkMonitor: React.FC = () => {
+  const [network, setNetwork] = useState<{ enabled: boolean; errors: string[]; universes: any[] } | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const s = await (window as any).lightMaestro?.dmx?.getStatus?.();
+        if (alive && s?.network) setNetwork(s.network);
+      } catch { /* engine not available — keep last state */ }
+    };
+    tick();
+    const iv = setInterval(tick, 1000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+
+  const toggleReceive = async (universeId: string, enabled: boolean) => {
+    setToggling(universeId);
+    try {
+      const s = await (window as any).lightMaestro?.dmx?.setSacnReceive?.(universeId, enabled);
+      if (s?.network) setNetwork(s.network);
+    } catch { /* engine off */ }
+    finally { setToggling(null); }
+  };
+
+  const universes = network?.universes ?? [];
+
+  return (
+    <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
+      <div className="px-4 py-2 border-b border-gray-800/50 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-medium text-gray-400">Réseau sACN</span>
+          <span className="flex items-center gap-1.5 text-[10px] text-gray-500">
+            <span className={`inline-block w-2 h-2 rounded-full ${network?.enabled ? 'bg-green-500' : 'bg-gray-700'}`} />
+            {network?.enabled ? 'récepteur actif' : 'récepteur inactif'}
+          </span>
+          <span className="text-[10px] text-gray-600">ce qui part (émission) · ce qui arrive (réception, merge HTP)</span>
+        </div>
+        {!!network?.errors?.length && (
+          <span className="flex items-center gap-1 text-[10px] text-red-400">
+            <AlertTriangle size={11} /> {network.errors.length} erreur(s)
+          </span>
+        )}
+      </div>
+
+      {universes.length === 0 ? (
+        <div className="p-4 text-center text-xs text-gray-600">
+          Aucun univers sACN configuré — le monitoring réseau s'affiche ici pour les univers de type sACN.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-gray-800/30 text-[10px] text-gray-500 uppercase tracking-wider">
+                <th className="text-left px-4 py-2 font-medium">Univers</th>
+                <th className="text-left px-4 py-2 font-medium">Émission (part)</th>
+                <th className="text-left px-4 py-2 font-medium">Réception (arrive)</th>
+                <th className="text-left px-4 py-2 font-medium">Sources reçues</th>
+                <th className="text-right px-4 py-2 font-medium">Réception</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800/20">
+              {universes.map((u) => (
+                <tr key={u.universeId} className="hover:bg-gray-800/20 transition-colors align-top">
+                  {/* Univers */}
+                  <td className="px-4 py-2">
+                    <div className="font-medium text-gray-200">{u.name}</div>
+                    <div className="text-[10px] text-gray-600 font-mono">U{u.universe} · prio {u.priority}</div>
+                  </td>
+
+                  {/* Émission */}
+                  <td className="px-4 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <NetDot ok={!!u.txActive && !!u.outputEnabled} title={u.txActive && u.outputEnabled ? 'Émission active' : 'Émission inactive'} />
+                      <span className={u.txActive && u.outputEnabled ? 'text-gray-300' : 'text-gray-600'}>
+                        {u.txActive && u.outputEnabled ? `${u.txFps} fps` : 'inactif'}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-gray-600 mt-0.5">
+                      {fmtNetPackets(u.txPackets)} paquets · dernière {fmtNetTime(u.txLastSendAt)}
+                    </div>
+                  </td>
+
+                  {/* Réception */}
+                  <td className="px-4 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <NetDot ok={!!u.receiving} off={!u.receiveEnabled} title={!u.receiveEnabled ? 'Réception désactivée' : u.receiving ? 'Réception active' : 'Aucune trame reçue'} />
+                      <span className={!u.receiveEnabled ? 'text-gray-600' : u.receiving ? 'text-gray-300' : 'text-red-400'}>
+                        {!u.receiveEnabled ? 'désactivée' : u.receiving ? `${u.rxFps} fps` : 'aucune trame'}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-gray-600 mt-0.5">
+                      {u.rxPps} paquets/s · {fmtNetPackets(u.rxPackets)} reçus · dernière trame {fmtNetTime(u.rxLastFrameAt)}
+                      {u.mergeOutput && <span className="text-purple-400/80"> · merge HTP → sortie</span>}
+                    </div>
+                  </td>
+
+                  {/* Sources */}
+                  <td className="px-4 py-2">
+                    {u.sources.length === 0 ? (
+                      <span className="text-[10px] text-gray-600">—</span>
+                    ) : (
+                      <div className="space-y-1">
+                        {u.sources.map((s: any) => (
+                          <div key={s.cid} className="flex items-center gap-1.5 text-[10px]">
+                            <NetDot ok={!!s.active} title={s.active ? 'Source active' : 'Source inactive (timeout)'} />
+                            <span className={s.active ? 'text-gray-300' : 'text-gray-600'}>
+                              {s.name || 'inconnue'}
+                            </span>
+                            <span className="text-gray-600">{s.address}</span>
+                            <span className="text-gray-600">prio {s.priority}</span>
+                            <span className={s.active ? 'text-gray-500' : 'text-gray-700'}>
+                              {s.active ? `${s.fps} fps` : 'timeout'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+
+                  {/* Toggle réception */}
+                  <td className="px-4 py-2 text-right">
+                    <button
+                      onClick={() => toggleReceive(u.universeId, !u.receiveEnabled)}
+                      disabled={toggling === u.universeId}
+                      title={u.receiveEnabled ? 'Désactiver la réception' : 'Activer la réception'}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all border cursor-pointer ${
+                        u.receiveEnabled
+                          ? 'bg-green-500/15 text-green-300 border-green-500/30 hover:bg-green-500/25'
+                          : 'bg-gray-800/40 text-gray-500 border-gray-700 hover:bg-gray-700/40 hover:text-gray-300'
+                      } ${toggling === u.universeId ? 'opacity-50' : ''}`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${u.receiveEnabled ? 'bg-green-400' : 'bg-gray-600'}`} />
+                      {u.receiveEnabled ? 'ON' : 'OFF'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!!network?.errors?.length && (
+        <div className="px-4 py-2 border-t border-gray-800/50 space-y-0.5">
+          {network.errors.slice(-5).map((e, i) => (
+            <div key={i} className="text-[10px] text-red-400/80 flex items-center gap-1.5">
+              <AlertTriangle size={10} className="shrink-0" /> {e}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+

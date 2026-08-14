@@ -8,6 +8,7 @@
 import type { PatchedFixture } from '../stores/showStore';
 import { useAppStore } from '../stores/appStore';
 import { fixtureTestState } from './fixture-test-state';
+import { dmxBridge } from './dmx-bridge';
 
 export interface UniverseInfo {
   id: string;
@@ -62,38 +63,47 @@ export function dispatchChannelsByFixture(
 
 /**
  * Send channel values to all relevant DMX universes based on fixture patch.
+ * `sourceId` names the output-arbiter source so priorities apply.
  */
 export async function sendChannelsToHardware(
   channelValues: Record<number, number>,
   patchedFixtures: PatchedFixture[],
   universes: UniverseInfo[],
+  sourceId: string = 'default',
+  transientMs?: number,
 ): Promise<void> {
   const dmx = (window as any).lightMaestro?.dmx;
   if (!dmx) return;
 
-  // dmx.setChannels IPC handler auto-starts the engine if needed and silently
-  // creates any missing universes — no need for explicit start/register calls
   if (patchedFixtures.length > 0 && universes.length > 0) {
     const dispatched = dispatchChannelsByFixture(channelValues, patchedFixtures, universes);
     for (const [uniNum, vals] of dispatched.entries()) {
-      try { await dmx.setChannels(uniNum, vals); } catch {}
+      try {
+        if (transientMs !== undefined) dmxBridge.writeTransient(sourceId, uniNum, vals, transientMs);
+        else dmxBridge.write(sourceId, uniNum, vals);
+      } catch {}
     }
   } else {
     // Direct output — no fixtures patched, send to universe 0
-    try { await dmx.setChannels(0, channelValues); } catch {}
+    try {
+      if (transientMs !== undefined) dmxBridge.writeTransient(sourceId, 0, channelValues, transientMs);
+      else dmxBridge.write(sourceId, 0, channelValues);
+    } catch {}
   }
 }
 
 /**
  * Send to a single universe — useful for Simple Desk (per-universe).
+ * `sourceId` names the output-arbiter source so priorities apply.
  */
 export async function sendToUniverse(
   uniNum: number,
   channelValues: Record<number, number>,
+  sourceId: string = 'default',
 ): Promise<void> {
   const dmx = (window as any).lightMaestro?.dmx;
   if (!dmx) return;
-  try { await dmx.setChannels(uniNum, channelValues); } catch {}
+  try { dmxBridge.write(sourceId, uniNum, channelValues); } catch {}
 }
 
 /**
@@ -155,13 +165,16 @@ export function buildFixtureOnChannelValues(
 /**
  * Send channel values to hardware AND mirror them into the appStore
  * so the 3D view shows exactly what the hardware receives.
+ * `sourceId` names the output-arbiter source so priorities apply.
  */
 export async function sendChannelsToHardwareAndStore(
   channelValues: Record<number, number>,
   patchedFixtures: PatchedFixture[],
   universes: UniverseInfo[],
+  sourceId: string = 'design-test',
+  transientMs?: number,
 ): Promise<void> {
-  try { await sendChannelsToHardware(channelValues, patchedFixtures, universes); } catch {}
+  try { await sendChannelsToHardware(channelValues, patchedFixtures, universes, sourceId, transientMs); } catch {}
   const dispatched = dispatchChannelsByFixture(channelValues, patchedFixtures, universes);
   for (const [uniNum, vals] of dispatched.entries()) {
     try { useAppStore.getState().setUniverseData(uniNum, vals); } catch {}
@@ -181,7 +194,7 @@ export async function sendFixtureOn(
   const values = buildFixtureOnChannelValues(pf, channels);
   if (Object.keys(values).length === 0) return;
   fixtureTestState.set(pf.id, values);
-  try { await sendChannelsToHardware(values, patchedFixtures, universes); } catch {}
+  try { await sendChannelsToHardware(values, patchedFixtures, universes, 'fixture-onoff'); } catch {}
   const uniIdx = universes.findIndex((u) => u.id === pf.universeId);
   if (uniIdx >= 0) {
     try { useAppStore.getState().setUniverseData(uniIdx, values); } catch {}
@@ -200,7 +213,9 @@ export async function sendFixtureOff(
   fixtureTestState.clear(pf.id);
   const zeros: Record<number, number> = {};
   for (let a = pf.startAddress; a < pf.startAddress + pf.channelCount; a++) zeros[a] = 0;
-  try { await sendChannelsToHardware(zeros, patchedFixtures, universes); } catch {}
+  // Transient: zeros flush the fixture, then the source is released so the
+  // engine can light it again (a persistent LTP zero block would pin it off).
+  try { await sendChannelsToHardware(zeros, patchedFixtures, universes, 'fixture-onoff', 2000); } catch {}
   const uniIdx = universes.findIndex((u) => u.id === pf.universeId);
   if (uniIdx >= 0) {
     try { useAppStore.getState().setUniverseData(uniIdx, zeros); } catch {}

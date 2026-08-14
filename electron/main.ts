@@ -142,6 +142,11 @@ ipcMain.handle('dmx:blackout', async () => dmxEngine.blackout());
 ipcMain.handle('dmx:restore', async () => dmxEngine.restore());
 ipcMain.handle('dmx:getUniverses', async () => dmxEngine.getUniverseConfigs());
 ipcMain.handle('dmx:getStatus', async () => dmxEngine.getStatus());
+// Network monitoring: toggle sACN reception for a universe at runtime
+ipcMain.handle('dmx:setSacnReceive', async (_, id: string, enabled: boolean) => {
+  dmxEngine.setSacnReceive(id, !!enabled);
+  return dmxEngine.getStatus();
+});
 ipcMain.handle('dmx:addUniverse', async (_, config: any) => dmxEngine.addUniverse(config));
 ipcMain.handle('dmx:syncUniverses', async (_, configs: any[]) => dmxEngine.syncUniverses(configs || []));
 ipcMain.handle('dmx:removeUniverse', async (_, id: string) => dmxEngine.removeUniverse(id));
