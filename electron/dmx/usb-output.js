@@ -15,20 +15,43 @@
  *   {"type":"ready","portId":0,"port":"COM6"}
  *   {"type":"error","portId":0,"message":"..."}
  *   {"type":"frame","portId":0}
+ *   {"type":"disconnected","portId":0,"message":"..."}  ← fatal port loss
+ *                                      (unplug / driver reset); process exits with code 3
  */
 
 const { SerialPort } = require('serialport');
+const fs = require('fs');
 
 // ─── State ──────────────────────────────────────────────────
 
 var ports = {};
 var buf = Buffer.alloc(0);
 var shutdown = false;
+/** portId → true once a fatal disconnect has been reported (guard against double exit) */
+var fatal = {};
 
 // ─── Helpers ─────────────────────────────────────────────────
 
 function log(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');
+}
+
+/** Synchronous stdout write — used right before process.exit() so the
+ *  "disconnected" message is never truncated by an async flush. */
+function logSync(obj) {
+  fs.writeSync(1, JSON.stringify(obj) + '\n');
+}
+
+/**
+ * Fatal port loss (USB dongle unplugged / driver reset / open failure).
+ * Reports the loss to the parent engine, then exits with a dedicated code so
+ * the parent removes the universe entry and respawns us (see engine.ts).
+ */
+function flagDisconnected(portId, reason) {
+  if (fatal[portId]) return;
+  fatal[portId] = true;
+  logSync({ type: 'disconnected', portId: portId, message: reason });
+  process.exit(3);
 }
 
 function createDmxFrame(data) {
@@ -41,7 +64,13 @@ function createDmxFrame(data) {
 
 function sendFrame(portId, rawData) {
   var entry = ports[portId];
-  if (!entry || !entry.port || !entry.port.isOpen) return;
+  if (!entry) return;
+
+  // Port died between frames (unplugged) — report so the engine respawns us
+  if (!entry.port || !entry.port.isOpen) {
+    flagDisconnected(portId, 'port not open');
+    return;
+  }
 
   // Skip if busy — DMX is lossy, dropping occasional frames is fine
   if (entry.busy) return;
@@ -51,13 +80,25 @@ function sendFrame(portId, rawData) {
 
   // DMX BREAK/MAB sequence via serialport
   // set brk=true → hold line low (break) → set brk=false → MAB → write frame
+  // ports[portId] missing = closePort() ran = intentional close → do nothing.
   entry.port.set({ brk: true }, function(err) {
-    if (err || !entry.port || !entry.port.isOpen) { entry.busy = false; return; }
+    if (shutdown || !ports[portId]) { entry.busy = false; return; }
+    if (err || !entry.port || !entry.port.isOpen) {
+      entry.busy = false;
+      flagDisconnected(portId, err ? err.message : 'port closed during break');
+      return;
+    }
     entry.port.set({ brk: false }, function(err2) {
-      if (err2 || !entry.port || !entry.port.isOpen) { entry.busy = false; return; }
+      if (shutdown || !ports[portId]) { entry.busy = false; return; }
+      if (err2 || !entry.port || !entry.port.isOpen) {
+        entry.busy = false;
+        flagDisconnected(portId, err2 ? err2.message : 'port closed during MAB');
+        return;
+      }
       entry.port.write(frame, function(err3) {
         entry.busy = false;
-        if (err3) log({ type: 'error', portId: portId, message: 'write: ' + err3.message });
+        if (shutdown || !ports[portId]) return;
+        if (err3) flagDisconnected(portId, 'write: ' + err3.message);
         else log({ type: 'frame', portId: portId });
       });
     });
@@ -82,11 +123,23 @@ function openPort(portId, portName) {
 
     port.on('error', function(err) {
       log({ type: 'error', portId: portId, message: 'port error: ' + err.message });
+      // ports[portId] missing = intentional closePort() → ignore.
+      if (!shutdown && ports[portId]) flagDisconnected(portId, err.message);
+    });
+
+    port.on('close', function(err) {
+      // Unexpected close (device unplugged / driver reset). Intentional closes
+      // are guarded: closePort() removes the entry before calling close().
+      if (shutdown || !ports[portId]) return;
+      flagDisconnected(portId, (err && err.message) || 'port closed unexpectedly');
     });
 
     port.open(function(err) {
       if (err) {
         log({ type: 'error', portId: portId, message: 'open failed: ' + err.message });
+        // No live port = the parent must keep retrying (boot enumeration,
+        // dongle absent, …). Exit so the engine can respawn us.
+        if (!shutdown) flagDisconnected(portId, 'open failed: ' + err.message);
         return;
       }
       // RTS HIGH powers RS-485 transceiver on many USB-DMX dongles
@@ -96,14 +149,17 @@ function openPort(portId, portName) {
     });
   } catch (e) {
     log({ type: 'error', portId: portId, message: 'create: ' + e.message });
+    if (!shutdown) flagDisconnected(portId, 'create: ' + e.message);
   }
 }
 
 function closePort(portId) {
   var entry = ports[portId];
   if (entry) {
-    try { entry.port.close(); } catch (ignore) {}
+    // Remove the entry BEFORE closing so the 'close' event handler does not
+    // treat this intentional close as an unexpected disconnect.
     delete ports[portId];
+    try { entry.port.close(); } catch (ignore) {}
   }
 }
 
@@ -177,9 +233,11 @@ process.on('exit', function() {
   }
 });
 
-process.on('SIGTERM', function() { process.exit(0); });
-process.on('SIGINT', function() { process.exit(0); });
+process.on('SIGTERM', function() { shutdown = true; process.exit(0); });
+process.on('SIGINT', function() { shutdown = true; process.exit(0); });
 
 process.on('uncaughtException', function(err) {
   log({ type: 'error', portId: -1, message: 'uncaught: ' + err.message });
+  // Corrupted state — exit so the parent respawns a fresh child.
+  process.exit(3);
 });

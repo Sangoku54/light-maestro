@@ -110,6 +110,11 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     remove: (key: string) => ipcRenderer.invoke('storage:remove', key),
   },
 
+  // Watchdog (renderer heartbeat — fail-safe blackout in the main process)
+  watchdog: {
+    ping: () => ipcRenderer.send('watchdog:ping'),
+  },
+
   // App-level controls
   app: {
     onBeforeClose: (callback: () => void) => {

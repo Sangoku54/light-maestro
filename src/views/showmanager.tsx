@@ -897,15 +897,17 @@ export const ShowManager: React.FC = () => {
               if (!selectedShow) return;
               try {
                 // Save via system file dialog
-                const filePath = await window.lightMaestro.dialog.saveFile(
+                const saved = await window.lightMaestro.dialog.saveFile(
                   [{ name: 'Light Maestro Show', extensions: ['lmshow'] }],
                   `${selectedShow.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.lmshow`,
                   JSON.stringify(selectedShow, null, 2)
                 );
-                if (filePath) {
-                  console.log('Show saved to', filePath);
+                if (saved) {
+                  // dialog:saveFile returns { filePath, name } — normalize to a string path
+                  const savedPath = typeof saved === 'string' ? saved : (saved as { filePath?: string }).filePath;
+                  console.log('Show saved to', savedPath);
                   // Also save via the show storage for recent list
-                  try { await window.lightMaestro.show.save(selectedShow, filePath); } catch {}
+                  try { await window.lightMaestro.show.save(selectedShow, savedPath); } catch {} 
                 }
               } catch (err) { console.error('Save failed', err); }
             }}

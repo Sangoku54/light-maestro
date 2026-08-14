@@ -95,7 +95,7 @@ export function buildRgbSegments(colourChannels: Array<{offset:number;name:strin
   return segments;
 }
 
-import type { DmxFixtureCapability } from './dmx-cues';
+import type { DmxFixtureCapability } from '../hooks/dmx-cues';
 import type { PatchedFixture } from '../stores/showStore';
 
 export function findBestWheelCap(caps: DmxFixtureCapability[], paletteHex: string): DmxFixtureCapability|null {

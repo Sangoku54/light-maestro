@@ -3762,8 +3762,8 @@ if (editBlock) { setEditBlock(null); return; }
               <div className="flex justify-end gap-2 mt-5">
                 <button onClick={() => setEditBlock(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
                 <button onClick={() => {
-                  const p1 = (document.getElementById('__ed_mv_p1') as HTMLSelectElement).value;
-                  const p2 = (document.getElementById('__ed_mv_p2') as HTMLSelectElement).value;
+                  const p1 = (document.getElementById('__ed_mv_p1') as HTMLSelectElement).value as MovementBlock['pattern'];
+                  const p2 = (document.getElementById('__ed_mv_p2') as HTMLSelectElement).value as MovementBlock['pattern'];
                   const a1 = Number((document.getElementById('__ed_mv_a1') as HTMLInputElement).value);
                   const a2 = Number((document.getElementById('__ed_mv_a2') as HTMLInputElement).value);
                   onFixtureTracksChange(fixtureTracks.map((t, i) => i === editBlock.trackIdx ? { ...t, movementBlocks: t.movementBlocks.map(b => b.id === editBlock.blockId ? { ...b, pattern: p1, amplitude: a1, endPattern: p1 !== p2 ? p2 : undefined, endAmplitude: a1 !== a2 ? a2 : undefined } : b) } : t));

@@ -25,6 +25,8 @@ export interface PatchedFixture {
   channelCount: number;
   name: string;
   tier: FixtureTier;
+  /** Whether the fixture participates in auto-generated output (undefined = enabled). */
+  enabled?: boolean;
   thumbnailId?: string; // variant id from fixtureThumbnails
 }
 
@@ -163,6 +165,7 @@ export interface SongPreset {
   colorTracks?: any[];
   strobeTracks?: any[];
   dimmerTracks?: any[];
+  chaserTracks?: any[];
   createdAt: string;
 }
 

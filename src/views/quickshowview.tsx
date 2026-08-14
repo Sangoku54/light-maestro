@@ -3,7 +3,7 @@ import React, { useCallback, useState, useEffect, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next';
 import { Save, FolderOpen, Download, RefreshCw, Undo2, Redo2, Trash2, Zap, ZapOff, Pencil, Plus, Palette, Sun, Layers, Repeat, Upload, Music, Crosshair, Snowflake } from 'lucide-react';
 import { useAppStore, type CustomPalette, type ColorPreset } from '../stores/appStore';
-import { useShowStore, type PatchedFixture } from '../stores/showStore';
+import { useShowStore, type PatchedFixture, type SongPreset } from '../stores/showStore';
 import { AudioFileUpload, useAudioFileLoader } from '../hooks/useAudioFileLoader';
 import { TrackAnalysis, TrackSection, SECTION_COLORS, keyToPalette, SectionAnalysis, AtmosphereType } from '../hooks/audio-analysis';
 import type { GenreProfile } from '../hooks/audio-analysis';
@@ -391,7 +391,7 @@ export function genCues(
   beatDivision: number,
   cfg: any,
   manualCues: DmxCue[],
-  regenSeed?: number,
+  regenSeed?: number | string,
   analysis?: TrackAnalysis | null,
 ): any[] {
   const cues: any[] = [];
@@ -1633,8 +1633,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const firedRef = useRef<Set<string>>(new Set());
 
   /* ─── Undo/redo ──────────────────────────────────── */
-  const undoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[]; chaserTracks: ChaserTrack[] }[]>([]);
-  const redoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[]; chaserTracks: ChaserTrack[] }[]>([]);
+  const undoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[]; chaserTracks: ChaserTrack[]; disabledFixtures: Set<string> }[]>([]);
+  const redoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[]; chaserTracks: ChaserTrack[]; disabledFixtures: Set<string> }[]>([]);
   const canUndo = undoHistoryRef.current.length > 0;
   const canRedo = redoHistoryRef.current.length > 0;
 
@@ -1824,7 +1824,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
 
   /* ─── Preset file dialog loader ───────────────── */
   const [presetsDropdown, setPresetsDropdown] = useState(false);
-  const [savedPresets, setSavedPresets] = useState<Array<{ name: string; timestamp: string; data: any }>>([]);
+  const [savedPresets, setSavedPresets] = useState<Array<{ name: string; timestamp: string; data?: any } & Partial<SongPreset>>>([]);
   const presetsBtnRef = useRef<HTMLButtonElement>(null);
 
   // Load saved preset list on mount
@@ -3434,7 +3434,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             </button>
           ))}
           <button
-            onClick={() => triggerAddColor(sections[picker.idx]?.type as keyof CustomPalette || 'unknown')}
+            onClick={() => triggerAddColor((sections[picker.idx]?.type || 'unknown') as keyof CustomPalette)}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800 flex items-center gap-2"
           >
             <Plus className="w-3 h-3" /> Add color

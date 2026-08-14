@@ -3072,7 +3072,7 @@ const EFXEditor: React.FC = () => {
       .join(' ');
   }, [previewPoints]);
 
-  const trailPoints = React.useMemo(() => {
+  const trailPoints = React.useMemo<{ x: number; y: number; alpha?: number }[]>(() => {
     if (previewPoints.length < 10) return previewPoints;
     const currentIdx = Math.floor((phase / (Math.PI * 2)) * previewPoints.length) % previewPoints.length;
     const trail: { x: number; y: number; alpha: number }[] = [];

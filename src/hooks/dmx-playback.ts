@@ -23,6 +23,8 @@ export interface ColorTrackRef {
     groupId?: string;
     fixtureIds?: string[];
   };
+  /** Display name (debug/diagnostics only). */
+  name?: string;
 }
 
 export interface StrobeTrackRef {
@@ -50,7 +52,7 @@ export function computeStrobeTrackOverrides(
   strobeTracks: StrobeTrackRef[],
   currentTime: number,
   patchedFixtures: PatchedFixture[],
-  fixtureGroups: FixtureGroup[],
+  fixtureGroups: { id: string; fixtureIds: string[] }[],
 ): Map<string, { active: boolean; speed: number }> {
   const result = new Map<string, { active: boolean; speed: number }>();
   for (const stItem of strobeTracks) {
@@ -85,7 +87,7 @@ export function computeDimmerTrackOverrides(
   dimmerTracks: DimmerTrackRef[],
   currentTime: number,
   patchedFixtures: PatchedFixture[],
-  fixtureGroups: FixtureGroup[],
+  fixtureGroups: { id: string; fixtureIds: string[] }[],
 ): Map<string, { active: boolean; value: number }> {
   const result = new Map<string, { active: boolean; value: number }>();
   for (const dtItem of dimmerTracks) {
@@ -120,7 +122,7 @@ export function computeColorTrackColors(
   colorTracks: ColorTrackRef[],
   currentTime: number,
   patchedFixtures: PatchedFixture[],
-  fixtureGroups: FixtureGroup[],
+  fixtureGroups: { id: string; fixtureIds: string[] }[],
 ): Map<string, string> {
   const result = new Map<string, string>();
   for (const ctItem of colorTracks) {
@@ -184,6 +186,8 @@ export interface ChaserTrackRef {
     groupId?: string;
     fixtureIds?: string[];
   };
+  /** Display name (debug/diagnostics only). */
+  name?: string;
 }
 
 /**
@@ -198,7 +202,7 @@ export function computeChaserTrackOverrides(
   scenes: Array<{ id: string; channels: Record<number, number> }>,
   currentTime: number,
   patchedFixtures: PatchedFixture[],
-  fixtureGroups: FixtureGroup[],
+  fixtureGroups: { id: string; fixtureIds: string[] }[],
 ): Map<string, Record<number, number>> {
   const controlled = new Map<string, Record<number, number>>();
   for (const tr of chaserTracks) {
@@ -376,7 +380,7 @@ export function useDmxPlayback(options: {
   const patchedFixturesRef=useRef(patchedFixtures);patchedFixturesRef.current=patchedFixtures;
 
   // Pre-compute fixture channel analysis (re-computed when fixtures change)
-  const analysisRef=useRef<{byUniverse:Map<number,ChannelAnalysis[]>;uniIds:string[]}|null>(null);
+  const analysisRef=useRef<{byUniverse:Map<number,ChannelAnalysis[]>;uniIds:string[];_key?:string}|null>(null);
   useEffect(()=>{
     if(patchedFixtures.length===0||universes.length===0){analysisRef.current=null;return;}
     const uniIds=universes.map(u=>String(u.id));
@@ -561,7 +565,6 @@ export function useDmxPlayback(options: {
       let active:CuePlayback|null=null;
       for(const cue of c){if(cue.time<=ct&&(!active||cue.time>active.time))active=cue;}
       // Pre-compute section for use throughout tick (isDrop, isChorus, strobe sectionMult, movement fallback)
-      // @ts-expect-error — active is non-null at usage sites (returned above if null)
       const sec:string = active?.section?.toLowerCase() ?? 'verse';
       // Standby / blackout at boundaries
       let fadeFactor = 1.0;
@@ -646,7 +649,7 @@ export function useDmxPlayback(options: {
       if (!efxPtOverrides || efxPtOverrides.size === 0) {
         if (efxTracksRef?.current && efxTracksRef.current.length > 0 && effectsRef?.current && effectsRef.current.length > 0) {
           const hasEntries = efxTracksRef.current.some(t => t.entries.length > 0);
-          if (hasEntries) ;
+          if (hasEntries) {}
         }
       }
       const efxMap=efxActive||{};

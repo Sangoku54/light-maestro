@@ -73,6 +73,10 @@ export class DMXEngine extends EventEmitter {
   // USB serialport child process outputs (one per universe)
   private usbOutputs: Map<string, UsbOutput> = new Map();
 
+  /** Universes that have had a live USB output at least once (drives the honest
+   *  "reconnecting" vs "disconnected" status after a hot unplug). */
+  private usbEverConnected = new Set<string>();
+
   // Art-Net / sACN outputs (main process, avoids worker require issues)
   private artnetOutputs: Map<string, ArtNetOutput> = new Map();
   private sacnOutputs: Map<string, SacnOutput> = new Map();
@@ -135,9 +139,23 @@ export class DMXEngine extends EventEmitter {
     if (this.startCancelled) { await this.stopInternal(); return; }
 
     this.worker!.postMessage({ type: 'start' });
-    // A successful start clears transient errors from USB retry attempts
-    this.lastError = null;
-    for (const entry of this.universes.values()) entry.active = true;
+    // A successful start clears transient errors from USB retry attempts —
+    // unless a USB universe is still without a live output (honest status).
+    if (this.hasDisconnectedUsb()) {
+      this.lastError = 'USB output disconnected — waiting for dongle';
+    } else {
+      this.lastError = null;
+    }
+    for (const [id, entry] of this.universes.entries()) {
+      // USB universes report their own liveness via the child output; other
+      // output types are active as long as the engine is running.
+      if (entry.config.type === 'usb-dmx') {
+        const usb = this.usbOutputs.get(id);
+        entry.active = !!(usb && usb.ready && !usb.child.killed);
+      } else {
+        entry.active = true;
+      }
+    }
     this.startUsbRetryTimer();
     this.emit('started');
   }
@@ -221,6 +239,7 @@ export class DMXEngine extends EventEmitter {
   private stopOutput(id: string): void {
     const usbOut = this.usbOutputs.get(id);
     if (usbOut) { try { usbOut.child.kill(); } catch {} this.usbOutputs.delete(id); }
+    this.usbEverConnected.delete(id);
     const artnetOut = this.artnetOutputs.get(id);
     if (artnetOut) { try { artnetOut.controller.close(); } catch {} this.artnetOutputs.delete(id); }
     const sacnOut = this.sacnOutputs.get(id);
@@ -232,6 +251,7 @@ export class DMXEngine extends EventEmitter {
       try { output.child.kill(); } catch {}
     }
     this.usbOutputs.clear();
+    this.usbEverConnected.clear();
 
     for (const [, output] of this.artnetOutputs) {
       try { output.controller.close(); } catch {}
@@ -311,12 +331,32 @@ export class DMXEngine extends EventEmitter {
             try {
               const msg = JSON.parse(line.trim());
               if (msg.type === 'ready') {
+                // Ignore a late READY from a child that was already timed
+                // out / killed — a newer child owns this universe now.
+                if (child.killed) return;
                 const output: UsbOutput = { child, portName, ready: true };
                 this.usbOutputs.set(id, output);
+                const univ = this.universes.get(id);
+                if (univ) univ.active = true;
+                this.usbEverConnected.add(id);
+                this.usbRetryCounts.set(id, 0);
                 this.emit('info', `USB DMX ready on ${portName}`);
                 settle(true);
               } else if (msg.type === 'error') {
                 this.emit('error', new Error(`USB ${portName}: ${msg.message}`));
+              } else if (msg.type === 'disconnected') {
+                // USB dongle lost (unplugged / driver reset / open failure).
+                // Drop the output entry so the retry timer respawns the child,
+                // and surface an honest error instead of a green status.
+                // Ignore a stale child: a newer one may own the universe now.
+                const current = this.usbOutputs.get(id);
+                if (current && current.child !== child) return;
+                this.usbOutputs.delete(id);
+                const univ = this.universes.get(id);
+                if (univ) univ.active = false;
+                this.usbRetryCounts.set(id, 0);
+                this.emit('error', new Error(`USB ${portName}: ${msg.message || 'output lost'} — retrying`));
+                try { child.kill(); } catch {}
               }
             } catch {}
           }
@@ -328,24 +368,38 @@ export class DMXEngine extends EventEmitter {
         });
 
         child.on('error', (err: Error) => {
-          this.emit('error', new Error(`USB child process error: ${err.message}`));
+          this.emit('error', new Error(`USB ${portName} child process error: ${err.message}`));
+          const univ = this.universes.get(id);
+          if (univ) univ.active = false;
           try { child.kill(); } catch {}
           this.usbOutputs.delete(id);
           settle(false);
         });
 
         child.on('exit', (code: number | null) => {
-          if (code !== 0 && code !== null) {
-            this.emit('error', new Error(`USB child exited with code ${code}`));
+          // Only touch state that still belongs to THIS child: a newer child
+          // may have taken over the universe id since (hot re-plug respawn).
+          const current = this.usbOutputs.get(id);
+          if (current && current.child === child) {
+            this.usbOutputs.delete(id);
+            const univ = this.universes.get(id);
+            if (univ) univ.active = false;
           }
-          this.usbOutputs.delete(id);
+          if (code !== 0 && code !== null) {
+            this.emit('error', new Error(`USB ${portName}: child exited with code ${code}`));
+          }
           settle(false);
         });
 
         setTimeout(() => {
           if (!settled) {
             try { child.kill(); } catch {}
-            this.usbOutputs.delete(id);
+            const current = this.usbOutputs.get(id);
+            if (current && current.child === child) {
+              this.usbOutputs.delete(id);
+              const univ = this.universes.get(id);
+              if (univ) univ.active = false;
+            }
             this.emit('error', new Error(`USB ${portName}: timeout waiting for READY`));
             settle(false);
           }
@@ -392,7 +446,8 @@ export class DMXEngine extends EventEmitter {
   // ─── USB retry watcher ──────────────────────────────────
   // At boot the OS may enumerate the USB adapter several seconds after the
   // engine starts. If a configured usb-dmx universe has no live output, retry
-  // opening the port every 5s (up to ~60s) without any user action.
+  // opening the port every 5s (up to ~60s) without any user action, then keep
+  // retrying every ~30s so a dongle plugged back in at any time is picked up.
   private startUsbRetryTimer(): void {
     this.stopUsbRetryTimer();
     this.usbRetryCounts.clear();
@@ -403,7 +458,10 @@ export class DMXEngine extends EventEmitter {
         const portName = entry.config.serialPort || '';
         if (!portName.trim()) continue;
         const n = this.usbRetryCounts.get(id) || 0;
-        if (n >= 12) continue; // give up after ~60s of failure
+        // Fast phase: every tick (~5s) for the first 12 attempts (~60s,
+        // covers slow boot enumeration). Slow phase: every 6th tick (~30s)
+        // indefinitely, so a hot-plugged dongle is picked up at any time.
+        if (n >= 12 && n % 6 !== 0) continue;
         this.usbRetryCounts.set(id, n + 1);
         const scriptPath = path.join(__dirname, 'usb-output.js');
         this.trySpawnUsbChild(id, portName, scriptPath).then((ok) => {
@@ -411,6 +469,19 @@ export class DMXEngine extends EventEmitter {
         });
       }
     }, 5000);
+  }
+
+  /** True when a configured usb-dmx universe has no live child output.
+   *  Drives the honest status: frames flowing elsewhere must not clear the
+   *  "USB disconnected" error while a dongle is down. */
+  private hasDisconnectedUsb(): boolean {
+    for (const [id, entry] of this.universes.entries()) {
+      if (entry.config.type !== 'usb-dmx') continue;
+      if (!(entry.config.serialPort || '').trim()) continue; // config error, not hardware state
+      const usb = this.usbOutputs.get(id);
+      if (!usb || !usb.ready || usb.child.killed) return true;
+    }
+    return false;
   }
 
   private stopUsbRetryTimer(): void {
@@ -425,8 +496,10 @@ export class DMXEngine extends EventEmitter {
   private handleFrameSent(): void {
     // Telemetry: measure the worker's output heartbeat (running ⇒ ~30 fps)
     this.frameCount++;
-    // Frames flowing = the engine is healthy: clear any transient boot error
-    if (this.lastError) this.lastError = null;
+    // Frames flowing = the engine is healthy: clear any transient boot error —
+    // unless a USB universe is down, in which case the error must stay visible
+    // (never show a green "all OK" dot while a dongle is disconnected).
+    if (this.lastError && !this.hasDisconnectedUsb()) this.lastError = null;
     const now = Date.now();
     if (this.lastFrameTime > 0) {
       const dt = now - this.lastFrameTime;
@@ -567,6 +640,7 @@ export class DMXEngine extends EventEmitter {
 
     const usbOut = this.usbOutputs.get(id);
     if (usbOut) { try { usbOut.child.kill(); } catch {} this.usbOutputs.delete(id); }
+    this.usbEverConnected.delete(id);
     const artnetOut = this.artnetOutputs.get(id);
     if (artnetOut) { try { artnetOut.controller.close(); } catch {} this.artnetOutputs.delete(id); }
     const sacnOut = this.sacnOutputs.get(id);
@@ -591,18 +665,28 @@ export class DMXEngine extends EventEmitter {
       grandMaster: this.grandMasterLevel,
       frameRate: Math.round(this.measuredFps),
       frameCount: this.frameCount,
-      universes: Array.from(this.universes.values()).map((e) => ({
-        id: e.config.id,
-        name: e.config.name,
-        type: e.config.type,
-        output: e.config.output,
-        serialPort: e.config.serialPort || '',
-        artnetIP: e.config.artnetIP || '',
-        artnetUniverse: e.config.artnetUniverse ?? 0,
-        sacnUniverse: e.config.sacnUniverse ?? 1,
-        channels: e.config.channels,
-        active: e.active,
-      })),
+      universes: Array.from(this.universes.values()).map((e) => {
+        let usbState: 'none' | 'ready' | 'reconnecting' | 'disconnected' = 'none';
+        if (e.config.type === 'usb-dmx') {
+          const usb = this.usbOutputs.get(e.config.id);
+          if (usb && usb.ready && !usb.child.killed) usbState = 'ready';
+          else if (this.usbEverConnected.has(e.config.id)) usbState = 'reconnecting';
+          else usbState = 'disconnected';
+        }
+        return {
+          id: e.config.id,
+          name: e.config.name,
+          type: e.config.type,
+          output: e.config.output,
+          serialPort: e.config.serialPort || '',
+          artnetIP: e.config.artnetIP || '',
+          artnetUniverse: e.config.artnetUniverse ?? 0,
+          sacnUniverse: e.config.sacnUniverse ?? 1,
+          channels: e.config.channels,
+          active: e.active,
+          usbState,
+        };
+      }),
       lastError: this.lastError,
     };
   }

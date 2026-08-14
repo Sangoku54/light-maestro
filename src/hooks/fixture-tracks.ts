@@ -58,6 +58,8 @@ export interface FixtureTrack {
   target: string;
   label: string;
   enabled: boolean;
+  /** Display-only: names of fixtures targeted by this track (timeline UI). */
+  fixtureNames?: string[];
   colorBlocks: ColorBlock[];
   dimmerBlocks: DimmerBlock[];
   strobeBlocks: StrobeBlock[];

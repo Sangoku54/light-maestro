@@ -1,10 +1,12 @@
-/**
- * Show Storage — Save/Load light shows
- *
- * QLC+ uses XML (.qxw), SoundSwitch uses proprietary format.
- * We use JSON for readability and ease of editing, with SQLite for
- * efficient scene/chaser indexing in large shows.
- */
+// ─── Show Storage — Save/Load light shows
+//
+// QLC+ uses XML (.qxw), SoundSwitch uses proprietary format.
+// We use JSON for readability and ease of editing, with SQLite for
+// efficient scene/chaser indexing in large shows.
+
+// Current schema version of the written .lmshow format.
+// Files without the field are treated as v1 (backward compatible).
+const SHOW_SCHEMA_VERSION = 1;
 
 import fs from 'fs';
 import path from 'path';
@@ -119,6 +121,8 @@ export interface ShowData {
   version: string; // Light Maestro version
   created: string; // ISO date
   modified: string;
+  /** Show file schema version — absent = v1 (legacy files are tolerated). */
+  schemaVersion?: number;
 
   // Universe configuration
   universes: any[];
@@ -171,12 +175,18 @@ export class ShowStorage {
 
   save(show: ShowData, filePath?: string): string {
     show.modified = new Date().toISOString();
+    show.schemaVersion = SHOW_SCHEMA_VERSION;
 
     const json = JSON.stringify(show, null, 2);
     const targetPath = filePath || this.getDefaultPath(show.name);
 
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-    fs.writeFileSync(targetPath, json, 'utf-8');
+
+    // Atomic write: temp file + rename, so a crash mid-write never leaves
+    // a truncated/corrupted show file (rename is atomic on the same volume).
+    const tmpPath = `${targetPath}.tmp`;
+    fs.writeFileSync(tmpPath, json, 'utf-8');
+    fs.renameSync(tmpPath, targetPath);
 
     this.addToRecent(targetPath);
     this.indexShow(show);
@@ -193,6 +203,15 @@ export class ShowStorage {
 
     const json = fs.readFileSync(filePath, 'utf-8');
     const show = JSON.parse(json) as ShowData;
+
+    // Schema versioning: files written before schemaVersion existed are v1.
+    // Missing field is tolerated; unknown newer versions warn but still load.
+    const schemaVersion = (show as any).schemaVersion ?? 1;
+    if (schemaVersion > SHOW_SCHEMA_VERSION) {
+      console.warn(
+        `[ShowStorage] ${filePath}: schemaVersion ${schemaVersion} is newer than supported ${SHOW_SCHEMA_VERSION} — loading may be incomplete`
+      );
+    }
 
     this.addToRecent(filePath);
 

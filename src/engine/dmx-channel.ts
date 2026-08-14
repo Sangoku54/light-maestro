@@ -2,7 +2,7 @@
 // Extracted from dmx-playback.ts — fixture channel capability analysis
 
 import type { PatchedFixture } from '../stores/showStore';
-import type { DmxFixtureDefinition, DmxFixtureCapability } from './dmx-cues';
+import type { DmxFixtureDefinition, DmxFixtureCapability } from '../hooks/dmx-cues';
 import { RgbSegment, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments } from './dmx-color';
 
 export interface ChannelAnalysis {

@@ -41,7 +41,7 @@ export interface DmxFixtureChannel {
     | 'Effect'
     | 'Beam'
     | 'Maintenance'
-    | 'Nothing';
+    | 'Nothing' | 'Macro' | 'Zoom' | 'Frost' | 'Focus' | 'Iris';
   capabilities?: DmxFixtureCapability[];
 }
 
@@ -587,7 +587,7 @@ function analyzeFixture(
     speedOffset: null,
     beamOffset: null,
     macroOffsets: [],
-    universeIndex: 0,
+    universeIndex: 0, channelCount: channels.length,
   };
 
   const colourChannels: { offset: number; name: string; caps?: DmxFixtureCapability[] }[] = [];

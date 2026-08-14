@@ -177,6 +177,61 @@ dmxEngine.on('error', (err: Error) => {
   mainWindow?.webContents.send('dmx:error', err.message);
 });
 
+// ─── Watchdog fail-safe: renderer heartbeat → auto blackout ───
+// The renderer pings `watchdog:ping` every ~500 ms (src/utils/renderer-watchdog.ts).
+// Fail-safe rules (safety live):
+//   • Never armed before the FIRST ping — a slow startup is not a failure.
+//   • Re-armed on every ping; a healthy renderer never gets blacked out.
+//   • If no ping arrives for more than WATCHDOG_TIMEOUT_MS, the renderer is
+//     presumed dead (crash / hang / RAF loop killed): blackout every output
+//     (zero frame pushed on all universes) and stop the engine so the worker
+//     stops emitting and USB/Art-Net/sACN outputs are closed — no stale frame
+//     can stay on the wire.
+//   • Additionally, if the DMX worker dies while the renderer is alive and the
+//     engine was previously started (graceful stop emits 'stopped'), we blackout
+//     too — the output pipeline is dead either way.
+const WATCHDOG_PING_INTERVAL_MS = 500;
+const WATCHDOG_TIMEOUT_MS = 2000;
+let watchdogLastPing = 0;
+let watchdogArmed = false;       // becomes true after the first ping
+let watchdogFired = false;       // fail-safe already engaged for this dead window
+let watchdogTimer: NodeJS.Timeout | null = null;
+let engineStartedByUser = false; // engine reported 'started' (not a graceful stop)
+
+ipcMain.on('watchdog:ping', () => {
+  watchdogLastPing = Date.now();
+  if (!watchdogArmed) {
+    watchdogArmed = true;
+    startWatchdogTimer();
+  }
+  // Renderer is alive again after a fail-safe: re-arm for future crashes.
+  watchdogFired = false;
+});
+
+dmxEngine.on('started', () => { engineStartedByUser = true; });
+dmxEngine.on('stopped', () => { engineStartedByUser = false; });
+
+function startWatchdogTimer(): void {
+  if (watchdogTimer) return;
+  watchdogTimer = setInterval(() => {
+    if (!watchdogArmed) return;
+    const now = Date.now();
+    const rendererLost = now - watchdogLastPing > WATCHDOG_TIMEOUT_MS;
+    const workerLost = engineStartedByUser && !dmxEngine.isRunning() && !rendererLost;
+    if (!rendererLost && !workerLost) return;
+    if (watchdogFired) return;
+    watchdogFired = true;
+    watchdogArmed = false; // wait for the next ping before re-evaluating
+    const reason = rendererLost ? 'renderer heartbeat lost' : 'DMX worker lost';
+    console.error(`[watchdog] ${reason} — FAIL-SAFE BLACKOUT engaged`);
+    try { dmxEngine.blackout(); } catch (e) { console.error('[watchdog] blackout() failed:', e); }
+    dmxEngine.stop().catch((e: Error) => console.error('[watchdog] engine stop failed:', e?.message || e));
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('dmx:error', `[watchdog] ${reason}: fail-safe blackout engaged`);
+    }
+  }, WATCHDOG_PING_INTERVAL_MS);
+}
+
 // ─── IPC Handlers: Fixtures ──────────────────────────────────
 ipcMain.handle('fixtures:loadLibrary', async () => fixtureLibrary.load());
 ipcMain.handle('fixtures:search', async (_, query: string) => fixtureLibrary.search(query));
@@ -336,7 +391,10 @@ ipcMain.handle('project:save', async (_, content: string) => {
     filters: [{ name: 'Light Maestro Project', extensions: ['lmproj'] }],
   });
   if (result.canceled || !result.filePath) return null;
-  fs.writeFileSync(result.filePath, content, 'utf-8');
+  // Atomic write: temp + rename so a crash mid-write never corrupts the project
+  const tmpPath = `${result.filePath}.tmp`;
+  fs.writeFileSync(tmpPath, content, 'utf-8');
+  fs.renameSync(tmpPath, result.filePath);
   return result.filePath;
 });
 
@@ -367,7 +425,15 @@ ipcMain.handle('storage:get', async (_, key: string) => {
   try { const p = path.join(app.getPath('userData'), `${key}.json`); if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8')); return null; } catch { return null; }
 });
 ipcMain.handle('storage:set', async (_, key: string, data: any) => {
-  try { fs.writeFileSync(path.join(app.getPath('userData'), `${key}.json`), JSON.stringify(data), 'utf-8'); return true; } catch (e) { console.error('storage:set failed:', e); return false; }
+  try {
+    const p = path.join(app.getPath('userData'), `${key}.json`);
+    // Atomic write: temp + rename (used by the silent autosave — a crash
+    // mid-write must not corrupt the recovery snapshot)
+    const tmpPath = `${p}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(data), 'utf-8');
+    fs.renameSync(tmpPath, p);
+    return true;
+  } catch (e) { console.error('storage:set failed:', e); return false; }
 });
 ipcMain.handle('storage:remove', async (_, key: string) => {
   try { const p = path.join(app.getPath('userData'), `${key}.json`); if (fs.existsSync(p)) fs.unlinkSync(p); return true; } catch { return false; }

@@ -41,7 +41,7 @@ export interface SectionAnalysis {
 export type AtmosphereType = 'energetic' | 'dark' | 'uplifting' | 'dreamy' | 'aggressive' | 'groovy' | 'epic';
 
 export interface TrackSection {
-  type: 'intro' | 'verse' | 'chorus' | 'bridge' | 'drop' | 'outro' | 'unknown';
+  type: 'intro' | 'verse' | 'chorus' | 'bridge' | 'drop' | 'outro' | 'build' | 'unknown';
   startTime: number;
   endTime: number;
   energy: number;
@@ -56,16 +56,22 @@ export interface TrackAnalysis {
   beatPositions: number[];
   beatStrengths: ('strong' | 'weak')[];
   downbeats: number[];
-  sections: TrackSection[];
+  /** Optional: synthetic analyses (e.g. test fixtures) may omit section segmentation. */
+  sections?: TrackSection[];
   energyCurve: number[];
   lowCurve: number[];
   midCurve: number[];
   highCurve: number[];
-  waveform: number[];
-  fileName: string;
-  fileSize: number;
+  /** Optional: synthetic analyses may omit waveform/file metadata. */
+  waveform?: number[];
+  fileName?: string;
+  fileSize?: number;
   genre?: string;
   key?: string;
+  /** Time signature as a string like "4/4" (informational field, used by presets). */
+  timeSignature?: string;
+  /** Confidence of the detected musical key (informational field, used by presets). */
+  keyConfidence?: number;
   vocalCurve?: number[];
   onsetCurve?: number[];
   sectionAnalyses?: SectionAnalysis[];

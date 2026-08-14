@@ -38,6 +38,84 @@ class ErrorBoundary extends React.Component<
   }
 }
 
+// ─── Project save (shared by Ctrl+S / __lm_save, Save & Quit and autosave) ───
+const AUTOSAVE_INTERVAL_MS = 45 * 1000;
+
+// Mutual exclusion: a manual save (save dialog open), a Save & Quit or an
+// autosave in flight must never overlap another save.
+let projectSaveInFlight = false;
+
+/**
+ * Serialize the FULL project (app store + show store incl. scenes/chasers/
+ * effects/cueLists/shows/songPresets + virtual console widgets) and persist it.
+ *
+ * - silent=false → open the .lmproj save dialog (same path as Ctrl+S / __lm_save)
+ * - silent=true  → write the userData autosave slot, no dialog, no toast
+ *
+ * Returns true when a snapshot was persisted. Never throws.
+ */
+async function saveProject(options: { silent?: boolean } = {}): Promise<boolean> {
+  if (projectSaveInFlight) return false; // a save is already running — skip
+  projectSaveInFlight = true;
+  try {
+    const showState = useShowStore.getState();
+    const perfState = usePerformStore.getState();
+    const appState = useAppStore.getState();
+    const { isDirty, markDirty, markClean, ...persistable } = appState;
+    // Strip showData from widget configs (large binary, stored separately in preset)
+    const widgets = perfState.vcWidgets.map(w => ({
+      ...w,
+      config: w.config?.showData ? { ...w.config, showData: undefined } : w.config,
+    }));
+    const data = {
+      schemaVersion: 1,
+      appStore: persistable,
+      showStore: {
+        patchedFixtures: showState.patchedFixtures,
+        stageDims: showState.stageDims,
+        universes: showState.universes,
+        fixturePositions: showState.fixturePositions,
+        fixtureGroups: showState.fixtureGroups,
+        scenes: showState.scenes,
+        chasers: showState.chasers,
+        effects: showState.effects,
+        cueLists: showState.cueLists,
+        shows: showState.shows,
+        songPresets: showState.songPresets,
+      },
+      vcWidgets: widgets,
+      version: 1,
+      timestamp: new Date().toISOString(),
+    };
+
+    if (options.silent) {
+      // No dialog: persist the full snapshot to the stable autosave slot
+      const ok = await (window as any).lightMaestro?.storage?.set('autosave', data);
+      if (ok) useAppStore.getState().markClean();
+      return !!ok;
+    }
+
+    const json = JSON.stringify(data, null, 2);
+    const saved = await (window as any).lightMaestro?.project?.save(json);
+    if (saved) {
+      useAppStore.getState().markClean();
+      // Set project name from save result (project:save resolves to the file path)
+      const filePath = typeof saved === 'string' ? saved : saved?.filePath;
+      if (filePath) {
+        const fileName = String(filePath).split(/[/\\]/).pop()?.replace(/\.lmproj$/i, '') || '';
+        useAppStore.getState().setProjectName(fileName || 'Sans titre');
+      }
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.error('Failed to save project:', e);
+    return false;
+  } finally {
+    projectSaveInFlight = false;
+  }
+}
+
 const App: React.FC = () => {
   const { t } = useTranslation();
   const mode = useAppStore((s) => s.mode);
@@ -141,7 +219,7 @@ const App: React.FC = () => {
       const ss = useShowStore.getState();
       ss.setPatchedFixtures([]);
       ss.setShowUniverses([]);
-      ss.setFixturePositions([]);
+      ss.setFixturePositions({});
       ss.setFixtureGroups([]);
       ss.setScenes([]);
       ss.setChasers([]);
@@ -203,48 +281,7 @@ const App: React.FC = () => {
       } catch (e) { console.error('Failed to open project:', e); }
     };
 
-    (window as any).__lm_save = async () => {
-      try {
-        const showState = useShowStore.getState();
-        const perfState = usePerformStore.getState();
-        const appState = useAppStore.getState();
-        const { isDirty, markDirty, markClean, ...persistable } = appState;
-        // Strip showData from widget configs (large binary, stored separately in preset)
-        const widgets = perfState.vcWidgets.map(w => ({
-          ...w,
-          config: w.config?.showData ? { ...w.config, showData: undefined } : w.config,
-        }));
-        const data = {
-          appStore: persistable,
-          showStore: {
-            patchedFixtures: showState.patchedFixtures,
-            stageDims: showState.stageDims,
-            universes: showState.universes,
-            fixturePositions: showState.fixturePositions,
-            fixtureGroups: showState.fixtureGroups,
-            scenes: showState.scenes,
-            chasers: showState.chasers,
-            effects: showState.effects,
-            cueLists: showState.cueLists,
-            shows: showState.shows,
-            songPresets: showState.songPresets,
-          },
-          vcWidgets: widgets,
-          version: 1,
-          timestamp: new Date().toISOString(),
-        };
-        const json = JSON.stringify(data, null, 2);
-        const saved = await window.lightMaestro?.project?.save(json);
-        if (saved) {
-          useAppStore.getState().markClean();
-          // Set project name from save result
-          if (saved.filePath) {
-            const fileName = (saved.filePath as string).split(/[/\\]/).pop()?.replace(/\.lmproj$/i, '') || '';
-            useAppStore.getState().setProjectName(fileName || 'Sans titre');
-          }
-        }
-      } catch (e) { console.error('Failed to save project:', e); }
-    };
+    (window as any).__lm_save = () => { saveProject(); };
 
     return () => {
       delete (window as any).__lm_new;
@@ -265,18 +302,31 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // ─── Autosave ───────────────────────────────────
+  // Full-project snapshot every 45 s, only when there are unsaved changes.
+  // Silent: no dialog, no toast. Skipped while another save is in flight
+  // (manual Ctrl+S with the dialog open, or a Save & Quit in progress).
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!useAppStore.getState().isDirty) return; // nothing new since last save
+      saveProject({ silent: true });
+    }, AUTOSAVE_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, []);
+
   const handleSaveAndQuit = async () => {
     setSaving(true);
     try {
-      // Save show state (patched fixtures + groups)
-      const showState = useShowStore.getState();
-      await window.lightMaestro.show.save({
-        patchedFixtures: showState.patchedFixtures,
-        universes: showState.universes,
-        fixtureGroups: showState.fixtureGroups,
-      });
+      // Full project save (same path as Ctrl+S / __lm_save) — scenes, chasers,
+      // effects, cue lists, shows, songPresets and VC widgets are all included.
+      const saved = await saveProject();
+      if (!saved) {
+        // Save dialog cancelled/failed — still quit as the user chose, but keep
+        // a silent autosave snapshot so the session stays recoverable.
+        await saveProject({ silent: true });
+      }
     } catch {
-      // Save may fail (dialog cancelled, etc.) — still quit since user chose to
+      // saveProject swallows its own errors — belt and braces, still quit
     }
     useAppStore.getState().markClean();
     setSaving(false);

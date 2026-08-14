@@ -1,5 +1,11 @@
 /// <reference types="vite/client" />
 
+// NOTE: `export {}` makes this file a module so the `declare global`
+// augmentation below is legal (TS2669 otherwise) and actually applied
+// to Window — without it, `window.lightMaestro` stays unknown everywhere.
+
+export {};
+
 interface LightMaestroAPI {
   dmx: {
     start: () => Promise<void>;
@@ -7,10 +13,17 @@ interface LightMaestroAPI {
     setChannel: (universe: number, channel: number, value: number) => Promise<void>;
     setChannels: (universe: number, channels: Record<number, number>) => Promise<void>;
     blackout: () => Promise<void>;
+    restore: () => Promise<void>;
     getUniverses: () => Promise<any[]>;
+    getStatus: () => Promise<any>;
     addUniverse: (config: any) => Promise<void>;
+    syncUniverses: (configs: any[]) => Promise<void>;
     removeUniverse: (id: string) => Promise<void>;
     listSerialPorts: () => Promise<any[]>;
+    isRunning: () => Promise<boolean>;
+    /** Not exposed by preload today — present only if the main process adds it later. */
+    applyGrandMaster?: (value: number) => Promise<void>;
+    onError: (callback: (msg: string) => void) => () => void;
   };
   fixtures: {
     loadLibrary: () => Promise<any[]>;
@@ -25,7 +38,7 @@ interface LightMaestroAPI {
     onUpdateComplete: (callback: (data: { newCount: number }) => void) => void;
   };
   show: {
-    save: (show: any, filePath?: string) => Promise<string>;
+    save: (show: any, filePath?: string | { filePath: string; name: string }) => Promise<string>;
     load: (filePath: string) => Promise<any>;
     listRecent: () => Promise<string[]>;
     openDialog: () => Promise<any | null>;
@@ -37,6 +50,9 @@ interface LightMaestroAPI {
     getMapping: () => Promise<any[]>;
     setMapping: (mapping: any) => Promise<void>;
     onEvent: (callback: (event: any) => void) => void;
+    onActivity: (callback: (activity: any) => void) => void;
+    onTrigger: (callback: (trigger: any) => void) => void;
+    onStatus: (callback: (status: any) => void) => void;
   };
   audio: {
     getDevices: () => Promise<any[]>;
@@ -47,8 +63,21 @@ interface LightMaestroAPI {
     importFile: () => Promise<{ fileName: string; filePath: string; dataUrl: string } | null>;
   };
   dialog: {
-    openFile: (filters: any[]) => Promise<string | null>;
-    saveFile: (filters: any[], defaultName: string) => Promise<string | null>;
+    openFile: (filters: any[]) => Promise<{ filePath: string; content: string; name: string } | null>;
+    saveFile: (filters: any[], defaultName: string, content: string) => Promise<{ filePath: string; name: string } | null>;
+  };
+  project: {
+    save: (content: string) => Promise<string | { filePath: string } | null>;
+    open: () => Promise<{ content: string; filePath: string } | null>;
+  };
+  presets: {
+    save: (presets: any[]) => Promise<void>;
+    load: () => Promise<any[] | null>;
+  };
+  storage: {
+    get: (key: string) => Promise<any>;
+    set: (key: string, data: any) => Promise<boolean>;
+    remove: (key: string) => Promise<void>;
   };
   app: {
     onBeforeClose: (callback: () => void) => () => void;
