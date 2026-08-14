@@ -3,29 +3,53 @@
  *
  * Shows a top-down 2D stage view with all patched fixtures.
  * Click+drag to reposition, right-click to set height.
+ * Shift+click to multi-select. Alignment tools for selected fixtures.
  * Positions are persisted in useShowStore.fixturePositions (shared with Stage3D).
  */
 
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShowStore, getFixtureColor, type PatchedFixture } from '../stores/showStore';
-import { Eye, Maximize2 } from 'lucide-react';
+import { Eye, Maximize2, AlignStartVertical, AlignStartHorizontal, AlignLeft, AlignRight, ArrowLeftRight, ArrowUpDown } from 'lucide-react';
+import { generateAllThumbnails, getVariantsForCategory } from '../utils/fixtureThumbnails';
 
-const STAGE_W = 10;
-const STAGE_D = 8;
 
 export const Stage2DEditor: React.FC = () => {
   const { t } = useTranslation();
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
   const fixturePositions = useShowStore((s) => s.fixturePositions);
+  const stageDims = useShowStore((s) => s.stageDims);
   const setFixturePosition = useShowStore((s) => s.setFixturePosition);
   const initFixturePosition = useShowStore((s) => s.initFixturePosition);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
-  const dragRef = useRef<{ id: string; sx: number; sy: number } | null>(null);
+  const dragRef = useRef<{ ids: Set<string>; offsets: Map<string, { sx: number; sy: number }>; startMouse: { fx: number; fy: number } } | null>(null);
+  // Thumbnails chosen at patch time (fixtureThumbnails data URLs) — loaded once
+  const thumbnails = useMemo(() => {
+    const map = new Map<string, HTMLImageElement>();
+    for (const v of generateAllThumbnails()) {
+      const img = new Image();
+      img.src = v.dataUrl;
+      map.set(v.id, img);
+    }
+    return map;
+  }, []);
+
+  // Fallback thumbnail per fixture type for fixtures patched before thumbnailId existed
+  const typeThumbFallback = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const f of patchedFixtures) {
+      if (!map.has(f.fixtureType)) {
+        map.set(f.fixtureType, getVariantsForCategory(f.fixtureType)[0]?.id ?? 'par-can');
+      }
+    }
+    return map;
+  }, [patchedFixtures]);
+
   const [showBeams, setShowBeams] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
+  const [selectedFixtureIds, setSelectedFixtureIds] = useState<Set<string>>(new Set());
 
   // Init positions for new fixtures
   useEffect(() => {
@@ -37,6 +61,89 @@ export const Stage2DEditor: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patchedFixtures.map(f => f.id).join(',')]);
+
+  // ─── Alignment helpers ───
+  const alignVertical = useCallback(() => {
+    if (selectedFixtureIds.size < 2) return;
+    const positions = patchedFixtures
+      .filter(f => selectedFixtureIds.has(f.id))
+      .map(f => fixturePositions[f.id])
+      .filter(Boolean);
+    if (positions.length < 2) return;
+    const avgX = positions.reduce((sum, p) => sum + p.x, 0) / positions.length;
+    for (const f of patchedFixtures) {
+      if (selectedFixtureIds.has(f.id)) setFixturePosition(f.id, { x: avgX });
+    }
+  }, [selectedFixtureIds, patchedFixtures, fixturePositions, setFixturePosition]);
+
+  const alignHorizontal = useCallback(() => {
+    if (selectedFixtureIds.size < 2) return;
+    const positions = patchedFixtures
+      .filter(f => selectedFixtureIds.has(f.id))
+      .map(f => fixturePositions[f.id])
+      .filter(Boolean);
+    if (positions.length < 2) return;
+    const avgY = positions.reduce((sum, p) => sum + p.y, 0) / positions.length;
+    for (const f of patchedFixtures) {
+      if (selectedFixtureIds.has(f.id)) setFixturePosition(f.id, { y: avgY });
+    }
+  }, [selectedFixtureIds, patchedFixtures, fixturePositions, setFixturePosition]);
+
+  const alignLeft = useCallback(() => {
+    if (selectedFixtureIds.size < 2) return;
+    const positions = patchedFixtures
+      .filter(f => selectedFixtureIds.has(f.id))
+      .map(f => fixturePositions[f.id])
+      .filter(Boolean);
+    if (positions.length < 2) return;
+    const minX = positions.reduce((min, p) => Math.min(min, p.x), 1);
+    for (const f of patchedFixtures) {
+      if (selectedFixtureIds.has(f.id)) setFixturePosition(f.id, { x: minX });
+    }
+  }, [selectedFixtureIds, patchedFixtures, fixturePositions, setFixturePosition]);
+
+  const alignRight = useCallback(() => {
+    if (selectedFixtureIds.size < 2) return;
+    const positions = patchedFixtures
+      .filter(f => selectedFixtureIds.has(f.id))
+      .map(f => fixturePositions[f.id])
+      .filter(Boolean);
+    if (positions.length < 2) return;
+    const maxX = positions.reduce((max, p) => Math.max(max, p.x), 0);
+    for (const f of patchedFixtures) {
+      if (selectedFixtureIds.has(f.id)) setFixturePosition(f.id, { x: maxX });
+    }
+  }, [selectedFixtureIds, patchedFixtures, fixturePositions, setFixturePosition]);
+
+  const distributeHorizontal = useCallback(() => {
+    if (selectedFixtureIds.size < 3) return;
+    const selected = patchedFixtures
+      .filter(f => selectedFixtureIds.has(f.id))
+      .map(f => ({ id: f.id, ...fixturePositions[f.id] }))
+      .filter(p => p.x !== undefined)
+      .sort((a, b) => a.x - b.x);
+    if (selected.length < 3) return;
+    const totalRange = selected[selected.length - 1].x - selected[0].x;
+    const gap = totalRange / (selected.length - 1);
+    for (let i = 0; i < selected.length; i++) {
+      setFixturePosition(selected[i].id, { x: selected[0].x + i * gap });
+    }
+  }, [selectedFixtureIds, patchedFixtures, fixturePositions, setFixturePosition]);
+
+  const distributeVertical = useCallback(() => {
+    if (selectedFixtureIds.size < 3) return;
+    const selected = patchedFixtures
+      .filter(f => selectedFixtureIds.has(f.id))
+      .map(f => ({ id: f.id, ...fixturePositions[f.id] }))
+      .filter(p => p.y !== undefined)
+      .sort((a, b) => a.y - b.y);
+    if (selected.length < 3) return;
+    const totalRange = selected[selected.length - 1].y - selected[0].y;
+    const gap = totalRange / (selected.length - 1);
+    for (let i = 0; i < selected.length; i++) {
+      setFixturePosition(selected[i].id, { y: selected[0].y + i * gap });
+    }
+  }, [selectedFixtureIds, patchedFixtures, fixturePositions, setFixturePosition]);
 
   // Canvas render loop
   useEffect(() => {
@@ -65,8 +172,8 @@ export const Stage2DEditor: React.FC = () => {
       // Grid
       ctx.strokeStyle = '#1a1a2e';
       ctx.lineWidth = 0.5;
-      const cols = STAGE_W;
-      const rows = STAGE_D;
+      const cols = stageDims.width;
+      const rows = stageDims.depth;
       for (let i = 0; i <= cols; i++) {
         const x = pad + (i / cols) * sw;
         ctx.beginPath();
@@ -90,7 +197,7 @@ export const Stage2DEditor: React.FC = () => {
       // Stage label
       ctx.fillStyle = '#3a3a5e';
       ctx.font = '10px monospace';
-      ctx.fillText(`${STAGE_W}m × ${STAGE_D}m`, pad + 6, pad + 14);
+      ctx.fillText(`${stageDims.width}m × ${stageDims.depth}m`, pad + 6, pad + 14);
 
       // Direction labels
       ctx.fillStyle = '#4a4a6e';
@@ -108,12 +215,13 @@ export const Stage2DEditor: React.FC = () => {
         const fy = pad + pos.y * sh;
         const r = 16;
         const color = getFixtureColor(i);
+        const isSelected = selectedFixtureIds.has(pf.id);
 
         // Beam cone
         if (showBeams) {
           const beamLen = 50;
           ctx.save();
-          ctx.globalAlpha = 0.08;
+          ctx.globalAlpha = isSelected ? 0.15 : 0.08;
           ctx.beginPath();
           ctx.moveTo(fx, fy);
           ctx.lineTo(fx - beamLen * 0.25, fy + beamLen);
@@ -127,30 +235,59 @@ export const Stage2DEditor: React.FC = () => {
           ctx.restore();
         }
 
-        // Circle
-        ctx.beginPath();
-        ctx.arc(fx, fy, r, 0, Math.PI * 2);
-        ctx.fillStyle = '#1a1a2ecc';
-        ctx.fill();
+        // Thumbnail (chosen at patch time) or fallback circle
+        const thumbId = pf.thumbnailId ?? typeThumbFallback.get(pf.fixtureType);
+        const thumbImg = thumbId ? thumbnails.get(thumbId) : undefined;
+        const thumbReady = !!thumbImg && thumbImg.complete && thumbImg.naturalWidth > 0;
+        const drawR = thumbReady ? 15 : r;
 
-        // Tier border
+        // Selection glow ring
+        if (isSelected) {
+          ctx.beginPath();
+          ctx.arc(fx, fy, drawR + 5, 0, Math.PI * 2);
+          ctx.strokeStyle = '#a855f7';
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([4, 3]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        // Tier border color
         const tierBorderColor =
           pf.tier === 'primary' ? '#a855f7' :
           pf.tier === 'secondary' ? '#3b82f6' : '#6b7280';
-        ctx.strokeStyle = tierBorderColor;
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
 
-        // Inner circle (color dot)
-        ctx.beginPath();
-        ctx.arc(fx, fy, r - 5, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
+        if (thumbReady) {
+          // Fixture thumbnail picked at patch time
+          ctx.drawImage(thumbImg!, fx - drawR, fy - drawR, drawR * 2, drawR * 2);
+          ctx.beginPath();
+          ctx.arc(fx, fy, drawR, 0, Math.PI * 2);
+          ctx.strokeStyle = isSelected ? '#a855f7' : tierBorderColor;
+          ctx.lineWidth = isSelected ? 3 : 2;
+          ctx.stroke();
+        } else {
+          // Circle
+          ctx.beginPath();
+          ctx.arc(fx, fy, r, 0, Math.PI * 2);
+          ctx.fillStyle = isSelected ? '#2a1a4ecc' : '#1a1a2ecc';
+          ctx.fill();
+
+          // Tier border
+          ctx.strokeStyle = isSelected ? '#a855f7' : tierBorderColor;
+          ctx.lineWidth = isSelected ? 3 : 2.5;
+          ctx.stroke();
+
+          // Inner circle (color dot)
+          ctx.beginPath();
+          ctx.arc(fx, fy, r - 5, 0, Math.PI * 2);
+          ctx.fillStyle = isSelected ? '#c084fc' : color;
+          ctx.fill();
+        }
 
         // Height indicator (small bar on side)
         const hBarH = Math.max(2, pos.h * 16);
         ctx.fillStyle = '#ffffff33';
-        ctx.fillRect(fx + r + 3, fy - hBarH / 2, 3, hBarH);
+        ctx.fillRect(fx + drawR + 3, fy - hBarH / 2, 3, hBarH);
 
         // Label
         if (showLabels) {
@@ -158,23 +295,23 @@ export const Stage2DEditor: React.FC = () => {
           ctx.fillStyle = '#9ca3af';
           ctx.font = '9px Inter, sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText(label, fx, fy + r + 13);
+          ctx.fillText(label, fx, fy + drawR + 13);
 
           // Tier badge
           const tierBadge = pf.tier === 'primary' ? 'P' : pf.tier === 'secondary' ? 'S' : 'T';
           ctx.fillStyle = tierBorderColor;
           ctx.font = 'bold 8px Inter, sans-serif';
-          ctx.fillText(tierBadge, fx, fy - r - 7);
+          ctx.fillText(tierBadge, fx, fy - drawR - 7);
 
           // Height text
           ctx.fillStyle = '#5a5a7e';
           ctx.font = '7px Inter, sans-serif';
-          ctx.fillText(`${(pos.h * 5.0).toFixed(1)}m`, fx, fy - r - 16);
+          ctx.fillText(`${(pos.h * 5.0).toFixed(1)}m`, fx, fy - drawR - 16);
 
           // Heading arrow (points forward direction)
           if (pos.heading !== undefined) {
             const hRad = (pos.heading * Math.PI) / 180;
-            const arrowLen = r + 8;
+            const arrowLen = drawR + 8;
             ctx.strokeStyle = '#f59e0b80';
             ctx.lineWidth = 1.5;
             ctx.beginPath();
@@ -207,7 +344,7 @@ export const Stage2DEditor: React.FC = () => {
     };
     render();
     return () => cancelAnimationFrame(animRef.current);
-  }, [patchedFixtures, fixturePositions, showBeams, showLabels]);
+  }, [patchedFixtures, fixturePositions, stageDims, selectedFixtureIds, showBeams, showLabels, thumbnails]);
 
   // ── Mouse handlers ──
   const getCanvasCoords = useCallback((e: React.MouseEvent) => {
@@ -221,47 +358,104 @@ export const Stage2DEditor: React.FC = () => {
     return { fx: (x - pad) / sw, fy: (y - pad) / sh };
   }, []);
 
+  const hitTestFixture = useCallback((cx: number, cy: number): string | null => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const pad = 48;
+    const sw = rect.width - 96;
+    const sh = rect.height - 96;
+    for (const pf of patchedFixtures) {
+      const pos = fixturePositions[pf.id] || { x: 0.5, y: 0.3, h: 0.5, heading: 0 };
+      const fx = pad + pos.x * sw;
+      const fy = pad + pos.y * sh;
+      if (Math.hypot(cx - fx, cy - fy) < 20) return pf.id;
+    }
+    return null;
+  }, [patchedFixtures, fixturePositions]);
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    // Right-click: cycle height preset
+    if (e.button === 2) {
+      const hitId = hitTestFixture(x, y);
+      if (hitId) {
+        e.preventDefault();
+        const pos = fixturePositions[hitId];
+        if (pos) {
+          const heights = [0.1, 0.3, 0.5, 0.6, 0.8, 1.0];
+          const currentIdx = heights.findIndex(h => Math.abs(h - pos.h) < 0.02);
+          const nextIdx = (currentIdx + 1) % heights.length;
+          // Apply to all selected if this fixture is selected
+          const targets = selectedFixtureIds.has(hitId) ? selectedFixtureIds : new Set([hitId]);
+          for (const tid of targets) {
+            setFixturePosition(tid, { h: heights[nextIdx] });
+          }
+        }
+      }
+      return;
+    }
+
+    // Left-click
+    const shift = e.shiftKey;
     const pad = 48;
     const sw = rect.width - 96;
     const sh = rect.height - 96;
 
-    for (const pf of patchedFixtures) {
-      const pos = fixturePositions[pf.id] || { x: 0.5, y: 0.3, h: 0.5, heading: 0 };
-      const fx = pad + pos.x * sw;
-      const fy = pad + pos.y * sh;
-      if (Math.hypot(x - fx, y - fy) < 20) {
-        if (e.button === 2 || e.button === 0) {
-          // Right-click: cycle height preset
-          if (e.button === 2) {
-            e.preventDefault();
-            const heights = [0.1, 0.3, 0.5, 0.6, 0.8, 1.0];
-            const currentIdx = heights.findIndex(h => Math.abs(h - pos.h) < 0.02);
-            const nextIdx = (currentIdx + 1) % heights.length;
-            setFixturePosition(pf.id, { h: heights[nextIdx] });
-            return;
-          }
-          // Left-click: start drag
-          const { fx: mfx, fy: mfy } = getCanvasCoords(e);
-          dragRef.current = { id: pf.id, sx: pos.x - mfx, sy: pos.y - mfy };
+    const hitId = hitTestFixture(x, y);
+    const { fx: mfx, fy: mfy } = getCanvasCoords(e);
+
+    if (hitId) {
+      let newSelection: Set<string>;
+      if (shift) {
+        // Shift+click: toggle selection
+        newSelection = new Set(selectedFixtureIds);
+        if (newSelection.has(hitId)) {
+          newSelection.delete(hitId);
+        } else {
+          newSelection.add(hitId);
         }
-        return;
+      } else {
+        // Click on fixture: select it (or keep multi-selection if already selected)
+        if (!selectedFixtureIds.has(hitId)) {
+          newSelection = new Set([hitId]);
+        } else {
+          newSelection = selectedFixtureIds; // keep existing multi-selection
+        }
       }
+      setSelectedFixtureIds(newSelection);
+
+      // Start drag for entire selection
+      const dragIds = newSelection.size > 0 ? newSelection : new Set([hitId]);
+      const offsets = new Map<string, { sx: number; sy: number }>();
+      for (const id of dragIds) {
+        const pos = fixturePositions[id];
+        if (pos) {
+          offsets.set(id, { sx: pos.x - mfx, sy: pos.y - mfy });
+        }
+      }
+      dragRef.current = { ids: dragIds, offsets, startMouse: { fx: mfx, fy: mfy } };
+    } else {
+      // Click on empty space: clear selection unless shift
+      if (!shift) {
+        setSelectedFixtureIds(new Set());
+      }
+      dragRef.current = null;
     }
-    dragRef.current = null;
-  }, [patchedFixtures, fixturePositions, getCanvasCoords, setFixturePosition]);
+  }, [patchedFixtures, fixturePositions, getCanvasCoords, hitTestFixture, selectedFixtureIds, setFixturePosition]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!dragRef.current) return;
     const { fx, fy } = getCanvasCoords(e);
-    setFixturePosition(dragRef.current.id, {
-      x: Math.max(0, Math.min(1, fx + dragRef.current.sx)),
-      y: Math.max(0, Math.min(1, fy + dragRef.current.sy)),
-    });
+    for (const [id, offset] of dragRef.current.offsets) {
+      setFixturePosition(id, {
+        x: Math.max(0, Math.min(1, fx + offset.sx)),
+        y: Math.max(0, Math.min(1, fy + offset.sy)),
+      });
+    }
   }, [getCanvasCoords, setFixturePosition]);
 
   const handleMouseUp = useCallback(() => {
@@ -269,25 +463,14 @@ export const Stage2DEditor: React.FC = () => {
   }, []);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    // Prevent default context menu for right-click height cycling
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const pad = 48;
-    const sw = rect.width - 96;
-    const sh = rect.height - 96;
-
-    for (const pf of patchedFixtures) {
-      const pos = fixturePositions[pf.id] || { x: 0.5, y: 0.3, h: 0.5, heading: 0 };
-      const fx = pad + pos.x * sw;
-      const fy = pad + pos.y * sh;
-      if (Math.hypot(x - fx, y - fy) < 20) {
-        e.preventDefault();
-        return;
-      }
+    if (hitTestFixture(x, y)) {
+      e.preventDefault();
     }
-  }, [patchedFixtures, fixturePositions]);
+  }, [hitTestFixture]);
 
   return (
     <div className="h-full flex flex-col bg-[#08080e]">
@@ -298,7 +481,7 @@ export const Stage2DEditor: React.FC = () => {
         </span>
         <div className="w-px h-3 bg-gray-800" />
         <span className="text-[10px] text-gray-600">
-          {STAGE_W}m × {STAGE_D}m
+          {stageDims.width}m × {stageDims.depth}m
         </span>
         <div className="w-px h-3 bg-gray-800" />
         <button
@@ -317,9 +500,37 @@ export const Stage2DEditor: React.FC = () => {
         >
           Labels
         </button>
+
+        {/* Alignment tools — visible when ≥2 fixtures selected */}
+        {selectedFixtureIds.size >= 2 && (
+          <>
+            <div className="w-px h-3 bg-gray-800" />
+            <span className="text-[9px] text-gray-500">{selectedFixtureIds.size} selected</span>
+            <button onClick={alignVertical} title="Vertical" className="p-1 rounded text-gray-500 hover:text-purple-400 hover:bg-purple-600/20 transition-colors">
+              <AlignStartVertical size={13} />
+            </button>
+            <button onClick={alignHorizontal} title="Horizontal" className="p-1 rounded text-gray-500 hover:text-purple-400 hover:bg-purple-600/20 transition-colors">
+              <AlignStartHorizontal size={13} />
+            </button>
+            <button onClick={alignLeft} title="Left" className="p-1 rounded text-gray-500 hover:text-purple-400 hover:bg-purple-600/20 transition-colors">
+              <AlignLeft size={13} />
+            </button>
+            <button onClick={alignRight} title="Align Right" className="p-1 rounded text-gray-500 hover:text-purple-400 hover:bg-purple-600/20 transition-colors">
+              <AlignRight size={13} />
+            </button>
+            <div className="w-px h-3 bg-gray-800" />
+            <button onClick={distributeHorizontal} title="Distribute Horizontally (equal spacing)" className="p-1 rounded text-gray-500 hover:text-cyan-400 hover:bg-cyan-600/20 transition-colors">
+              <ArrowLeftRight size={13} />
+            </button>
+            <button onClick={distributeVertical} title="Distribute Vertically (equal spacing)" className="p-1 rounded text-gray-500 hover:text-cyan-400 hover:bg-cyan-600/20 transition-colors">
+              <ArrowUpDown size={13} />
+            </button>
+          </>
+        )}
+
         <div className="flex-1" />
         <span className="text-[9px] text-gray-600">
-          Drag to position · Right-click to set height
+          Drag · Right-click height · Shift+click multi-select
         </span>
       </div>
 

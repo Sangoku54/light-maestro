@@ -165,6 +165,108 @@ export function computeColorTrackColors(
 }
 
 import type { SavedEffect } from '../stores/showStore';
+
+/** A chaser track entry: a block on the timeline that references a saved chaser. */
+export interface ChaserTrackEntryRef {
+  id: string;
+  time: number;
+  endTime: number;
+  chaserId: string;
+  chaserName?: string;
+}
+
+/** Chaser track lane (mirror of the timeline type, for the playback engine). */
+export interface ChaserTrackRef {
+  id: string;
+  entries: ChaserTrackEntryRef[];
+  targetFixtures: {
+    type: 'all' | 'group' | 'fixture';
+    groupId?: string;
+    fixtureIds?: string[];
+  };
+}
+
+/**
+ * Resolve chaser playback at an absolute time inside a block.
+ * The chaser loops its steps (fadeIn → hold → fadeOut, exact ms) while the block is active,
+ * then control is handed back to the autoscript. Deterministic per frame — no state needed.
+ * Returns per-fixture address→value overrides for fully controlled fixtures.
+ */
+export function computeChaserTrackOverrides(
+  chaserTracks: ChaserTrackRef[],
+  chasers: Array<{ id: string; name?: string; steps: Array<{ sceneId: string; fadeIn?: number; hold?: number; fadeOut?: number }> }>,
+  scenes: Array<{ id: string; channels: Record<number, number> }>,
+  currentTime: number,
+  patchedFixtures: PatchedFixture[],
+  fixtureGroups: FixtureGroup[],
+): Map<string, Record<number, number>> {
+  const controlled = new Map<string, Record<number, number>>();
+  for (const tr of chaserTracks) {
+    if (!tr.entries || tr.entries.length === 0 || !tr.targetFixtures) continue;
+    const entry = tr.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
+    if (!entry) continue;
+    const chaser = chasers.find(c => c.id === entry.chaserId);
+    if (!chaser || !chaser.steps || chaser.steps.length === 0) continue;
+
+    // A chaser plays its OWN fixtures: targets = fixtures whose address range is
+    // covered by the channels of the scenes referenced by the chaser steps.
+    const sceneIds = new Set(chaser.steps.map(s => s.sceneId));
+    const addrSet = new Set<number>();
+    for (const sc of scenes) {
+      if (sceneIds.has(sc.id) && sc.channels) {
+        for (const addrStr of Object.keys(sc.channels)) addrSet.add(Number(addrStr));
+      }
+    }
+    let targets: string[] = [];
+    for (const pf of patchedFixtures) {
+      for (let a = pf.startAddress; a < pf.startAddress + pf.channelCount; a++) {
+        if (addrSet.has(a)) { targets.push(pf.id); break; }
+      }
+    }
+    if (targets.length === 0) continue;
+
+    // Deterministic step resolution: loop the chaser while the block is active
+    // NOTE: currentTime/entry.time are in SECONDS, step durations are in MS →
+    // convert elapsed time to ms before modulating against the cycle total.
+    const cycles = chaser.steps.map(s => Math.max(1, (s.fadeIn || 0) + (s.hold || 0) + (s.fadeOut || 0)));
+    const total = cycles.reduce((a, b) => a + b, 0);
+    const pos = total > 0 ? Math.max(0, (currentTime - entry.time) * 1000) % total : 0;
+    let acc = 0;
+    let stepIdx = 0;
+    for (let i = 0; i < cycles.length; i++) {
+      if (pos < acc + cycles[i]) { stepIdx = i; break; }
+      acc += cycles[i];
+      stepIdx = i;
+    }
+    const step = chaser.steps[stepIdx];
+    const sd = cycles[stepIdx] || 1;
+    const within = pos - acc;
+    const fi = Math.max(1, step.fadeIn || 0);
+    const fo = Math.max(1, step.fadeOut || 0);
+    let scale = 1;
+    if (within < fi) scale = Math.min(1, within / fi);
+    else if (within >= sd - fo) scale = Math.max(0, 1 - (within - (sd - fo)) / fo);
+    else scale = 1;
+    const scene = scenes.find(s => s.id === step.sceneId);
+    if (!scene || !scene.channels) continue;
+    const addrMap: Record<number, number> = {};
+    for (const [addrStr, v] of Object.entries(scene.channels)) {
+      const addr = Number(addrStr);
+      const val = Number(v);
+      addrMap[addr] = Math.max(0, Math.min(255, Math.round(Number.isFinite(val) ? val * scale : 0)));
+    }
+    for (const fid of targets) controlled.set(fid, addrMap);
+  }
+  return controlled;
+}
+
+// Stage-aware pan/tilt clamping to keep beams on stage
+// ─── Extracted utilities (pure functions, no React) ──────
+import type { RgbSegment } from '../engine/dmx-color';
+import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, findBestWheelCap } from '../engine/dmx-color';
+import type { ChannelAnalysis } from '../engine/dmx-channel';
+import { analyzeChannels } from '../engine/dmx-channel';
+import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSmartMovement } from '../engine/dmx-movement';
 import { useAppStore } from '../stores/appstore';
 import { dmxBridge } from '../utils/dmx-bridge';
 
@@ -238,205 +340,6 @@ export interface UniversePlayback {
   channels?: number;
 }
 
-interface RgbSegment { r: number; g: number; b: number; w: number | null; }
-
-interface ChannelAnalysis {
-  fixture: PatchedFixture;
-  intensityOffset: number | null;
-  shutterOffset: number | null;
-  rgbSegments: RgbSegment[];
-  wheelOffset: number | null;
-  wheelCaps: DmxFixtureCapability[];
-  panOffsets: number[];
-  tiltOffsets: number[];
-  channelCount: number;
-  universeIndex: number;
-  goboOffset: number | null;
-  goboCaps: DmxFixtureCapability[];
-  prismOffset: number | null;
-  zoomOffset: number | null;
-  frostOffset: number | null;
-  irisOffset: number | null;
-  focusOffset: number | null;
-  presetOverrideOffsets: number[]; // Color Preset/Macro channels that must be 0 for RGB mode
-}
-
-function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace('#', '');
-  return [parseInt(h.substring(0,2),16), parseInt(h.substring(2,4),16), parseInt(h.substring(4,6),16)];
-}
-
-/** Hue shift: rotate color on HSL wheel. Preserves brightness. */
-function applyHueShift([r,g,b]: [number,number,number], deg: number): [number,number,number] {
-  if (deg === 0) return [r,g,b];
-  const nr=r/255,ng=g/255,nb=b/255;
-  const mx=Math.max(nr,ng,nb),mn=Math.min(nr,ng,nb);
-  const l=(mx+mn)/2;
-  if (mx===mn) return [r,g,b];
-  const d=mx-mn;
-  const s=l>0.5?d/(2-mx-mn):d/(mx+mn);
-  let h:number;
-  if (mx===nr) h=((ng-nb)/d+(ng<nb?6:0))*60;
-  else if (mx===ng) h=((nb-nr)/d+2)*60;
-  else h=((nr-ng)/d+4)*60;
-  h=(h+deg)%360;if(h<0) h+=360;
-  const c=(1-Math.abs(2*l-1))*s;
-  const x=c*(1-Math.abs((h/60)%2-1));
-  const m=l-c/2;
-  let r2,g2,b2:number;
-  if(h<60){r2=c;g2=x;b2=0;}else if(h<120){r2=x;g2=c;b2=0;}
-  else if(h<180){r2=0;g2=c;b2=x;}else if(h<240){r2=0;g2=x;b2=c;}
-  else if(h<300){r2=x;g2=0;b2=c;}else{r2=c;g2=0;b2=x;}
-  return [Math.round((r2+m)*255),Math.round((g2+m)*255),Math.round((b2+m)*255)];
-}
-
-const TIER_HUE = { primary: 0, secondary: 120, tertiary: 240 } as const;
-
-function colorDistance(hex1: string, hex2: string): number {
-  const [r1,g1,b1]=hexToRgb(hex1); const [r2,g2,b2]=hexToRgb(hex2);
-  return Math.sqrt(2*(r1-r2)**2 + 4*(g1-g2)**2 + 3*(b1-b2)**2);
-}
-
-function classifyColor(r: number, g: number, b: number): string {
-  if(r>200&&g>200&&b>200)return'white'; if(r<50&&g<50&&b<50)return'black';
-  const max=Math.max(r,g,b);
-  if(max===r){if(g>b*1.5)return'yellow';if(b>g*1.5)return'magenta';if(r>g*2&&r>b*2)return'red';return'orange';}
-  if(max===g){if(r>b*1.5)return'yellow';return'green';}
-  if(max===b){if(r>g*1.5)return'magenta';if(r>g*.6)return'purple';return'blue';}
-  return'white';
-}
-
-function matchCapToCategory(capName: string, category: string): number {
-  if(!capName)return 0; const n=capName.trim();
-  const kw: Record<string,string[]>={red:['Red','Rouge','Dark Red','Light Red','Deep Red','Red (1)','Red (2)'],blue:['Blue','Bleu','Cyan','Dark Blue','Light Blue','Sky Blue','Blue (1)','Blue (2)'],green:['Green','Vert','Lime','Dark Green','Light Green','Green (1)','Green (2)'],yellow:['Yellow','Jaune','Amber','Ambre','Gold','Yellow (1)','Yellow (2)'],white:['White','Blanc','Open','Warm White','Cold White','Neutral White','Bright','White (1)','White (2)'],magenta:['Magenta','Pink','Rose','Fuchsia','Magenta (1)','Magenta (2)','Pink (1)','Pink (2)'],cyan:['Cyan','Turquoise','Teal','Aqua','Cyan (1)','Cyan (2)'],orange:['Orange','Orange (1)','Orange (2)'],purple:['Purple','Violet','Pourpre','UV','Lavender','Mauve','Indigo','Purple (1)','Purple (2)','UV (1)'],pink:['Pink','Rose','Salmon','Pink (1)','Pink (2)'],amber:['Amber','Ambre','Gold','Amber (1)','Amber (2)']};
-  const k=kw[category]||[category]; const low=n.toLowerCase();
-  for(const kk of k){const kl=kk.toLowerCase();if(low===kl)return 10;if(low.startsWith(kl+' '))return 9;if(low.startsWith(kl+'('))return 9;if(low.includes(kl))return 5;}
-  return 0;
-}
-
-function mapIntensity(level: string, energy: number, tier: FixtureTier, tierMults?: { primary: number; secondary: number; tertiary: number }): number {
-  const ABSOLUTE_MIN=0; let val: number;
-  if(level==='dynamic'){val=Math.round(Math.max(ABSOLUTE_MIN,20+energy*235));}
-  else{let lo:number,hi:number;switch(level){case'very-low':lo=40;hi=130;break;case'low':lo=100;hi=200;break;case'medium':lo=140;hi=240;break;case'high':lo=180;hi=255;break;case'very-high':lo=200;hi=255;break;default:lo=120;hi=220;break;}val=Math.round(Math.max(ABSOLUTE_MIN,lo+Math.max(0,Math.min(1,energy))*(hi-lo)));}
-  let tierMult=tier==='primary'?1.0:tier==='secondary'?0.7:0.4;
-  if(tierMults){if(tier==='primary')tierMult*=(tierMults.primary/100);else if(tier==='secondary')tierMult*=(tierMults.secondary/100);else tierMult*=(tierMults.tertiary/100);}
-  return Math.round(val*tierMult);
-}
-
-const startsWithRgb=/^(red|green|blue|r|g|b|rouge|vert|bleu|rojo|verde|azul)(\s*\(?\d*\)?)?$/i;
-const hasColorWord=/\b(red|green|blue|white|amber|uv|laser|rouge|vert|bleu|blanc|ambre|rojo|verde|azul|blanco)\b/i;
-const isRed=/\b(red|r|rouge|rojo)\b/i; const isGreen=/\b(green|g|vert|verde)\b/i; const isBlue=/\b(blue|b|bleu|azul)\b/i; const isWhite=/\b(white|w|blanc|blanco)\b/i;
-const isPresetMode=/presets?|macro|auto|sound/i;
-
-function buildRgbSegments(colourChannels: Array<{offset:number;name:string}>): RgbSegment[] {
-  const segments: RgbSegment[]=[]; const used=new Set<number>();
-  // Order-independent: find Red, Green, Blue regardless of channel order
-  // Some fixtures list channels as [Blue, Green, Red] or [Dimmer, Red, Blue, Green]
-  for(let i=0;i<colourChannels.length;i++){
-    if(used.has(i))continue;
-    const ci=colourChannels[i];
-    // Find Red anywhere (not just first)
-    let ri=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&isRed.test(colourChannels[j].name)){ri=j;break;}}
-    if(ri<0)continue;
-    let gi=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&j!==ri&&isGreen.test(colourChannels[j].name)){gi=j;break;}}
-    if(gi<0)continue;
-    let bi=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&j!==ri&&j!==gi&&isBlue.test(colourChannels[j].name)){bi=j;break;}}
-    if(bi<0)continue;
-    let wi=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&j!==ri&&j!==gi&&j!==bi&&isWhite.test(colourChannels[j].name)){wi=j;break;}}
-    used.add(ri);used.add(gi);used.add(bi);if(wi>=0)used.add(wi);
-    segments.push({r:colourChannels[ri].offset,g:colourChannels[gi].offset,b:colourChannels[bi].offset,w:wi>=0?colourChannels[wi].offset:null});
-    // Continue scanning for additional RGB(W) segments (multi-segment fixtures like flower/beam+bee-eye)
-  }
-  return segments;
-}
-
-function analyzeChannels(pf: PatchedFixture, def: DmxFixtureDefinition|undefined): ChannelAnalysis {
-  const channels=def?.modes[pf.modeIndex]?.channels??[];
-  const fa: ChannelAnalysis={fixture:pf,intensityOffset:null,shutterOffset:null,rgbSegments:[],wheelOffset:null,wheelCaps:[],panOffsets:[],tiltOffsets:[],channelCount:channels.length,universeIndex:0,goboOffset:null,goboCaps:[],prismOffset:null,zoomOffset:null,frostOffset:null,irisOffset:null,focusOffset:null,presetOverrideOffsets:[]};
-  const colourChannels: Array<{offset:number;name:string;caps?:DmxFixtureCapability[]}>=[];
-  for(let i=0;i<channels.length;i++){const ch=channels[i];const off=ch.offset??i;const chName=(ch.name?.trim()??'');
-    // Detect "Color Preset" / "Macro" channels that must be set to 0 for RGB mode
-    if(isPresetMode.test(chName)){fa.presetOverrideOffsets.push(off);continue;}
-    // Detect Dimmer in Shutter channels (fixtures like "Dimmer / Strobe")
-    const isShutterDimmer = /\bdimmer\b/i.test(chName) && ch.type === 'Shutter';
-    if(isShutterDimmer && fa.intensityOffset === null){fa.intensityOffset = off;}
-    const hasColorCaps=ch.capabilities?.some(cap=>cap.color);
-    if(startsWithRgb.test(chName)||ch.type==='Colour'||(ch.type==='Beam'&&hasColorWord.test(chName))||hasColorCaps){colourChannels.push({offset:off,name:chName,caps:ch.capabilities});continue;}
-    switch(ch.type){case'Intensity':if(fa.intensityOffset===null)fa.intensityOffset=off;break;case'Shutter':case'Effect':if(fa.shutterOffset===null)fa.shutterOffset=off;break;case'Pan':fa.panOffsets.push(off);break;case'Tilt':fa.tiltOffsets.push(off);break;case'Gobo':if(fa.goboOffset===null){fa.goboOffset=off;fa.goboCaps=ch.capabilities??[];}break;case'Prism':if(fa.prismOffset===null)fa.prismOffset=off;break;case'Zoom':if(fa.zoomOffset===null)fa.zoomOffset=off;break;case'Frost':case'Focus':if(fa.frostOffset===null)fa.frostOffset=off;break;case'Iris':if(fa.irisOffset===null)fa.irisOffset=off;break;}}
-  // Build RGB segments from detected colour channels
-  if(colourChannels.length>0){const hasRgbStart=colourChannels.some(c=>startsWithRgb.test(c.name));
-    const hasRgbWords=colourChannels.some(c=>isRed.test(c.name))&&colourChannels.some(c=>isGreen.test(c.name))&&colourChannels.some(c=>isBlue.test(c.name));
-    const hasRgbNames=(hasRgbStart||hasRgbWords)&&colourChannels.length>=3;
-    const hasColorCaps=colourChannels.some(c=>c.caps?.some(cap=>cap.color));
-    if(hasRgbNames){fa.rgbSegments=buildRgbSegments(colourChannels);}
-    else if(hasColorCaps){const wheel=colourChannels.find(c=>c.caps?.some(cap=>cap.color));if(wheel){fa.wheelOffset=wheel.offset;fa.wheelCaps=wheel.caps??[];}}
-    else if(colourChannels.length>=3){fa.rgbSegments=buildRgbSegments(colourChannels);if(fa.rgbSegments.length===0){fa.rgbSegments=[{r:colourChannels[0].offset,g:colourChannels[1].offset,b:colourChannels[2].offset,w:null}];}}
-    else{fa.wheelOffset=colourChannels[0].offset;const ch=channels.find(c=>(c.offset??channels.indexOf(c))===colourChannels[0].offset);if(ch?.capabilities&&ch.capabilities.length>0)fa.wheelCaps=ch.capabilities;}
-    
-  }
-  if(fa.wheelOffset!==null&&fa.wheelCaps.length===0){const ch=channels.find(c=>(c.offset??channels.indexOf(c))===fa.wheelOffset);if(ch?.capabilities&&ch.capabilities.length>0)fa.wheelCaps=ch.capabilities;}
-  // Diagnostic: log channel analysis for every fixture (once)
-  if (!(analyzeChannels as any)._logged) {
-    (analyzeChannels as any)._logged = new Set<string>();
-  }
-  const logged = (analyzeChannels as any)._logged as Set<string>;
-  if (!logged.has(pf.id)) {
-    logged.add(pf.id);
-    console.log(`[analyzeChannels] ${pf.name} (${pf.fixtureType}, tier=${pf.tier}, addr=${pf.startAddress})`,
-      `| colourChannels: ${colourChannels.length} [${colourChannels.map(c=>`${c.name}@${c.offset}`).join(', ')}]`,
-      `| rgbSegments: ${fa.rgbSegments.length>0?fa.rgbSegments.map(s=>`R${s.r}G${s.g}B${s.b}`).join('; '):'none'}`,
-      `| wheelOffset: ${fa.wheelOffset} (caps:${fa.wheelCaps.length})`,
-      `| intensityOffset: ${fa.intensityOffset} shutterOffset: ${fa.shutterOffset}`,
-      `| panOffsets: [${fa.panOffsets.join(',')}] tiltOffsets: [${fa.tiltOffsets.join(',')}]`);
-  }
-  return fa;
-}
-
-function findBestWheelCap(caps: DmxFixtureCapability[], paletteHex: string): DmxFixtureCapability|null {
-  if(caps.length===0)return null;
-  const[r,g,b]=hexToRgb(paletteHex);const cat=classifyColor(r,g,b);
-  // Step 1: Name-based matching (most reliable)
-  let bestName:{cap:DmxFixtureCapability;score:number}|null=null;
-  for(const cap of caps){if(!cap.name)continue;const s=matchCapToCategory(cap.name,cat);if(s>(bestName?.score??0))bestName={cap,score:s};}
-  if(bestName&&bestName.score>=5)return bestName.cap;
-  // Step 2: Color distance
-  let bestCap:DmxFixtureCapability|null=null;let bestDist=Infinity;
-  for(const cap of caps){if(cap.color){const d=colorDistance(paletteHex,cap.color);if(d<bestDist){bestDist=d;bestCap=cap;}}}
-  if(bestCap&&bestDist<350)return bestCap;
-  // Step 3: Name with any score (better than hue guess)
-  if(bestName&&bestName.score>0)return bestName.cap;
-  // Step 4: Category-based wheel position (DMX standard wheel order)
-  // Standard DMX wheel: White(0%), Red(10%), Orange(20%), Yellow(30%), Green(42%), Cyan(55%), Blue(68%), Magenta(78%), UV(90%)
-  const catToWheelPos: Record<string, number> = {red:0.10,orange:0.20,yellow:0.30,green:0.42,cyan:0.55,blue:0.68,magenta:0.78,purple:0.78,white:0.02,black:0.02};
-  const wheelPos=catToWheelPos[cat]??0.5;
-  return caps[Math.floor(wheelPos*caps.length)%caps.length];
-}
-
-// Mapping: section → best suited movement patterns per fixture (ordered by energy)
-const SMART_MOVEMENTS: Record<string, string[]> = {
-  intro:   ['static', 'panOnly', 'tiltOnly', 'sweep', 'wave'],
-  verse:   ['sweep', 'wave', 'panOnly', 'figure8', 'randomWalk', 'panOnly'],
-  chorus:  ['circle', 'sweep', 'spiral', 'diamond', 'figure8', 'bounce', 'wave'],
-  bridge:  ['figure8', 'wave', 'zigzag', 'randomWalk', 'spiral', 'diamond'],
-  drop:    ['bounce', 'zigzag', 'heartbeat', 'circle', 'spiral', 'diamond', 'randomWalk', 'wave'],
-  outro:   ['tiltOnly', 'panOnly', 'sweep', 'static', 'wave'],
-  build:   ['spiral', 'circle', 'wave', 'sweep', 'diamond', 'zigzag'],
-};
-const DEFAULT_SMART_MOVEMENTS = ['sweep', 'circle', 'wave', 'figure8', 'zigzag'];
-
-function getSmartMovement(fixtureIndex: number, totalMobileFixtures: number, section: string, timeOffset?: number): string {
-  const patterns = SMART_MOVEMENTS[section] || DEFAULT_SMART_MOVEMENTS;
-  if (totalMobileFixtures <= 1) return patterns[0];
-  let hash = 0;
-  for (let i = 0; i < section.length; i++) hash = ((hash << 5) - hash) + section.charCodeAt(i);
-  // Time-based rotation: same fixture gets different pattern at different times
-  const timeIdx = timeOffset ? Math.floor(timeOffset / 8) : 0; // rotate every ~8 seconds
-  const idx = (fixtureIndex + timeIdx + Math.abs(hash % 97)) % patterns.length;
-  return patterns[idx];
-}
-
-// ─── Main Hook ──────────────────────────────────────────────
-
 export function useDmxPlayback(options: {
   isPlaying: boolean; currentTimeRef: React.MutableRefObject<number>;
   cues: CuePlayback[]; patchedFixtures: PatchedFixture[];
@@ -453,12 +356,24 @@ export function useDmxPlayback(options: {
   colorTracksRef?: React.MutableRefObject<ColorTrackRef[]>; // Color track overrides
   strobeTracksRef?: React.MutableRefObject<StrobeTrackRef[]>; // Strobe track overrides
   dimmerTracksRef?: React.MutableRefObject<DimmerTrackRef[] | null>; // Dimmer track overrides (highest priority for intensity)
+  chaserTracksRef?: React.MutableRefObject<ChaserTrackRef[] | null>; // Chaser track takeover (full control of target fixtures)
+  chasersRef?: React.MutableRefObject<Array<{ id: string; steps: Array<{ sceneId: string; fadeIn?: number; hold?: number; fadeOut?: number }> }>>; // Saved chasers
+  scenesRef?: React.MutableRefObject<Array<{ id: string; channels: Record<number, number> }>>; // Saved scenes (for chaser steps)
   disabledFixturesRef?: React.MutableRefObject<Set<string>>; // Disabled fixture IDs
+  fixturePositionsRef?: React.MutableRefObject<Record<string, { x: number; y: number }>>; // For stage-aware pan/tilt
   onVirtualDmx?: (universe: number, channelValues: Record<number, number>) => void; // Mirror for 3D view
+  dryRunMode?: boolean; // Skip hardware DMX output, keep store/3D updates
+  frozenRef?: React.MutableRefObject<boolean>; // Freeze: hold current DMX frame
+  forceDropRef?: React.MutableRefObject<boolean>; // Force next tick to use drop parameters
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,onVirtualDmx,disabledFixturesRef}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,dryRunMode=false,frozenRef,forceDropRef}=options;
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
+  const dryRunRef=useRef(dryRunMode);dryRunRef.current=dryRunMode;
+  const lastChannelsRef=useRef<Map<number,Record<number,number>>>(new Map());
+  const freezerRef=useRef(frozenRef);freezerRef.current=frozenRef;
+  const forceDropRefLocal=useRef(forceDropRef);forceDropRefLocal.current=forceDropRef;
+  const patchedFixturesRef=useRef(patchedFixtures);patchedFixturesRef.current=patchedFixtures;
 
   // Pre-compute fixture channel analysis (re-computed when fixtures change)
   const analysisRef=useRef<{byUniverse:Map<number,ChannelAnalysis[]>;uniIds:string[]}|null>(null);
@@ -521,10 +436,47 @@ export function useDmxPlayback(options: {
       if(hasPlayedRef.current&&dmxEnabledRef.current){
         hasPlayedRef.current=false;
         const api=(typeof window!=='undefined'?(window as any).lightMaestro?.dmx:null);
-        if(api){
+        const savedChannels = lastChannelsRef.current;
+        if(savedChannels.size > 0 && api){
+          // Fade-out on pause: step down to 0 over 200ms (quadratic ease-out)
+          const fadeStart = performance.now() / 1000;
+          const fadeDuration = 0.2;
+          const tickFade = (now: number) => {
+            const elapsed = (now / 1000) - fadeStart;
+            if(elapsed >= fadeDuration){
+              // Final zero
+              for(let uniIdx=0;uniIdx<universes.length;uniIdx++){
+                const black:Record<number,number>={};for(let ch=1;ch<=512;ch++)black[ch]=0;
+                if(!dryRunRef.current)api.setChannels(uniIdx,black).catch(()=>{});
+                useAppStore.getState().setUniverseData(uniIdx, black);
+                dmxBridge.push(uniIdx, black);
+                if(onVirtualDmx)onVirtualDmx(uniIdx,black);
+              }
+              return;
+            }
+            const t = elapsed / fadeDuration;
+            const factor = 1.0 - (t * t);
+            for(const[uniIdx,channels]of savedChannels.entries()){
+              const faded:Record<number,number>={};
+              for(const[ch,val]of Object.entries(channels)){
+                faded[Number(ch)]=Math.round(Number(val) * factor);
+              }
+              if(!dryRunRef.current)api.setChannels(uniIdx,faded).catch(()=>{});
+              useAppStore.getState().setUniverseData(uniIdx, faded);
+              dmxBridge.push(uniIdx, faded);
+              if(onVirtualDmx)onVirtualDmx(uniIdx,faded);
+            }
+            requestAnimationFrame(tickFade);
+          };
+          requestAnimationFrame(tickFade);
+        }else{
+          // No saved channels: zero immediately (fallback)
           for(let uniIdx=0;uniIdx<universes.length;uniIdx++){
             const black:Record<number,number>={};for(let ch=1;ch<=512;ch++)black[ch]=0;
-            api.setChannels(uniIdx,black).catch(()=>{});
+            if(api&&!dryRunRef.current)api.setChannels(uniIdx,black).catch(()=>{});
+            useAppStore.getState().setUniverseData(uniIdx, black);
+            dmxBridge.push(uniIdx, black);
+            if(onVirtualDmx)onVirtualDmx(uniIdx,black);
           }
         }
       }
@@ -534,6 +486,8 @@ export function useDmxPlayback(options: {
     hasPlayedRef.current=true;
     const api=(typeof window!=='undefined'?(window as any).lightMaestro?.dmx:null);
     if(!api)return;
+    // Dry-run mode: skip hardware DMX, keep store/3D updates
+    const pushDmx=(uniIdx:number,vals:Record<number,number>)=>{if(!dryRunRef.current)api.setChannels(uniIdx,vals).catch(()=>{});};
 
     // Ensure engine is started (re-attempt on first play tick if needed)
     if(!engineStartedRef.current){
@@ -563,13 +517,30 @@ export function useDmxPlayback(options: {
       const c=cuesRef.current;
       const analysis=analysisRef.current;
       if(!analysis||c.length===0){rafRef.current=requestAnimationFrame(tick);return;}
+      // Freeze: hold last DMX frame, skip all computation
+      if (freezerRef.current?.current) {
+        const lastCh = lastChannelsRef.current;
+        if (lastCh.size > 0) {
+          for (const [uId, chMap] of lastCh) {
+            const uIdx = analysis.uniIds.indexOf(String(uId));
+            if (uIdx < 0) continue;
+            const cpy = { ...chMap };
+            if (!dryRunRef.current && api) api.setChannels(uId, cpy).catch(() => {});
+            dmxBridge.push(uId, cpy);
+            if (onVirtualDmx) onVirtualDmx(uId, { ...cpy });
+          }
+        }
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+      const fixturePositions = fixturePositionsRef?.current;
 
       // ── Color track forced colors (compute early, used later in palette resolution) ──
       const ctRefData = colorTracksRef?.current || [];
       const colorTrackColors = computeColorTrackColors(
         ctRefData,
         ct,
-        patchedFixtures,
+        patchedFixturesRef.current,
         fixtureGroupsRef?.current || [],
       );
       // Diagnostic: log color tracks once every 120 frames (~2s)
@@ -578,23 +549,89 @@ export function useDmxPlayback(options: {
       if (_diagFrame2 % 120 === 0 && ctRefData.length > 0) {
         for (const ctItem of ctRefData) {
           const activeEntry = ctItem.entries.find(e => ct >= e.time && ct < e.endTime);
-          console.log(`[colorTrack] "${ctItem.name}" targets=${ctItem.targetFixtures?.type} entries=${ctItem.entries.length} activeAt=${ct.toFixed(1)}: ${activeEntry ? `${activeEntry.color}→${activeEntry.endColor || 'N/A'} [${activeEntry.time.toFixed(1)}-${activeEntry.endTime.toFixed(1)}]` : 'none'}`);
+          console.log(`[colorTrack] "${ctItem.name}" targets=${ctItem.targetFixtures?.type} entries=${ctItem.entries.length} activeAt=${ct.toFixed(1)}: ${activeEntry ? `${activeEntry.color}→${activeEntry.endColor || 'N/A'} [${activeEntry.time.toFixed(1)}-${activeEntry.endTime.toFixed(1)}]` : '∅'}`);
         }
-        const armId = patchedFixtures.find(f => f.name?.includes('6 arm'))?.id;
+        const armId = patchedFixturesRef.current.find(f => f.name?.includes('6 arm'))?.id;
         if (armId) {
-          console.log(`[colorTrack] Tonio 6 arm (${armId}) hasColorTrack: ${colorTrackColors.has(armId)} → ${colorTrackColors.get(armId) || 'NONE'}`);
+          console.log(`[colorTrack] Tonio 6 arm (${armId}) hasColorTrack: ${colorTrackColors.has(armId)} → ${colorTrackColors.get(armId) || '∅'}`);
         }
       }
 
       // Find active cue: direct latest-before-ct, NO section grouping
       let active:CuePlayback|null=null;
       for(const cue of c){if(cue.time<=ct&&(!active||cue.time>active.time))active=cue;}
-      if(!active){if(c.length>0)active=c[0];else{rafRef.current=requestAnimationFrame(tick);return;}}
+      // Pre-compute section for use throughout tick (isDrop, isChorus, strobe sectionMult, movement fallback)
+      // @ts-expect-error — active is non-null at usage sites (returned above if null)
+      const sec:string = active?.section?.toLowerCase() ?? 'verse';
+      // Standby / blackout at boundaries
+      let fadeFactor = 1.0;
+      // 2) No active cue → hard cut to 0
+      if(!active){
+        if(analysis){
+          for(const[uniIdx]of analysis.byUniverse.entries()){
+            const uid=analysis.uniIds[uniIdx];if(!uid)continue;
+            const zeroCh:Record<number,number>={};
+            for(let ch=1;ch<=512;ch++)zeroCh[ch]=0;
+            pushDmx(uniIdx,zeroCh);
+            useAppStore.getState().setUniverseData(uniIdx, zeroCh);
+            dmxBridge.push(uniIdx, zeroCh);
+            if(onVirtualDmx)onVirtualDmx(uniIdx,zeroCh);
+          }
+        }
+        rafRef.current=requestAnimationFrame(tick);
+        return;
+      }
+      // 3) End fade-out: fade to black over 1.0s after last cue (quadratic ease-out)
+      if(c.length>0 && ct > c[c.length-1].time){
+        const fadeDuration = 1.0;
+        const elapsed = ct - c[c.length-1].time;
+        if(elapsed >= fadeDuration){
+          if(analysis){
+            for(const[uniIdx]of analysis.byUniverse.entries()){
+              const uid=analysis.uniIds[uniIdx];if(!uid)continue;
+              const zeroCh:Record<number,number>={};
+              for(let ch=1;ch<=512;ch++)zeroCh[ch]=0;
+              pushDmx(uniIdx,zeroCh);
+              useAppStore.getState().setUniverseData(uniIdx, zeroCh);
+              dmxBridge.push(uniIdx, zeroCh);
+              if(onVirtualDmx)onVirtualDmx(uniIdx,zeroCh);
+            }
+          }
+          rafRef.current=requestAnimationFrame(tick);
+          return;
+        }
+        const t = elapsed / fadeDuration;
+        fadeFactor = 1.0 - (t * t);
+      }
+
+      // Crossfade: find next cue and pre-compute its DMX values
+      let nextCue:CuePlayback|null=null;
+      let crossfadeT = 0;
+      for(const cue of c){if(cue.time>ct&&(!nextCue||cue.time<nextCue.time))nextCue=cue;}
+      let nextCueDmx:Array<{universe:number;channelValues:Record<number,number>}>|null=null;
+      if(nextCue&&active){const gap=nextCue.time-active.time;if(gap>0&&gap<0.3){const window=Math.min(0.15,gap*0.5);const start=nextCue.time-window;if(ct>=start){crossfadeT=Math.min(1,(ct-start)/window);}}}
+      if(crossfadeT>0&&nextCue){
+        try{
+          nextCueDmx=computeDmxForCue(
+            nextCue,patchedFixturesRef.current,fixtureDefs,universes as any,tierMultipliers,undefined,
+            colorTrackColors,undefined,undefined,disabledFixturesRef?.current,fixturePositions
+          );
+        }catch(e){crossfadeT=0;nextCueDmx=null;console.warn('[crossfade] computeDmxForCue failed, skipping:',e);}
+      }
 
 
     const energy=active.energy??(active.intensity==='very-high'?0.95:active.intensity==='high'?0.8:active.intensity==='medium'?0.5:active.intensity==='low'?0.25:0.1);
-      const sec=active.section.toLowerCase();
-      const isDrop=sec==='drop';const isChorus=sec==='chorus';
+    // Drop Now: force max energy + strobe for ~300ms via setTimeout
+    let dropBoost = 0;
+    if (forceDropRefLocal.current?.current) {
+      dropBoost = 0.95;
+      forceDropRefLocal.current.current = false;
+      setTimeout(() => { dropBoost = 0; }, 300);
+    }
+    const effectiveEnergy = dropBoost > 0 ? dropBoost : energy;
+    const isDrop=sec==='drop'||dropBoost>0;const isChorus=sec==='chorus';
+    // Boost strobe during drop force
+    const forcedStrobe = dropBoost > 0 ? true : active.forcedStrobe;
 
       // Pre-compute active EFX/manual override for this frame
       let efxActive:Record<number,number>|null=null;let efxTime=0;
@@ -602,7 +639,7 @@ export function useDmxPlayback(options: {
 
       // Pre-compute EFX track pan/tilt overrides for this frame
       const efxPtOverrides = efxTracksRef?.current && effectsRef?.current && efxTracksRef.current.length > 0
-        ? computeEfxOverrides(efxTracksRef.current, ct, effectsRef.current, patchedFixtures, fixtureGroupsRef?.current || [])
+        ? computeEfxOverrides(efxTracksRef.current, ct, effectsRef.current, patchedFixturesRef.current, fixtureGroupsRef?.current || [])
         : null;
 
       // Debug: log if EFX tracks exist but no overrides computed
@@ -629,7 +666,7 @@ export function useDmxPlayback(options: {
             if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
               for (const ft of fixtureTracksRef.current) {
                 if (!ft.enabled) continue;
-                const targets = resolveTrackTargets(ft, patchedFixtures, fixtureGroupsRef.current);
+                const targets = resolveTrackTargets(ft, patchedFixturesRef.current, fixtureGroupsRef.current);
                 if (!targets.includes(pf.id)) continue;
                 const activeBlock = ft.dimmerBlocks.find(b => ct >= b.time && ct < b.endTime);
                 if (activeBlock) {
@@ -643,11 +680,11 @@ export function useDmxPlayback(options: {
                 }
               }
             }
-            return active.forcedDimmerVal !== undefined ? active.forcedDimmerVal : mapIntensity(active.intensity, energy, pf.tier, tierMultipliers);
+            return active.forcedDimmerVal !== undefined ? active.forcedDimmerVal : mapIntensity(active.intensity, effectiveEnergy, pf.tier, tierMultipliers);
           })();
           // Dimmer track override (highest priority for intensity)
           if (dimmerTracksRef?.current) {
-            const dto = computeDimmerTrackOverrides(dimmerTracksRef.current, ct, patchedFixtures, fixtureGroupsRef?.current || []);
+            const dto = computeDimmerTrackOverrides(dimmerTracksRef.current, ct, patchedFixturesRef.current, fixtureGroupsRef?.current || []);
             const dimmerOverride = dto.get(pf.id);
             if (dimmerOverride) {
               dimmerVal = Math.round(255 * dimmerOverride.value / 100);
@@ -664,7 +701,7 @@ export function useDmxPlayback(options: {
             if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
               for (const ft of fixtureTracksRef.current) {
                 if (!ft.enabled) continue;
-                const targets = resolveTrackTargets(ft, patchedFixtures, fixtureGroupsRef.current);
+                const targets = resolveTrackTargets(ft, patchedFixturesRef.current, fixtureGroupsRef.current);
                 if (!targets.includes(pf.id)) continue;
                 const activeBlock = ft.colorBlocks.find(b => ct >= b.time && ct < b.endTime);
                 if (activeBlock) {
@@ -699,6 +736,26 @@ export function useDmxPlayback(options: {
             // Only apply tier hue shift to cue colors, NOT to user-specified color track colors
             if (!isColorTrack) {
               [r,g,b] = applyHueShift([r,g,b], TIER_HUE[pf.tier]);
+              // Dynamic palette by energy: modulate saturation based on intensity
+              const grayVal = Math.round(r * 0.299 + g * 0.587 + b * 0.114);
+              if (effectiveEnergy < 0.3) {
+                // Low energy: desaturate toward gray
+                const desat = 1 - effectiveEnergy * 3;
+                r = Math.round(r + (grayVal - r) * desat);
+                g = Math.round(g + (grayVal - g) * desat);
+                b = Math.round(b + (grayVal - b) * desat);
+                // Cool shift on intros/outros
+                if (!isDrop && !isChorus) {
+                  r = Math.round(r * (1 - (0.3 - effectiveEnergy) * 0.8));
+                  b = Math.min(255, Math.round(b * (1 + (0.3 - effectiveEnergy) * 0.5)));
+                }
+              } else if (effectiveEnergy > 0.6) {
+                // High energy: boost saturation (push away from gray)
+                const boost = (effectiveEnergy - 0.6) * 0.4;
+                r = Math.min(255, Math.round(r + (r - grayVal) * boost * 2.5));
+                g = Math.min(255, Math.round(g + (g - grayVal) * boost * 2.5));
+                b = Math.min(255, Math.round(b + (b - grayVal) * boost * 2.5));
+              }
             }
             for(const po of fa.presetOverrideOffsets){chVals[pf.startAddress+po]=0;}
             // If intensityOffset was detected (including Dimmer/Shutter), set it
@@ -720,8 +777,8 @@ export function useDmxPlayback(options: {
           (tick as any)._armDiagFrame = _diagFrame + 1;
           if (_diagFrame % 120 === 0 && pf.name?.includes('6 arm')) {
             const isCT = colorTrackColors.has(pf.id);
-            console.log(`[dmx-out] Tonio 6 arm | source=${isCT?'colorTrack':'cue'} palette=${paletteColor||'NONE'} dimmer=${dimmerVal}`,
-              `| rgbSegments=${fa.rgbSegments.length>0?fa.rgbSegments.map(s=>`R${pf.startAddress+s.r}=${chVals[pf.startAddress+s.r]??0} G${pf.startAddress+s.g}=${chVals[pf.startAddress+s.g]??0} B${pf.startAddress+s.b}=${chVals[pf.startAddress+s.b]??0}`).join('; '):'none'}`);
+            console.log(`[dmx-out] Tonio 6 arm | source=${isCT?'colorTrack':'cue'} palette=${paletteColor||'∅'} dimmer=${dimmerVal}`,
+              `| rgbSegments=${fa.rgbSegments.length>0?fa.rgbSegments.map(s=>`R${pf.startAddress+s.r}=${chVals[pf.startAddress+s.r]??0} G${pf.startAddress+s.g}=${chVals[pf.startAddress+s.g]??0} B${pf.startAddress+s.b}=${chVals[pf.startAddress+s.b]??0}`).join('; '):'∅'}`);
           }
 
           // Shutter
@@ -729,7 +786,7 @@ export function useDmxPlayback(options: {
             // Strobe track override (highest priority)
             const strobeTrackOverride = (() => {
               if (strobeTracksRef?.current) {
-                const sto = computeStrobeTrackOverrides(strobeTracksRef.current, ct, patchedFixtures, fixtureGroupsRef?.current || []);
+                const sto = computeStrobeTrackOverrides(strobeTracksRef.current, ct, patchedFixturesRef.current, fixtureGroupsRef?.current || []);
                 return sto.get(pf.id) || null;
               }
               return null;
@@ -738,7 +795,7 @@ export function useDmxPlayback(options: {
               if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
                 for (const ft of fixtureTracksRef.current) {
                   if (!ft.enabled) continue;
-                  const targets = resolveTrackTargets(ft, patchedFixtures, fixtureGroupsRef.current);
+                  const targets = resolveTrackTargets(ft, patchedFixturesRef.current, fixtureGroupsRef.current);
                   if (!targets.includes(pf.id)) continue;
                   const activeBlock = ft.strobeBlocks.find(b => ct >= b.time && ct < b.endTime);
                   if (activeBlock) {
@@ -758,8 +815,22 @@ export function useDmxPlayback(options: {
               ? strobeTrackOverride.active
               : trackStrobe
               ? trackStrobe.active
-              : active.forcedStrobe !== undefined ? active.forcedStrobe : ((isDrop || isChorus) && active.strobe && pf.tier === 'primary');
-            if (useStrobe) {const speed = Math.min(strobeTrackOverride?.speed || trackStrobe?.speed || active.strobeSpeed || 10, strobeLimit); chVals[sAddr] = Math.min(255, 180 + Math.floor(speed * 3));}
+              : forcedStrobe !== undefined ? forcedStrobe : ((isDrop || isChorus) && active.strobe && pf.tier === 'primary');
+            if (useStrobe) {
+              // Adaptive strobe speed: section-dependent multiplier
+              const sectionMult = isDrop ? 1.5 : isChorus ? 1.2 : sec === 'build' ? 1.3 : sec === 'bridge' ? 1.0 : sec === 'verse' ? 0.8 : 0.5;
+              const baseSpeed = Math.min(strobeTrackOverride?.speed || trackStrobe?.speed || active.strobeSpeed || 10, strobeLimit);
+              const adaptedSpeed = Math.min(baseSpeed * sectionMult, strobeLimit);
+              // Soft strobe: pulse dimmer + hold shutter open when fixture has separate intensity
+              if (fa.intensityOffset !== null && !strobeTrackOverride && !trackStrobe) {
+                const pulse = 0.5 + 0.5 * Math.sin(ct * Math.PI * 2 * adaptedSpeed);
+                const iAddr = pf.startAddress + fa.intensityOffset;
+                if (!chVals[iAddr] || Math.round(dimmerVal * pulse) > chVals[iAddr]) chVals[iAddr] = Math.round(dimmerVal * pulse);
+                chVals[sAddr] = 255; // shutter stays open
+              } else {
+                chVals[sAddr] = Math.min(255, 180 + Math.floor(adaptedSpeed * 3));
+              }
+            }
             else if(fa.intensityOffset===null){chVals[sAddr]=Math.max(8,Math.min(255,8+Math.round((dimmerVal/255)*247)));}
             else{chVals[sAddr]=255;}}
 
@@ -780,7 +851,7 @@ export function useDmxPlayback(options: {
                 if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
                   for (const ft of fixtureTracksRef.current) {
                     if (!ft.enabled) continue;
-                    const targets = resolveTrackTargets(ft, patchedFixtures, fixtureGroupsRef.current);
+                    const targets = resolveTrackTargets(ft, patchedFixturesRef.current, fixtureGroupsRef.current);
                     if (!targets.includes(pf.id)) continue;
                     const activeBlock = ft.movementBlocks.find(b => ct >= b.time && ct < b.endTime);
                     if (activeBlock) return activeBlock;
@@ -791,7 +862,7 @@ export function useDmxPlayback(options: {
               const amplitude = trackMovement
                 ? trackMovement.amplitude
                 : active.movementAmplitude !== undefined
-                  ? Math.round(active.movementAmplitude * 128)
+                  ? Math.min(128, Math.max(0, Math.round(active.movementAmplitude)))
                   : pf.tier === 'primary' ? 90 : pf.tier === 'secondary' ? 70 : 40;
                 const movPattern = (() => {
                   if (trackMovement) return trackMovement.pattern;
@@ -827,12 +898,29 @@ export function useDmxPlayback(options: {
                   }
                   return sec;
                 })();
-              if(amplitude>0){for(let m=0;m<motorCount;m++){const motorPhase=m*(Math.PI*2/motorCount);const speedMult=active.movementSpeed??1;const phase=(ct*Math.PI*2*speedMult)+motorPhase+movementPhase;let px=0,py=0;
+              if(amplitude>0){for(let m=0;m<motorCount;m++){const motorPhase=m*(Math.PI*2/motorCount);const speedMult=active.movementSpeed??1;
+                // Crossfade movement params: blend toward next cue
+                const curAmp = amplitude; const curSpd = speedMult;
+                const blendAmp = (crossfadeT>0&&nextCue&&!trackMovement)
+                  ? Math.round(curAmp*(1-crossfadeT) + (nextCue.movementAmplitude!==undefined?Math.min(128,Math.max(0,Math.round(nextCue.movementAmplitude))):curAmp)*crossfadeT)
+                  : curAmp;
+                const blendSpd = (crossfadeT>0&&nextCue&&!trackMovement)
+                  ? curSpd*(1-crossfadeT) + (nextCue.movementSpeed??curSpd)*crossfadeT
+                  : curSpd;
+                const phase=(ct*Math.PI*2*blendSpd)+motorPhase+movementPhase;let px=0,py=0;
                 switch(movPattern){case'intro':px=Math.sin(phase*.1)*.3;py=Math.cos(phase*.08+motorPhase)*.3;break;case'verse':px=Math.sin(phase*.25)*.5;py=Math.cos(phase*.2+motorPhase)*.4;break;case'chorus':px=Math.sin(phase*.5)*.7;py=Math.cos(phase*.5+motorPhase)*.7;break;case'bridge':px=Math.sin(phase*.3)*.5;py=Math.sin(phase*.6+motorPhase)*.5;break;case'drop':px=Math.sin(phase*.8)*.9;py=Math.cos(phase*1.2+motorPhase)*.6;break;case'outro':px=Math.sin(phase*.15)*.2;py=Math.cos(phase*.12+motorPhase)*.2;break;case'sweep':px=Math.sin(phase*.35+motorPhase)*.7;py=Math.cos(phase*.3+motorPhase)*.5;break;case'circle':px=Math.sin(phase*.5+motorPhase)*.7;py=Math.cos(phase*.5+motorPhase)*.7;break;case'bounce':px=Math.sin(phase*.4+motorPhase)*.5;py=Math.abs(Math.sin(phase*.8+motorPhase))*.8;break;case'wave':px=Math.sin(phase*.6+motorPhase)*.5;py=Math.sin(phase*.35+motorPhase*1.5)*.5;break;case'figure8':px=Math.sin(phase*.4+motorPhase)*.6;py=Math.sin(phase*.8+motorPhase)*.5;break;case'static':px=Math.sin(phase*.05+motorPhase)*.1;py=Math.cos(phase*.05+motorPhase)*.1;break;
                 case'zigzag':{const saw=((phase/Math.PI)%2)-1;px=saw*.8;py=Math.sin(phase)>0?.5:-.5;}break;case'diamond':{px=(((phase/Math.PI)%2)-1)*.8;py=((((phase+Math.PI/2)/Math.PI)%2)-1)*.8;}break;case'spiral':{const r=.3+.7*Math.abs(Math.sin(phase*.3));px=Math.sin(phase*2)*r;py=Math.cos(phase*2)*r;}break;case'heartbeat':{const hp=((phase/(Math.PI*2))%1);const hb=hp<.15?1:hp<.3?.6:0;px=hb*Math.sin(phase*3);py=hb*Math.cos(phase*3);}break;case'randomWalk':px=Math.sin(phase*.7)*.5+Math.sin(phase*1.3)*.3+Math.cos(phase*2.1)*.2;py=Math.cos(phase*.6)*.5+Math.sin(phase*1.7)*.3+Math.sin(phase*2.3)*.2;break;case'panOnly':px=Math.sin(phase);py=0;break;case'tiltOnly':px=0;py=Math.sin(phase);break;
       default:px=Math.sin(phase*.35)*.4;py=Math.cos(phase*.3+motorPhase)*.4;}
-                if(m<panCount)chVals[pf.startAddress+fa.panOffsets[m]]=Math.max(0,Math.min(255,Math.round(128+px*amplitude)));
-                if(m<tiltCount)chVals[pf.startAddress+fa.tiltOffsets[m]]=Math.max(0,Math.min(255,Math.round(128+py*amplitude)));}
+                if(m<panCount){
+                  const raw = Math.max(0,Math.min(255,Math.round(128+px*blendAmp)));
+                  const fp = fixturePositions?.[pf.id];
+                  chVals[pf.startAddress+fa.panOffsets[m]] = fp ? clampPanToStage(raw, fp.x) : raw;
+                }
+                if(m<tiltCount){
+                  const raw = Math.max(0,Math.min(255,Math.round(128+py*blendAmp)));
+                  const fp = fixturePositions?.[pf.id];
+                  chVals[pf.startAddress+fa.tiltOffsets[m]] = fp ? clampTiltToStage(raw, fp.y) : raw;
+                }}
               }else{for(const po of fa.panOffsets)chVals[pf.startAddress+po]=128;for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=128;}
             }
           }
@@ -867,6 +955,67 @@ export function useDmxPlayback(options: {
           }
         }
 
+        // Chaser track takeover: fully controlled fixtures get the chaser scene state
+        if (chaserTracksRef?.current && chasersRef?.current && scenesRef?.current) {
+          // Diagnostic: log chaser track state once every 120 frames (~2s)
+          const _diagC = (tick as any)._chDiagFrame ?? 0;
+          (tick as any)._chDiagFrame = _diagC + 1;
+          try {
+            const chaserCtl = computeChaserTrackOverrides(
+              chaserTracksRef.current,
+              chasersRef.current,
+              scenesRef.current,
+              ct,
+              patchedFixturesRef.current,
+              fixtureGroupsRef?.current || [],
+            );
+            if (_diagC % 120 === 0 && chaserTracksRef.current.length > 0) {
+              for (const tr of chaserTracksRef.current) {
+                const activeEntry = tr.entries.find(e => ct >= e.time && ct < e.endTime);
+                console.log(`[chaserTrack] "${tr.name}" entries=${tr.entries.length} activeAt=${ct.toFixed(1)}: ${activeEntry ? `chaser=${activeEntry.chaserName || activeEntry.chaserId} [${activeEntry.time.toFixed(1)}-${activeEntry.endTime.toFixed(1)}] controls=${chaserCtl.size} fixtures` : '∅'}`);
+              }
+            }
+            if (chaserCtl.size > 0) {
+              for (const fa of fixtures) {
+                const pfx = fa.fixture;
+                const cmap = chaserCtl.get(pfx.id);
+                if (!cmap) continue;
+                for (let a = pfx.startAddress; a < pfx.startAddress + pfx.channelCount; a++) {
+                  if (chVals[a] !== undefined) delete chVals[a];
+                }
+                for (const [addrStr, v] of Object.entries(cmap)) {
+                  const addr = Number(addrStr);
+                  if (addr >= pfx.startAddress && addr < pfx.startAddress + pfx.channelCount) chVals[addr] = v;
+                }
+              }
+            }
+          } catch (e) {
+            console.error('[chaserTrack] takeover error:', e);
+          }
+        }
+
+        // Crossfade blend: mix next cue values into current chVals
+        if(crossfadeT>0&&nextCueDmx){
+          const nextUni=nextCueDmx.find(n=>n.universe===uniIdx);
+          if(nextUni){
+            const nextCh=nextUni.channelValues;
+            const existing=new Set(Object.keys(chVals));
+            for(const chStr of Object.keys(nextCh)){
+              const ch=Number(chStr);
+              chVals[ch]=existing.has(chStr)
+                ?Math.round(chVals[ch]*(1-crossfadeT)+nextCh[ch]*crossfadeT)
+                :Math.round(nextCh[ch]*crossfadeT);
+            }
+          }
+        }
+
+        // Apply master fade factor for end fade-out
+        if (fadeFactor < 1.0) {
+          for (const ch of Object.keys(chVals)) {
+            chVals[Number(ch)] = Math.round(chVals[Number(ch)] * fadeFactor);
+          }
+        }
+
         if(Object.keys(chVals).length>0){
           const sig=String(uniIdx)+':'+Object.entries(chVals).sort((a,b)=>Number(a[0])-Number(b[0])).map(([k,v])=>`${k}=${v}`).join(',');
           if(sig!==lastSig){lastSig=sig;
@@ -875,7 +1024,9 @@ export function useDmxPlayback(options: {
             // Direct bridge to Stage3D — bypasses store for guaranteed delivery
             dmxBridge.push(uniIdx, chVals);
             if (onVirtualDmx) onVirtualDmx(uniIdx, chVals);
-            api.setChannels(uniIdx,chVals).catch(()=>{});}
+            pushDmx(uniIdx,chVals);
+            // Save for pause fade-out
+            lastChannelsRef.current.set(uniIdx, {...chVals});}
         }
       }
       rafRef.current=requestAnimationFrame(tick);
@@ -907,6 +1058,8 @@ export function computeDmxForCue(
   strobeTrackOverrides?: Map<string, { active: boolean; speed: number }>,
   dimmerTrackOverrides?: Map<string, { active: boolean; value: number }>,
   disabledFixtures?: Set<string>,
+  fixturePositions?: Record<string, { x: number; y: number }>,
+  chaserTakeover?: Map<string, Record<number, number>>,
 ): Array<{ universe: number; channelValues: Record<number, number> }> {
   const uniIds = universes.map(u => String(u.id));
   const analyses: ChannelAnalysis[] = [];
@@ -1033,7 +1186,7 @@ export function computeDmxForCue(
         const amplitude = trackMovement
           ? trackMovement.amplitude
           : (cue as any).movementAmplitude !== undefined
-            ? Math.round((cue as any).movementAmplitude * 128)
+            ? Math.min(128, Math.max(0, Math.round((cue as any).movementAmplitude)))
             : pf.tier === 'primary' ? 90 : pf.tier === 'secondary' ? 70 : 40;
         if (amplitude > 0) {
           const speedMult = (cue as any).movementSpeed ?? 1;
@@ -1092,8 +1245,16 @@ export function computeDmxForCue(
               case 'tiltOnly': px = 0; py = Math.sin(phase); break;
               default: px = Math.sin(phase * .35) * .5; py = Math.cos(phase * .3 + motorPhase) * .5;
             }
-            if (m < panCount) chVals[pf.startAddress + fa.panOffsets[m]] = Math.max(0, Math.min(255, Math.round(128 + px * amplitude)));
-            if (m < tiltCount) chVals[pf.startAddress + fa.tiltOffsets[m]] = Math.max(0, Math.min(255, Math.round(128 + py * amplitude)));
+            if (m < panCount) {
+              const raw = Math.max(0, Math.min(255, Math.round(128 + px * amplitude)));
+              const fp = fixturePositions?.[pf.id];
+              chVals[pf.startAddress + fa.panOffsets[m]] = fp ? clampPanToStage(raw, fp.x) : raw;
+            }
+            if (m < tiltCount) {
+              const raw = Math.max(0, Math.min(255, Math.round(128 + py * amplitude)));
+              const fp = fixturePositions?.[pf.id];
+              chVals[pf.startAddress + fa.tiltOffsets[m]] = fp ? clampTiltToStage(raw, fp.y) : raw;
+            }
           }
         } else {
           for (const po of fa.panOffsets) chVals[pf.startAddress + po] = 128;
@@ -1134,6 +1295,22 @@ export function computeDmxForCue(
 
       if (fa.focusOffset !== null) {
         chVals[pf.startAddress + fa.focusOffset] = Math.round(80 + fxEnergy * 120 + Math.sin(fxPhase * 0.3) * 30);
+      }
+    }
+
+    // Chaser track takeover: fully controlled fixtures get the chaser scene state
+    if (chaserTakeover && chaserTakeover.size > 0) {
+      for (const fa of fixtures) {
+        const pf = fa.fixture;
+        const cmap = chaserTakeover.get(pf.id);
+        if (!cmap) continue;
+        for (let a = pf.startAddress; a < pf.startAddress + pf.channelCount; a++) {
+          if (chVals[a] !== undefined) delete chVals[a];
+        }
+        for (const [addrStr, v] of Object.entries(cmap)) {
+          const addr = Number(addrStr);
+          if (addr >= pf.startAddress && addr < pf.startAddress + pf.channelCount) chVals[addr] = v;
+        }
       }
     }
 

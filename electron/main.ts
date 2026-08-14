@@ -141,7 +141,9 @@ ipcMain.handle('dmx:isRunning', async () => dmxEngine.isRunning());
 ipcMain.handle('dmx:blackout', async () => dmxEngine.blackout());
 ipcMain.handle('dmx:restore', async () => dmxEngine.restore());
 ipcMain.handle('dmx:getUniverses', async () => dmxEngine.getUniverseConfigs());
+ipcMain.handle('dmx:getStatus', async () => dmxEngine.getStatus());
 ipcMain.handle('dmx:addUniverse', async (_, config: any) => dmxEngine.addUniverse(config));
+ipcMain.handle('dmx:syncUniverses', async (_, configs: any[]) => dmxEngine.syncUniverses(configs || []));
 ipcMain.handle('dmx:removeUniverse', async (_, id: string) => dmxEngine.removeUniverse(id));
 ipcMain.handle('dmx:listSerialPorts', async () => {
   try {
@@ -200,6 +202,30 @@ ipcMain.handle('show:openDialog', async () => {
   });
   if (!filePaths || filePaths.length === 0) return null;
   return showStorage.load(filePaths[0]);
+});
+
+// ─── IPC Handlers: Generic File Dialog ──────────────────────
+ipcMain.handle('dialog:openFile', async (_, filters: Electron.FileFilter[]) => {
+  const { filePaths } = await dialog.showOpenDialog({
+    title: 'Open File',
+    filters: filters || [],
+    properties: ['openFile'],
+  });
+  if (!filePaths || filePaths.length === 0) return null;
+  const filePath = filePaths[0];
+  const content = fs.readFileSync(filePath, 'utf-8');
+  return { filePath, content, name: path.basename(filePath) };
+});
+
+ipcMain.handle('dialog:saveFile', async (_, filters: Electron.FileFilter[], defaultName: string, content: string) => {
+  const { filePath } = await dialog.showSaveDialog({
+    title: 'Save File',
+    defaultPath: defaultName,
+    filters: filters || [],
+  });
+  if (!filePath) return null;
+  fs.writeFileSync(filePath, content, 'utf-8');
+  return { filePath, name: path.basename(filePath) };
 });
 
 // ─── IPC Handlers: Audio ──────────────────────────────────────

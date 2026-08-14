@@ -84,10 +84,21 @@ export class DMXEngine extends EventEmitter {
   /** Grand Master level applied at output time (not modifying SAB) */
   private grandMasterLevel = 1.0;
 
+  /** Output telemetry surfaced to the renderer via getStatus() */
+  private frameCount = 0;
+  private lastFrameTime = 0;
+  private measuredFps = 0;
+  private lastError: string | null = null;
+
+  /** Periodic USB retry: a port that appears late after boot gets picked up. */
+  private usbRetryTimer: NodeJS.Timeout | null = null;
+  private usbRetryCounts = new Map<string, number>();
+
   constructor() {
     super();
     this.sab = new SharedArrayBuffer(SAB_SIZE);
     this.channelView = new Uint8Array(this.sab);
+    this.on('error', (e: Error) => { this.lastError = e.message; });
   }
 
   // ─── Lifecycle ───────────────────────────────────────────
@@ -109,6 +120,8 @@ export class DMXEngine extends EventEmitter {
 
   private async _doStart(): Promise<void> {
     if (this.startCancelled) return;
+    // Fresh start: clear any stale error so the status bar goes green again
+    this.lastError = null;
     await this.spawnWorker();
     if (this.startCancelled) { await this.stopInternal(); return; }
 
@@ -122,7 +135,10 @@ export class DMXEngine extends EventEmitter {
     if (this.startCancelled) { await this.stopInternal(); return; }
 
     this.worker!.postMessage({ type: 'start' });
+    // A successful start clears transient errors from USB retry attempts
+    this.lastError = null;
     for (const entry of this.universes.values()) entry.active = true;
+    this.startUsbRetryTimer();
     this.emit('started');
   }
 
@@ -136,6 +152,7 @@ export class DMXEngine extends EventEmitter {
   }
 
   private async stopInternal(): Promise<void> {
+    this.stopUsbRetryTimer();
     for (const entry of this.universes.values()) entry.active = false;
 
     if (this.worker) {
@@ -200,6 +217,16 @@ export class DMXEngine extends EventEmitter {
     }
   }
 
+  /** Stop all outputs for a single universe (USB child, Art-Net, sACN). */
+  private stopOutput(id: string): void {
+    const usbOut = this.usbOutputs.get(id);
+    if (usbOut) { try { usbOut.child.kill(); } catch {} this.usbOutputs.delete(id); }
+    const artnetOut = this.artnetOutputs.get(id);
+    if (artnetOut) { try { artnetOut.controller.close(); } catch {} this.artnetOutputs.delete(id); }
+    const sacnOut = this.sacnOutputs.get(id);
+    if (sacnOut) { try { sacnOut.sender.close(); } catch {} this.sacnOutputs.delete(id); }
+  }
+
   private async stopAllOutputs(): Promise<void> {
     for (const [, output] of this.usbOutputs) {
       try { output.child.kill(); } catch {}
@@ -248,7 +275,22 @@ export class DMXEngine extends EventEmitter {
 
     const scriptPath = path.join(__dirname, 'usb-output.js');
 
-    return new Promise<void>((resolve) => {
+    // Try to open the serial port with backoff retries — at boot the OS may not
+    // have enumerated the USB adapter yet, so a single attempt fails silently.
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const ok = await this.trySpawnUsbChild(id, portName, scriptPath);
+      if (ok) return;
+      if (attempt < maxAttempts) {
+        await new Promise<void>((r) => setTimeout(r, 2000 * attempt));
+      }
+    }
+    this.emit('error', new Error(`USB ${portName}: failed after ${maxAttempts} attempts`));
+  }
+
+  /** Spawn the USB child once; resolves true when the port reports READY. */
+  private trySpawnUsbChild(id: string, portName: string, scriptPath: string): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
       try {
         const projectRoot = path.join(__dirname, '..', '..', '..');
         const child = spawn(process.execPath, [scriptPath, portName], {
@@ -257,7 +299,8 @@ export class DMXEngine extends EventEmitter {
           env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
         });
 
-        let resolved = false;
+        let settled = false;
+        const settle = (ok: boolean) => { if (!settled) { settled = true; resolve(ok); } };
         let stdoutBuf = '';
 
         child.stdout?.on('data', (chunk: Buffer) => {
@@ -271,7 +314,7 @@ export class DMXEngine extends EventEmitter {
                 const output: UsbOutput = { child, portName, ready: true };
                 this.usbOutputs.set(id, output);
                 this.emit('info', `USB DMX ready on ${portName}`);
-                if (!resolved) { resolved = true; resolve(); }
+                settle(true);
               } else if (msg.type === 'error') {
                 this.emit('error', new Error(`USB ${portName}: ${msg.message}`));
               }
@@ -286,7 +329,9 @@ export class DMXEngine extends EventEmitter {
 
         child.on('error', (err: Error) => {
           this.emit('error', new Error(`USB child process error: ${err.message}`));
-          if (!resolved) { resolved = true; resolve(); }
+          try { child.kill(); } catch {}
+          this.usbOutputs.delete(id);
+          settle(false);
         });
 
         child.on('exit', (code: number | null) => {
@@ -294,19 +339,20 @@ export class DMXEngine extends EventEmitter {
             this.emit('error', new Error(`USB child exited with code ${code}`));
           }
           this.usbOutputs.delete(id);
+          settle(false);
         });
 
         setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
+          if (!settled) {
+            try { child.kill(); } catch {}
+            this.usbOutputs.delete(id);
             this.emit('error', new Error(`USB ${portName}: timeout waiting for READY`));
-            resolve();
+            settle(false);
           }
         }, 5000);
-
       } catch (e: any) {
         this.emit('error', new Error(`USB: ${e.message}`));
-        resolve();
+        resolve(false);
       }
     });
   }
@@ -343,9 +389,54 @@ export class DMXEngine extends EventEmitter {
     }
   }
 
+  // ─── USB retry watcher ──────────────────────────────────
+  // At boot the OS may enumerate the USB adapter several seconds after the
+  // engine starts. If a configured usb-dmx universe has no live output, retry
+  // opening the port every 5s (up to ~60s) without any user action.
+  private startUsbRetryTimer(): void {
+    this.stopUsbRetryTimer();
+    this.usbRetryCounts.clear();
+    this.usbRetryTimer = setInterval(() => {
+      for (const [id, entry] of this.universes.entries()) {
+        if (entry.config.type !== 'usb-dmx') continue;
+        if (this.usbOutputs.has(id)) continue;
+        const portName = entry.config.serialPort || '';
+        if (!portName.trim()) continue;
+        const n = this.usbRetryCounts.get(id) || 0;
+        if (n >= 12) continue; // give up after ~60s of failure
+        this.usbRetryCounts.set(id, n + 1);
+        const scriptPath = path.join(__dirname, 'usb-output.js');
+        this.trySpawnUsbChild(id, portName, scriptPath).then((ok) => {
+          if (ok) this.usbRetryCounts.set(id, 0);
+        });
+      }
+    }, 5000);
+  }
+
+  private stopUsbRetryTimer(): void {
+    if (this.usbRetryTimer) {
+      clearInterval(this.usbRetryTimer);
+      this.usbRetryTimer = null;
+    }
+  }
+
   // ─── Frame Dispatch ───────────────────────────────────────
 
   private handleFrameSent(): void {
+    // Telemetry: measure the worker's output heartbeat (running ⇒ ~30 fps)
+    this.frameCount++;
+    // Frames flowing = the engine is healthy: clear any transient boot error
+    if (this.lastError) this.lastError = null;
+    const now = Date.now();
+    if (this.lastFrameTime > 0) {
+      const dt = now - this.lastFrameTime;
+      if (dt > 0) {
+        const inst = 1000 / dt;
+        this.measuredFps = this.measuredFps === 0 ? inst : this.measuredFps * 0.9 + inst * 0.1;
+      }
+    }
+    this.lastFrameTime = now;
+
     if (!this.channelView || this.blackoutState) return;
 
     const gm = this.grandMasterLevel;
@@ -410,11 +501,26 @@ export class DMXEngine extends EventEmitter {
   // ─── Universe Management ─────────────────────────────────
 
   async addUniverse(config: UniverseConfig): Promise<string> {
+    const fullConfig: UniverseConfig = { ...config, channels: config.channels || DMX_CHANNELS };
+
+    // Idempotent: updating an existing universe must not duplicate it in
+    // universeOrder nor leak a new sabIndex slot.
+    const existing = this.universes.get(config.id);
+    if (existing) {
+      const changed = JSON.stringify(existing.config) !== JSON.stringify(fullConfig);
+      existing.config = fullConfig;
+      if (changed && this.worker && this.workerReady) {
+        this.stopOutput(config.id);
+        await this.startOutput(config.id, fullConfig);
+        this.worker.postMessage({ type: 'addUniverse', index: existing.sabIndex, config: fullConfig });
+      }
+      return config.id;
+    }
+
     if (this.freeSabIndices.length === 0 && this.nextSabIndex >= MAX_UNIVERSES) {
       throw new Error(`Maximum of ${MAX_UNIVERSES} universes reached`);
     }
     const sabIndex = this.freeSabIndices.length > 0 ? this.freeSabIndices.pop()! : this.nextSabIndex++;
-    const fullConfig: UniverseConfig = { ...config, channels: config.channels || DMX_CHANNELS };
     const entry: UniverseEntry = { config: fullConfig, sabIndex, active: this.worker !== null };
     this.universes.set(config.id, entry);
     this.universeOrder.push(config.id);
@@ -426,6 +532,27 @@ export class DMXEngine extends EventEmitter {
 
     this.emit('universeAdded', fullConfig);
     return config.id;
+  }
+
+  /**
+   * Reconcile the engine's universes with an authoritative config list.
+   * Removes universes no longer present, adds/updates the rest, and enforces
+   * the exact ordering so universe INDEX mapping matches the config array.
+   */
+  async syncUniverses(configs: UniverseConfig[]): Promise<void> {
+    const incomingIds = configs.map((c) => c.id);
+
+    for (const id of Array.from(this.universes.keys())) {
+      if (!incomingIds.includes(id)) {
+        await this.removeUniverse(id);
+      }
+    }
+
+    for (const cfg of configs) {
+      await this.addUniverse(cfg);
+    }
+
+    this.universeOrder = incomingIds.filter((id) => this.universes.has(id));
   }
 
   async removeUniverse(id: string): Promise<void> {
@@ -454,6 +581,30 @@ export class DMXEngine extends EventEmitter {
 
   getUniverseConfigs(): UniverseConfig[] {
     return Array.from(this.universes.values()).map((u) => u.config);
+  }
+
+  /** Full output status for the renderer (monitoring panel / status bar). */
+  getStatus() {
+    return {
+      running: this.isRunning(),
+      blackout: this.blackoutState,
+      grandMaster: this.grandMasterLevel,
+      frameRate: Math.round(this.measuredFps),
+      frameCount: this.frameCount,
+      universes: Array.from(this.universes.values()).map((e) => ({
+        id: e.config.id,
+        name: e.config.name,
+        type: e.config.type,
+        output: e.config.output,
+        serialPort: e.config.serialPort || '',
+        artnetIP: e.config.artnetIP || '',
+        artnetUniverse: e.config.artnetUniverse ?? 0,
+        sacnUniverse: e.config.sacnUniverse ?? 1,
+        channels: e.config.channels,
+        active: e.active,
+      })),
+      lastError: this.lastError,
+    };
   }
 
   getUniverseData(id: string): Uint8Array | null {

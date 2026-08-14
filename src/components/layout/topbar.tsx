@@ -13,6 +13,7 @@ import {
   FilePlus,
   FolderOpen,
   Save,
+  Music,
 } from 'lucide-react';
 
 interface TopBarProps {
@@ -28,7 +29,10 @@ const MODE_BUTTONS: { mode: AppMode; labelKey: string; icon: React.ReactNode; sh
 
 export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
   const { t, i18n } = useTranslation();
-  
+  const projectName = useAppStore((s) => s.projectName);
+  const presetName = useAppStore((s) => s.presetName);
+  const audioFileName = useAppStore((s) => s.quickShow.audioFileName);
+
   const toggleLanguage = () => {
     const next = i18n.language === 'fr' ? 'en' : 'fr';
     i18n.changeLanguage(next);
@@ -36,17 +40,48 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
   };
 
   return (
-    <header className="h-12 bg-[#0d0d14] border-b border-gray-800 flex items-center px-3 gap-2 select-none drag-region">
+    <header className="h-12 bg-[#0d0d14] border-b border-gray-800 flex items-center px-3 gap-2 select-none drag-region relative">
       {/* Logo */}
-      <div className="flex items-center gap-2 mr-4 ml-2 no-drag">
+      <div className="flex items-center gap-2 mr-2 ml-2 no-drag">
         <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center">
           <Sun size={16} className="text-white" />
         </div>
         <span className="font-semibold text-white text-sm tracking-wide">{t('app.title')}</span>
       </div>
 
+      {/* Project name + Style selector */}
+      <div className="flex items-center gap-2 no-drag">
+        {projectName && (
+          <>
+            <div className="w-px h-5 bg-gray-700" />
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-700/20 border border-purple-600/20">
+              <span className="text-[10px] text-purple-400/70 font-medium uppercase tracking-wider">Projet</span>
+              <span className="text-xs text-purple-200 font-semibold truncate max-w-[180px]">{projectName}</span>
+            </div>
+          </>
+        )}
+        {presetName && (
+          <>
+            <div className="w-px h-5 bg-gray-700" />
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-700/15 border border-amber-600/15">
+              <span className="text-[10px] text-amber-400/70 font-medium uppercase tracking-wider">Preset</span>
+              <span className="text-xs text-amber-200 font-semibold truncate max-w-[160px]">{presetName}</span>
+            </div>
+          </>
+        )}
+        {!presetName && audioFileName && (
+            <>
+              <div className="w-px h-5 bg-gray-700" />
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-700/15 border border-blue-600/15">
+                <Music size={11} className="text-blue-400" />
+                <span className="text-xs text-blue-200 font-semibold truncate max-w-[200px]">{audioFileName}</span>
+              </div>
+            </>
+          )}
+      </div>
+
       {/* Mode Switcher — SoundSwitch-style clean tabs */}
-      <nav className="flex items-center bg-[#12121a] rounded-lg p-0.5 no-drag">
+      <nav className="absolute left-1/2 -translate-x-1/2 flex items-center bg-[#12121a] rounded-lg p-0.5 no-drag">
         {MODE_BUTTONS.map((btn) => (
           <button
             key={btn.mode}

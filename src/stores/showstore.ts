@@ -10,7 +10,7 @@ import type { DmxCue } from '../hooks/dmx-cues';
 
 // ─── Types ─────────────────────────────────────────────────
 
-export type FixtureTier = 'primary' | 'secondary' | 'tertiary';
+export type FixtureTier = 'primary' | 'secondary' | 'tertiary' | 'other';
 
 export interface PatchedFixture {
   id: string;
@@ -110,7 +110,7 @@ export interface SavedChaser {
 
 // ─── EFX Types ───────────────────────────────────────────
 
-export type EfxPattern = 'Circle' | 'Line' | 'Eight' | 'Square' | 'Triangle';
+export type EfxPattern = 'Circle' | 'Line' | 'Eight' | 'Square' | 'Triangle' | 'Infinity' | 'Zigzag' | 'Spiral' | 'DoubleCircle' | 'Heart';
 
 export interface SavedEffect {
   id: string;
@@ -159,6 +159,10 @@ export interface SongPreset {
   sections: any[];
   efxTracks?: any[];
   manualCues?: DmxCue[];
+  fixtureTracks?: any[];
+  colorTracks?: any[];
+  strobeTracks?: any[];
+  dimmerTracks?: any[];
   createdAt: string;
 }
 
@@ -220,6 +224,7 @@ interface ShowState {
   moveFixture: (id: string, newAddress: number) => { error?: string };
   getFixturesByTier: (universeId: string, tier: FixtureTier) => PatchedFixture[];
   unpatchFixture: (id: string) => void;
+  updateFixtureTier: (id: string, tier: FixtureTier) => void;
   setFixtureName: (id: string, name: string) => void;
   setPatchedFixtures: (fixtures: PatchedFixture[]) => void;
   addShowUniverse: (config: ShowUniverse) => void;
@@ -232,6 +237,8 @@ interface ShowState {
 
   // Fixture positions (shared between Stage2D and Stage3D)
   fixturePositions: Record<string, FixturePos>;
+  stageDims: { width: number; depth: number };
+  setStageDims: (dims: { width: number; depth: number }) => void;
   setFixturePosition: (id: string, pos: Partial<FixturePos>) => void;
   setFixturePositions: (positions: Record<string, FixturePos>) => void;
   initFixturePosition: (id: string, fixtureType: string, index: number) => void;
@@ -299,9 +306,27 @@ interface ShowState {
 
 // ─── Store ─────────────────────────────────────────────────
 
+const UNIVERSE_STORAGE_KEY = 'lightmaestro.universes.v1';
+
+function loadUniverses(): ShowUniverse[] {
+  try {
+    const raw = localStorage.getItem(UNIVERSE_STORAGE_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return arr as ShowUniverse[];
+    }
+  } catch { /* storage unavailable */ }
+  return [];
+}
+
+function saveUniverses(universes: ShowUniverse[]): void {
+  try { localStorage.setItem(UNIVERSE_STORAGE_KEY, JSON.stringify(universes)); } catch { /* storage unavailable */ }
+}
+
 export const useShowStore = create<ShowState>((set, get) => ({
   patchedFixtures: [],
-  universes: [],
+  stageDims: { width: 10, depth: 8 },
+  universes: loadUniverses(),
 
   patchFixture: (fixture) => {
     const { patchedFixtures } = get();
@@ -398,8 +423,16 @@ export const useShowStore = create<ShowState>((set, get) => ({
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
   },
 
+  updateFixtureTier: (id, tier) => {
+    set((state) => ({
+      patchedFixtures: state.patchedFixtures.map((f) => (f.id === id ? { ...f, tier } : f)),
+    }));
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+  },
+
   setShowUniverses: (universes) => {
     set({ universes });
+    saveUniverses(universes);
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
   },
 
@@ -407,40 +440,46 @@ export const useShowStore = create<ShowState>((set, get) => ({
     set((state) => {
       // Deduplicate by id
       if (state.universes.some((u) => u.id === config.id)) return state;
+      const next = [
+        ...state.universes,
+        {
+          id: config.id,
+          name: config.name,
+          type: config.type,
+          channels: config.channels ?? DMX_MAX_ADDRESS,
+          serialPort: config.serialPort || '',
+          artnetIP: config.artnetIP || '',
+          artnetSubnet: config.artnetSubnet ?? 0,
+          artnetUniverse: config.artnetUniverse ?? 0,
+          sacnUniverse: config.sacnUniverse ?? 1,
+          sacnPriority: config.sacnPriority ?? 100,
+        },
+      ];
+      saveUniverses(next);
       try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
-      return {
-        universes: [
-          ...state.universes,
-          {
-            id: config.id,
-            name: config.name,
-            type: config.type,
-            channels: config.channels ?? DMX_MAX_ADDRESS,
-            serialPort: config.serialPort || '',
-            artnetIP: config.artnetIP || '',
-            artnetSubnet: config.artnetSubnet ?? 0,
-            artnetUniverse: config.artnetUniverse ?? 0,
-            sacnUniverse: config.sacnUniverse ?? 1,
-            sacnPriority: config.sacnPriority ?? 100,
-          },
-        ],
-      };
+      return { universes: next };
     }),
 
   removeShowUniverse: (id) => {
-    set((state) => ({
-      universes: state.universes.filter((u) => u.id !== id),
-      patchedFixtures: state.patchedFixtures.filter((f) => f.universeId !== id),
-    }));
+    set((state) => {
+      const next = state.universes.filter((u) => u.id !== id);
+      saveUniverses(next);
+      return {
+        universes: next,
+        patchedFixtures: state.patchedFixtures.filter((f) => f.universeId !== id),
+      };
+    });
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
   },
 
   updateShowUniverse: (id, updates) => {
-    set((state) => ({
-      universes: state.universes.map((u) =>
+    set((state) => {
+      const next = state.universes.map((u) =>
         u.id === id ? { ...u, ...updates } : u
-      ),
-    }));
+      );
+      saveUniverses(next);
+      return { universes: next };
+    });
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
   },
 
@@ -497,6 +536,10 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   setFixturePositions: (positions) => {
     set({ fixturePositions: positions });
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+  },
+  setStageDims: (dims) => {
+    set({ stageDims: dims });
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
   },
 

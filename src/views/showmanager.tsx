@@ -183,6 +183,7 @@ export const ShowManager: React.FC = () => {
       const currentMs = performance.now() - playStartRef.current;
       playheadTimeRef.current = currentMs;
       setPlayheadTime(currentMs);
+      const currentState = useShowStore.getState();
 
       for (const track of selectedShow.tracks) {
         if (track.muted) continue;
@@ -263,11 +264,10 @@ export const ShowManager: React.FC = () => {
 
           // ── EFX Item ──
           if (track.type === 'efx') {
-            const currentEffects = useShowStore.getState().effects;
+            const currentEffects = currentState.effects;
             const effect = currentEffects.find((e) => e.id === item.resourceId);
             if (effect && effect.fixtureIds.length > 0) {
-              const store = useShowStore.getState();
-              const allPatched = store.patchedFixtures;
+              const allPatched = currentState.patchedFixtures;
               const targetFixtures = allPatched.filter((f) => effect.fixtureIds.includes(f.id));
               for (const pf of targetFixtures) {
                 // Use identical math to EFX Editor live DMX preview
@@ -426,7 +426,7 @@ export const ShowManager: React.FC = () => {
     });
   };
 
-  const handleAddItemToTrack = (trackId: string, resourceId: string, name: string, duration?: number, audioFileBase64?: string) => {
+  const handleAddItemToTrack = (trackId: string, resourceId: string, name: string, duration?: number, audioFileBase64?: string, fadeIn?: number, fadeOut?: number) => {
     if (!selectedShow) return;
     const itemId = 'tmi-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     const itemDur = duration ?? 5000;
@@ -435,8 +435,8 @@ export const ShowManager: React.FC = () => {
       startTime: playheadTime,
       duration: itemDur,
       resourceId,
-      fadeIn: 500,
-      fadeOut: 500,
+      fadeIn: fadeIn ?? 500,
+      fadeOut: fadeOut ?? 500,
       name,
       audioFileBase64,
     };
@@ -1375,7 +1375,7 @@ export const ShowManager: React.FC = () => {
             {selTrack?.type === 'scene' && scenes.map((scene) => (
               <button
                 key={scene.id}
-                onClick={() => handleAddItemToTrack(selectedTrackId, scene.id, scene.name, scene.duration)}
+                onClick={() => handleAddItemToTrack(selectedTrackId, scene.id, scene.name, scene.duration, undefined, scene.fadeIn, scene.fadeOut)}
                 className="px-3 py-1.5 rounded-lg text-xs bg-purple-600/10 border border-purple-500/20 text-purple-300 hover:bg-purple-600/20 transition-colors"
               >
                 🎬 {scene.name}

@@ -1,6 +1,6 @@
 /**
  * Global state management with Zustand
- * 
+ *
  * Three modes (SoundSwitch-inspired):
  * - quick: DJ-friendly, minimal controls, auto-script focus
  * - design: Full editor, scenes, chasers, cue lists
@@ -13,7 +13,7 @@ import { persist } from 'zustand/middleware';
 export type AppMode = 'quick' | 'design' | 'perform';
 
 // Sidebar tab keys per mode
-export type QuickSidebarTab = 'autoscript' | 'audio' | 'efx' | 'colors' | 'dj' | 'settings';
+export type QuickSidebarTab = 'autoscript' | 'efx' | 'colors';
 export type DesignSidebarTab = 'fixtures' | 'groups' | 'scenes' | 'chasers' | 'show' | 'cuelists' | 'rgbmatrix' | 'efx' | 'stage' | 'settings';
 export type PerformSidebarTab = 'vconsole' | 'midi' | 'simpledesk' | 'stage' | 'cuelist' | 'settings';
 export type SidebarTab = QuickSidebarTab | DesignSidebarTab | PerformSidebarTab;
@@ -53,6 +53,7 @@ export interface QuickShowState {
   beatDivision: 1 | 2 | 4 | 8;
   strobeLimit: number;
   sectionAware: boolean;
+  audioFileName: string;
   customPalette: CustomPalette;
   colorPresets: ColorPreset[];
   userPreset: string[];
@@ -71,12 +72,12 @@ export interface QuickShowState {
   dimmerEntries: Array<{ id: string; time: number; endTime: number; value: number }>;
   strobeEntries: Array<{ id: string; time: number; endTime: number; speed: number }>;
 }
-export type QuickShowState = QuickShowState;
 
 interface DMXState {
   running: boolean;
   blackout: boolean;
   grandMaster: number; // 0-255
+  panTiltMaxSpeed: number; // max pan/tilt angular speed simulated in 3D (°/s), matches real fixture motors
   universes: Array<{
     id: string;
     name: string;
@@ -132,10 +133,16 @@ interface AppState {
   show: ShowState;
   audio: AudioState;
 
-  // Unsaved changes tracking (NOT persisted — resets on reload)
+  // Unsaved changes tracking (NOT persisted - resets on reload)
   isDirty: boolean;
   markDirty: () => void;
   markClean: () => void;
+
+  // Project identity (NOT persisted - session-only)
+  projectName: string;
+  setProjectName: (name: string) => void;
+  presetName: string;
+  setPresetName: (name: string) => void;
 
   // Actions
   setMode: (mode: AppMode) => void;
@@ -152,6 +159,7 @@ interface AppState {
   setDMXRunning: (running: boolean) => void;
   setBlackout: (blackout: boolean) => void;
   setGrandMaster: (value: number) => void;
+  setPanTiltMaxSpeed: (value: number) => void;
   setChannelValue: (universe: number, channel: number, value: number) => void;
   setUniverseData: (universe: number, values: Record<number, number>) => void;
   setAudioAnalysis: (analysis: any) => void;
@@ -169,6 +177,7 @@ export const useAppStore = create<AppState>()(
 
       quickShow: {
         audioActive: false,
+        audioFileName: '',
         intensity: 'dynamic',
         colorScheme: 'auto',
         musicStyle: 'dance',
@@ -206,6 +215,7 @@ export const useAppStore = create<AppState>()(
         running: false,
         blackout: false,
         grandMaster: 255,
+        panTiltMaxSpeed: 120,
         universes: [
           { id: 'u1', name: 'Universe 1', type: 'virtual', output: true, channels: 512 },
         ],
@@ -237,6 +247,11 @@ export const useAppStore = create<AppState>()(
       markDirty: () => set({ isDirty: true }),
       markClean: () => set({ isDirty: false }),
 
+      projectName: '',
+      setProjectName: (name) => set({ projectName: name }),
+      presetName: '',
+      setPresetName: (name) => set({ presetName: name }),
+
       setMode: (mode) => set({ mode }),
       setQuickSidebarTab: (tab) => set({ quickSidebarTab: tab }),
       setDesignSidebarTab: (tab) => set({ designSidebarTab: tab }),
@@ -251,7 +266,7 @@ export const useAppStore = create<AppState>()(
             ('intensity' in partial && 'colorScheme' in partial && 'movement' in partial && 'strobeLimit' in partial);
 
           if (isFullReplace) {
-            // Full replacement — use the preset state directly, ensuring all nested
+            // Full replacement - use the preset state directly, ensuring all nested
             // objects have safe defaults in case the preset is from an older version.
             const incoming = partial as any;
             return {
@@ -288,7 +303,7 @@ export const useAppStore = create<AppState>()(
             };
           }
 
-          // Partial update — merge into current state
+          // Partial update - merge into current state
           return {
             quickShow: {
               ...state.quickShow,
@@ -361,6 +376,9 @@ export const useAppStore = create<AppState>()(
       setGrandMaster: (value) =>
         set((state) => ({ dmx: { ...state.dmx, grandMaster: value } })),
 
+      setPanTiltMaxSpeed: (value) =>
+        set((state) => ({ dmx: { ...state.dmx, panTiltMaxSpeed: Math.max(20, Math.min(720, value)) } })),
+
       setChannelValue: (universe, channel, value) => {
         const { dmx } = get();
         const raw = dmx.channelData || {};
@@ -421,6 +439,7 @@ export const useAppStore = create<AppState>()(
         dmx: {
           universes: state.dmx.universes,
           grandMaster: state.dmx.grandMaster,
+          panTiltMaxSpeed: state.dmx.panTiltMaxSpeed,
         },
         show: {
           recentShows: state.show.recentShows,
@@ -432,7 +451,7 @@ export const useAppStore = create<AppState>()(
         dmx: {
           ...current.dmx,
           ...(persisted.dmx || {}),
-          channelData: current.dmx.channelData || {}, // Map — never overwritten by stale JSON
+          channelData: current.dmx.channelData || {}, // Map - never overwritten by stale JSON
         },
       }),
     }

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { generateAllThumbnails, getVariantsForCategory, type ThumbnailVariant } from '../utils/fixtureThumbnails';
 import { useTranslation } from 'react-i18next';
 import { Plus, Play, Pause, Square, Trash2, GripVertical, Search, X, Edit2, Check, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Zap, Save } from 'lucide-react';
@@ -6,9 +6,12 @@ import { useAppStore } from '../stores/appStore';
 import { useShowStore, getFixtureColor, type PatchedFixture, type FixtureGroup, type SavedScene, type SavedChaser, type ChaserStep, type SavedCueList, type CueListCue, type ShowUniverse } from '../stores/showStore';
 import { ShowManager } from './ShowManager';
 import { Stage2DEditor } from './Stage2DEditor';
+import { Stage3D } from './Stage3D';
 import { useFixtureTest } from '../hooks/useFixtureTest';
 import { loadFixtureDefinitions, type DmxFixtureDefinition, clearFixtureDefCache } from '../hooks/dmx-cues';
-import { sendChannelsToHardware, sendToUniverse } from '../utils/dmx-helpers';
+import { analyzeChannels } from '../engine/dmx-channel';
+import { sendChannelsToHardware, sendToUniverse, sendFixtureOn, sendFixtureOff, sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
+import { fixtureTestState } from '../utils/fixture-test-state';
 import { useRgbMatrixStore } from '../stores/rgbmatrixStore';
 
 /**
@@ -19,6 +22,41 @@ import { useRgbMatrixStore } from '../stores/rgbmatrixStore';
  */
 
 type EditorTab = 'fixtures' | 'groups' | 'scenes' | 'chasers' | 'show' | 'cuelists' | 'rgbmatrix' | 'efx' | 'stage' | 'settings';
+
+/** True when a serial port looks like a DMX adapter (FTDI/Enttec/clones). */
+function isDmxPort(p: any): boolean {
+  const m = (p.manufacturer || '').toLowerCase();
+  const fn = (p.friendlyName || '').toLowerCase();
+  const pnp = (p.pnpId || '').toLowerCase();
+  const vid = (p.vendorId || '').toLowerCase();
+  const pid = (p.productId || '').toLowerCase();
+  const isFtdi = vid === '0403';
+  const isDmxName = m.includes('enttec') || m.includes('ftdi') || m.includes('dmx') ||
+    m.includes('opto') || m.includes('usb serial') || m.includes('usb-serial') ||
+    fn.includes('enttec') || fn.includes('ftdi') || fn.includes('dmx') ||
+    fn.includes('opto') || fn.includes('usb serial') || fn.includes('usb-serial') ||
+    pnp.includes('ftdi') || pnp.includes('dmx') || pnp.includes('enttec') ||
+    pnp.includes('opto') || pnp.includes('0403');
+  return isFtdi || isDmxName;
+}
+
+/** Full universe config payload for the DMX engine. */
+function universeToEngineConfig(u: any): any {
+  return {
+    id: u.id,
+    name: u.name,
+    type: u.type,
+    output: true,
+    input: false,
+    channels: u.channels,
+    serialPort: u.serialPort || '',
+    artnetIP: u.artnetIP || '',
+    artnetSubnet: u.artnetSubnet ?? 0,
+    artnetUniverse: u.artnetUniverse ?? 0,
+    sacnUniverse: u.sacnUniverse ?? 1,
+    sacnPriority: u.sacnPriority ?? 100,
+  };
+}
 
 export const DesignView: React.FC = () => {
   const { t } = useTranslation();
@@ -32,6 +70,7 @@ export const DesignView: React.FC = () => {
       <div className="px-4 pt-3 pb-0 flex items-center gap-1 border-b border-gray-800/50">
         {([
           { key: 'fixtures', label: t('design.tabs.fixtures') },
+          { key: 'stage', label: 'Vue 2D' },
           { key: 'groups', label: t('design.tabs.groups') },
           { key: 'scenes', label: t('design.tabs.scenes') },
           { key: 'chasers', label: t('design.tabs.chasers') },
@@ -39,7 +78,6 @@ export const DesignView: React.FC = () => {
           { key: 'cuelists', label: t('design.tabs.cueLists') },
           { key: 'rgbmatrix', label: t('design.tabs.rgbMatrix') },
           { key: 'efx', label: t('design.tabs.efx') },
-          { key: 'stage', label: t('design.tabs.stage') },
           { key: 'settings', label: t('common.settings') },
         ] as const).map((tab) => (
           <button
@@ -437,7 +475,7 @@ const SceneEditor: React.FC = () => {
       latestChannelsRef.current = { ...scene.channels };
       // Push scene channels to DMX engine immediately
       if (Object.keys(scene.channels).length > 0) {
-        sendChannelsToHardware(scene.channels, patchedFixtures, universes).catch(() => {});
+        sendChannelsToHardwareAndStore(scene.channels, patchedFixtures, universes).catch(() => {});
       }
     } else {
       setEditName('');
@@ -449,7 +487,7 @@ const SceneEditor: React.FC = () => {
       // Blackout — clear entire DMX universe
       const zeros: Record<number, number> = {};
       for (let i = 1; i <= 512; i++) zeros[i] = 0;
-      sendChannelsToHardware(zeros, patchedFixtures, universes).catch(() => {});
+      sendChannelsToHardwareAndStore(zeros, patchedFixtures, universes).catch(() => {});
     }
   }, [scene?.id]);
 
@@ -496,7 +534,7 @@ const SceneEditor: React.FC = () => {
       latestChannelsRef.current = next;
       if (dmxPushRef.current) clearTimeout(dmxPushRef.current);
       dmxPushRef.current = setTimeout(() => {
-        sendChannelsToHardware(latestChannelsRef.current, patchedFixturesRef.current, universesRef.current).catch(() => {});
+        sendChannelsToHardwareAndStore(latestChannelsRef.current, patchedFixturesRef.current, universesRef.current).catch(() => {});
       }, 16);
       return next;
     });
@@ -530,14 +568,14 @@ const SceneEditor: React.FC = () => {
     if (testActive) return;
     setTestActive(true);
     try {
-      await sendChannelsToHardware(editChannels, patchedFixtures, universes);
+      await sendChannelsToHardwareAndStore(editChannels, patchedFixtures, universes);
       setTimeout(async () => {
         // Reset all channels to 0
         const zeros: Record<number, number> = {};
         for (const addr of Object.keys(editChannels)) {
           zeros[Number(addr)] = 0;
         }
-        try { await sendChannelsToHardware(zeros, patchedFixtures, universes); } catch {}
+        try { await sendChannelsToHardwareAndStore(zeros, patchedFixtures, universes); } catch {}
         setTestActive(false);
       }, 3000);
     } catch {
@@ -581,8 +619,9 @@ const SceneEditor: React.FC = () => {
     primary: { icon: '🎯' },
     secondary: { icon: '🔹' },
     tertiary: { icon: '⬜' },
+    other: { icon: '⚙️' },
   };
-  const TIER_ORDER = ['primary', 'secondary', 'tertiary'];
+  const TIER_ORDER = ['primary', 'secondary', 'tertiary', 'other'];
 
   // ── If no scene selected, show empty state ──
   if (!scene && patchedFixtures.length === 0) {
@@ -596,7 +635,8 @@ const SceneEditor: React.FC = () => {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="flex gap-4 h-full min-h-[540px]">
+      <div className="flex-1 min-w-0 space-y-5">
       {/* Scene name */}
       <div className="flex items-center gap-3">
         <input
@@ -615,6 +655,7 @@ const SceneEditor: React.FC = () => {
         <ParamField label="Fade Out" value={editFadeOut} unit="ms" onChange={(v) => { setEditFadeOut(v); if (scene) updateScene(scene.id, { fadeOut: v }); }} />
         <ParamField label="Duration" value={editDuration} unit="ms" onChange={(v) => { setEditDuration(v); if (scene) updateScene(scene.id, { duration: v }); }} />
       </div>
+      <p className="text-[9px] text-gray-500 -mt-3">Duration = fenêtre totale (fades inclus). 0 = maintien infini.</p>
 
       {/* Action buttons */}
       <div className="flex gap-2">
@@ -672,6 +713,11 @@ const SceneEditor: React.FC = () => {
           })}
         </div>
       )}
+      </div>
+      {/* Live 3D preview of the programmed scene */}
+      <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-[540px] h-full">
+        <Stage3D />
+      </div>
     </div>
   );
 };
@@ -738,6 +784,7 @@ const TierFixtureSection: React.FC<{
                       <span className={`inline-block px-1 py-0 rounded text-[8px] ${
                         pf.tier === 'primary' ? 'bg-purple-500/20 text-purple-400' :
                         pf.tier === 'secondary' ? 'bg-blue-500/20 text-blue-400' :
+                        pf.tier === 'other' ? 'bg-cyan-500/20 text-cyan-400' :
                         'bg-gray-500/20 text-gray-400'
                       }`}>{pf.tier}</span>
                     </div>
@@ -1223,6 +1270,8 @@ const ChaserEditor: React.FC = () => {
   const chasers = useShowStore((s) => s.chasers);
   const scenes = useShowStore((s) => s.scenes);
   const updateChaser = useShowStore((s) => s.updateChaser);
+  const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const universes = useShowStore((s) => s.universes);
 
   // Get selected chaser ID from list
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1323,8 +1372,6 @@ const ChaserEditor: React.FC = () => {
     return editSteps;
   }, [editSteps, editDirection]);
 
-  const bpmToMs = (bpm: number) => (60 / bpm) * 1000;
-
   // ── Playback ──
   const stopPlayback = useCallback(() => {
     if (playRef.current.timer) {
@@ -1359,11 +1406,9 @@ const ChaserEditor: React.FC = () => {
     if (seq.length === 0) return;
 
     const step = seq[0];
-    const beatMs = bpmToMs(editSpeed);
-    const speedMultiplier = beatMs / 1000; // normalize around 1s beat
-    const fadeInScaled = step.fadeIn * speedMultiplier;
-    const holdScaled = step.hold * speedMultiplier;
-    const fadeOutScaled = step.fadeOut * speedMultiplier;
+    // Tempo = pure speed multiplier, normalized so 120 BPM (default) = exact ms durations
+    const speedMultiplier = editSpeed / 120;
+    const fadeInScaled = (step.fadeIn ?? 0) * speedMultiplier;
     let phaseDuration = fadeInScaled || 100;
 
     // Get initial scene channels
@@ -1415,6 +1460,22 @@ const ChaserEditor: React.FC = () => {
 
     const advanceStep = () => {
       phaseStart = Date.now();
+      const speedMultiplier = editSpeed / 120;
+      const cur = seq[currentIdx];
+
+      // Phase machine: fadeIn → hold → fadeOut → next step (exact ms durations at default tempo)
+      if (phase === 'fadeIn' && cur) {
+        phase = 'hold';
+        phaseDuration = ((cur.hold ?? 0) * speedMultiplier) || 1;
+        return;
+      }
+      if (phase === 'hold' && cur) {
+        phase = 'fadeOut';
+        phaseDuration = ((cur.fadeOut ?? 0) * speedMultiplier) || 1;
+        return;
+      }
+
+      // fadeOut done → advance to next step
       const nextIdx = getNextStepIndex(currentIdx);
 
       if (editDirection === 'bounce') {
@@ -1436,9 +1497,7 @@ const ChaserEditor: React.FC = () => {
       if (!step) { currentIdx = 0; return; }
 
       phase = 'fadeIn';
-      const beatMs = bpmToMs(editSpeed);
-      const speedMultiplier = beatMs / 1000;
-      phaseDuration = (step.fadeIn * speedMultiplier) || 100;
+      phaseDuration = ((step.fadeIn ?? 0) * speedMultiplier) || 1;
     };
 
     const getNextStepIndex = (idx: number) => {
@@ -1462,7 +1521,7 @@ const ChaserEditor: React.FC = () => {
     setPlayState('playing');
     setActiveStepIdx(0);
     setStepProgress(0);
-  }, [editSteps, editDirection, editSpeed, stopPlayback, sceneById, bpmToMs]);
+  }, [editSteps, editDirection, editSpeed, stopPlayback, sceneById]);
 
   const pausePlayback = useCallback(() => {
     if (playRef.current.timer) {
@@ -1489,7 +1548,12 @@ const ChaserEditor: React.FC = () => {
 
   // ── Step actions ──
   const handleAddStep = (sceneId: string) => {
-    const newSteps = [...editSteps, { sceneId, fadeIn: 1000, hold: 2000, fadeOut: 1000 }];
+    // Prefill step timing from the scene (duration = total window incl fades)
+    const sc = scenes.find((s) => s.id === sceneId);
+    const fadeIn = sc?.fadeIn ?? 1000;
+    const fadeOut = sc?.fadeOut ?? 1000;
+    const hold = sc && sc.duration > 0 ? Math.max(0, sc.duration - fadeIn - fadeOut) : 2000;
+    const newSteps = [...editSteps, { sceneId, fadeIn, hold, fadeOut }];
     setEditSteps(newSteps);
     persistChanges(newSteps);
     setShowAddStep(false);
@@ -1619,6 +1683,7 @@ const ChaserEditor: React.FC = () => {
           />
           <span className="text-xs text-gray-300 font-mono w-10 text-right">{editSpeed}</span>
           <span className="text-[10px] text-gray-600">BPM</span>
+          <span className="text-[9px] text-gray-700">(120 = temps réel)</span>
         </div>
       </div>
 
@@ -1646,7 +1711,7 @@ const ChaserEditor: React.FC = () => {
       )}
 
       {/* Step Sequencer */}
-      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl">
         <div className="px-4 py-2.5 border-b border-gray-800/50 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-xs font-medium text-gray-400">Steps ({editSteps.length})</span>
@@ -2349,7 +2414,7 @@ const CueListEditor: React.FC = () => {
         </p>
       </div>
 
-      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl">
         <div className="px-4 py-2.5 border-b border-gray-800/50 flex items-center justify-between">
           <span className="text-xs font-medium text-gray-400">Cues ({cueList.cues.length})</span>
           <div className="relative">
@@ -2520,7 +2585,7 @@ const EFXList: React.FC = () => {
 
 // ─── EFX Editor ────────────────────────────────────────────
 
-const EFX_PATTERNS = ['Circle', 'Line', 'Eight', 'Square', 'Triangle'] as const;
+const EFX_PATTERNS = ['Circle', 'Line', 'Eight', 'Square', 'Triangle', 'Infinity', 'Zigzag', 'Spiral', 'DoubleCircle', 'Heart'] as const;
 type EfxPattern = typeof EFX_PATTERNS[number];
 
 const EFXEditor: React.FC = () => {
@@ -2642,6 +2707,33 @@ const EFXEditor: React.FC = () => {
 
   // ── Live DMX output for EFX preview ──
   const [fixtureDefs, setFixtureDefs] = useState<Map<string, DmxFixtureDefinition>>(new Map());
+
+  // ── Pan/Tilt eligibility filter ──
+  const [efxEligibleFixtureIds, setEfxEligibleFixtureIds] = useState<Set<string>>(new Set());
+  const [efxDefsLoaded, setEfxDefsLoaded] = useState(false);
+  useEffect(() => {
+    const allIds = patchedFixtures.map((f) => f.fixtureDefId).filter(Boolean);
+    if (allIds.length === 0) {
+      setEfxEligibleFixtureIds(new Set());
+      setEfxDefsLoaded(false);
+      return;
+    }
+    loadFixtureDefinitions(allIds).then((defs) => {
+      const eligible = new Set<string>();
+      for (const pf of patchedFixtures) {
+        const def = defs.get(pf.fixtureDefId);
+        if (!def) continue;
+        const analysed = analyzeChannels(pf, def);
+        if (analysed.panOffsets.length > 0 || analysed.tiltOffsets.length > 0) {
+          eligible.add(pf.id);
+        }
+      }
+      setEfxEligibleFixtureIds(eligible);
+      setEfxDefsLoaded(true);
+    }).catch(() => {
+      setEfxDefsLoaded(true); // Still mark as loaded on error to avoid infinite spinner
+    });
+  }, [patchedFixtures]);
 
   // Load fixture definitions for selected fixtures
   useEffect(() => {
@@ -2780,6 +2872,45 @@ const EFXEditor: React.FC = () => {
           py = (tv[ti][1] + (tn[1] - tv[ti][1]) * tf) * ry;
           break;
         }
+        case 'Infinity':
+          px = Math.cos(phase) * rx;
+          py = Math.sin(phase * 2) * ry * 0.5;
+          break;
+        case 'Zigzag': {
+          const z = (seg % 1) * 2 - 1;
+          px = z * rx;
+          const zs = seg * 8;
+          const zi = Math.floor(zs);
+          const zf = zs - zi;
+          const zy = zi % 2 === 0 ? -1 + zf * 2 : 1 - zf * 2;
+          py = zy * ry;
+          break;
+        }
+        case 'Spiral': {
+          const sc = seg % 1;
+          const sr = 0.2 + sc * 0.8;
+          px = Math.cos(phase) * rx * sr;
+          py = Math.sin(phase) * ry * sr;
+          break;
+        }
+        case 'DoubleCircle': {
+          const dc = Math.cos(phase) * rx;
+          const ds = Math.sin(phase) * ry;
+          const dc2 = Math.cos(phase + Math.PI) * rx * 0.5;
+          const ds2 = Math.sin(phase + Math.PI) * ry * 0.5;
+          const blending = (Math.sin(phase * 3) + 1) / 2;
+          px = dc * (1 - blending) + dc2 * blending;
+          py = ds * (1 - blending) + ds2 * blending;
+          break;
+        }
+        case 'Heart': {
+          const t = phase;
+          const hx = 16 * Math.pow(Math.sin(t), 3);
+          const hy = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+          px = (hx / 16) * rx;
+          py = (hy / 16) * -ry;
+          break;
+        }
       }
       // Apply rotation and offset
       const rx2 = px * Math.cos(rotRad) - py * Math.sin(rotRad) + ox;
@@ -2849,6 +2980,7 @@ const EFXEditor: React.FC = () => {
 
     for (let i = 0; i <= steps; i++) {
       const t = (i / steps) * Math.PI * 2 + phase;
+      const seg = (t % (Math.PI * 2)) / (Math.PI * 2);
       let x = 0, y = 0;
       switch (pattern) {
         case 'Circle':
@@ -2856,7 +2988,7 @@ const EFXEditor: React.FC = () => {
           y = Math.sin(t) * ry;
           break;
         case 'Line':
-          const lp = (t % (Math.PI * 2)) / (Math.PI * 2);
+          const lp = seg % 1;
           const lineX = lp < 0.5 ? (lp * 2) * 2 - 1 : (1 - (lp - 0.5) * 2) * 2 - 1;
           x = lineX * rx;
           y = 0;
@@ -2866,7 +2998,6 @@ const EFXEditor: React.FC = () => {
           y = Math.sin(t * 2) * ry * 0.5;
           break;
         case 'Square':
-          const seg = (t % (Math.PI * 2)) / (Math.PI * 2);
           const s = seg * 4;
           const sIdx = Math.floor(s) % 4;
           const sFrac = s - Math.floor(s);
@@ -2884,6 +3015,44 @@ const EFXEditor: React.FC = () => {
           x = (tv[ti][0] + (tn[0] - tv[ti][0]) * tf) * rx;
           y = (tv[ti][1] + (tn[1] - tv[ti][1]) * tf) * ry;
           break;
+        case 'Infinity':
+          x = Math.cos(t) * rx;
+          y = Math.sin(t * 2) * ry * 0.5;
+          break;
+        case 'Zigzag': {
+          const zz = (seg % 1) * 2 - 1;
+          x = zz * rx;
+          const zs = seg * 8;
+          const zi = Math.floor(zs);
+          const zf = zs - zi;
+          const zy = zi % 2 === 0 ? -1 + zf * 2 : 1 - zf * 2;
+          y = zy * ry;
+          break;
+        }
+        case 'Spiral': {
+          const sc = seg % 1;
+          const sr = 0.2 + sc * 0.8;
+          x = Math.cos(t) * rx * sr;
+          y = Math.sin(t) * ry * sr;
+          break;
+        }
+        case 'DoubleCircle': {
+          const dc = Math.cos(t) * rx;
+          const ds = Math.sin(t) * ry;
+          const dc2 = Math.cos(t + Math.PI) * rx * 0.5;
+          const ds2 = Math.sin(t + Math.PI) * ry * 0.5;
+          const blending = (Math.sin(t * 3) + 1) / 2;
+          x = dc * (1 - blending) + dc2 * blending;
+          y = ds * (1 - blending) + ds2 * blending;
+          break;
+        }
+        case 'Heart': {
+          const hx = 16 * Math.pow(Math.sin(t), 3);
+          const hy = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+          x = (hx / 16) * rx;
+          y = (hy / 16) * -ry;
+          break;
+        }
       }
       // Apply rotation and offset
       const rx2 = x * Math.cos(rotRad) - y * Math.sin(rotRad) + ox;
@@ -2950,7 +3119,7 @@ const EFXEditor: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="block text-[10px] text-gray-500">Speed: {speed.toFixed(2)} Hz</label>
+              <label className="block text-[10px] text-gray-500">Speed: {(speed / Math.PI).toFixed(2)} Hz</label>
               <input
                 type="range"
                 min={0.3}
@@ -3035,9 +3204,34 @@ const EFXEditor: React.FC = () => {
               <div className="text-[10px] text-gray-600 italic py-1">
                 No fixtures patched. Switch to the Fixtures tab first.
               </div>
-            ) : (
+            ) : !efxDefsLoaded ? (
               <div className="max-h-32 overflow-y-auto bg-gray-800/20 border border-gray-700/50 rounded-md p-1.5 space-y-0.5">
                 {patchedFixtures.map((pf) => {
+                  const isChecked = selectedFixtureIds.has(pf.id);
+                  return (
+                    <label
+                      key={pf.id}
+                      className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-gray-800/30 cursor-pointer text-[11px] text-gray-300"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleFixture(pf.id)}
+                        className="accent-purple-500"
+                      />
+                      <span className="truncate flex-1">{pf.name}</span>
+                      <span className="text-[9px] text-gray-600 font-mono">@{pf.startAddress}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : efxEligibleFixtureIds.size === 0 ? (
+              <div className="text-[10px] text-gray-600 italic py-1">
+                No fixtures with Pan/Tilt channels. Patch a moving head or scanner first.
+              </div>
+            ) : (
+              <div className="max-h-32 overflow-y-auto bg-gray-800/20 border border-gray-700/50 rounded-md p-1.5 space-y-0.5">
+                {patchedFixtures.filter((pf) => efxEligibleFixtureIds.has(pf.id)).map((pf) => {
                   const isChecked = selectedFixtureIds.has(pf.id);
                   return (
                     <label
@@ -3146,7 +3340,7 @@ const EFXEditor: React.FC = () => {
           <div className="flex gap-2 text-[10px] text-gray-600 justify-center">
             <span>{pattern}</span>
             <span>·</span>
-            <span>{speed.toFixed(1)} Hz</span>
+            <span>{(speed / Math.PI).toFixed(1)} Hz</span>
             <span>·</span>
             <span>{previewPoints.length > 0 ? `${Math.round((phase / (Math.PI * 2) * 100) % 100)}%` : 'idle'}</span>
           </div>
@@ -3182,7 +3376,7 @@ const EFXEditor: React.FC = () => {
                   <div className="flex-1 min-w-0">
                     <div className="text-xs text-gray-300 truncate">{efx.name}</div>
                     <div className="text-[10px] text-gray-600">
-                      {efx.pattern} · {efx.speed}Hz · {efx.fixtureIds.length} fixture{efx.fixtureIds.length !== 1 ? 's' : ''}
+                      {efx.pattern} · {(efx.speed / Math.PI).toFixed(1)}Hz · {efx.fixtureIds.length} fixture{efx.fixtureIds.length !== 1 ? 's' : ''}
                       {fixtureNames && <span className="ml-1 truncate">({fixtureNames})</span>}
                     </div>
                   </div>
@@ -3253,10 +3447,29 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
   const universes = useShowStore((s) => s.universes);
   const patchFixture = useShowStore((s) => s.patchFixture);
   const unpatchFixture = useShowStore((s) => s.unpatchFixture);
+  const updateFixtureTier = useShowStore((s) => s.updateFixtureTier);
   const setFixtureName = useShowStore((s) => s.setFixtureName);
   const addShowUniverse = useShowStore((s) => s.addShowUniverse);
   const getNextFreeAddress = useShowStore((s) => s.getNextFreeAddress);
   const getUniverseMap = useShowStore((s) => s.getUniverseMap);
+
+  // Fixtures currently lit by the test button (for visual feedback in the table)
+  const [litSet, setLitSet] = useState<Set<string>>(new Set());
+
+  // Toggle a patched fixture ON (dimmer max + white) / OFF to verify hardware wiring
+  const handleTestLight = async (pf: PatchedFixture) => {
+    if (fixtureTestState.has(pf.id)) {
+      setLitSet((prev) => { const n = new Set(prev); n.delete(pf.id); return n; });
+      try { await sendFixtureOff(pf, patchedFixtures, universes); } catch { /* hardware not available */ }
+    } else {
+      setLitSet((prev) => new Set(prev).add(pf.id));
+      try {
+        const def = await (window as any).lightMaestro?.fixtures?.getDefinition(pf.fixtureDefId);
+        const channels = def?.modes?.[pf.modeIndex]?.channels ?? [];
+        await sendFixtureOn(pf, channels, patchedFixtures, universes);
+      } catch { /* hardware not available */ }
+    }
+  };
 
   const [selectedUniverseId, setSelectedUniverseId] = useState<string>('');
   const [hoveredFixtureId, setHoveredFixtureId] = useState<string | null>(null);
@@ -3274,7 +3487,7 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
   const [selectedModeIdx, setSelectedModeIdx] = useState(0);
   const [startAddress, setStartAddress] = useState(1);
   const [quantity, setQuantity] = useState(1);
-  const [addTier, setAddTier] = useState<'primary' | 'secondary' | 'tertiary'>('primary');
+  const [addTier, setAddTier] = useState<'primary' | 'secondary' | 'tertiary' | 'other'>('primary');
   const [addThumbnailId, setAddThumbnailId] = useState<string>('');
   const [addError, setAddError] = useState<string | null>(null);
   const [detailFixture, setDetailFixture] = useState<any>(null);
@@ -3701,6 +3914,10 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
                     <tr
                       key={f.id}
                       className="hover:bg-gray-800/20 transition-colors"
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setContextMenu({ visible: true, x: e.clientX, y: e.clientY, fixtureId: f.id, fixtureName: f.name });
+                      }}
                       onMouseEnter={() => setHoveredFixtureId(f.id)}
                       onMouseLeave={() => setHoveredFixtureId(null)}
                     >
@@ -3739,6 +3956,7 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
                         <span className={`inline-block px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
                           f.tier === 'primary' ? 'bg-purple-500/20 text-purple-400' :
                           f.tier === 'secondary' ? 'bg-blue-500/20 text-blue-400' :
+                          f.tier === 'other' ? 'bg-cyan-500/20 text-cyan-400' :
                           'bg-gray-500/20 text-gray-400'
                         }`}>
                           {f.tier}
@@ -3757,6 +3975,13 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
                             title="Rename"
                           >
                             <Edit2 size={12} />
+                          </button>
+                          <button
+                            onClick={() => handleTestLight(f)}
+                            className={`p-1 transition-colors ${litSet.has(f.id) ? 'text-green-400' : 'text-gray-600 hover:text-green-400'}`}
+                            title={litSet.has(f.id) ? 'Éteindre' : 'Allumer (dimmer max + blanc)'}
+                          >
+                            <Zap size={12} />
                           </button>
                           <button
                             onClick={() => unpatchFixture(f.id)}
@@ -3835,6 +4060,29 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
             <Edit2 size={12} />
             Rename
           </button>
+          <div className="my-1 border-t border-gray-800/60" />
+          <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">Groupe</div>
+          {(['primary', 'secondary', 'tertiary', 'other'] as const).map((tier) => {
+            const isCurrent = patchedFixtures.find((f) => f.id === contextMenu.fixtureId)?.tier === tier;
+            return (
+              <button
+                key={tier}
+                onClick={() => {
+                  updateFixtureTier(contextMenu.fixtureId, tier);
+                  setContextMenu((c) => ({ ...c, visible: false }));
+                }}
+                className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                  isCurrent ? 'text-purple-300' : 'text-gray-300 hover:bg-purple-600/20 hover:text-purple-300'
+                }`}
+              >
+                <span className={`w-2.5 h-2.5 rounded-full ${
+                  tier === 'primary' ? 'bg-purple-400' : tier === 'secondary' ? 'bg-blue-400' : tier === 'other' ? 'bg-cyan-400' : 'bg-gray-400'
+                }`} />
+                {tier.charAt(0).toUpperCase() + tier.slice(1)}
+                {isCurrent && <Check size={12} className="ml-auto" />}
+              </button>
+            );
+          })}
           <button
             onClick={() => {
               unpatchFixture(contextMenu.fixtureId);
@@ -4191,7 +4439,7 @@ const DmxAddressMap: React.FC<DmxAddressMapProps> = ({
                   >
                     {/* Channel number overlay */}
                     <span
-                      className={`absolute inset-0 flex items-center justify-center font-mono leading-none pointer-events-none select-none ${owner ? 'text-[7px] text-white font-semibold drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]' : 'text-[8px] text-gray-300'}`}
+                      className={`absolute inset-0 flex items-center justify-center font-mono leading-none pointer-events-none select-none ${owner ? 'text-[7px] text-white font-semibold' : 'text-[8px] text-gray-300'}`}
                     >
                       {ch <= 512 ? ch : ''}
                     </span>
@@ -4275,8 +4523,8 @@ interface AddFixtureModalProps {
   selectedManufacturer: string;
   manufacturerFixtures: FixtureDefResult[];
   allFixtures: FixtureDefResult[];
-  tier: 'primary' | 'secondary' | 'tertiary';
-  onSetTier: (tier: 'primary' | 'secondary' | 'tertiary') => void;
+  tier: 'primary' | 'secondary' | 'tertiary' | 'other';
+  onSetTier: (tier: 'primary' | 'secondary' | 'tertiary' | 'other') => void;
   thumbnailId: string;
   onSetThumbnail: (id: string) => void;
   fixtureType: string;
@@ -4707,11 +4955,12 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                   <label className="text-xs text-gray-400">Fixture Tier</label>
                   <span className="text-[9px] text-gray-600">Tiers control show behavior (intensity/movement/strobe) — Groups control targeting</span>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {([
                     { value: 'primary' as const, label: 'Primary', desc: 'Lead fixtures — full effects & movement', color: 'border-purple-500/50 bg-purple-600/10', activeColor: 'border-purple-400 bg-purple-600/30' },
                     { value: 'secondary' as const, label: 'Secondary', desc: 'Fill lights — balanced effects', color: 'border-blue-500/50 bg-blue-600/10', activeColor: 'border-blue-400 bg-blue-600/30' },
                     { value: 'tertiary' as const, label: 'Tertiary', desc: 'Ambient/wash — simple colors only', color: 'border-gray-500/50 bg-gray-600/10', activeColor: 'border-gray-400 bg-gray-600/30' },
+                    { value: 'other' as const, label: 'Other', desc: 'Non catalogué — effets neutres', color: 'border-cyan-500/50 bg-cyan-600/10', activeColor: 'border-cyan-400 bg-cyan-600/30' },
                   ]).map((opt) => (
                     <button
                       key={opt.value}
@@ -4757,6 +5006,7 @@ const PatchedFixtureList: React.FC = () => {
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
   const universes = useShowStore((s) => s.universes);
   const unpatchFixture = useShowStore((s) => s.unpatchFixture);
+  const updateFixtureTier = useShowStore((s) => s.updateFixtureTier);
   const setFixtureName = useShowStore((s) => s.setFixtureName);
   const { testState, startTest, stopTest } = useFixtureTest();
   const [testingFixtureId, setTestingFixtureId] = useState<string | null>(null);
@@ -4851,6 +5101,7 @@ const PatchedFixtureList: React.FC = () => {
                 <span className={`inline-block px-1 py-0 rounded text-[8px] ${
                   f.tier === 'primary' ? 'bg-purple-500/20 text-purple-400' :
                   f.tier === 'secondary' ? 'bg-blue-500/20 text-blue-400' :
+                  f.tier === 'other' ? 'bg-cyan-500/20 text-cyan-400' :
                   'bg-gray-500/20 text-gray-400'
                 }`}>{f.tier}</span>
                 {f.model} · {f.channelCount}ch · @{f.startAddress}
@@ -4936,6 +5187,29 @@ const PatchedFixtureList: React.FC = () => {
             <Edit2 size={12} />
             Rename
           </button>
+          <div className="my-1 border-t border-gray-800/60" />
+          <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">Groupe</div>
+          {(['primary', 'secondary', 'tertiary', 'other'] as const).map((tier) => {
+            const isCurrent = patchedFixtures.find((f) => f.id === ctxMenu.fixtureId)?.tier === tier;
+            return (
+              <button
+                key={tier}
+                onClick={() => {
+                  updateFixtureTier(ctxMenu.fixtureId, tier);
+                  setCtxMenu((c) => ({ ...c, visible: false }));
+                }}
+                className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                  isCurrent ? 'text-purple-300' : 'text-gray-300 hover:bg-purple-600/20 hover:text-purple-300'
+                }`}
+              >
+                <span className={`w-2.5 h-2.5 rounded-full ${
+                  tier === 'primary' ? 'bg-purple-400' : tier === 'secondary' ? 'bg-blue-400' : tier === 'other' ? 'bg-cyan-400' : 'bg-gray-400'
+                }`} />
+                {tier.charAt(0).toUpperCase() + tier.slice(1)}
+                {isCurrent && <Check size={12} className="ml-auto" />}
+              </button>
+            );
+          })}
           <button
             onClick={() => {
               unpatchFixture(ctxMenu.fixtureId);
@@ -5410,22 +5684,23 @@ const DesignSettingsPanel: React.FC = () => {
       }
       // Sync showStore universes into the DMX engine before starting
       const universes = useShowStore.getState().universes;
-      for (const u of universes) {
+      // Auto-detect a DMX adapter port when a usb-dmx universe has none configured
+      let missingPort = universes.some((u: any) => u.type === 'usb-dmx' && !u.serialPort);
+      if (missingPort) {
         try {
-          await window.lightMaestro.dmx.addUniverse({
-            id: u.id,
-            name: u.name,
-            type: u.type,
-            output: true,
-            input: false,
-            channels: u.channels,
-            serialPort: (u as any).serialPort || '',
-            artnetIP: (u as any).artnetIP || '',
-            artnetSubnet: (u as any).artnetSubnet ?? 0,
-            artnetUniverse: (u as any).artnetUniverse ?? 0,
-            sacnUniverse: (u as any).sacnUniverse ?? 1,
-            sacnPriority: (u as any).sacnPriority ?? 100,
-          });
+          const ports = await window.lightMaestro.dmx.listSerialPorts();
+          const dmxPorts = (ports || []).filter(isDmxPort);
+          const chosen = dmxPorts[0] || (ports && ports[0]);
+          if (chosen) {
+            const st = useShowStore.getState();
+            st.setShowUniverses(st.universes.map((u: any) => u.type === 'usb-dmx' && !u.serialPort ? { ...u, serialPort: chosen.path } : u));
+          }
+        } catch { /* serial port listing unavailable */ }
+      }
+      const universes2 = useShowStore.getState().universes;
+      for (const u of universes2) {
+        try {
+          await window.lightMaestro.dmx.addUniverse(universeToEngineConfig(u));
         } catch { /* already exists or not ready */ }
       }
       await window.lightMaestro.dmx.start();
@@ -5451,6 +5726,38 @@ const DesignSettingsPanel: React.FC = () => {
     handleStartDmx();
   }, [showUniverses.length]); // eslint-disable-line
 
+  // Auto-detect a DMX serial port: keep polling while a usb-dmx universe has no
+  // port assigned (the adapter may enumerate a few seconds after boot).
+  useEffect(() => {
+    let tries = 0;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || tries >= 15) return;
+      tries++;
+      const st = useShowStore.getState();
+      const needs = st.universes.some((u: any) => u.type === 'usb-dmx' && !u.serialPort);
+      if (!needs) return;
+      try {
+        const ports = await window.lightMaestro.dmx.listSerialPorts();
+        const dmxPorts = (ports || []).filter(isDmxPort);
+        const chosen = dmxPorts[0] || (ports && ports[0]);
+        if (chosen) {
+          const merged = st.universes.map((u: any) => u.type === 'usb-dmx' && !u.serialPort ? { ...u, serialPort: chosen.path } : u);
+          st.setShowUniverses(merged);
+          for (const u of merged) {
+            if (u.type === 'usb-dmx') {
+              window.lightMaestro.dmx.addUniverse(universeToEngineConfig(u)).catch(() => {});
+            }
+          }
+          return;
+        }
+      } catch { /* ports not ready yet */ }
+      setTimeout(tick, 2000);
+    };
+    tick();
+    return () => { cancelled = true; };
+  }, []);
+
   const handleStopDmx = async () => {
     try { await window.lightMaestro.dmx.stop(); setDmxEngineRunning(false); } catch (e: any) { setSaveStatus('DMX stop failed: ' + (e.message || 'Unknown')); }
   };
@@ -5466,6 +5773,12 @@ const DesignSettingsPanel: React.FC = () => {
     const store = useShowStore.getState();
     const merged = store.universes.map(u => u.id === id ? { ...u, ...updates } : u);
     store.setShowUniverses(merged);
+    // 3. Sync to the DMX engine right away: changing the port (or type) must
+    //    start/restart the output without requiring a manual stop + start.
+    const u = merged.find(x => x.id === id);
+    if (u && window.lightMaestro?.dmx?.addUniverse) {
+      window.lightMaestro.dmx.addUniverse(universeToEngineConfig(u)).catch(() => {});
+    }
   };
 
   const handleSave = async () => {
@@ -5590,24 +5903,7 @@ const DesignSettingsPanel: React.FC = () => {
           const uPort = univ.serialPort || '';
           const types = ['usb-dmx', 'artnet', 'sacn', 'virtual'] as const;
           const typeLabels: Record<string, string> = { 'usb-dmx': 'USB', artnet: 'ArtNet', sacn: 'sACN', virtual: 'Virtual' };
-          const dmxPorts = serialPorts.filter((p: any) => {
-            const m = (p.manufacturer || '').toLowerCase();
-            const fn = (p.friendlyName || '').toLowerCase();
-            const pnp = (p.pnpId || '').toLowerCase();
-            const vid = (p.vendorId || '').toLowerCase();
-            const pid = (p.productId || '').toLowerCase();
-            // Match known DMX/FTDI identifiers across manufacturer, friendlyName, and PnP ID
-            // FTDI chips: vendor 0403 (common for Enttec, DMXKing, Opto-USBDMX clones)
-            // Some clones use other FTDI PIDs or report as "USB Serial Port"
-            const isFtdi = vid === '0403';
-            const isDmxName = m.includes('enttec') || m.includes('ftdi') || m.includes('dmx') ||
-                              m.includes('opto') || m.includes('usb serial') || m.includes('usb-serial') ||
-                              fn.includes('enttec') || fn.includes('ftdi') || fn.includes('dmx') ||
-                              fn.includes('opto') || fn.includes('usb serial') || fn.includes('usb-serial') ||
-                              pnp.includes('ftdi') || pnp.includes('dmx') || pnp.includes('enttec') ||
-                              pnp.includes('opto') || pnp.includes('0403');
-            return isFtdi || isDmxName;
-          });
+          const dmxPorts = serialPorts.filter(isDmxPort);
           // If no DMX-looking ports found, show ALL ports (user can pick any COM port)
           const showPorts = dmxPorts.length > 0 ? dmxPorts : serialPorts;
           return (

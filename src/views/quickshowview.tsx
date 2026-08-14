@@ -1,19 +1,19 @@
 
 import React, { useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Save, FolderOpen, RefreshCw, Undo2, Redo2, Trash2, Zap, ZapOff, Pencil, Plus, Palette, Sun, Layers, Repeat, Upload, Music, Crosshair, Disc, Settings } from 'lucide-react';
+import { Save, FolderOpen, Download, RefreshCw, Undo2, Redo2, Trash2, Zap, ZapOff, Pencil, Plus, Palette, Sun, Layers, Repeat, Upload, Music, Crosshair, Snowflake } from 'lucide-react';
 import { useAppStore, type CustomPalette, type ColorPreset } from '../stores/appStore';
 import { useShowStore, type PatchedFixture } from '../stores/showStore';
 import { AudioFileUpload, useAudioFileLoader } from '../hooks/useAudioFileLoader';
-import { useAudioCapture } from '../hooks/useAudioCapture';
 import { TrackAnalysis, TrackSection, SECTION_COLORS, keyToPalette, SectionAnalysis, AtmosphereType } from '../hooks/audio-analysis';
 import type { GenreProfile } from '../hooks/audio-analysis';
-import { computeFixtureTrackOverrides, type FixtureTrack } from '../hooks/fixture-tracks';
+import { computeFixtureTrackOverrides, computeEfxOverrides, type FixtureTrack } from '../hooks/fixture-tracks';
 import { loadFixtureDefinitions, clearFixtureDefCache, type DmxCue, type DmxFixtureDefinition } from '../hooks/dmx-cues';
-import { useDmxPlayback, computeDmxForCue, computeColorTrackColors, type ColorTrackRef, type DimmerTrackRef, computeDimmerTrackOverrides } from '../hooks/dmx-playback';
+import { useDmxPlayback, computeDmxForCue, computeColorTrackColors, type ColorTrackRef, type DimmerTrackRef, computeDimmerTrackOverrides, computeStrobeTrackOverrides, computeChaserTrackOverrides, type ChaserTrackRef } from '../hooks/dmx-playback';
+import { analyzeChannels } from '../engine/dmx-channel';
 import { Stage3D } from './Stage3D';
 import TrackTimeline from './TrackTimeline';
-import type { EfxTrack, EfxTrackEntry, ColorTrack, ColorTrackEntry, StrobeTrack, StrobeTrackEntry, DimmerTrack, DimmerTrackEntry } from './TrackTimeline';
+import type { EfxTrack, EfxTrackEntry, ColorTrack, ColorTrackEntry, StrobeTrack, StrobeTrackEntry, DimmerTrack, DimmerTrackEntry, ChaserTrack, ChaserTrackEntry } from './TrackTimeline';
 
 type EnrichedCue = DmxCue;
 
@@ -22,6 +22,80 @@ type EnrichedCue = DmxCue;
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');
   return [parseInt(h.substring(0, 2), 16), parseInt(h.substring(2, 4), 16), parseInt(h.substring(4, 6), 16)];
+}
+
+/* ─── Preset DMX cue baking (widget "Play Preset" snapshot) ───
+ * Bakes ALL timeline track types (fixture / color / strobe / dimmer / efx)
+ * into a static cue snapshot, so the Virtual Console widget plays the preset
+ * exactly as authored in QuickShow (including user-added tracks).
+ */
+function buildPresetDmxCues(
+  currentCues: any[],
+  pf: any[],
+  uni: any[],
+  fDefs: Map<string, any>,
+  tierMultipliers: { primary: number; secondary: number; tertiary: number },
+  fixtureTracksRef: React.MutableRefObject<FixtureTrack[]>,
+  colorTracksRef: React.MutableRefObject<ColorTrack[]>,
+  strobeTracksRef: React.MutableRefObject<StrobeTrack[]>,
+  dimmerTracksRef: React.MutableRefObject<DimmerTrackRef[]>,
+  efxTracksRef: React.MutableRefObject<EfxTrack[]>,
+  effectsRef: React.MutableRefObject<any[]>,
+  fixtureGroupsRef: React.MutableRefObject<{ id: string; fixtureIds: string[] }[]>,
+  chaserTracksRef: React.MutableRefObject<ChaserTrackRef[]>,
+  chasersRef: React.MutableRefObject<any[]>,
+  scenesRef: React.MutableRefObject<any[]>,
+): DmxCue[] {
+  const out: DmxCue[] = [];
+  if (!(currentCues.length > 0 && pf.length > 0 && fDefs.size > 0)) return out;
+  const uniIds = uni.map((u: any) => String(u.id));
+  const fg = fixtureGroupsRef.current as any;
+
+  // Precompute pan/tilt channel offsets per fixture (only needed for EFX tracks)
+  const hasEfx = efxTracksRef.current.length > 0;
+  const fxOffsets = hasEfx
+    ? (() => {
+        const m = new Map<string, { pan: number[]; tilt: number[]; universeIdx: number }>();
+        for (const pfx of pf) {
+          const def = fDefs.get(pfx.fixtureDefId);
+          if (!def) continue;
+          const fa = analyzeChannels(pfx, def);
+          const uIdx = uniIds.indexOf(String(pfx.universeId));
+          m.set(pfx.id, { pan: fa.panOffsets, tilt: fa.tiltOffsets, universeIdx: uIdx < 0 ? 0 : uIdx });
+        }
+        return m;
+      })()
+    : null;
+
+  for (const cue of currentCues) {
+    try {
+      const overrides = computeFixtureTrackOverrides(fixtureTracksRef.current, cue.time, pf, fg);
+      const ctc = computeColorTrackColors(colorTracksRef.current as any, cue.time, pf, fg);
+      const sto = computeStrobeTrackOverrides(strobeTracksRef.current as any, cue.time, pf, fg);
+      const dto = computeDimmerTrackOverrides(dimmerTracksRef.current as any, cue.time, pf, fg);
+      const cho = computeChaserTrackOverrides(chaserTracksRef.current as any, chasersRef.current as any, scenesRef.current as any, cue.time, pf, fg);
+      const efxPt = hasEfx
+        ? computeEfxOverrides(efxTracksRef.current as any, cue.time, effectsRef.current, pf, fg)
+        : null;
+      const computed = computeDmxForCue(cue, pf, fDefs, uni as any, tierMultipliers, overrides, ctc, sto, dto, undefined, undefined, cho);
+      for (const c of computed) {
+        const channelValues: Record<number, number> = { ...c.channelValues };
+        // Apply EFX track pan/tilt overrides (not handled by computeDmxForCue)
+        if (efxPt && efxPt.size > 0 && fxOffsets) {
+          for (const pfx of pf) {
+            const pt = efxPt.get(pfx.id);
+            if (!pt) continue;
+            const off = fxOffsets.get(pfx.id);
+            if (!off || off.universeIdx !== c.universe) continue;
+            for (const po of off.pan) channelValues[pfx.startAddress + po] = pt.pan;
+            for (const to of off.tilt) channelValues[pfx.startAddress + to] = pt.tilt;
+          }
+        }
+        out.push({ time: cue.time, section: cue.section, universe: c.universe, channelValues, fixtureNames: [], fixtureCount: 0, effect: cue.effect, colors: cue.colors || [] });
+      }
+    } catch { /* skip individual cue errors */ }
+  }
+  return out;
 }
 
 function mulberry32(a: number): () => number {
@@ -311,7 +385,7 @@ function expandEntityToCues(
   return cues;
 }
 
-function genCues(
+export function genCues(
   sections: TrackSection[],
   bpm: number,
   beatDivision: number,
@@ -367,6 +441,86 @@ function genCues(
     let prevColor = basePal[0];
     let prevIntensity = 'medium';
     let cueGlobalIdx = 0; // across all sections, guarantees palette[3] (green) is reached
+
+    // ── Genre + atmosphere extraction for movement selection ──
+    // cfg.musicStyle explicitly overrides detected genre
+    let detectedGenre = 'dance', detectedAtmosphere = '';
+    try {
+      const g = analysis ? JSON.parse(analysis.genre || '{}') : {};
+      detectedGenre = cfg.musicStyle || g.genre || genre;
+      detectedAtmosphere = analysis?.atmosphere || '';
+    } catch { detectedGenre = genre; }
+
+    // ── Movement pattern selector: audio-driven, genre-aware ──
+    const selectMovementPattern = (secType: string, featRms: number, featCentroid: number, featBass: number, isBeatStrong: boolean, isDropAnticipation: boolean): string => {
+      // Pool of patterns per section type
+      const pools: Record<string, string[]> = {
+        intro:  ['static', 'panOnly', 'tiltOnly', 'wave'],
+        verse:  ['sweep', 'wave', 'figure8', 'randomWalk', 'tiltOnly'],
+        chorus: ['circle', 'diamond', 'spiral', 'sweep', 'figure8'],
+        bridge: ['static', 'figure8', 'wave', 'randomWalk'],
+        drop:   ['bounce', 'heartbeat', 'zigzag', 'diamond', 'circle'],
+        outro:  ['sweep', 'wave', 'randomWalk', 'panOnly'],
+        build:  ['sweep', 'figure8', 'spiral', 'circle'],
+      };
+      let pool = pools[secType] || ['sweep', 'circle', 'wave'];
+
+      // Genre bias: add/remove patterns based on genre character
+      switch (detectedGenre) {
+        case 'techno':    pool = [...pool, 'circle', 'spiral']; pool = pool.filter(p => p !== 'randomWalk'); break;
+        case 'house':     pool = [...pool, 'circle', 'wave']; break;
+        case 'dubstep':   pool = [...pool, 'heartbeat', 'zigzag']; pool = pool.filter(p => p !== 'static' && p !== 'panOnly'); break;
+        case 'drum_and_bass': pool = [...pool, 'zigzag', 'bounce']; pool = pool.filter(p => p !== 'static'); break;
+        case 'hiphop':    pool = [...pool, 'static', 'panOnly']; pool = pool.filter(p => p !== 'circle' && p !== 'spiral'); break;
+        case 'rock':      pool = [...pool, 'zigzag', 'randomWalk']; break;
+        case 'metal':     pool = [...pool, 'zigzag', 'diamond', 'heartbeat']; pool = pool.filter(p => p !== 'static' && p !== 'wave'); break;
+        case 'ballad':    pool = [...pool, 'static', 'panOnly']; pool = pool.filter(p => p !== 'zigzag' && p !== 'bounce'); break;
+        case 'funk':      pool = [...pool, 'figure8', 'wave']; break;
+        case 'disco':     pool = [...pool, 'circle', 'diamond']; break;
+        case 'rnb':       pool = [...pool, 'wave', 'tiltOnly']; break;
+        case 'electro':   pool = [...pool, 'diamond', 'spiral']; break;
+        case 'jazz':      pool = [...pool, 'randomWalk', 'static']; pool = pool.filter(p => p !== 'zigzag' && p !== 'bounce'); break;
+        case 'reggaeton': pool = [...pool, 'bounce', 'heartbeat']; break;
+      }
+
+      // Atmosphere bias
+      switch (detectedAtmosphere) {
+        case 'energetic':  pool = [...pool, 'circle', 'diamond']; break;
+        case 'dark':       pool = [...pool, 'spiral', 'wave']; pool = pool.filter(p => p !== 'circle' && p !== 'diamond'); break;
+        case 'aggressive': pool = [...pool, 'zigzag', 'heartbeat', 'bounce']; pool = pool.filter(p => p !== 'static' && p !== 'wave' && p !== 'panOnly'); break;
+        case 'dreamy':     pool = [...pool, 'wave', 'spiral']; pool = pool.filter(p => p !== 'zigzag' && p !== 'bounce' && p !== 'heartbeat'); break;
+        case 'groovy':     pool = [...pool, 'figure8', 'wave', 'circle']; break;
+        case 'epic':       pool = [...pool, 'spiral', 'diamond', 'circle']; break;
+        case 'uplifting':  pool = [...pool, 'circle', 'wave', 'sweep']; break;
+      }
+
+      // BPM bias: fast→more aggressive, slow→more gentle
+      if (detectedGenre === 'dubstep' || detectedGenre === 'drum_and_bass' || bpm > 150) {
+        if (!isDropAnticipation) pool = pool.filter(p => p !== 'static');
+      }
+      if (bpm < 85) {
+        pool = pool.filter(p => p !== 'zigzag' && p !== 'heartbeat' && p !== 'bounce');
+        if (!pool.includes('static')) pool.push('static');
+      }
+
+      // Audio feature bias: centroid/energy/rms influence selection
+      if (isBeatStrong && (featRms > 0.5 || isDropAnticipation)) {
+        const strongPrefs = ['bounce', 'heartbeat', 'zigzag', 'diamond', 'circle'];
+        const hasStrong = pool.some(p => strongPrefs.includes(p));
+        if (hasStrong && !isDropAnticipation) pool = pool.filter(p => p !== 'static' && p !== 'panOnly');
+      }
+      if (featRms < 0.2 && !isDropAnticipation) {
+        pool = pool.filter(p => p !== 'bounce' && p !== 'zigzag' && p !== 'heartbeat');
+        if (!pool.includes('static')) pool.push('static');
+      }
+
+      // Dedupe and select using seeded hash + regenSeed for regenerate variety
+      const deduped = [...new Set(pool)];
+      const hashKey = `${secType}_${detectedGenre}_${detectedAtmosphere}_${regenSeed ?? 0}`;
+      const h = hash(hashKey);
+      const idx = Math.abs(h + Math.floor(featRms * 7 + featCentroid * 11 + rng() * 13)) % deduped.length;
+      return deduped[idx];
+    };
 
     // Detect build→drop boundary for anticipation effect
     const dropStartTimes = new Set<number>();
@@ -455,25 +609,26 @@ function genCues(
         const colorTemp: 'warm' | 'neutral' | 'cool' =
           centroid < 0.35 ? 'warm' : centroid > 0.65 ? 'cool' : 'neutral';
 
-        // Movement: use section name so DMX engine distributes per-fixture
-        // (getSmartMovement assigns different patterns to each fixture)
-        const movement = section.type; // 'intro'|'verse'|'chorus'|etc → getSmartMovement distributes
+        // Movement: audio-driven, genre-aware pattern selection
+        const movement = selectMovementPattern(section.type, rms, centroid, bassRatio, beatStrong, dropAnticipation);
 
-        // Amplitude: audio-driven, section-scaled
-        const movementAmplitude = (() => {
+        // Amplitude: DMX-scale (0-255), audio-driven, section-scaled.
+        // Center is 128, so amplitude=128 means full edge-to-edge sweep.
+        // Values capped at 128 to prevent DMX overflow (excess just saturates at 0/255).
+        const movementAmplitude = Math.min(128, (() => {
           switch (section.type) {
-            case 'intro': return 0.05 + rms * 0.15;
-            case 'outro': return 0.05 + rms * 0.1;
-            case 'verse': return 0.15 + rms * 0.4;
-            case 'chorus': return 0.3 + bassRatio * 0.35;
-            case 'drop': return 0.4 + bassRatio * 0.45;
-            case 'bridge': return 0.15 + rms * 0.25;
+            case 'intro': return 50 + rms * 80;           // 50-130 DMX
+            case 'outro': return 40 + rms * 60;           // 40-100 DMX
+            case 'verse': return 80 + rms * 100;          // 80-180 DMX
+            case 'chorus': return 110 + bassRatio * 110;   // 110-220 DMX
+            case 'drop': return 140 + bassRatio * 110;     // 140-250 DMX (near full sweep)
+            case 'bridge': return 60 + rms * 80;           // 60-140 DMX
             case 'build': return dropAnticipation
-              ? 0.35 + (1 - beatsUntilDrop / 2) * 0.3  // ramps up before drop
-              : 0.15 + sectionProgress * 0.5;
-            default: return 0.3;
+              ? 160 + (1 - beatsUntilDrop / 2) * 80       // ramps 160→240 before drop
+              : 70 + sectionProgress * 160;                // ramps 70→230 across section
+            default: return 80;
           }
-        })();
+        })());
 
         const movementSpeed = (() => {
           const baseSpeed = 0.3 + centroid * 0.6;
@@ -636,7 +791,7 @@ async function saveProject(
   } catch (e) {
     // localStorage full - try without large arrays
     try {
-      const slim = { ...localData, manualCues: [], efxTracks: [], colorTracks: [], strobeTracks: [], dimmerTracks: [], fixtureTracks: [] };
+      const slim = { ...localData, manualCues: [], efxTracks: [], colorTracks: [], strobeTracks: [], dimmerTracks: [], chaserTracks: [], fixtureTracks: [] };
       localStorage.setItem('light-maestro:lastProject', JSON.stringify(slim));
       console.log('[saveProject] Auto-saved (slim) to localStorage');
     } catch (e2) {
@@ -676,6 +831,7 @@ async function loadProject(
   setColorTracks: (tracks: ColorTrack[]) => void,
   setStrobeTracks: (tracks: StrobeTrack[]) => void,
   setDimmerTracks: (tracks: DimmerTrack[]) => void,
+  setChaserTracks: (tracks: ChaserTrack[]) => void,
   setDisabledFixtures?: (ids: Set<string>) => void,
 ): Promise<void> {
   return new Promise((resolve) => {
@@ -689,12 +845,16 @@ async function loadProject(
         const text = await file.text();
         const data = JSON.parse(text);
         if (data.quickShow) setQs(data.quickShow);
+        // Set preset name from file
+        const importedPresetName = data.quickShow?.name || file.name.replace(/\.(lmpreset|lmshow|lmproj)$/i, '');
+        useAppStore.getState().setPresetName(importedPresetName);
         if (data.sections) setSections(data.sections);
         if (data.manualCues) setManualCues(data.manualCues);
         if (data.efxTracks) setEfxTracks(data.efxTracks);
         if (data.colorTracks) setColorTracks(data.colorTracks);
         if (data.strobeTracks) setStrobeTracks(data.strobeTracks);
         if (data.dimmerTracks) setDimmerTracks(data.dimmerTracks);
+        if (data.chaserTracks) setChaserTracks(data.chaserTracks);
         if (data.fixtureTracks) setFixtureTracks(data.fixtureTracks);
         if (data.disabledFixtures && setDisabledFixtures) setDisabledFixtures(new Set(data.disabledFixtures));
         if (data.analysis) {
@@ -964,118 +1124,8 @@ export const QuickShowView: React.FC<{ audioFile: ReturnType<typeof useAudioFile
       <div style={{ display: tab === 'autoscript' ? 'flex' : 'none' }} className="h-full flex-col">
         <AutoScriptPanel audioFile={audioFile} />
       </div>
-      <div style={{ display: tab === 'audio' ? 'flex' : 'none' }} className="h-full flex-col">
-        <AudioSourcePanel audioFile={audioFile} />
-      </div>
       <div style={{ display: tab === 'colors' ? 'flex' : 'none' }} className="h-full flex-col">
         <ColorPresetsPanel />
-      </div>
-      <div style={{ display: tab === 'dj' ? 'flex' : 'none' }} className="h-full flex-col">
-        <DjPanel />
-      </div>
-      <div style={{ display: tab === 'settings' ? 'flex' : 'none' }} className="h-full flex-col">
-        <QuickSettingsPanel />
-      </div>
-    </div>
-  );
-};
-
-/* ─── AudioSourcePanel ─────────────────────────────── */
-const AudioSourcePanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoader> }> = ({ audioFile }) => {
-  const { t } = useTranslation();
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
-  const [systemAudioSupported, setSystemAudioSupported] = useState(false);
-  const audioCapture = useAudioCapture();
-
-  useEffect(() => {
-    navigator.mediaDevices?.enumerateDevices().then(devs => {
-      const audioDevs = devs.filter(d => d.kind === 'audioinput');
-      setDevices(audioDevs);
-      // Check for system audio (loopback) support
-      const hasLoopback = audioDevs.some(d => d.label.toLowerCase().includes('loopback') || d.label.toLowerCase().includes('stereo mix') || d.label.toLowerCase().includes('what you hear') || d.label.toLowerCase().includes('mixage stéréo'));
-      setSystemAudioSupported(hasLoopback);
-      if (audioDevs.length > 0 && !selectedDeviceId) {
-        setSelectedDeviceId(audioDevs[0].deviceId);
-      }
-    }).catch(() => {});
-  }, []);
-
-  return (
-    <div className="flex-1 flex flex-col p-6 overflow-y-auto">
-      <h2 className="text-lg font-semibold text-gray-200 mb-4 flex items-center gap-2">
-        <Music className="w-5 h-5 text-purple-400" />
-        {t('sidebar.audioSource') || 'Source Audio'}
-      </h2>
-
-      {/* Audio file section */}
-      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-lg p-4 mb-4">
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Fichier Audio</h3>
-        <div className="border-2 border-dashed border-gray-700 hover:border-purple-500/50 rounded-xl p-6 cursor-pointer bg-[#0a0a0f]"
-          onClick={() => { const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'audio/*'; inp.onchange = async () => { const f = inp.files?.[0]; if (f) await audioFile.loadFile(f); }; inp.click(); }}
-          onDragOver={e => e.preventDefault()}
-          onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) audioFile.loadFile(f); }}>
-          <Upload className="w-8 h-8 text-gray-500 mx-auto mb-2" />
-          <p className="text-xs text-gray-400">Glisser-déposer un fichier</p>
-          <p className="text-[10px] text-gray-600 mt-1">MP3, WAV, FLAC, OGG, M4A</p>
-          {audioFile.file && (
-            <p className="text-xs text-purple-400 mt-2">{audioFile.file.name}</p>
-          )}
-        </div>
-      </div>
-
-      {/* Audio devices (system capture) */}
-      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-lg p-4">
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Périphériques Audio Windows</h3>
-        {devices.length === 0 ? (
-          <p className="text-xs text-gray-600">Aucun périphérique audio détecté.</p>
-        ) : (
-          <div className="space-y-2">
-            {devices.map(d => (
-              <label key={d.deviceId} className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${selectedDeviceId === d.deviceId ? 'bg-purple-600/20 border border-purple-500/30' : 'bg-gray-800/30 border border-gray-700/30 hover:bg-gray-700/30'}`}>
-                <input
-                  type="radio"
-                  name="audioDevice"
-                  value={d.deviceId}
-                  checked={selectedDeviceId === d.deviceId}
-                  onChange={() => setSelectedDeviceId(d.deviceId)}
-                  className="accent-purple-500"
-                />
-                <span className="text-xs text-gray-300">{d.label || `Périphérique ${d.deviceId.slice(0, 8)}`}</span>
-                {d.label.toLowerCase().includes('loopback') || d.label.toLowerCase().includes('stereo mix') || d.label.toLowerCase().includes('mixage') ? (
-                  <span className="text-[9px] bg-green-600/20 text-green-400 px-1.5 py-0.5 rounded">Loopback</span>
-                ) : null}
-              </label>
-            ))}
-          </div>
-        )}
-        <div className="mt-3 flex gap-2">
-          <button
-            onClick={async () => {
-              try {
-                await audioCapture.startCapture(selectedDeviceId);
-              } catch { /* */ }
-            }}
-            disabled={!selectedDeviceId || audioCapture.isCapturing}
-            className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${audioCapture.isCapturing ? 'bg-red-600/20 text-red-300 border border-red-500/30' : 'bg-purple-600/20 text-purple-300 border border-purple-500/30 hover:bg-purple-600/30'} disabled:opacity-40 disabled:cursor-not-allowed`}
-          >
-            {audioCapture.isCapturing ? 'Capture en cours...' : 'Démarrer la capture'}
-          </button>
-          {audioCapture.isCapturing && (
-            <button
-              onClick={() => audioCapture.stopCapture()}
-              className="px-3 py-1.5 rounded text-xs bg-gray-700/30 text-gray-400 border border-gray-600/30 hover:bg-gray-700/50"
-            >
-              Arrêter
-            </button>
-          )}
-        </div>
-        {systemAudioSupported && (
-          <p className="text-[10px] text-green-500/70 mt-2">Capture système (loopback) détectée - le son de vos applications sera analysé.</p>
-        )}
-        {!systemAudioSupported && devices.length > 0 && (
-          <p className="text-[10px] text-amber-500/70 mt-2">Aucun périphérique loopback détecté. Activez « Mixage stéréo » dans les paramètres audio Windows pour capturer le son système.</p>
-        )}
       </div>
     </div>
   );
@@ -1463,161 +1513,6 @@ const ColorPresetsPanel: React.FC = () => {
   );
 };
 
-/* ─── DjPanel ──────────────────────────────────────── */
-const DjPanel: React.FC = () => {
-  const { t } = useTranslation();
-  const qs = useAppStore(s => s.quickShow);
-  const setQs = useAppStore(s => s.setQuickShow);
-  return (
-    <div className="flex-1 flex flex-col p-6 overflow-y-auto">
-      <h2 className="text-lg font-semibold text-gray-200 mb-4 flex items-center gap-2">
-        <Disc className="w-5 h-5 text-amber-400" />
-        {t('sidebar.djIntegration') || 'Intégration DJ'}
-      </h2>
-      <p className="text-xs text-gray-500 mb-6">Ces réglages sont synchronisés avec l'onglet AutoScript. Les modifications ici se reflètent immédiatement dans le show.</p>
-      <div className="space-y-4">
-        <div className="bg-[#0d0d14] border border-gray-800/50 rounded-lg p-4">
-          <label className="text-xs text-gray-400 block mb-2 font-semibold">Style Musical</label>
-          <select
-            value={qs.musicStyle || 'dance'}
-            onChange={e => setQs({ musicStyle: e.target.value })}
-            className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 w-full cursor-pointer"
-          >
-            {['dance','disco','techno','rock','rnb','reggaeton','latino','electro','house','dubstep','hiphop','funk','ballad'].map(s => (
-              <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
-            ))}
-          </select>
-          <p className="text-[10px] text-gray-600 mt-1">Définit la palette de couleurs et l'énergie de base.</p>
-        </div>
-        <div className="bg-[#0d0d14] border border-gray-800/50 rounded-lg p-4">
-          <label className="text-xs text-gray-400 block mb-2 font-semibold">Palette de Couleurs</label>
-          <select
-            value={qs.colorScheme || 'auto'}
-            onChange={e => setQs({ colorScheme: e.target.value })}
-            className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 w-full cursor-pointer"
-          >
-            {['auto','warm','cool','party','monochrome','neon','pastel','dance','disco','techno','rock','rnb','reggaeton','latino','electro','house','dubstep','hiphop','funk'].map(s => (
-              <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
-            ))}
-          </select>
-        </div>
-        <div className="bg-[#0d0d14] border border-gray-800/50 rounded-lg p-4">
-          <label className="text-xs text-gray-400 block mb-2 font-semibold">Intensité</label>
-          <select
-            value={qs.intensity || 'dynamic'}
-            onChange={e => setQs({ intensity: e.target.value as any })}
-            className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 w-full cursor-pointer"
-          >
-            {['very-low','low','medium','high','very-high','dynamic'].map(i => (
-              <option key={i} value={i}>{i}</option>
-            ))}
-          </select>
-        </div>
-        <div className="bg-[#0d0d14] border border-gray-800/50 rounded-lg p-4">
-          <label className="text-xs text-gray-400 block mb-2 font-semibold">Division de Beat</label>
-          <select
-            value={qs.beatDivision || 4}
-            onChange={e => setQs({ beatDivision: Number(e.target.value) as any })}
-            className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 w-full cursor-pointer"
-          >
-            {[1,2,4,8].map(d => <option key={d} value={d}>1/{d}</option>)}
-          </select>
-          <p className="text-[10px] text-gray-600 mt-1">1/1 = lent, 1/8 = rapide.</p>
-        </div>
-        <div className="bg-[#0d0d14] border border-gray-800/50 rounded-lg p-4">
-          <label className="text-xs text-gray-400 block mb-2 font-semibold">Mouvement</label>
-          <select
-            value={qs.movement || 'dynamic'}
-            onChange={e => setQs({ movement: e.target.value as any })}
-            className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 w-full cursor-pointer"
-          >
-            {['smooth','sharp','dynamic'].map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </div>
-        <label className="flex items-center gap-2 cursor-pointer bg-[#0d0d14] border border-gray-800/50 rounded-lg p-4">
-          <input
-            type="checkbox"
-            checked={qs.sectionAware !== false}
-            onChange={e => setQs({ sectionAware: e.target.checked })}
-            className="w-4 h-4 accent-purple-500"
-          />
-          <span className="text-xs text-gray-300">Section-Aware (adapte l'intensité par partie)</span>
-        </label>
-      </div>
-    </div>
-  );
-};
-
-/* ─── QuickSettingsPanel ────────────────────────────── */
-const QuickSettingsPanel: React.FC = () => {
-  const { t } = useTranslation();
-  const qs = useAppStore(s => s.quickShow);
-  const setQs = useAppStore(s => s.setQuickShow);
-  return (
-    <div className="flex-1 flex flex-col p-6 overflow-y-auto">
-      <h2 className="text-lg font-semibold text-gray-200 mb-4 flex items-center gap-2">
-        <Settings className="w-5 h-5 text-gray-400" />
-        {t('common.settings') || 'Settings'}
-      </h2>
-      <div className="space-y-4 max-w-md">
-        <div>
-          <label className="text-xs text-gray-400 block mb-1">Strobe Limit (Hz)</label>
-          <input
-            type="range"
-            min={1}
-            max={25}
-            value={qs.strobeLimit || 10}
-            onChange={e => setQs({ strobeLimit: Number(e.target.value) })}
-            className="w-full"
-          />
-          <span className="text-xs text-gray-500">{qs.strobeLimit || 10} Hz</span>
-        </div>
-        <div>
-          <label className="text-xs text-gray-400 uppercase tracking-wider">{t('quickshow.fade', 'Fondu')} ({qs.colorFadeMs || 250}ms)</label>
-          <input type="range" min={0} max={2000} step={50} value={qs.colorFadeMs || 250} onChange={e => setQs({ colorFadeMs: Number(e.target.value) })} className="w-full" />
-        </div>
-        <div>
-          <label className="text-xs text-gray-400 block mb-1">Movement</label>
-          <select
-            value={qs.movement || 'dynamic'}
-            onChange={e => setQs({ movement: e.target.value as any })}
-            className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-300 w-full"
-          >
-            {['smooth','sharp','dynamic'].map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-400">Color Track Visible</label>
-          <input
-            type="checkbox"
-            checked={qs.showColorTrack || false}
-            onChange={e => setQs({ showColorTrack: e.target.checked })}
-            className="w-4 h-4"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-400">Strobe Track Visible</label>
-          <input
-            type="checkbox"
-            checked={qs.showStrobeTrack || false}
-            onChange={e => setQs({ showStrobeTrack: e.target.checked })}
-            className="w-4 h-4"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-400">Dimmer Track Visible</label>
-          <input
-            type="checkbox"
-            checked={qs.showDimmerTrack || false}
-            onChange={e => setQs({ showDimmerTrack: e.target.checked })}
-            className="w-4 h-4"
-          />
-        </div>
-      </div>
-    </div>
-  );
-};
-
 /* ─── AutoScriptPanel ───────────────────────────────── */
 
 const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoader> }> = ({ audioFile }) => {
@@ -1635,14 +1530,34 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   if (a) stableAnalysis.current = a;
   const resolvedAnalysis = a || stableAnalysis.current;
 
+  // Sync detected genre from audio analysis to musicStyle
+  useEffect(() => {
+    const ga = resolvedAnalysis;
+    if (!ga) return;
+    try {
+      const g = JSON.parse(ga.genre || '{}');
+      if (g.genre && g.genre !== qs.musicStyle) {
+        setQs({ musicStyle: g.genre });
+      }
+    } catch { /* ignore parse errors */ }
+  }, [resolvedAnalysis]);
+
   const patchedFixtures = useShowStore(s => s.patchedFixtures);
   const fixtureGroups = useShowStore(s => s.fixtureGroups);
   const universes = useShowStore(s => s.universes);
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [dmxOutputEnabled, setDmxOutputEnabled] = useState(true);
+  const [dryRunMode, setDryRunMode] = useState(false);
+  const [frozen, setFrozen] = useState(false);
+  const frozenRef = useRef(false);
+  const forceDropRef = useRef(false);
   const [dmxCues, setDmxCues] = useState<DmxCue[]>([]);
   const dmxCuesRef = useRef<DmxCue[]>([]);
   const lastDmxCuesRef = useRef<DmxCue[]>([]);
+  // A/B comparison
+  const [cuesB, setCuesB] = useState<any[]>([]);
+  const [showB, setShowB] = useState(false);
+  const [compareStyle, setCompareStyle] = useState<string>('house');
   const lastEnrichedCuesRef = useRef<EnrichedCue[]>([]);
   const overrideCuesRef = useRef<DmxCue[]>([]);
   const [syncMode, setSyncMode] = useState<'internal' | 'manual' | 'tap'>('internal');
@@ -1667,11 +1582,18 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [dimmerTracks, setDimmerTracks] = useState<DimmerTrack[]>([]);
   const dimmerTracksRef = useRef<DimmerTrackRef[]>([]);
   useEffect(() => { dimmerTracksRef.current = dimmerTracks; }, [dimmerTracks]);
+  const [chaserTracks, setChaserTracks] = useState<ChaserTrack[]>([]);
+  const chaserTracksRef = useRef<ChaserTrackRef[]>([]);
+  useEffect(() => { chaserTracksRef.current = chaserTracks as any; }, [chaserTracks]);
   const [fixtureTracks, setFixtureTracks] = useState<FixtureTrack[]>([]);
   const fixtureTracksRef = useRef<FixtureTrack[]>([]);
   fixtureTracksRef.current = fixtureTracks;
   const fixtureGroupsRef = useRef<{ id: string; fixtureIds: string[] }[]>([]);
   fixtureGroupsRef.current = useShowStore.getState().fixtureGroups;
+  const chasersRef = useRef<any[]>([]);
+  chasersRef.current = useShowStore.getState().chasers;
+  const scenesRef = useRef<any[]>([]);
+  scenesRef.current = useShowStore.getState().scenes;
   const efxTracksRef = useRef<EfxTrack[]>([]);
   efxTracksRef.current = efxTracks;
   const effectsRef = useRef<any[]>([]);
@@ -1711,8 +1633,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const firedRef = useRef<Set<string>>(new Set());
 
   /* ─── Undo/redo ──────────────────────────────────── */
-  const undoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[] }[]>([]);
-  const redoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[] }[]>([]);
+  const undoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[]; chaserTracks: ChaserTrack[] }[]>([]);
+  const redoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[]; chaserTracks: ChaserTrack[] }[]>([]);
   const canUndo = undoHistoryRef.current.length > 0;
   const canRedo = redoHistoryRef.current.length > 0;
 
@@ -1725,10 +1647,11 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       colorTracks: [...colorTracks],
       strobeTracks: [...strobeTracks],
       dimmerTracks: [...dimmerTracks],
+      chaserTracks: [...chaserTracks],
       disabledFixtures: new Set(disabledFixtures),
     });
     redoHistoryRef.current = [];
-  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, disabledFixtures]);
+  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, disabledFixtures]);
 
     const restoreState = (state: any) => {
     setSections(state.sections);
@@ -1738,12 +1661,14 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setColorTracks(state.colorTracks);
     setStrobeTracks(state.strobeTracks);
     setDimmerTracks(state.dimmerTracks);
+    setChaserTracks(state.chaserTracks || []);
     setDisabledFixtures(state.disabledFixtures || new Set<string>());
   };
   const saveState = () => ({
     sections: [...sections], manual: [...manualCues], efx: [...efxTracks],
     fixtureTracks: [...fixtureTracks], colorTracks: [...colorTracks],
     strobeTracks: [...strobeTracks], dimmerTracks: [...dimmerTracks],
+    chaserTracks: [...chaserTracks],
     disabledFixtures: new Set(disabledFixtures),
   });
 
@@ -1752,14 +1677,35 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     if (!state) return;
     redoHistoryRef.current.push(saveState());
     restoreState(state);
-  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, disabledFixtures]);
+  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, disabledFixtures]);
 
   const redo = useCallback(() => {
     const state = redoHistoryRef.current.pop();
     if (!state) return;
     undoHistoryRef.current.push(saveState());
     restoreState(state);
-  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks]);
+  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks]);
+
+  // Keyboard shortcuts: Ctrl+Z / Ctrl+Y
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        e.preventDefault();
+        redo();
+      }
+      // Ctrl+Shift+Z = redo (common alternative)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [undo, redo]);
 
   const handleToggleFixture = useCallback((fixtureId: string) => {
     pushHistory();
@@ -1818,6 +1764,30 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setPicker(null);
     setGradientPicker({ sectionType, colorIdx, startColor: currentColor, endColor: currentColor, constantColor: false });
   }, [customPal]);
+
+  // Remove a custom color from a section palette (right-click in picker)
+  const removeCustomColor = useCallback((sectionType: string, colorIdx: number) => {
+    const key = sectionType as keyof CustomPalette;
+    const arr = (customPal[key] || []).filter((_, i) => i !== colorIdx);
+    const newPal = { ...customPal, [key]: arr };
+    setCustomPal(newPal);
+    setQs({ customPalette: newPal });
+  }, [customPal, setCustomPal, setQs]);
+
+  // Reset one section's custom colors
+  const resetSectionColors = useCallback((sectionType: string) => {
+    const key = sectionType as keyof CustomPalette;
+    const newPal = { ...customPal, [key]: [] };
+    setCustomPal(newPal);
+    setQs({ customPalette: newPal });
+  }, [customPal, setCustomPal, setQs]);
+
+  // Reset all custom colors
+  const resetAllCustomColors = useCallback(() => {
+    const empty: CustomPalette = { intro: [], verse: [], chorus: [], bridge: [], drop: [], outro: [], build: [] };
+    setCustomPal(empty);
+    setQs({ customPalette: empty, customGradients: {} });
+  }, [setCustomPal, setQs]);
 
 
   const handleForceColor = useCallback((fixtureId: string, color: string) => {
@@ -1889,6 +1859,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           const text = await pf.text();
           const data = JSON.parse(text);
           const presetName = data.quickShow?.name || pf.name.replace(/\.lmpreset$/i, '');
+          useAppStore.getState().setPresetName(presetName);
           if (data.quickShow) setQs(data.quickShow);
           if (data.sections) setSections(data.sections);
           if (data.manualCues) setManualCues(data.manualCues);
@@ -1963,36 +1934,26 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           const commaIdx = audioDataUrl.indexOf(',');
           audioBase64Raw = commaIdx > 0 ? audioDataUrl.slice(commaIdx + 1) : '';
         }
-        // Batch-compute DMX cues for VC playback
+        // Batch-compute DMX cues for VC playback (all track types: fixture, color, strobe, dimmer, efx)
         const currentCues = genCues(sections, effectiveBpm, qs.beatDivision || 4, qs, manualCues, key, resolvedAnalysis);
         const store = useShowStore.getState();
         const pf = store.patchedFixtures;
         const uni = store.universes;
         const fDefs = fixtureDefsRef.current;
         const tierMultipliers = { primary: qs.tierConfig?.primary || 100, secondary: qs.tierConfig?.secondary || 70, tertiary: qs.tierConfig?.tertiary || 40 };
-        let dmxCuesArray: DmxCue[] = [];
-        if (currentCues.length > 0 && pf.length > 0 && fDefs.size > 0) {
-          for (const cue of currentCues) {
-            try {
-              const overrides = computeFixtureTrackOverrides(fixtureTracksRef.current, cue.time, pf, fixtureGroupsRef.current);
-              const ctc = computeColorTrackColors(colorTracksRef.current as any, cue.time, pf, fixtureGroupsRef.current);
-              const computed = computeDmxForCue(cue, pf, fDefs, uni as any, tierMultipliers, overrides, ctc, undefined);
-              for (const c of computed) {
-                dmxCuesArray.push({
-                  time: cue.time, section: cue.section, universe: c.universe,
-                  channelValues: c.channelValues, fixtureNames: [], fixtureCount: 0,
-                  effect: cue.effect, colors: cue.colors || [],
-                });
-              }
-            } catch { /* skip individual cue errors */ }
-          }
-        }
+        const dmxCuesArray: DmxCue[] = buildPresetDmxCues(
+          currentCues, pf, uni, fDefs, tierMultipliers,
+          fixtureTracksRef, colorTracksRef, strobeTracksRef, dimmerTracksRef,
+          efxTracksRef, effectsRef, fixtureGroupsRef,
+          chaserTracksRef, chasersRef, scenesRef,
+        );
 
-        // Sync to showStore.songPresets (for VC widget)
+        // Sync to showStore.songPresets (for VC widget) — update in place on re-save
+        // so widgets referencing the existing id keep seeing the latest tracks/cues.
         const audioFileName = resolvedAnalysis?.fileName || file?.name || name;
-        const existingPresets = store.songPresets.filter(p => p.name !== name);
-        store.setSongPresets([...existingPresets, {
-          id: `qs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        const existing = store.songPresets.find(p => p.name === name);
+        const songPreset: any = {
+          id: existing?.id ?? `qs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           name,
           audioFileBase64: audioDataUrl || '',
           audioFileName,
@@ -2002,11 +1963,14 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           sections,
           efxTracks,
           manualCues,
+          fixtureTracks,
           colorTracks,
           strobeTracks,
           dimmerTracks,
-          createdAt: new Date().toISOString(),
-        }]);
+          chaserTracks,
+          createdAt: existing?.createdAt ?? new Date().toISOString(),
+        };
+        store.setSongPresets([...store.songPresets.filter(p => p.name !== name), songPreset]);
 
         // Save to IPC
         const data: any = {
@@ -2019,6 +1983,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           colorTracks,
           strobeTracks,
           dimmerTracks,
+          chaserTracks,
         };
         if (audioBase64Raw) data.audioDataBase64 = audioBase64Raw;
         const api = (window as any).lightMaestro?.presets;
@@ -2030,7 +1995,46 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         setSavedPresets(updated);
       } catch (e) { console.error('Failed to save preset:', e); }
     })();
-  }, [qs, resolvedAnalysis, sections, manualCues, efxTracks, fixtureTracks, audioFile, effectiveBpm, key]);
+  }, [qs, resolvedAnalysis, sections, manualCues, efxTracks, fixtureTracks, chaserTracks, audioFile, effectiveBpm, key]);
+
+  const handleExportPreset = useCallback(() => {
+    const name = prompt(t('presetName') || 'Preset name for export:');
+    if (!name) return;
+    (async () => {
+      try {
+        const file = audioFile.file;
+        let audioDataBase64: string | undefined;
+        if (file) {
+          audioDataBase64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+        }
+        const currentCues = genCues(sections, effectiveBpm, qs.beatDivision || 4, qs, manualCues, key, resolvedAnalysis);
+        const store = useShowStore.getState();
+        const pf = store.patchedFixtures;
+        const uni = store.universes;
+        const fDefs = fixtureDefsRef.current;
+        const tierMultipliers = { primary: qs.tierConfig?.primary || 100, secondary: qs.tierConfig?.secondary || 70, tertiary: qs.tierConfig?.tertiary || 40 };
+        const dmxCuesArray: DmxCue[] = buildPresetDmxCues(
+          currentCues, pf, uni, fDefs, tierMultipliers,
+          fixtureTracksRef, colorTracksRef, strobeTracksRef, dimmerTracksRef,
+          efxTracksRef, effectsRef, fixtureGroupsRef,
+          chaserTracksRef, chasersRef, scenesRef,
+        );
+        const exportData = { version: 1, name, createdAt: new Date().toISOString(), quickShow: qs, analysis: resolvedAnalysis, sections, manualCues, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, fixtureTracks, dmxCues: dmxCuesArray, audioDataBase64 };
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${name.replace(/[^a-zA-Z0-9_\- ]/g, '')}.lmpreset`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (e) { console.error('Failed to export preset:', e); }
+    })();
+  }, [qs, resolvedAnalysis, sections, manualCues, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, fixtureTracks, audioFile, effectiveBpm, key]);
 
   const handleLoadPreset = useCallback(async (preset: typeof savedPresets[number]) => {
     // Support both legacy format {data:{quickShow,analysis,...}} and flat SongPreset format
@@ -2044,6 +2048,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     const dmxCuesData = preset?.data?.dmxCues || preset?.dmxCues;
     const presetName = preset.name;
     if (!qsData) return;
+    useAppStore.getState().setPresetName(presetName);
     pushHistory();
     setQs(qsData);
     if (sectionsData) setSections(sectionsData);
@@ -2056,6 +2061,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     if (strobeTracksPreset) setStrobeTracks(strobeTracksPreset);
     const dimmerTracksPreset = preset?.data?.dimmerTracks || preset?.dimmerTracks;
     if (dimmerTracksPreset) setDimmerTracks(dimmerTracksPreset);
+    const chaserTracksPreset = preset?.data?.chaserTracks || preset?.chaserTracks;
+    if (chaserTracksPreset) setChaserTracks(chaserTracksPreset);
     let audioDataUrl = '';
     if (analysisData) {
       if (audioBase64 && typeof audioBase64 === 'string') {
@@ -2077,11 +2084,11 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       }
       setHasEverHadAnalysis(true);
     }
-    // Sync to showStore.songPresets (for VC widget)
+    // Sync to showStore.songPresets (for VC widget) — update in place on re-import
     const store = useShowStore.getState();
-    const existingPresets = store.songPresets.filter(p => p.name !== presetName);
-    store.setSongPresets([...existingPresets, {
-      id: `qs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    const existing = store.songPresets.find(p => p.name === presetName);
+    const newPreset: any = {
+      id: existing?.id ?? `qs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: presetName,
       audioFileBase64: audioDataUrl,
       audioFileName: analysisData?.fileName || presetName,
@@ -2090,12 +2097,15 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       trackAnalysis: analysisData,
       sections: sectionsData || [],
       efxTracks: efxTracksData || [],
+      fixtureTracks: fixtureTracksData || [],
       colorTracks: colorTracksPreset || [],
       strobeTracks: strobeTracksPreset || [],
       dimmerTracks: dimmerTracksPreset || [],
+      chaserTracks: chaserTracksPreset || [],
       manualCues: manualCuesData || [],
-      createdAt: new Date().toISOString(),
-    }]);
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+    };
+    store.setSongPresets([...store.songPresets.filter(p => p.name !== presetName), newPreset]);
     setPresetsDropdown(false);
   }, [setQs, setSections, setManualCues, setEfxTracks, setFixtureTracks, audioFile, pushHistory]);
 
@@ -2183,11 +2193,12 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   useDmxPlayback({
     isPlaying: audioFile.isPlaying,
     currentTimeRef: currentTimeRef,
-    cues: cues as any,
+    cues: (showB && cuesB.length > 0 ? cuesB : cues) as any,
     patchedFixtures,
     fixtureDefs,
     universes: universes.map(u => ({ id: u.id, name: u.name, type: u.type, channels: u.channels })) as any,
     dmxOutputEnabled,
+    dryRunMode,
     tierMultipliers: { primary: qs.tierConfig?.primary || 100, secondary: qs.tierConfig?.secondary || 70, tertiary: qs.tierConfig?.tertiary || 40 },
     overrideCuesRef: overrideCuesRef as any,
     fixtureTracksRef,
@@ -2197,8 +2208,13 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     colorTracksRef: colorTracksRef as any,
     strobeTracksRef: strobeTracksRef as any,
     dimmerTracksRef: dimmerTracksRef as any,
+    chaserTracksRef: chaserTracksRef as any,
+    chasersRef,
+    scenesRef,
     disabledFixturesRef: disabledFixturesRef as any,
     colorFadeMs: qs.colorFadeMs ?? 250,
+    frozenRef: frozenRef as React.MutableRefObject<boolean>,
+    forceDropRef: forceDropRef as React.MutableRefObject<boolean>,
     onVirtualDmx: (uni, chVals) => {
       useAppStore.getState().setUniverseData(uni, chVals);
     },
@@ -2218,6 +2234,57 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   useEffect(() => {
     if (resolvedAnalysis?.sections && sections.length === 0) {
       setSections(mergeAdjacentSections(resolvedAnalysis.sections));
+    } else if (sections.length === 0 && resolvedAnalysis?.duration && resolvedAnalysis.duration > 0) {
+      // Auto-generate sections when audio has no analyzed sections
+      const dur = resolvedAnalysis.duration;
+      const energyCurve = resolvedAnalysis.energyCurve || [];
+      const autoSecs: TrackSection[] = [];
+      if (energyCurve.length > 10) {
+        // Use energy curve: find peaks (drops) and valleys
+        const step = Math.max(1, Math.floor(energyCurve.length / 200));
+        const smoothed: number[] = [];
+        for (let i = 0; i < energyCurve.length; i += step) {
+          let sum = 0, count = 0;
+          for (let j = Math.max(0, i - step); j < Math.min(energyCurve.length, i + step); j++) { sum += energyCurve[j]; count++; }
+          smoothed.push(sum / count);
+        }
+        const mean = smoothed.reduce((a, b) => a + b, 0) / smoothed.length;
+        const peaks: number[] = [];
+        for (let i = 1; i < smoothed.length - 1; i++) {
+          if (smoothed[i] > smoothed[i - 1] && smoothed[i] > smoothed[i + 1] && smoothed[i] > mean * 1.15) peaks.push(i / smoothed.length);
+        }
+        if (peaks.length >= 2) {
+          // Build sections around peaks
+          const boundaries = [0, ...peaks, 1];
+          boundaries.sort((a, b) => a - b);
+          for (let i = 0; i < boundaries.length - 1; i++) {
+            const start = boundaries[i];
+            const end = boundaries[i + 1];
+            const mid = (start + end) / 2;
+            const segEnergy = smoothed[Math.floor(mid * smoothed.length)] || mean;
+            const type: TrackSection['type'] = i === 0 ? 'intro' : i === boundaries.length - 2 ? 'outro'
+              : peaks.includes(end) ? 'drop' : peaks.includes(start) ? 'verse' : 'bridge';
+            autoSecs.push({ type, startTime: start * dur, endTime: end * dur, energy: segEnergy / (mean * 1.5), color: '' });
+          }
+        }
+      }
+      if (autoSecs.length === 0) {
+        // Fallback: 10-second chunks
+        const SEC_LENGTH = 10;
+        const chunkCount = Math.max(1, Math.ceil(dur / SEC_LENGTH));
+        for (let i = 0; i < chunkCount; i++) {
+          const s = (i / chunkCount) * dur;
+          const e = Math.min(dur, ((i + 1) / chunkCount) * dur);
+          autoSecs.push({
+            type: 'verse',
+            startTime: s,
+            endTime: e,
+            energy: 0.5,
+            color: '',
+          });
+        }
+      }
+      setSections(mergeAdjacentSections(autoSecs));
     }
   }, [resolvedAnalysis]);
 
@@ -2271,6 +2338,9 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [dimmerTargetType, setDimmerTargetType] = useState<'all' | 'group' | 'fixture'>('all');
   const [dimmerTargetGroupId, setDimmerTargetGroupId] = useState('');
   const [dimmerTargetFixtureIds, setDimmerTargetFixtureIds] = useState<string[]>([]);
+  const [chaserInsertMenu, setChaserInsertMenu] = useState<{ trackId: string; time: number; x: number; y: number } | null>(null);
+  const [chaserEntryMenu, setChaserEntryMenu] = useState<{ trackId: string; entry: ChaserTrackEntry; x: number; y: number } | null>(null);
+  const [chaserPickModal, setChaserPickModal] = useState<{ trackId: string } | null>(null);
 
   // Resolve target fixture names for display + DMX filtering
   const efxTargetFixtureNames = useMemo(() => {
@@ -2633,6 +2703,84 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setDimmerTrackModal(true);
   }, []);
 
+  /* ─── Chaser Track handlers ──────────────────────── */
+  // A chaser track is NOT assigned to fixtures: the chaser itself plays its own
+  // fixtures. The button creates the track then opens a picker to choose the chaser.
+  const handleAddChaserTrack = useCallback(() => {
+    pushHistory();
+    const trackId = `chaser-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setChaserTracks(prev => [...prev, {
+      id: trackId,
+      name: `Chaser Track ${prev.length + 1}`,
+      entries: [],
+      targetFixtures: { type: 'all' }, // unused: the chaser plays its own fixtures
+    }]);
+    setChaserPickModal({ trackId });
+  }, [pushHistory]);
+
+  const handleDeleteChaserTrack = useCallback((trackId: string) => {
+    pushHistory();
+    setChaserTracks(prev => prev.filter(t => t.id !== trackId));
+  }, [pushHistory]);
+
+  const handleInsertChaserToTrack = useCallback((trackId: string, time: number, chaserId: string, chaserName?: string) => {
+    pushHistory();
+    // Default block length = the chaser's total cycle (plays once), clamped to a sane range
+    const chaser = useShowStore.getState().chasers.find((c: any) => c.id === chaserId);
+    let defDur = 10;
+    if (chaser && Array.isArray(chaser.steps) && chaser.steps.length > 0) {
+      const total = chaser.steps.reduce((acc: number, s: any) => acc + Math.max(1, (s.fadeIn || 0) + (s.hold || 0) + (s.fadeOut || 0)), 0);
+      defDur = Math.min(120, Math.max(2, total / 1000));
+    }
+    setChaserTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      const entry: ChaserTrackEntry = {
+        id: `chaser-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        time,
+        endTime: time + defDur,
+        chaserId,
+        chaserName: chaserName || chaser?.name,
+      };
+      return { ...t, entries: [...t.entries, entry] };
+    }));
+    setChaserInsertMenu(null);
+  }, [pushHistory]);
+
+  const handleRemoveChaserEntry = useCallback((trackId: string, entryId: string) => {
+    pushHistory();
+    setChaserTracks(prev => prev.map(t => t.id === trackId ? { ...t, entries: t.entries.filter(e => e.id !== entryId) } : t));
+    setChaserEntryMenu(null);
+  }, [pushHistory]);
+
+  const handleChaserEntryChange = useCallback((trackId: string, entryIndex: number, newTime: number, newEndTime: number) => {
+    pushHistory();
+    setChaserTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      const entries = [...t.entries];
+      if (entryIndex >= 0 && entryIndex < entries.length) {
+        entries[entryIndex] = { ...entries[entryIndex], time: newTime, endTime: newEndTime };
+      }
+      return { ...t, entries };
+    }));
+  }, [pushHistory]);
+
+  const handleChaserTrackContextMenu = useCallback((trackId: string, time: number, clientX: number, clientY: number) => {
+    setChaserInsertMenu({ trackId, time, x: clientX, y: clientY });
+  }, []);
+
+  const handleChaserEntryClick = useCallback((trackId: string, entry: ChaserTrackEntry) => {
+    // Seek handled by TrackTimeline; nothing else to do here
+  }, []);
+
+  const handleChaserEntryContextMenu = useCallback((trackId: string, entry: ChaserTrackEntry, clientX: number, clientY: number) => {
+    setChaserEntryMenu({ trackId, entry, x: clientX, y: clientY });
+  }, []);
+
+  const handlePickChaserForTrack = useCallback((trackId: string, chaserId: string, chaserName?: string) => {
+    handleInsertChaserToTrack(trackId, 0, chaserId, chaserName);
+    setChaserPickModal(null);
+  }, [handleInsertChaserToTrack]);
+
   /* ─── Insert entity handler ──────────────────────── */
   const handleInsertEntity = useCallback((startTime: number, endTime: number, entityType: string, entityId: string) => {
     pushHistory();
@@ -2759,6 +2907,64 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           {dmxOutputEnabled ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4" />}
         </button>
 
+        {/* Dry-run toggle */}
+        <button
+          title={'Dry-run preview (no hardware DMX)'}
+          onClick={() => setDryRunMode(v => !v)}
+          className={`p-1.5 rounded text-[10px] font-mono font-bold ${dryRunMode ? 'text-amber-400 bg-amber-400/10' : 'text-gray-600 bg-gray-800/50'}`}
+        >
+          DRY
+        </button>
+
+        {/* Freeze hold */}
+        <button
+          title={frozen ? 'Unfreeze (resume playback)' : 'Freeze (hold current DMX frame)'}
+          onClick={() => { setFrozen(v => { frozenRef.current = !v; return !v; }); }}
+          className={`p-1.5 rounded text-[10px] font-mono font-bold ${frozen ? 'text-cyan-400 bg-cyan-400/10' : 'text-gray-600 bg-gray-800/50'}`}
+        >
+          <Snowflake className="w-3 h-3" />
+        </button>
+
+        {/* Drop Now */}
+        <button
+          title="Force a drop (max energy + strobe for 300ms)"
+          onClick={() => { forceDropRef.current = true; }}
+          className="p-1.5 rounded text-gray-600 bg-gray-800/50 hover:text-red-400 hover:bg-red-400/5"
+        >
+          <Zap className="w-3.5 h-3.5" />
+        </button>
+
+        {/* Divider */}
+        <span className="w-px h-5 bg-gray-700/50" />
+
+        {/* A/B Compare */}
+        {cuesB.length > 0 ? (
+          <button
+            title={showB ? 'Switch to style A' : 'Switch to style B (' + compareStyle + ')'}
+            onClick={() => setShowB(v => !v)}
+            className={`p-1.5 rounded text-[10px] font-mono font-bold ${showB ? 'text-amber-400 bg-amber-400/10' : 'text-gray-500 bg-gray-800/50'}`}
+          >
+            {showB ? 'B' : 'A'}
+          </button>
+        ) : (
+          <button
+            title="Generate B cues with different style for comparison"
+            onClick={() => {
+              const styleB = qs.musicStyle === 'techno' ? 'house' : 'techno';
+              const qsB = { ...qs, musicStyle: styleB };
+              const b = genCues(sections, effectiveBpm, qs.beatDivision || 4, qsB, manualCues, key + '_b', resolvedAnalysis);
+              setCuesB(b);
+              setCompareStyle(styleB);
+            }}
+            className="p-1.5 rounded text-gray-600 bg-gray-800/50 hover:text-amber-400 hover:bg-amber-400/5"
+          >
+            <Layers className="w-3.5 h-3.5" />
+          </button>
+        )}
+
+        {/* Divider */}
+        <span className="w-px h-5 bg-gray-700/50" />
+
         {/* Group selector */}
         <select
           value={selectedGroupId}
@@ -2816,7 +3022,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         <button title={t('save') || 'Save'} onClick={() => saveProject(resolvedAnalysis, sections, qs, audioFile, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, disabledFixtures)} className="p-1 rounded text-gray-400 hover:text-white">
           <Save className="w-3.5 h-3.5" />
         </button>
-        <button title={t('open') || 'Open'} onClick={() => loadProject(setQs, audioFile, setSections, setManualCues, setEfxTracks, setFixtureTracks, setColorTracks, setStrobeTracks, setDimmerTracks, setDisabledFixtures)} className="p-1 rounded text-gray-400 hover:text-white">
+        <button title={t('open') || 'Open'} onClick={() => loadProject(setQs, audioFile, setSections, setManualCues, setEfxTracks, setFixtureTracks, setColorTracks, setStrobeTracks, setDimmerTracks, setChaserTracks, setDisabledFixtures)} className="p-1 rounded text-gray-400 hover:text-white">
           <FolderOpen className="w-3.5 h-3.5" />
         </button>
         <button title={t('clear') || 'Clear'} onClick={clearAudio} className="p-1 rounded text-gray-400 hover:text-red-400">
@@ -2847,6 +3053,9 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
               </button>
               <button onClick={() => { setPresetsDropdown(false); loadPresetFile(); }} className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2">
                 <FolderOpen className="w-3 h-3" /> Load from file...
+              </button>
+              <button onClick={() => { setPresetsDropdown(false); handleExportPreset(); }} className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2">
+                <Download className="w-3 h-3" /> Export to file...
               </button>
               {savedPresets.length > 0 && <div className="border-t border-gray-800 my-0.5" />}
               {savedPresets.map((p, i) => (
@@ -2890,6 +3099,17 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           ))}
         </select>
 
+        {/* Genre */}
+        <select
+          value={qs.musicStyle || 'dance'}
+          onChange={e => setQs({ musicStyle: e.target.value })}
+          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300"
+        >
+          {['dance','techno','house','hiphop','dubstep','drum_and_bass','trance','disco','electro','pop','rock','rnb','reggaeton','latino','funk','ballad','reggae','trap','jazz','blues','latin','lo_fi','ambient'].map(s => (
+            <option key={s} value={s}>{(s.charAt(0).toUpperCase() + s.slice(1)).replace(/_/g, ' ')}</option>
+          ))}
+        </select>
+
         {/* Beat division */}
         <select
           value={qs.beatDivision || 4}
@@ -2899,6 +3119,26 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           {[1, 2, 4, 8].map(d => (
             <option key={d} value={d}>1/{d}</option>
           ))}
+        </select>
+
+        {/* Intensity */}
+        <select
+          value={qs.intensity || 'dynamic'}
+          onChange={e => setQs({ intensity: e.target.value as any })}
+          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300"
+        >
+          {['very-low','low','medium','high','very-high','dynamic'].map(i => (
+            <option key={i} value={i}>{i}</option>
+          ))}
+        </select>
+
+        {/* Movement type */}
+        <select
+          value={qs.movement || 'dynamic'}
+          onChange={e => setQs({ movement: e.target.value as any })}
+          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300"
+        >
+          {['smooth','sharp','dynamic'].map(m => <option key={m} value={m}>{m}</option>)}
         </select>
 
         {/* Section aware */}
@@ -3011,7 +3251,43 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           onDimmerEntryClick={handleDimmerEntryClick}
           onDimmerEntryContextMenu={handleDimmerEntryContextMenu}
           onDimmerEntryChange={handleDimmerEntryChange}
+          chaserTracks={chaserTracks}
+          onChaserTrackContextMenu={handleChaserTrackContextMenu}
+          onChaserEntryClick={handleChaserEntryClick}
+          onChaserEntryContextMenu={handleChaserEntryContextMenu}
+          onChaserEntryChange={handleChaserEntryChange}
           onSectionsChange={(newSecs: TrackSection[]) => { pushHistory(); setSections(newSecs); }}
+          onAutoScriptContextMenu={(time, _x, _y) => {
+            pushHistory();
+            setSections(prev => {
+              if (prev.length === 0) {
+                const dur = resolvedAnalysis?.duration || 120;
+                const halfSec = 5;
+                const start = Math.max(0, time - halfSec);
+                const end = Math.min(dur, time + halfSec);
+                if (end - start < 0.5) return prev;
+                const newSection: TrackSection = {
+                  type: 'verse',
+                  startTime: start,
+                  endTime: end,
+                  energy: 0.5,
+                  color: '',
+                };
+                return [newSection];
+              }
+              const sorted = [...prev].sort((a, b) => a.startTime - b.startTime);
+              for (let i = 0; i < sorted.length; i++) {
+                const s = sorted[i];
+                if (time > s.startTime && time < s.endTime) {
+                  if (time - s.startTime < 0.15 || s.endTime - time < 0.15) return prev;
+                  const before: TrackSection = { ...s, endTime: time };
+                  const after: TrackSection = { ...s, startTime: time };
+                  return [...sorted.slice(0, i), before, after, ...sorted.slice(i + 1)];
+                }
+              }
+              return prev;
+            });
+          }}
           fixtureTracks={fixtureTracks}
           onFixtureTracksChange={setFixtureTracks}
           showStrobeTrack={qs.showStrobeTrack}
@@ -3038,6 +3314,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           }}
           disabledFixtures={disabledFixtures}
           onToggleFixture={handleToggleFixture}
+          energyCurve={resolvedAnalysis?.energyCurve}
+          cueMarkers={dmxCues}
         />
       </div>
 
@@ -3086,6 +3364,14 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         >
           <Plus className="w-3 h-3" />
           Dimmer Track
+        </button>
+        <button
+          onClick={handleAddChaserTrack}
+          className="ml-1 px-2 py-0.5 rounded text-[10px] text-emerald-400 border border-emerald-700/50 hover:bg-emerald-400/10 cursor-pointer flex items-center gap-1"
+          title="Piste de chaser : importe un chaser qui prend la main sur ses fixtures pendant sa plage"
+        >
+          <Plus className="w-3 h-3" />
+          Chaser Track
         </button>
         <button
           onClick={() => setFadeModal(!fadeModal)}
@@ -3661,6 +3947,73 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         </>
       )}
 
+      {/* ── Chaser Track insert menu ── */}
+      {chaserInsertMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setChaserInsertMenu(null)} />
+          <div
+            className="fixed z-50 bg-[#1a1a2e] border border-emerald-700/50 rounded-lg shadow-xl py-1 min-w-[200px] max-h-[320px] overflow-auto"
+            style={{ left: chaserInsertMenu.x, top: chaserInsertMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1.5 text-[10px] text-emerald-400 uppercase tracking-wider border-b border-gray-800 sticky top-0 bg-[#1a1a2e]">
+              Import Chaser at {(chaserInsertMenu.time ?? 0).toFixed(1)}s
+            </div>
+            {entityChaserList.length === 0 && (
+              <div className="px-3 py-2 text-[10px] text-gray-600">No saved chasers — create one in Design → Chasers.</div>
+            )}
+            {entityChaserList.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => handleInsertChaserToTrack(chaserInsertMenu.trackId, chaserInsertMenu.time ?? 0, c.id, c.name)}
+                className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-emerald-500/10 flex items-center gap-2"
+              >
+                <span className="text-emerald-400">🎬</span>
+                {c.name}
+              </button>
+            ))}
+            <div className="border-t border-gray-800" />
+            <button
+              onClick={() => { handleDeleteChaserTrack(chaserInsertMenu.trackId); setChaserInsertMenu(null); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
+            >
+              Delete track
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Chaser entry context menu */}
+      {chaserEntryMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setChaserEntryMenu(null)} />
+          <div
+            className="fixed z-50 bg-[#1a1a2e] border border-emerald-700/50 rounded-lg shadow-xl py-1 min-w-[160px]"
+            style={{ left: chaserEntryMenu.x, top: chaserEntryMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1.5 text-[10px] text-emerald-400 uppercase tracking-wider border-b border-gray-800">
+              {chaserEntryMenu.entry.chaserName || 'Chaser'}
+            </div>
+            <div className="px-3 py-1 text-[9px] text-gray-600">
+              {chaserEntryMenu.entry.time.toFixed(1)}s - {chaserEntryMenu.entry.endTime.toFixed(1)}s
+            </div>
+            <button
+              onClick={() => handleRemoveChaserEntry(chaserEntryMenu.trackId, chaserEntryMenu.entry.id)}
+              className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
+            >
+              Remove entry
+            </button>
+            <button
+              onClick={() => setChaserEntryMenu(null)}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+
       {/* ── Color Track Target Modal ── */}
       {colorTrackModal && (
         <>
@@ -3955,6 +4308,51 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             </div>
           </div>
           <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setDimmerTrackModal(false)} />
+        </>
+      )}
+
+      {chaserPickModal && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setChaserPickModal(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
+            <div className="bg-[#1a1a2e] border border-emerald-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold text-gray-200">Sélectionner un chaser</span>
+                <button onClick={() => setChaserPickModal(null)} className="text-gray-500 hover:text-white">✕</button>
+              </div>
+
+              <p className="text-[10px] text-gray-500 leading-relaxed mb-4">
+                Le chaser joue ses propres fixtures et prend le dessus sur l'autoscript pendant sa plage, puis rend la main.
+              </p>
+
+              {entityChaserList.length === 0 ? (
+                <div className="text-[11px] text-gray-600 py-6 text-center border border-dashed border-gray-800 rounded-lg">
+                  Aucun chaser sauvegardé.<br />
+                  <span className="text-gray-500">Créez-en un dans Design → Chasers, puis réessayez.</span>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {entityChaserList.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => handlePickChaserForTrack(chaserPickModal.trackId, c.id, c.name)}
+                      className="w-full text-left px-3 py-2 rounded-lg bg-gray-800/40 border border-gray-700/40 hover:border-emerald-500/50 hover:bg-emerald-500/10 text-xs text-gray-300 flex items-center gap-2 transition-all"
+                    >
+                      <span className="text-emerald-400">🎬</span>
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex justify-end mt-4">
+                <button onClick={() => setChaserPickModal(null)}
+                  className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
+                  Fermer
+                </button>
+              </div>
+            </div>
+          </div>
         </>
       )}
     </div>

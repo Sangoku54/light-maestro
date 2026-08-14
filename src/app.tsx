@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore, AppMode } from './stores/appStore';
 import { useShowStore } from './stores/showStore';
+import { usePerformStore } from './stores/performStore';
 import { TopBar } from './components/layout/TopBar';
 import { Sidebar } from './components/layout/Sidebar';
 import { QuickShowView } from './views/QuickShowView';
@@ -49,6 +50,21 @@ const App: React.FC = () => {
   // RGB Matrix playback engine — runs globally, writes DMX directly
   useRgbMatrixPlayback();
 
+  // Clear old persisted widgets from localStorage (now saved in project file)
+  useEffect(() => {
+    try {
+      const key = 'light-maestro-perform';
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.state?.vcWidgets?.length > 0) {
+          delete parsed.state.vcWidgets;
+          localStorage.setItem(key, JSON.stringify(parsed));
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   // ─── Close Guard ─────────────────────────────────────────
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -82,23 +98,39 @@ const App: React.FC = () => {
 
   const syncUniversesToEngine = async (universes: any[]) => {
     const api = (window as any).lightMaestro?.dmx;
-    if (!api || !universes?.length) return;
+    if (!api) return;
+    const configs = (universes || []).map((u: any) => ({
+      id: u.id, name: u.name, type: u.type || 'usb-dmx',
+      output: true, input: false, channels: u.channels || 512,
+      serialPort: u.serialPort || '', artnetIP: u.artnetIP || '',
+      artnetSubnet: u.artnetSubnet ?? 0, artnetUniverse: u.artnetUniverse ?? 0,
+      sacnUniverse: u.sacnUniverse ?? 1, sacnPriority: u.sacnPriority ?? 100,
+    }));
     try {
-      for (const u of universes) {
-        await api.addUniverse({
-          id: u.id, name: u.name, type: u.type || 'usb-dmx',
-          output: true, input: false, channels: u.channels || 512,
-          serialPort: u.serialPort || '', artnetIP: u.artnetIP || '',
-          artnetSubnet: u.artnetSubnet ?? 0, artnetUniverse: u.artnetUniverse ?? 0,
-          sacnUniverse: u.sacnUniverse ?? 1, sacnPriority: u.sacnPriority ?? 100,
-        }).catch(() => {});
+      if (api.syncUniverses) {
+        await api.syncUniverses(configs).catch(() => {});
+      } else {
+        for (const u of configs) await api.addUniverse(u).catch(() => {});
       }
-    } catch {}
+    } catch { /* engine may not be ready yet */ }
   };
+
+  // Keep the DMX engine's universe table mirroring showStore.universes so that
+  // every output path (playback, Simple Desk, RGB matrix, design live-edit)
+  // always has a registered hardware target — even right after a project load.
+  const showUniverses = useShowStore((s) => s.universes);
+  useEffect(() => {
+    const id = setTimeout(() => syncUniversesToEngine(showUniverses), 150);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showUniverses]);
 
   // ─── Project: New / Save / Open (.lmproj) ──────────
   useEffect(() => {
     (window as any).__lm_new = () => {
+      // Clear project identity
+      useAppStore.getState().setProjectName('');
+      useAppStore.getState().setPresetName('');
       // Wipe persisted state
       Object.keys(localStorage).forEach((k) => {
         if (k.startsWith('light-maestro') || k.startsWith('zustand')) {
@@ -116,6 +148,8 @@ const App: React.FC = () => {
       ss.setEffects([]);
       ss.setCueLists([]);
       ss.setShows([]);
+      ss.setSongPresets([]);
+      usePerformStore.getState().vcSetWidgets([]);
       // Also remove persisted show-store from disk
       window.lightMaestro?.storage?.remove('show-store').catch(() => {});
       window.location.reload();
@@ -126,9 +160,15 @@ const App: React.FC = () => {
         const result = await window.lightMaestro?.project?.open();
         if (!result) return;
         const data = JSON.parse(result.content);
+        // Extract project name from file path
+        if (result.filePath) {
+          const fileName = result.filePath.split(/[/\\]/).pop()?.replace(/\.lmproj$/i, '') || '';
+          useAppStore.getState().setProjectName(fileName || 'Sans titre');
+        }
         const ss = useShowStore.getState();
         if (data.showStore) {
           if (data.showStore.patchedFixtures) ss.setPatchedFixtures(data.showStore.patchedFixtures);
+          if (data.showStore.stageDims) ss.setStageDims(data.showStore.stageDims);
           if (data.showStore.universes) { ss.setShowUniverses(data.showStore.universes); syncUniversesToEngine(data.showStore.universes); }
           if (data.showStore.fixturePositions) ss.setFixturePositions(data.showStore.fixturePositions);
           if (data.showStore.fixtureGroups) ss.setFixtureGroups(data.showStore.fixtureGroups);
@@ -137,9 +177,27 @@ const App: React.FC = () => {
           if (data.showStore.effects) ss.setEffects(data.showStore.effects);
           if (data.showStore.cueLists) ss.setCueLists(data.showStore.cueLists);
           if (data.showStore.shows) ss.setShows(data.showStore.shows);
+          if (data.showStore.songPresets) ss.setSongPresets(data.showStore.songPresets);
         }
         if (data.appStore) {
           useAppStore.setState(data.appStore);
+        }
+        // Restore virtual console widgets
+        if (data.vcWidgets) {
+          usePerformStore.getState().vcSetWidgets(data.vcWidgets);
+        } else {
+          // Migration fallback: old .lmproj without vcWidgets → try localStorage
+          try {
+            const raw = localStorage.getItem('light-maestro-perform');
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              const oldWidgets = parsed?.state?.vcWidgets;
+              if (Array.isArray(oldWidgets) && oldWidgets.length > 0) {
+                usePerformStore.getState().vcSetWidgets(oldWidgets);
+                useAppStore.getState().markDirty();
+              }
+            }
+          } catch { /* no migration source */ }
         }
         useAppStore.getState().markClean();
       } catch (e) { console.error('Failed to open project:', e); }
@@ -148,12 +206,19 @@ const App: React.FC = () => {
     (window as any).__lm_save = async () => {
       try {
         const showState = useShowStore.getState();
+        const perfState = usePerformStore.getState();
         const appState = useAppStore.getState();
         const { isDirty, markDirty, markClean, ...persistable } = appState;
+        // Strip showData from widget configs (large binary, stored separately in preset)
+        const widgets = perfState.vcWidgets.map(w => ({
+          ...w,
+          config: w.config?.showData ? { ...w.config, showData: undefined } : w.config,
+        }));
         const data = {
           appStore: persistable,
           showStore: {
             patchedFixtures: showState.patchedFixtures,
+            stageDims: showState.stageDims,
             universes: showState.universes,
             fixturePositions: showState.fixturePositions,
             fixtureGroups: showState.fixtureGroups,
@@ -162,13 +227,22 @@ const App: React.FC = () => {
             effects: showState.effects,
             cueLists: showState.cueLists,
             shows: showState.shows,
+            songPresets: showState.songPresets,
           },
+          vcWidgets: widgets,
           version: 1,
           timestamp: new Date().toISOString(),
         };
         const json = JSON.stringify(data, null, 2);
         const saved = await window.lightMaestro?.project?.save(json);
-        if (saved) useAppStore.getState().markClean();
+        if (saved) {
+          useAppStore.getState().markClean();
+          // Set project name from save result
+          if (saved.filePath) {
+            const fileName = (saved.filePath as string).split(/[/\\]/).pop()?.replace(/\.lmproj$/i, '') || '';
+            useAppStore.getState().setProjectName(fileName || 'Sans titre');
+          }
+        }
       } catch (e) { console.error('Failed to save project:', e); }
     };
 
@@ -177,6 +251,18 @@ const App: React.FC = () => {
       delete (window as any).__lm_open;
       delete (window as any).__lm_save;
     };
+  }, []);
+
+  // ─── Global keyboard shortcuts ──────────────────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        (window as any).__lm_save?.();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
   }, []);
 
   const handleSaveAndQuit = async () => {
@@ -315,16 +401,56 @@ const App: React.FC = () => {
 
 const StatusBar: React.FC = () => {
   const { t } = useTranslation();
-  const dmxRunning = useAppStore((s) => s.dmx.running);
   const blackout = useAppStore((s) => s.dmx.blackout);
   const bpm = useAppStore((s) => s.audio.bpm);
   const analyzing = useAppStore((s) => s.audio.analyzing);
 
+  // Live DMX output status, polled from the main-process engine
+  const [dmxStatus, setDmxStatus] = useState<{
+    running: boolean;
+    frameRate: number;
+    universes: Array<{ id: string; name: string; type: string; serialPort: string; artnetIP: string; sacnUniverse: number; active: boolean }>;
+    lastError: string | null;
+  } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      const api = (window as any).lightMaestro?.dmx;
+      if (!api?.getStatus) return;
+      try { const s = await api.getStatus(); if (alive) setDmxStatus(s); } catch {}
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+
   return (
     <footer className="h-7 bg-[#0d0d14] border-t border-gray-800 flex items-center px-4 text-xs text-gray-500 gap-4 select-none">
-      <div className="flex items-center gap-1.5">
-        <span className={`w-2 h-2 rounded-full ${dmxRunning ? 'bg-green-500' : 'bg-gray-600'}`} />
-        <span>{dmxRunning ? t('statusBar.dmxOn') : t('statusBar.dmxOff')}</span>
+      <div
+        className="flex items-center gap-1.5"
+        title={[
+          ...(dmxStatus?.universes || []).map((u) =>
+            `${u.name || u.id} · ${u.type}${
+              u.type === 'usb-dmx' ? ' · ' + (u.serialPort || 'no port')
+              : u.type === 'artnet' ? ' · ' + (u.artnetIP || 'broadcast')
+              : ' · U' + u.sacnUniverse
+            }${u.active ? '' : ' (inactive)'}`
+          ),
+          ...(dmxStatus?.lastError ? ['', '⚠ ' + dmxStatus.lastError] : []),
+        ].join('\n')}
+      >
+        <span
+          className={`w-2 h-2 rounded-full ${
+            dmxStatus?.lastError ? 'bg-red-500' : dmxStatus?.running ? 'bg-green-500 animate-pulse' : 'bg-gray-600'
+          }`}
+        />
+        <span className={dmxStatus?.lastError ? 'text-red-400' : ''}>
+          {dmxStatus?.lastError
+            ? t('statusBar.dmxOn') + ' ⚠'
+            : dmxStatus?.running
+            ? `${t('statusBar.dmxOn')} ${dmxStatus.frameRate} fps`
+            : t('statusBar.dmxOff')}
+        </span>
       </div>
       {blackout && (
         <span className="text-red-400 font-bold animate-pulse">{t('statusBar.blackout')}</span>

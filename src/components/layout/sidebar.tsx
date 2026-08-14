@@ -3,13 +3,11 @@ import { useTranslation } from 'react-i18next';
 import { AppMode, QuickSidebarTab, DesignSidebarTab, PerformSidebarTab, useAppStore } from '../../stores/appStore';
 import {
   Mic,
-  Music,
   LayoutGrid,
   Sliders,
   ListMusic,
   Palette,
   Settings,
-  Disc,
   Radio,
   Crosshair,
   Users,
@@ -134,15 +132,13 @@ function getSidebarItems(mode: AppMode, t: (key: string) => string): SidebarItem
     case 'quick':
       return [
         { key: 'autoscript', label: t('sidebar.autoScript'), icon: <Mic size={16} /> },
-        { key: 'audio', label: t('sidebar.audioSource'), icon: <Music size={16} /> },
         { key: 'colors', label: t('sidebar.colorPresets'), icon: <Palette size={16} /> },
-        { key: 'dj', label: t('sidebar.djIntegration'), icon: <Disc size={16} /> },
-        { key: 'settings', label: t('common.settings'), icon: <Settings size={16} /> },
       ];
 
     case 'design':
       return [
         { key: 'fixtures', label: t('sidebar.fixtures'), icon: <LayoutGrid size={16} /> },
+        { key: 'stage', label: 'Vue 2D', icon: <Eye size={16} /> },
         { key: 'groups', label: t('sidebar.groups'), icon: <Users size={16} /> },
         { key: 'scenes', label: t('sidebar.scenes'), icon: <ListMusic size={16} /> },
         { key: 'chasers', label: t('sidebar.chasers'), icon: <Radio size={16} /> },

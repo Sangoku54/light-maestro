@@ -10,8 +10,10 @@ import { useAppStore } from '../stores/appStore';
 import { useShowStore, type SavedCueList, type CueListCue, type SongPreset } from '../stores/showStore';
 import { computeDmxCues, loadFixtureDefinitions, type CueInput, type DmxCue } from '../hooks/dmx-cues';
 import { computeDmxForCue } from '../hooks/dmx-playback';
+import { SongPresetPlayer } from '../components/SongPresetPlayer';
 import { analyzeAudioBuffer, type TrackAnalysis } from '../hooks/audio-analysis';
 import { sendChannelsToHardware, sendToUniverse } from '../utils/dmx-helpers';
+import { Stage3D } from './stage3d';
 import {
   usePerformStore,
   ConsoleWidget,
@@ -59,6 +61,42 @@ const VirtualConsolePanel: React.FC = () => {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; widgetId: string } | null>(null);
   const [showWidgetConfig, setShowWidgetConfig] = useState<string | null>(null);
   const paletteRef = useRef<HTMLDivElement>(null);
+
+  // Floating 3D stage view
+  const [showFloating3D, setShowFloating3D] = useState(false);
+  const [float3DPos, setFloat3DPos] = useState({ x: 200, y: 100 });
+  const [float3DSize, setFloat3DSize] = useState({ w: 960, h: 540 });
+  const float3DDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
+  const float3DResizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+
+  const handleFloat3DDragStart = useCallback((e: React.MouseEvent) => {
+    float3DDragRef.current = { startX: e.clientX, startY: e.clientY, startLeft: float3DPos.x, startTop: float3DPos.y };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DDragRef.current) return;
+      setFloat3DPos({
+        x: float3DDragRef.current.startLeft + ev.clientX - float3DDragRef.current.startX,
+        y: float3DDragRef.current.startTop + ev.clientY - float3DDragRef.current.startY,
+      });
+    };
+    const onUp = () => { float3DDragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DPos]);
+
+  const handleFloat3DResizeStart = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    float3DResizeRef.current = { startX: e.clientX, startY: e.clientY, startW: float3DSize.w, startH: float3DSize.h };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DResizeRef.current) return;
+      setFloat3DSize({
+        w: Math.max(320, float3DResizeRef.current.startW + ev.clientX - float3DResizeRef.current.startX),
+        h: Math.max(200, float3DResizeRef.current.startH + ev.clientY - float3DResizeRef.current.startY),
+      });
+    };
+    const onUp = () => { float3DResizeRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DSize]);
 
   // Show playback state (for local playback in Performance view)
   const showScenes = useShowStore(s => s.scenes);
@@ -575,6 +613,7 @@ const VirtualConsolePanel: React.FC = () => {
             key={widget.id}
             widget={widget}
             onContextMenu={(x, y) => setContextMenu({ x, y, widgetId: widget.id })}
+            onShow3D={() => setShowFloating3D(true)}
           />
         ))}
 
@@ -610,6 +649,28 @@ const VirtualConsolePanel: React.FC = () => {
 
       {/* Keyboard: Esc to cancel adding */}
       <KeyboardListener onEsc={() => { if (addingWidget) vcSetAddingWidget(null); }} />
+
+      {/* Floating 3D Stage View */}
+      {showFloating3D && (
+        <div
+          className="fixed z-50 bg-black/95 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col"
+          style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, overflow: 'hidden' }}
+        >
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
+            <span className="text-[11px] text-purple-400 font-medium">🎬 Live 3D View</span>
+            <button onClick={() => setShowFloating3D(false)} className="text-xs text-gray-500 hover:text-red-400 rounded px-1">✕</button>
+          </div>
+          <div className="flex-1 min-h-0 relative">
+            <Stage3D />
+            {/* Resize handle */}
+            <div
+              className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
+              onMouseDown={handleFloat3DResizeStart}
+              style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -750,14 +811,28 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
 
               <div>
                 <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('perform.vc.actionType')}</label>
-                <select value={config.actionType || 'scene'} onChange={(e) => setConfig({ ...config, actionType: e.target.value as any })}
+                <select value={config.actionType || 'scene'} onChange={async (e) => {
+                  const newType = e.target.value;
+                  if (newType === 'loadShow') {
+                    try {
+                      const r = await window.lightMaestro?.dialog?.openFile?.([
+                        { name: 'Light Maestro Show', extensions: ['lmshow', 'lmproj'] },
+                      ]);
+                      if (r?.content) {
+                        const p = JSON.parse(r.content);
+                        setConfig({ ...config, actionType: 'loadShow', showName: p.name || r.filePath?.split(/[\\/]/).pop()?.replace(/\.(lmshow|lmproj)$/,''), showData: p });
+                        return;
+                      }
+                    } catch { /* user cancelled */ }
+                  }
+                  setConfig({ ...config, actionType: newType as any });
+                }}
                   className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300">
                   <option value="scene">{t('perform.vc.scene')}</option>
                   <option value="chaser">{t('perform.vc.chaser')}</option>
                   <option value="blackout">{t('perform.vc.blackoutWidget')}</option>
-                  <option value="loadShow">Load & Play Show</option>
-                  <option value="playSong">♪ Play Song Preset</option>
-                  <option value="audioAutoScript">♪ Import Audio + AutoScript</option>
+                  <option value="loadShow">♪ Play Show</option>
+                  <option value="playSong">♪ Play Preset</option>
                 </select>
               </div>
 
@@ -784,10 +859,10 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                   <button
                     onClick={async () => {
                       try {
-                        const r = await window.lightMaestro?.dialog?.openFile?.([{ name: 'Light Maestro Show', extensions: ['lmshow'] }]);
+                        const r = await window.lightMaestro?.dialog?.openFile?.([{ name: 'Light Maestro Show', extensions: ['lmshow', 'lmproj'] }]);
                         if (!r?.content) return;
                         const p = JSON.parse(r.content);
-                        setConfig({ ...config, showName: p.name || r.filePath?.split(/[\\/]/).pop()?.replace('.lmproject',''), showData: p });
+                        setConfig({ ...config, showName: p.name || r.filePath?.split(/[\\/]/).pop()?.replace(/\.(lmshow|lmproj)$/,''), showData: p });
                       } catch { /* */ }
                     }}
                     className="px-3 py-1.5 bg-purple-600/30 text-purple-200 rounded text-[10px] font-medium hover:bg-purple-600/50 border border-purple-500/30 transition-colors"
@@ -806,11 +881,14 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
               )}
 
               {config.actionType === 'playSong' && (
-                <div>
+                <div className="space-y-2">
                   <label className="text-[10px] text-gray-500 uppercase tracking-wider">♪ Song Preset</label>
                   <select
                     value={config.songId || ''}
-                    onChange={(e) => setConfig({ ...config, songId: e.target.value })}
+                    onChange={(e) => {
+                      const sp = songPresets.find((s) => s.id === e.target.value);
+                      setConfig({ ...config, songId: e.target.value, songName: sp?.name });
+                    }}
                     className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300"
                   >
                     <option value="">— Select Song Preset —</option>
@@ -820,8 +898,60 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                       </option>
                     ))}
                   </select>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const r = await window.lightMaestro?.dialog?.openFile?.([
+                          { name: 'Light Maestro Preset', extensions: ['lmpreset'] },
+                        ]);
+                        if (!r?.content) return;
+                        let p = JSON.parse(r.content);
+                        // Support both single-object export format and legacy array-of-{name,timestamp,data} format
+                        if (Array.isArray(p)) {
+                          p = p[0]?.data || p[0] || {};
+                        }
+                        const store = useShowStore.getState();
+                        // Reconstruct full data URL from raw base64 (saved without data: prefix)
+                        let audioSrc = p.audioDataBase64 || p.audioFileBase64 || '';
+                        if (audioSrc && !audioSrc.startsWith('data:')) {
+                          const mime = p.analysis?.mimeType || p.trackAnalysis?.mimeType || 'audio/mpeg';
+                          audioSrc = `data:${mime};base64,${audioSrc}`;
+                        }
+                        const name = p.quickShow?.name || p.name || r.filePath?.split(/[\\/]/).pop()?.replace(/\.lmpreset$/i, '') || 'Imported Preset';
+                        const full = {
+                          name,
+                          audioFileBase64: audioSrc,
+                          audioFileName: p.audioFileName || p.analysis?.fileName || p.trackAnalysis?.fileName || '',
+                          dmxCues: p.dmxCues || [],
+                          quickShow: p.quickShow || {},
+                          trackAnalysis: p.analysis || p.trackAnalysis || null,
+                          sections: p.sections || [],
+                          efxTracks: p.efxTracks || [],
+                          manualCues: p.manualCues || [],
+                          fixtureTracks: p.fixtureTracks || [],
+                          colorTracks: p.colorTracks || [],
+                          strobeTracks: p.strobeTracks || [],
+                          dimmerTracks: p.dimmerTracks || [],
+                          chaserTracks: p.chaserTracks || [],
+                        };
+                        // Update-in-place by name (keeps a stable id so widget songId refs stay live)
+                        const existing = store.songPresets.find((s) => s.name === name);
+                        let presetId: string;
+                        if (existing) {
+                          store.updateSongPreset(existing.id, full);
+                          presetId = existing.id;
+                        } else {
+                          presetId = store.addSongPreset(full);
+                        }
+                        setConfig({ ...config, songId: presetId, songName: name });
+                      } catch { /* user cancelled */ }
+                    }}
+                    className="px-3 py-1.5 bg-purple-600/30 text-purple-200 rounded text-[10px] font-medium hover:bg-purple-600/50 border border-purple-500/30 transition-colors"
+                  >
+                    Browse...
+                  </button>
                   {songPresets.length === 0 && (
-                    <p className="text-[9px] text-amber-400 mt-1">No song presets saved yet. Save a song in QuickShow first.</p>
+                    <p className="text-[9px] text-amber-400 mt-1">No song presets saved yet. Import a .lmpreset file or save a song in QuickShow first.</p>
                   )}
                 </div>
               )}
@@ -1136,7 +1266,8 @@ const AudioAutoScriptConfig: React.FC<{
 const VCWidgetRenderer: React.FC<{
   widget: ConsoleWidget;
   onContextMenu: (x: number, y: number) => void;
-}> = ({ widget, onContextMenu }) => {
+  onShow3D?: () => void;
+}> = ({ widget, onContextMenu, onShow3D }) => {
   const { t } = useTranslation();
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
@@ -1204,7 +1335,7 @@ const VCWidgetRenderer: React.FC<{
 
   switch (widget.type) {
     case 'button':
-      return <VCButtonWidget widget={widget} onDragStart={handleDragStart} onResizeStart={handleResizeStart} onContextMenu={onContextMenu} />;
+      return <VCButtonWidget widget={widget} onDragStart={handleDragStart} onResizeStart={handleResizeStart} onContextMenu={onContextMenu} onShow3D={onShow3D} />;
     case 'slider':
       return <VCSliderWidget widget={widget} onDragStart={handleDragStart} onResizeStart={handleResizeStart} onContextMenu={onContextMenu} />;
     case 'frame':
@@ -1221,7 +1352,8 @@ const VCButtonWidget: React.FC<{
   onDragStart: (e: React.MouseEvent) => void;
   onResizeStart: (e: React.MouseEvent) => void;
   onContextMenu: (x: number, y: number) => void;
-}> = ({ widget, onDragStart, onResizeStart, onContextMenu }) => {
+  onShow3D?: () => void;
+}> = ({ widget, onDragStart, onResizeStart, onContextMenu, onShow3D }) => {
   const { t } = useTranslation();
   const [active, setActive] = useState(false);
   const scenes = useShowStore((s) => s.scenes);
@@ -1231,12 +1363,11 @@ const VCButtonWidget: React.FC<{
   const chaserRunningRef = useRef(false);
   const sceneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sceneFadeRef = useRef<{ cancel: () => void } | null>(null);
-  const songAudioRef = useRef<HTMLAudioElement | null>(null);
-  const songRafRef = useRef<number>(0);
   const autoAudioRef = useRef<HTMLAudioElement | null>(null);
   const autoRafRef = useRef<number>(0);
   const regeneratingRef = useRef(false);
   const playIntentRef = useRef(false);
+  const [songPlayer, setSongPlayer] = useState<SongPreset | null>(null);
 
   const { config } = widget;
   const color = config.color || '#a855f7';
@@ -1250,8 +1381,9 @@ const VCButtonWidget: React.FC<{
 
   const getSongLabel = () => {
     if (config.actionType !== 'playSong' || !config.songId) return '♪ Song';
-    const sp = songPresets.find((p) => p.id === config.songId);
-    return sp ? `♪ ${sp.name}` : '♪ Song';
+    const sp = songPresets.find((p) => p.id === config.songId)
+      || (config.songName ? songPresets.find((p) => p.name === config.songName) : undefined);
+    return sp ? `♪ ${sp.name}` : (config.songName ? `♪ ${config.songName}` : '♪ Song');
   };
 
   // ─── audioAutoScript playback helper ──────────────────
@@ -1315,11 +1447,21 @@ const VCButtonWidget: React.FC<{
       setActive(false);
     };
     audio.onerror = (e) => console.error('AudioAutoScript error:', e);
-    audio.play().catch((e) => console.error('AudioAutoScript play failed:', e));
+    const tryPlay = (retries: number) => {
+      audio.play().catch((e) => {
+        if (retries > 0) {
+          setTimeout(() => tryPlay(retries - 1), 50);
+        } else {
+          console.error('AudioAutoScript play failed:', e);
+        }
+      });
+    };
+    tryPlay(2);
   };
 
   const activate = () => {
     setActive(true);
+    const currentState = useShowStore.getState();
 
     // DMX engine will be restarted by PlaySong/audioAutoScript handlers when needed
 
@@ -1334,7 +1476,7 @@ const VCButtonWidget: React.FC<{
           // Use pre-loaded show data or open file picker if not yet loaded
           let p = config.showData;
           if (!p) {
-            const r = await window.lightMaestro?.dialog?.openFile?.([{ name: 'Light Maestro Show', extensions: ['lmshow'] }]);
+            const r = await window.lightMaestro?.dialog?.openFile?.([{ name: 'Light Maestro Show', extensions: ['lmshow', 'lmproj'] }]);
             if (!r?.content) return;
             p = JSON.parse(r.content);
           }
@@ -1405,132 +1547,16 @@ const VCButtonWidget: React.FC<{
     }
 
     if (config.actionType === 'playSong' && config.songId) {
-      const preset = songPresets.find((p) => p.id === config.songId);
-      if (!preset || !preset.audioFileBase64) {
-        console.warn('PlaySong: preset not found or no audio', config.songId);
+      const preset = songPresets.find((p) => p.id === config.songId)
+        || (config.songName ? songPresets.find((p) => p.name === config.songName) : undefined);
+      if (!preset) {
+        console.warn('PlaySong: preset not found', config.songId, 'available:', songPresets.map((p) => `${p.name}#${p.id}`).join(', '));
         return;
       }
-
-      // Toggle: if already playing this song, stop it
-      if (songAudioRef.current) {
-        songAudioRef.current.pause();
-        songAudioRef.current.currentTime = 0;
-        cancelAnimationFrame(songRafRef.current);
-        songAudioRef.current = null;
-        try {
-          const dmx = (window as any).lightMaestro?.dmx;
-          if (dmx) {
-            const z: Record<number,number> = {};
-            for (let i = 1; i <= 512; i++) z[i] = 0;
-            const s = useShowStore.getState();
-            const uniIds = s.universes.map((u:any) => String(u.id));
-            for (const pf of s.patchedFixtures) {
-              const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
-              try { dmx.setChannels(uniNum, z); } catch {}
-            }
-          }
-        } catch {}
-        setActive(false);
-        return;
-      }
-
-      // Use saved cues directly — QuickShow now saves them with new engine
-      const cues = preset.dmxCues || [];
-      console.log('PlaySong: starting', preset.name, 'cues:', cues.length);
-
-      // Start DMX engine + play audio async
-      (async () => {
-        const api = (window as any).lightMaestro?.dmx;
-        if (api) {
-          try {
-            await api.stop().catch(() => {});
-            const universes = useShowStore.getState().universes;
-            if (universes.length > 0) {
-              await Promise.all(universes.map((u: any) => api.addUniverse({
-                id: u.id, name: u.name, type: u.type, output: true, input: false,
-                channels: u.channels, serialPort: (u as any).serialPort || '',
-                artnetIP: (u as any).artnetIP ?? '', artnetSubnet: (u as any).artnetSubnet ?? 0,
-                artnetUniverse: (u as any).artnetUniverse ?? 0,
-                sacnUniverse: (u as any).sacnUniverse ?? 1, sacnPriority: (u as any).sacnPriority ?? 100,
-              }).catch(() => {})));
-              await api.start().catch(() => {});
-            }
-          } catch { /* silent */ }
-        }
-
-        const audio = new Audio(preset.audioFileBase64);
-        songAudioRef.current = audio;
-        let startTime = 0;
-        let firedCues = new Set<string>();
-
-        // Diagnostic: log first cue's channel values
-        if (cues.length > 0) {
-          const firstCue = cues[0];
-          const chKeys = Object.keys(firstCue.channelValues || {});
-          const sample: Record<string,number> = {};
-          chKeys.slice(0, 10).forEach(k => { sample[k] = firstCue.channelValues[Number(k)]; });
-          console.log('PlaySong DIAG: cue[0] universe=', firstCue.universe, 'totalChannels=', chKeys.length, 'sample=', sample);
-        }
-
-        // Wait for DMX engine to be fully started before firing cues
-        let dmxReady = false;
-        let firstFrameDone = false;
-        const uniIds = useShowStore.getState().universes.map((u:any) => String(u.id));
-        const waitForDmx = async () => {
-          for (let i = 0; i < 50; i++) {
-            try {
-              const running = await (window as any).lightMaestro?.dmx?.isRunning();
-              if (running) { dmxReady = true; return; }
-            } catch {}
-            await new Promise(r => setTimeout(r, 100));
-          }
-        };
-        const fireDmx = () => {
-          const elapsed = (performance.now() - startTime) / 1000;
-          if (!dmxReady) { songRafRef.current = requestAnimationFrame(fireDmx); return; }
-          const dmx = (window as any).lightMaestro?.dmx;
-          if (!dmx) { songRafRef.current = requestAnimationFrame(fireDmx); return; }
-          // Blackout all universes to 0 on first frame
-          if (!firstFrameDone) {
-            firstFrameDone = true;
-            const z: Record<number,number> = {};
-            for (let i = 1; i <= 512; i++) z[i] = 0;
-            for (const pf of useShowStore.getState().patchedFixtures) {
-              const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
-              try { dmx.setChannels(uniNum, z); } catch {}
-            }
-          }
-          for (const cue of cues) {
-            const key = `${cue.time.toFixed(2)}-${cue.universe}`;
-            if (firedCues.has(key)) continue;
-            if (elapsed >= cue.time && Object.keys(cue.channelValues).length > 0) {
-              firedCues.add(key);
-              try { dmx.setChannels(cue.universe, cue.channelValues); } catch {}
-            }
-          }
-          if (!audio.paused && !audio.ended) songRafRef.current = requestAnimationFrame(fireDmx);
-        };
-
-        audio.onplay = () => { startTime = performance.now(); void waitForDmx(); fireDmx(); };
-        audio.onended = () => {
-          cancelAnimationFrame(songRafRef.current);
-          try {
-            const dmx = (window as any).lightMaestro?.dmx;
-            if (dmx) {
-              const z: Record<number,number> = {};
-              for (let i = 1; i <= 512; i++) z[i] = 0;
-              for (const pf of useShowStore.getState().patchedFixtures) {
-                const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
-                try { dmx.setChannels(uniNum, z); } catch {}
-              }
-            }
-          } catch {}
-          songAudioRef.current = null;
-          setActive(false);
-        };
-        audio.onerror = (e) => console.error('PlaySong audio error:', e);
-        audio.play().catch((e) => console.error('PlaySong play failed:', e));
-      })();
+      // Playback no longer requires an audio file: SongPresetPlayer uses a
+      // virtual clock when the audio is missing or not yet playable.
+      // Toggle the full live playback (SongPresetPlayer) on/off
+      setSongPlayer((prev) => (prev ? null : preset));
       return;
     }
 
@@ -1636,7 +1662,9 @@ const VCButtonWidget: React.FC<{
         // Track active scene timers so deactivate can cancel
         const fadeIn = scene.fadeIn || 0;
         const fadeOut = scene.fadeOut || 0;
-        const hold = scene.duration || 0; // 0 = hold forever
+        // Duration = total window INCLUDING fades (0 = hold forever)
+        const infinite = !scene.duration || scene.duration <= 0;
+        const hold = infinite ? 0 : Math.max(0, scene.duration - fadeIn - fadeOut);
 
         const channels: Record<number, number> = {};
         for (const [addr, val] of Object.entries(scene.channels)) channels[Number(addr)] = val;
@@ -1667,17 +1695,17 @@ const VCButtonWidget: React.FC<{
             if (progress < 1) raf = requestAnimationFrame(fadeInAnim);
             else {
               applyLevel(1);
-              if (hold > 0) scheduleFadeOut();
+              if (!infinite) scheduleFadeOut(hold);
             }
           };
           (sceneFadeRef as any).current = { cancel: () => cancelAnimationFrame(raf) };
           raf = requestAnimationFrame(fadeInAnim);
         } else {
           applyLevel(1);
-          if (hold > 0) scheduleFadeOut();
+          if (!infinite) scheduleFadeOut(hold);
         }
 
-        const scheduleFadeOut = () => {
+        function scheduleFadeOut(delay: number) {
           sceneTimerRef.current = setTimeout(() => {
             if (fadeOut > 0) {
               const start = performance.now();
@@ -1695,7 +1723,7 @@ const VCButtonWidget: React.FC<{
               applyLevel(0);
               setActive(false);
             }
-          }, hold);
+          }, delay);
         };
       }
       return;
@@ -1718,10 +1746,10 @@ const VCButtonWidget: React.FC<{
           return;
         }
 
-        // Step has its own timing OR fall back to scene duration
+        // Step has its own timing OR fall back to scene timing (duration = total window incl fades)
         const fadeIn = step.fadeIn ?? scene.fadeIn ?? 0;
-        const hold = step.hold ?? scene.duration ?? 500;
         const fadeOut = step.fadeOut ?? scene.fadeOut ?? 0;
+        const hold = step.hold ?? (scene.duration > 0 ? Math.max(0, scene.duration - fadeIn - fadeOut) : 500);
 
         const targetChannels: Record<number, number> = {};
         for (const [addr, val] of Object.entries(scene.channels)) targetChannels[Number(addr)] = Number(val);
@@ -1809,25 +1837,7 @@ const VCButtonWidget: React.FC<{
       } catch {}
     }
     // Stop playSong playback
-    if (songAudioRef.current) {
-      songAudioRef.current.pause();
-      songAudioRef.current.currentTime = 0;
-      cancelAnimationFrame(songRafRef.current);
-      songAudioRef.current = null;
-      try {
-        const dmx = (window as any).lightMaestro?.dmx;
-        if (dmx) {
-          const z: Record<number,number> = {};
-          for (let i = 1; i <= 512; i++) z[i] = 0;
-          const s = useShowStore.getState();
-          const uniIds = s.universes.map((u:any) => String(u.id));
-          for (const pf of s.patchedFixtures) {
-            const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
-            try { dmx.setChannels(uniNum, z); } catch {}
-          }
-        }
-      } catch {}
-    }
+    setSongPlayer(null);
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -1897,6 +1907,20 @@ const VCButtonWidget: React.FC<{
         </span>
       </button>
 
+      {/* 3D view shortcut — visible when widget is active */}
+      {active && onShow3D && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onShow3D();
+          }}
+          title="View 3D Stage"
+          className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-purple-500/80 hover:bg-purple-400 text-white flex items-center justify-center shadow-lg transition-colors z-20"
+        >
+          <Eye size={12} />
+        </button>
+      )}
+
       {/* Resize handle */}
       <div
         className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize opacity-0 group-hover:opacity-100 transition-opacity z-10"
@@ -1904,6 +1928,14 @@ const VCButtonWidget: React.FC<{
       >
         <div className="w-2 h-2 border-r-2 border-b-2 border-gray-600 absolute bottom-0.5 right-0.5" />
       </div>
+
+      {/* Full live playback of the selected Song Preset */}
+      {songPlayer && (
+        <SongPresetPlayer
+          preset={songPlayer}
+          onEnded={() => { setSongPlayer(null); setActive(false); }}
+        />
+      )}
     </div>
   );
 };
@@ -2207,7 +2239,14 @@ const SimpleDeskPanel: React.FC = () => {
   const sdPasteUniverse = usePerformStore((s) => s.sdPasteUniverse);
   const sdSetUniverseId = usePerformStore((s) => s.sdSetUniverseId);
 
-  const universes = useAppStore((s) => s.dmx.universes);
+  const universes = useShowStore((s) => s.universes);
+  // Keep the selected universe in sync with the real (showStore) universe list
+  useEffect(() => {
+    if (universes.length === 0) return;
+    if (!universes.some((u) => u.id === universeId)) {
+      sdSetUniverseId(universes[0].id);
+    }
+  }, [universes, universeId, sdSetUniverseId]);
   const [jumpInput, setJumpInput] = useState('');
   const gridRef = useRef<HTMLDivElement>(null);
   const [shiftRange, setShiftRange] = useState<{ from: number; to: number } | null>(null);
@@ -2600,7 +2639,8 @@ const CueListViewPanel: React.FC = () => {
       const scene = scenes.find((s) => s.id === cue.sceneId);
       if (scene) {
         try {
-          sendChannelsToHardware(scene.channels, currentState.patchedFixtures, currentState.universes);
+          const st = useShowStore.getState();
+          sendChannelsToHardware(scene.channels, st.patchedFixtures, st.universes);
         } catch { /* */ }
       }
     }

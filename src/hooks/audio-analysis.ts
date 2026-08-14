@@ -1603,7 +1603,7 @@ export function analyzeAudioBuffer(
 
   if (segments.length === 0) {
     segments.push({
-      startF: 0, endF: nFrames - 1,
+      startF: 0, endF: Math.max(0, Math.floor(data.length / hopSize) - 1),
       startT: 0, endT: duration,
       energy: r4(mean(normEnergy)),
       bassRatio: 0.5,

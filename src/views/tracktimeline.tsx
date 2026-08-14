@@ -54,7 +54,7 @@ function hueShiftHex(hex: string, deg: number): string {
     .map(v => v.toString(16).padStart(2,'0')).join('');
 }
 
-const TIER_HUE_DEG = { primary: 0, secondary: 120, tertiary: 240 } as const;
+const TIER_HUE_DEG = { primary: 0, secondary: 120, tertiary: 240, other: 0 } as const;
 
 // ─── Types ─────────────────────────────────────────────────
 
@@ -158,6 +158,27 @@ export interface DimmerTrack {
   };
 }
 
+// ── Chaser Track types ────────────────────────────────
+
+export interface ChaserTrackEntry {
+  id: string;
+  time: number;
+  endTime: number;
+  chaserId: string;
+  chaserName?: string;
+}
+
+export interface ChaserTrack {
+  id: string;
+  name: string;
+  entries: ChaserTrackEntry[];
+  targetFixtures: {
+    type: 'all' | 'group' | 'fixture';
+    groupId?: string;
+    fixtureIds?: string[];
+  };
+}
+
 interface TrackTimelineProps {
   cues: Cue[];
   dmxCues?: DmxCue[];
@@ -207,8 +228,20 @@ interface TrackTimelineProps {
   onDimmerEntryContextMenu?: (trackId: string, entry: DimmerTrackEntry, clientX: number, clientY: number) => void;
   /** Called when user drag-resizes or drag-moves a dimmer entry */
   onDimmerEntryChange?: (trackId: string, entryIndex: number, newTime: number, newEndTime: number) => void;
+  /** Chaser tracks to render below dimmer tracks */
+  chaserTracks?: ChaserTrack[];
+  /** Called when user right-clicks on a chaser track row */
+  onChaserTrackContextMenu?: (trackId: string, time: number, clientX: number, clientY: number) => void;
+  /** Called when user left-clicks a chaser entry */
+  onChaserEntryClick?: (trackId: string, entry: ChaserTrackEntry) => void;
+  /** Called when user right-clicks a chaser entry */
+  onChaserEntryContextMenu?: (trackId: string, entry: ChaserTrackEntry, clientX: number, clientY: number) => void;
+  /** Called when user drag-resizes or drag-moves a chaser entry */
+  onChaserEntryChange?: (trackId: string, entryIndex: number, newTime: number, newEndTime: number) => void;
   /** Called when user drags a section boundary to resize */
   onSectionsChange?: (sections: TrackSection[]) => void;
+  /** Called when user right-clicks on the AutoScript track to insert a section */
+  onAutoScriptContextMenu?: (time: number, clientX: number, clientY: number) => void;
   /** Fixture tracks (override lanes drawn inside fixture tracks) */
   fixtureTracks?: FixtureTrack[];
   /** Called when fixture track blocks change */
@@ -226,6 +259,10 @@ interface TrackTimelineProps {
   /** Disabled fixture IDs (checkboxes) */
   disabledFixtures?: Set<string>;
   onToggleFixture?: (fixtureId: string) => void;
+  /** Energy curve for mini-waveform (values 0-1, one sample per pixel or time step) */
+  energyCurve?: Float32Array | number[];
+  /** Cue markers to overlay on waveform (dmxCues or genCues) */
+  cueMarkers?: Array<{ time: number; tier?: string; section?: string }>;
 }
 
 // ─── Constants ────────────────────────────────────────────
@@ -233,10 +270,12 @@ interface TrackTimelineProps {
 const TRACK_HEIGHT = 30;
 const HEADER_HEIGHT = 32;
 const AUTOSCRIPT_TRACK_HEIGHT = 40;
+const WAVEFORM_HEIGHT = 28;
 const EFX_TRACK_HEIGHT = 28;
 const COLOR_TRACK_HEIGHT = 26;
 const STROBE_TRACK_HEIGHT = 26;
 const DIMMER_TRACK_HEIGHT = 26;
+const CHASER_TRACK_HEIGHT = 26;
 const LABEL_WIDTH = 90;
 
 const fmt = (s: number) =>
@@ -410,6 +449,26 @@ function findDimmerEntryAt(
   return best;
 }
 
+function findChaserEntryAt(
+  track: ChaserTrack,
+  timeAtX: number,
+  duration: number,
+): ChaserTrackEntry | null {
+  const threshold = Math.min(2, duration * 0.05);
+  let best: ChaserTrackEntry | null = null;
+  let bestDist = Infinity;
+  for (const entry of track.entries) {
+    const entryMid = (entry.time + entry.endTime) / 2;
+    const halfLen = (entry.endTime - entry.time) / 2 + 0.1;
+    const d = Math.abs(entryMid - timeAtX);
+    if (d < halfLen + threshold && d < bestDist) {
+      best = entry;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
 // ─── Component ────────────────────────────────────────────
 
 const TrackTimeline: React.FC<TrackTimelineProps> = ({
@@ -441,7 +500,13 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   onDimmerEntryClick,
   onDimmerEntryContextMenu,
   onDimmerEntryChange,
+  chaserTracks,
+  onChaserTrackContextMenu,
+  onChaserEntryClick,
+  onChaserEntryContextMenu,
+  onChaserEntryChange,
   onSectionsChange,
+  onAutoScriptContextMenu,
   fixtureTracks,
   onFixtureTracksChange,
   showColorTrack,
@@ -455,6 +520,8 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   strobeEntries,
   disabledFixtures,
   onToggleFixture,
+  energyCurve,
+  cueMarkers,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -510,7 +577,8 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const numColorTracks = colorTracks?.length ?? 0;
   const numStrobeTracks = strobeTracks?.length ?? 0;
   const numDimmerTracks = dimmerTracks?.length ?? 0;
-  const TIER_ORDER: Record<string, number> = { primary: 0, secondary: 1, tertiary: 2 };
+  const numChaserTracks = chaserTracks?.length ?? 0;
+  const TIER_ORDER: Record<string, number> = { primary: 0, secondary: 1, tertiary: 2, other: 3 };
   const [collapsedTiers, setCollapsedTiers] = useState<Set<string>>(new Set());
   // Sort fixtures by tier, compute header positions
   const tieredLayout = useMemo(() => {
@@ -524,7 +592,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
     }
     return { sorted: sorted, list, count: list.length };
   }, [patchedFixtures, collapsedTiers]);
-  const totalHeight = HEADER_HEIGHT + tieredLayout.count * TRACK_HEIGHT + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT + numDimmerTracks * DIMMER_TRACK_HEIGHT;
+  const totalHeight = HEADER_HEIGHT + tieredLayout.count * TRACK_HEIGHT + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT + numDimmerTracks * DIMMER_TRACK_HEIGHT + numChaserTracks * CHASER_TRACK_HEIGHT;
 
   // Helper: resolve Y position to display row (header or fixture)
   const resolveDisplayRow = useCallback((y: number) => {
@@ -678,6 +746,16 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
     entryEndTime: number;
   } | null>(null);
 
+  // ── Chaser entry drag state (parallel to EFX drag) ──
+  const chaserDragRef = useRef<{
+    trackId: string;
+    entryIndex: number;
+    mode: 'move' | 'resize-left' | 'resize-right';
+    startX: number;
+    entryTime: number;
+    entryEndTime: number;
+  } | null>(null);
+
   // ── Cue lookup for hover/click ───────────────────────
   const getCueAtPosition = useCallback(
     (clientX: number, clientY: number): { cue: Cue; fixtureName?: string; efxEntry?: EfxTrackEntry; trackName?: string } | null => {
@@ -715,7 +793,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
       }
 
       // AutoScript track
-      const autoTrackStart = HEADER_HEIGHT + fixtureAreaHeight;
+      const autoTrackStart = HEADER_HEIGHT + fixtureAreaHeight + (energyCurve ? WAVEFORM_HEIGHT : 0);
       if (y >= autoTrackStart && y < autoTrackStart + AUTOSCRIPT_TRACK_HEIGHT) {
         let best: Cue | null = null;
         let bestDist = Infinity;
@@ -732,7 +810,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
 
       // EFX tracks
       const eTracks = efxTracks || [];
-      const efxTracksStart = HEADER_HEIGHT + fixtureAreaHeight + AUTOSCRIPT_TRACK_HEIGHT;
+      const efxTracksStart = HEADER_HEIGHT + fixtureAreaHeight + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT;
       if (y >= efxTracksStart && eTracks.length > 0) {
         const eTrackIdx = Math.floor((y - efxTracksStart) / EFX_TRACK_HEIGHT);
         if (eTrackIdx >= 0 && eTrackIdx < eTracks.length) {
@@ -905,6 +983,28 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         return;
       }
 
+      // Chaser entry drag/resize (parallel to EFX)
+      if (chaserDragRef.current) {
+        const c = containerRef.current; if (!c) return;
+        const rect = c.getBoundingClientRect();
+        const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
+        if (drawW <= 0) return;
+        const dx = (e.clientX - chaserDragRef.current.startX) / drawW * duration;
+        const drag = chaserDragRef.current;
+        if (drag.mode === 'move') {
+          const newTime = Math.max(0, drag.entryTime + dx);
+          const newEnd = drag.entryEndTime + dx;
+          onChaserEntryChange?.(drag.trackId, drag.entryIndex, newTime, newEnd);
+        } else if (drag.mode === 'resize-left') {
+          const newTime = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          onChaserEntryChange?.(drag.trackId, drag.entryIndex, newTime, drag.entryEndTime);
+        } else if (drag.mode === 'resize-right') {
+          const newEnd = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          onChaserEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
+        }
+        return;
+      }
+
       // Section resize in progress
       if (sectionResizeRef.current) {
         const resize = sectionResizeRef.current;
@@ -947,7 +1047,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         setTooltip(null);
       }
     },
-    [getCueAtPosition, duration, sections, onSectionsChange, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange],
+    [getCueAtPosition, duration, sections, onSectionsChange, energyCurve, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange],
   );
 
   const handleClick = useCallback(
@@ -1037,7 +1137,7 @@ if (editBlock) { setEditBlock(null); return; }
                 if (!targetsFixture2) continue;
                 // Check all block types
                 for (const blk2 of ft2.colorBlocks) {
-                  if (snappedTime >= blk2.time && snappedTime <= blk2.endTime) {
+                  if (timeAtX2 >= blk2.time && timeAtX2 <= blk2.endTime) {
                     setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'color' });
                     // Also select the time range
                     setFtSelStart(blk2.time);
@@ -1049,7 +1149,7 @@ if (editBlock) { setEditBlock(null); return; }
                   }
                 }
                 for (const blk2 of ft2.dimmerBlocks) {
-                  if (snappedTime >= blk2.time && snappedTime <= blk2.endTime) {
+                  if (timeAtX2 >= blk2.time && timeAtX2 <= blk2.endTime) {
                     setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'dimmer' });
                     setFtSelStart(blk2.time);
                     setFtSelEnd(blk2.endTime);
@@ -1060,7 +1160,7 @@ if (editBlock) { setEditBlock(null); return; }
                   }
                 }
                 for (const blk2 of ft2.strobeBlocks) {
-                  if (snappedTime >= blk2.time && snappedTime <= blk2.endTime) {
+                  if (timeAtX2 >= blk2.time && timeAtX2 <= blk2.endTime) {
                     setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'strobe' });
                     setFtSelStart(blk2.time);
                     setFtSelEnd(blk2.endTime);
@@ -1071,7 +1171,7 @@ if (editBlock) { setEditBlock(null); return; }
                   }
                 }
                 for (const blk2 of ft2.movementBlocks) {
-                  if (snappedTime >= blk2.time && snappedTime <= blk2.endTime) {
+                  if (timeAtX2 >= blk2.time && timeAtX2 <= blk2.endTime) {
                     setEditBlock({ trackIdx: fti2, blockId: blk2.id, blockType: 'movement' });
                     setFtSelStart(blk2.time);
                     setFtSelEnd(blk2.endTime);
@@ -1153,10 +1253,13 @@ if (editBlock) { setEditBlock(null); return; }
       if (!c) return;
       const rect = c.getBoundingClientRect();
       const x = e.clientX - rect.left - LABEL_WIDTH;
+      const y = e.clientY - rect.top;
       if (x < 0) return;
 
       const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
       if (drawW <= 0) return;
+
+      const timeAtX = (x / drawW) * duration;
 
       // Check if we hit a cue
       const result = getCueAtPosition(e.clientX, e.clientY);
@@ -1171,8 +1274,32 @@ if (editBlock) { setEditBlock(null); return; }
         return;
       }
 
+      // Chaser entry hit test (left-click selects + seeks)
+      if (chaserTracks && chaserTracks.length > 0) {
+        const cT = chaserTracks;
+        const eT = efxTracks || [];
+        const sT = strobeTracks || [];
+        const dT = dimmerTracks || [];
+        const efxBase = HEADER_HEIGHT + fixtureAreaHeight + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT;
+        const colorBase = efxBase + eT.length * EFX_TRACK_HEIGHT;
+        const strobeBase = colorBase + (colorTracks?.length ?? 0) * COLOR_TRACK_HEIGHT;
+        const dimmerBase = strobeBase + sT.length * STROBE_TRACK_HEIGHT;
+        const chaserBase = dimmerBase + dT.length * DIMMER_TRACK_HEIGHT;
+        if (y >= chaserBase && y < chaserBase + cT.length * CHASER_TRACK_HEIGHT) {
+          const cIdx = Math.floor((y - chaserBase) / CHASER_TRACK_HEIGHT);
+          if (cIdx >= 0 && cIdx < cT.length) {
+            const cTrack = cT[cIdx];
+            const entry = cTrack.entries.find(en => timeAtX >= en.time && timeAtX <= en.endTime);
+            if (entry && onChaserEntryClick) {
+              onChaserEntryClick(cTrack.id, entry);
+              onSeek(entry.time);
+              return;
+            }
+          }
+        }
+      }
+
       // Seek to position
-      const timeAtX = (x / drawW) * duration;
       onSeek(Math.max(0, Math.min(duration, timeAtX)));
     },
     [duration, getCueAtPosition, onSeek, efxTracks, onEfxEntryClick, dimmerTracks, onDimmerEntryClick],
@@ -1195,14 +1322,36 @@ if (editBlock) { setEditBlock(null); return; }
         const tDi = Math.floor((y - HEADER_HEIGHT) / TRACK_HEIGHT);
         if (tDi >= 0 && tDi < tieredLayout.list.length && tieredLayout.list[tDi].type === 'fixture') {
           e.preventDefault();
-          setFtMenu({ x: e.clientX, y: e.clientY, trackIdx: tIdx, timeAtX });
+          const fixture = tieredLayout.sorted[(tieredLayout.list[tDi] as any).fi];
+          const tIdx = fixtureTracks.findIndex((ft) => {
+            if (!ft.enabled) return false;
+            if (ft.target.startsWith('fixture:')) return ft.target.slice(8) === fixture.id;
+            if (ft.target.startsWith('tier:')) return ft.target.slice(5) === fixture.tier;
+            return true;
+          });
+          setFtMenu({ x: e.clientX, y: e.clientY, trackIdx: tIdx >= 0 ? tIdx : 0, timeAtX });
           return;
         }
       }
 
       const eTracks = efxTracks || [];
       const cTracks = colorTracks || [];
-      const efxTracksStart = HEADER_HEIGHT + fixtureAreaHeight + AUTOSCRIPT_TRACK_HEIGHT;
+      const waveformOffset = energyCurve ? WAVEFORM_HEIGHT : 0;
+      const autoScriptStart = HEADER_HEIGHT + fixtureAreaHeight + waveformOffset;
+      const efxTracksStart = autoScriptStart + AUTOSCRIPT_TRACK_HEIGHT;
+
+      // AutoScript track right-click: insert section at clicked position
+      if (y >= autoScriptStart && y < efxTracksStart) {
+        if (onAutoScriptContextMenu) {
+          e.preventDefault();
+          onAutoScriptContextMenu(
+            Math.max(0, Math.min(duration, timeAtX)),
+            e.clientX,
+            e.clientY,
+          );
+        }
+        return;
+      }
 
       if (y >= efxTracksStart) {
         const eTrackIdx = Math.floor((y - efxTracksStart) / EFX_TRACK_HEIGHT);
@@ -1279,9 +1428,26 @@ if (editBlock) { setEditBlock(null); return; }
             }
           }
         }
+        // Check chaser tracks (below dimmer tracks)
+        const chaserTrackBaseY = dimmerTrackBaseY + dTracks.length * DIMMER_TRACK_HEIGHT;
+        const chTracks = chaserTracks || [];
+        if (y >= chaserTrackBaseY && chTracks.length > 0) {
+          const cTrackIdx = Math.floor((y - chaserTrackBaseY) / CHASER_TRACK_HEIGHT);
+          if (cTrackIdx >= 0 && cTrackIdx < chTracks.length) {
+            e.preventDefault();
+            const timeAtX4 = (x / drawW) * duration;
+            const cTrack = chTracks[cTrackIdx];
+            const cEntry = findChaserEntryAt(cTrack, timeAtX4, duration);
+            if (cEntry && onChaserEntryContextMenu) {
+              onChaserEntryContextMenu(cTrack.id, cEntry, e.clientX, e.clientY);
+            } else {
+              onChaserTrackContextMenu?.(cTrack.id, Math.max(0, Math.min(duration, timeAtX4)), e.clientX, e.clientY);
+            }
+          }
+        }
       }
     },
-    [duration, efxTracks, colorTracks, strobeTracks, dimmerTracks, tieredLayout, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu, onDimmerTrackContextMenu, onDimmerEntryContextMenu],
+    [duration, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, tieredLayout, energyCurve, onAutoScriptContextMenu, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu, onDimmerTrackContextMenu, onDimmerEntryContextMenu, onChaserTrackContextMenu, onChaserEntryContextMenu],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -1370,7 +1536,7 @@ if (editBlock) { setEditBlock(null); return; }
         const drawW2 = rect2.width - LABEL_WIDTH;
         const eTracks = efxTracks || [];
         if (eTracks.length > 0 && drawW2 > 0 && x2 >= 0 && y2 >= HEADER_HEIGHT) {
-          const efxTracksStartY = HEADER_HEIGHT + fixtureAreaHeight + AUTOSCRIPT_TRACK_HEIGHT;
+          const efxTracksStartY = HEADER_HEIGHT + fixtureAreaHeight + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT;
           if (y2 >= efxTracksStartY) {
             const eIdx = Math.floor((y2 - efxTracksStartY) / EFX_TRACK_HEIGHT);
             if (eIdx >= 0 && eIdx < eTracks.length) {
@@ -1410,7 +1576,7 @@ if (editBlock) { setEditBlock(null); return; }
         const eT = efxTracks || [];
         const cT = colorTracks || [];
         if (cT.length > 0 && drawW3 > 0 && x3 >= 0 && y3 >= HEADER_HEIGHT) {
-          const efxBase = HEADER_HEIGHT + fixtureAreaHeight + AUTOSCRIPT_TRACK_HEIGHT;
+          const efxBase = HEADER_HEIGHT + fixtureAreaHeight + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT;
           const colorBase = efxBase + eT.length * EFX_TRACK_HEIGHT;
           if (y3 >= colorBase) {
             const cIdx = Math.floor((y3 - colorBase) / COLOR_TRACK_HEIGHT);
@@ -1451,7 +1617,7 @@ if (editBlock) { setEditBlock(null); return; }
         const eT = efxTracks || [];
         const sT = strobeTracks || [];
         if (sT.length > 0 && drawW4 > 0 && x4 >= 0 && y4 >= HEADER_HEIGHT) {
-          const efxBase = HEADER_HEIGHT + fixtureAreaHeight + AUTOSCRIPT_TRACK_HEIGHT;
+          const efxBase = HEADER_HEIGHT + fixtureAreaHeight + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT;
           const colorBase = efxBase + eT.length * EFX_TRACK_HEIGHT;
           const strobeBase = colorBase + (colorTracks?.length ?? 0) * COLOR_TRACK_HEIGHT;
           if (y4 >= strobeBase && y4 < strobeBase + sT.length * STROBE_TRACK_HEIGHT) {
@@ -1494,7 +1660,7 @@ if (editBlock) { setEditBlock(null); return; }
         const sT = strobeTracks || [];
         const dT = dimmerTracks || [];
         if (dT.length > 0 && drawW5 > 0 && x5 >= 0 && y5 >= HEADER_HEIGHT) {
-          const efxBase = HEADER_HEIGHT + fixtureAreaHeight + AUTOSCRIPT_TRACK_HEIGHT;
+          const efxBase = HEADER_HEIGHT + fixtureAreaHeight + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT;
           const colorBase = efxBase + (efxTracks?.length ?? 0) * EFX_TRACK_HEIGHT;
           const strobeBase = colorBase + (colorTracks?.length ?? 0) * COLOR_TRACK_HEIGHT;
           const dimmerBase = strobeBase + sT.length * STROBE_TRACK_HEIGHT;
@@ -1517,6 +1683,52 @@ if (editBlock) { setEditBlock(null); return; }
                 }
                 if (x5 > ex1 + EDGE && x5 < ex2 - EDGE) {
                   dimmerDragRef.current = { trackId: dTrack.id, entryIndex: ei, mode: 'move', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // -- Chaser entry drag detection (parallel to EFX) --
+    {
+      const c6 = containerRef.current;
+      if (c6 && onChaserEntryChange) {
+        const rect6 = c6.getBoundingClientRect();
+        const x6 = e.clientX - rect6.left - LABEL_WIDTH;
+        const y6 = e.clientY - rect6.top;
+        const drawW6 = rect6.width - LABEL_WIDTH;
+        const eT6 = efxTracks || [];
+        const sT6 = strobeTracks || [];
+        const dT6 = dimmerTracks || [];
+        const cT6 = chaserTracks || [];
+        if (cT6.length > 0 && drawW6 > 0 && x6 >= 0 && y6 >= HEADER_HEIGHT) {
+          const efxBase6 = HEADER_HEIGHT + fixtureAreaHeight + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT;
+          const colorBase6 = efxBase6 + eT6.length * EFX_TRACK_HEIGHT;
+          const strobeBase6 = colorBase6 + (colorTracks?.length ?? 0) * COLOR_TRACK_HEIGHT;
+          const dimmerBase6 = strobeBase6 + sT6.length * STROBE_TRACK_HEIGHT;
+          const chaserBase6 = dimmerBase6 + dT6.length * DIMMER_TRACK_HEIGHT;
+          if (y6 >= chaserBase6 && y6 < chaserBase6 + cT6.length * CHASER_TRACK_HEIGHT) {
+            const cIdx6 = Math.floor((y6 - chaserBase6) / CHASER_TRACK_HEIGHT);
+            if (cIdx6 >= 0 && cIdx6 < cT6.length) {
+              const cTrack6 = cT6[cIdx6];
+              for (let ei6 = 0; ei6 < cTrack6.entries.length; ei6++) {
+                const entry6 = cTrack6.entries[ei6];
+                const ex1 = (entry6.time / duration) * drawW6;
+                const ex2 = (entry6.endTime / duration) * drawW6;
+                const EDGE = 5;
+                if (Math.abs(x6 - ex1) < EDGE) {
+                  chaserDragRef.current = { trackId: cTrack6.id, entryIndex: ei6, mode: 'resize-left', startX: e.clientX, entryTime: entry6.time, entryEndTime: entry6.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (Math.abs(x6 - ex2) < EDGE) {
+                  chaserDragRef.current = { trackId: cTrack6.id, entryIndex: ei6, mode: 'resize-right', startX: e.clientX, entryTime: entry6.time, entryEndTime: entry6.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (x6 > ex1 + EDGE && x6 < ex2 - EDGE) {
+                  chaserDragRef.current = { trackId: cTrack6.id, entryIndex: ei6, mode: 'move', startX: e.clientX, entryTime: entry6.time, entryEndTime: entry6.endTime };
                   e.preventDefault(); e.stopPropagation(); return;
                 }
               }
@@ -1558,7 +1770,7 @@ if (editBlock) { setEditBlock(null); return; }
         return;
       }
     }
-  }, [sections, duration, onSectionsChange, efxTracks, colorTracks, strobeTracks, dimmerTracks, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange]);
+  }, [sections, duration, onSectionsChange, efxTracks, colorTracks, strobeTracks, dimmerTracks, energyCurve, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Clear EFX drag
@@ -1582,6 +1794,12 @@ if (editBlock) { setEditBlock(null); return; }
     // Dimmer entry drag end
     if (dimmerDragRef.current) {
       dimmerDragRef.current = null;
+      return;
+    }
+
+    // Chaser entry drag end
+    if (chaserDragRef.current) {
+      chaserDragRef.current = null;
       return;
     }
 
@@ -1893,8 +2111,9 @@ if (editBlock) { setEditBlock(null); return; }
             if (ce < LABEL_WIDTH || cx > w) continue;
             const bw = Math.max(3, ce - cx);
             const c1 = hueShiftHex(cb.color, tierDeg);
+            let c2 = c1;
             if (cb.endColor && cb.endColor !== cb.color) {
-              const c2 = hueShiftHex(cb.endColor, tierDeg);
+              c2 = hueShiftHex(cb.endColor, tierDeg);
               // Gradient block: draw a color gradient bar
               const grad = ctx.createLinearGradient(Math.max(LABEL_WIDTH, cx), trackY, Math.max(LABEL_WIDTH, cx) + bw, trackY);
               grad.addColorStop(0, c1);
@@ -2036,8 +2255,71 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
+    // ── Mini-waveform with cue markers (above auto-script) ──
+    if (energyCurve && energyCurve.length > 0) {
+      const waveformY = HEADER_HEIGHT + tieredLayout.count * TRACK_HEIGHT;
+      // Background
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.fillRect(LABEL_WIDTH, waveformY, drawW, WAVEFORM_HEIGHT);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(LABEL_WIDTH, waveformY + WAVEFORM_HEIGHT / 2);
+      ctx.lineTo(w, waveformY + WAVEFORM_HEIGHT / 2);
+      ctx.stroke();
+      // Waveform envelope
+      const curveLen = energyCurve.length;
+      if (curveLen > 1) {
+        ctx.strokeStyle = 'rgba(139, 92, 246, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let i = 0; i < curveLen; i++) {
+          const t = i / (curveLen - 1);
+          const xPos = LABEL_WIDTH + t * drawW;
+          const v = Math.max(0, Math.min(1, energyCurve[i]));
+          const yPos = waveformY + WAVEFORM_HEIGHT - v * WAVEFORM_HEIGHT;
+          if (i === 0) ctx.moveTo(xPos, yPos);
+          else ctx.lineTo(xPos, yPos);
+        }
+        ctx.stroke();
+        // Filled area
+        ctx.lineTo(LABEL_WIDTH + drawW, waveformY + WAVEFORM_HEIGHT);
+        ctx.lineTo(LABEL_WIDTH, waveformY + WAVEFORM_HEIGHT);
+        ctx.closePath();
+        const wfGrad = ctx.createLinearGradient(0, waveformY, 0, waveformY + WAVEFORM_HEIGHT);
+        wfGrad.addColorStop(0, 'rgba(139, 92, 246, 0.25)');
+        wfGrad.addColorStop(1, 'rgba(139, 92, 246, 0.02)');
+        ctx.fillStyle = wfGrad;
+        ctx.fill();
+      }
+      // Cue markers
+      if (cueMarkers && cueMarkers.length > 0) {
+        for (const marker of cueMarkers) {
+          if (marker.time < 0 || marker.time > duration) continue;
+          const mx = LABEL_WIDTH + (marker.time / duration) * drawW;
+          const tier = marker.tier || '';
+          const sec = marker.section || '';
+          let mColor = '#8b5cf6';
+          if (sec === 'drop') mColor = '#ef4444';
+          else if (sec === 'chorus') mColor = '#f59e0b';
+          else if (sec === 'build') mColor = '#22d3ee';
+          else if (sec === 'intro' || sec === 'outro') mColor = '#a1a1aa';
+          else if (sec === 'verse') mColor = '#22c55e';
+          if (tier === 'secondary') mColor = '#3b82f6';
+          else if (tier === 'tertiary') mColor = '#71717a';
+          const mSize = tier === 'primary' ? 3 : 2;
+          ctx.fillStyle = mColor;
+          ctx.globalAlpha = 0.8;
+          ctx.beginPath();
+          ctx.arc(mx, waveformY + 4, mSize, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+
     // ── AutoScript track ────────────────────────────
-    const autoY = HEADER_HEIGHT + tieredLayout.count * TRACK_HEIGHT;
+    const autoY = HEADER_HEIGHT + tieredLayout.count * TRACK_HEIGHT + (energyCurve ? WAVEFORM_HEIGHT : 0);
 
     // Track background
     ctx.fillStyle = 'rgba(139, 92, 246, 0.04)';
@@ -2642,6 +2924,120 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
+    // ── Chaser tracks ────────────────────────────────
+    if (numChaserTracks > 0) {
+      const eT = efxTracks || [];
+      const cT = colorTracks || [];
+      const sT = strobeTracks || [];
+      const dT = dimmerTracks || [];
+      const efxBase = autoY + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT;
+      const colorBase = efxBase + cT.length * COLOR_TRACK_HEIGHT;
+      const strobeBase = colorBase + sT.length * STROBE_TRACK_HEIGHT;
+      const dimmerBase = strobeBase + dT.length * DIMMER_TRACK_HEIGHT;
+      const chaserTrackBaseY = dimmerBase;
+      for (let ci = 0; ci < numChaserTracks; ci++) {
+        const cTrack = chaserTracks![ci];
+        const trackY = chaserTrackBaseY + ci * CHASER_TRACK_HEIGHT;
+
+        // Track background
+        ctx.fillStyle = ci % 2 === 0 ? 'rgba(16, 185, 129, 0.05)' : 'rgba(16, 185, 129, 0.02)';
+        ctx.fillRect(LABEL_WIDTH, trackY, drawW, CHASER_TRACK_HEIGHT);
+
+        // Top separator
+        ctx.strokeStyle = 'rgba(16, 185, 129, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY);
+        ctx.lineTo(w, trackY);
+        ctx.stroke();
+
+        // Track label
+        ctx.fillStyle = '#10b981';
+        ctx.font = '9px -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+        const cLabel = cTrack.name.length > 11 ? cTrack.name.substring(0, 10) + '\u2026' : cTrack.name;
+        ctx.fillText('CHS: ' + cLabel, 6, trackY + 12);
+
+        // Chaser info badge (the chaser plays its own fixtures)
+        const cEntry0 = cTrack.entries[0];
+        let cTargetLabel = '';
+        if (cEntry0) {
+          cTargetLabel = '🎬 ' + (cEntry0.chaserName || '').slice(0, 10);
+        } else {
+          cTargetLabel = 'clic droit pour importer';
+        }
+        if (cTargetLabel) {
+          ctx.fillStyle = '#6b7280';
+          ctx.font = '8px -apple-system, sans-serif';
+          ctx.fillText(cTargetLabel, 72, trackY + 12);
+        }
+
+        // Bottom separator
+        ctx.strokeStyle = 'rgba(75, 85, 99, 0.1)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY + CHASER_TRACK_HEIGHT);
+        ctx.lineTo(w, trackY + CHASER_TRACK_HEIGHT);
+        ctx.stroke();
+
+        // Draw entries (chaser blocks)
+        for (const entry of cTrack.entries) {
+          const ex = LABEL_WIDTH + (entry.time / duration) * drawW;
+          const endX = LABEL_WIDTH + (entry.endTime / duration) * drawW;
+          const entryW = Math.max(4, endX - ex);
+          if (ex < LABEL_WIDTH - 10 || ex > w + 10) continue;
+
+          const pad = 3;
+          const barY = trackY + pad;
+          const barH = CHASER_TRACK_HEIGHT - pad * 2;
+
+          // Green bar
+          ctx.fillStyle = '#10b981';
+          ctx.globalAlpha = 0.85;
+          ctx.beginPath();
+          ctx.roundRect(ex, barY, entryW, barH, 3);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+
+          // Edge accents
+          ctx.fillStyle = '#34d399';
+          ctx.beginPath();
+          ctx.roundRect(ex, barY, 3, barH, [3, 0, 0, 3]);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.roundRect(endX - 3, barY, 3, barH, [0, 3, 3, 0]);
+          ctx.fill();
+
+          // Chaser name label
+          if (entryW > 44) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 7px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            const nameLabel = (entry.chaserName || 'chaser').length > 14 ? (entry.chaserName || 'chaser').substring(0, 13) + '…' : (entry.chaserName || 'chaser');
+            ctx.fillText(nameLabel, ex + entryW / 2, trackY + CHASER_TRACK_HEIGHT / 2 + 3);
+          }
+
+          // Start/end diamonds
+          ctx.fillStyle = '#34d399';
+          const diamondSize = 3;
+          ctx.beginPath();
+          ctx.moveTo(ex, barY + barH / 2 - diamondSize);
+          ctx.lineTo(ex + diamondSize, barY + barH / 2);
+          ctx.lineTo(ex, barY + barH / 2 + diamondSize);
+          ctx.lineTo(ex - diamondSize, barY + barH / 2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(endX, barY + barH / 2 - diamondSize);
+          ctx.lineTo(endX + diamondSize, barY + barH / 2);
+          ctx.lineTo(endX, barY + barH / 2 + diamondSize);
+          ctx.lineTo(endX - diamondSize, barY + barH / 2);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
+
     // ── Playhead ─────────────────────────────────────
     if (currentTime >= 0 && currentTime <= duration) {
       const px = LABEL_WIDTH + (currentTime / duration) * drawW;
@@ -2693,6 +3089,8 @@ if (editBlock) { setEditBlock(null); return; }
     numStrobeTracks,
     dimmerTracks,
     numDimmerTracks,
+    chaserTracks,
+    numChaserTracks,
     fixtureTracks,
     disabledFixtures,
     ftSelStart,

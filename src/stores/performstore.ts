@@ -8,6 +8,21 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+/**
+ * Resolve the DMX engine universe index (0-based) for a Simple Desk universe id.
+ * Prefers the canonical showStore universe list; falls back to legacy numeric ids.
+ */
+function resolveUniverseIndex(sdUniverseId: string): number {
+  try {
+    const { useShowStore } = require('../stores/showStore');
+    const universes = useShowStore.getState().universes || [];
+    const idx = universes.findIndex((u: any) => String(u.id) === String(sdUniverseId));
+    if (idx >= 0) return idx;
+  } catch { /* showStore unavailable */ }
+  const n = parseInt(String(sdUniverseId).replace(/\D/g, ''), 10);
+  return Number.isFinite(n) ? Math.max(0, n - 1) : 0;
+}
+
 // ─── Types ─────────────────────────────────────────────────
 
 export type WidgetType = 'button' | 'slider' | 'frame';
@@ -43,6 +58,7 @@ export interface ConsoleWidgetConfig {
   showData?: any;
   cueListId?: string;
   songId?: string;
+  songName?: string;
   dmxUniverse?: number;
   dmxAddress?: number;
   dmxValue?: number;
@@ -244,7 +260,7 @@ export const usePerformStore = create<PerformState>()(
     });
     // Send to DMX output
     try {
-      const universeNum = parseInt(sdUniverseId.replace(/\D/g, '')) || 1;
+      const universeNum = resolveUniverseIndex(sdUniverseId);
       window.lightMaestro?.dmx?.setChannel(universeNum, channel, clamped);
     } catch { /* DMX output not available in browser dev */ }
   },
@@ -260,7 +276,7 @@ export const usePerformStore = create<PerformState>()(
     });
     // Send to DMX output
     try {
-      const universeNum = parseInt(sdUniverseId.replace(/\D/g, '')) || 1;
+      const universeNum = resolveUniverseIndex(sdUniverseId);
       window.lightMaestro?.dmx?.setChannels(universeNum, values);
     } catch { /* */ }
   },
@@ -277,7 +293,7 @@ export const usePerformStore = create<PerformState>()(
     });
     // Send all-zero to DMX
     try {
-      const universeNum = parseInt(sdUniverseId.replace(/\D/g, '')) || 1;
+      const universeNum = resolveUniverseIndex(sdUniverseId);
       const allZero: Record<number, number> = {};
       for (let i = 1; i <= 512; i++) allZero[i] = 0;
       window.lightMaestro?.dmx?.setChannels(universeNum, allZero);
@@ -297,7 +313,7 @@ export const usePerformStore = create<PerformState>()(
     });
     // Send to DMX
     try {
-      const universeNum = parseInt(sdUniverseId.replace(/\D/g, '')) || 1;
+      const universeNum = resolveUniverseIndex(sdUniverseId);
       window.lightMaestro?.dmx?.setChannels(universeNum, sdClipboard);
     } catch { /* */ }
   },
@@ -309,13 +325,14 @@ export const usePerformStore = create<PerformState>()(
   partialize: (state) => ({
     vcPages: state.vcPages,
     vcActivePage: state.vcActivePage,
-    vcWidgets: state.vcWidgets.map(w => ({
-      ...w,
-      config: w.config?.showData ? { ...w.config, showData: undefined } : w.config,
-    })),
     vcGridSnap: state.vcGridSnap,
-    // Do NOT persist simple desk state (ephemeral)
+    // vcWidgets are persisted inside the project file, not localStorage
   }),
+  onRehydrateStorage: () => (state, error) => {
+    if (!error && state && Array.isArray((state as any).vcWidgets)) {
+      (state as any).vcWidgets = [];
+    }
+  },
 }
 )
 );

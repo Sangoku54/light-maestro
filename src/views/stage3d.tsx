@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Stage3D - Real-time 3D Stage Visualizer
  *
  * Replaces the 2D stage view with a Three.js-powered 3D renderer.
@@ -18,6 +18,7 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { useShowStore, type PatchedFixture, type FixturePos } from '../stores/showStore';
 import { useAppStore } from '../stores/appStore';
 import {
@@ -27,16 +28,200 @@ import {
   type DmxFixtureChannel,
   type DmxFixtureCapability,
 } from '../hooks/dmx-cues';
-import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X } from 'lucide-react';
-import { dmxBridge } from '../utils/dmx-bridge';
+import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X, LayoutGrid, Music, Zap, List, Search, Crosshair } from 'lucide-react';
+import clavierImg from '../assets/musicians/clavier.png';
+import chanteuseImg from '../assets/musicians/chanteuse.png';
+import chanteurImg from '../assets/musicians/chanteur.png';
+import batteurImg from '../assets/musicians/batteur.png';
+import bassisteImg from '../assets/musicians/bassiste.jpg';
+import guitaristeImg from '../assets/musicians/guitariste.png';
+import { sendFixtureOn, sendFixtureOff } from '../utils/dmx-helpers';
+import { fixtureTestState } from '../utils/fixture-test-state';
 
 // ─── Constants ───────────────────────────────────────────────
 
 const STAGE_WIDTH = 10;  // meters
 const STAGE_DEPTH = 8;   // meters
 const TRUSS_HEIGHT = 3;  // meters
+const STAGE_HEIGHT = 1.5;  // meters — stage elevation above ground
+const STAGE_THICKNESS = 0.3;  // meters — stage platform thickness
 const DMX_POLL_INTERVAL = 1000 / 60; // 60fps — smooth pan/tilt update every render frame
+const MAX_TRAIL_POINTS = 80;
+const TRAIL_ADD_INTERVAL = 100; // ms between trail samples
 const GRID_SIZE = 1; // 1m grid squares
+
+// Seeded PRNG for deterministic crowd layout
+function mulberry32(a: number) {
+  return () => {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ─── Virtual musicians (config presets + image textures) ──
+
+type MusicianKind = 'vocal' | 'chanteuse' | 'guitar' | 'bass' | 'keys' | 'drums';
+type BandConfig = 'none' | 'solo' | 'solo-chanteuse' | 'duo' | 'trio' | 'quartet' | 'quintet' | 'sextet';
+
+interface MusicianDef {
+  id: string;
+  kind: MusicianKind;
+  x: number; // 0..1 left → right
+  z: number; // 0..1 front → back
+}
+
+const MUSICIAN_IMAGES: Record<MusicianKind, string> = {
+  vocal: chanteurImg,
+  chanteuse: chanteuseImg,
+  guitar: guitaristeImg,
+  bass: bassisteImg,
+  keys: clavierImg,
+  drums: batteurImg,
+};
+
+const MUSICIAN_HEIGHTS: Record<MusicianKind, number> = {
+  vocal: 1.75,
+  chanteuse: 1.7,
+  guitar: 1.75,
+  bass: 1.75,
+  keys: 1.65,
+  drums: 1.6,
+};
+
+// Beam cone length (m) — portée du faisceau (divisée par 2)
+const BEAM_LENGTH = 12.5;
+
+const VOCAL: MusicianDef = { id: 'vocal', kind: 'vocal', x: 0.50, z: 0.09 };
+const CHANTEUSE: MusicianDef = { id: 'chanteuse', kind: 'chanteuse', x: 0.68, z: 0.10 };
+const GUITAR: MusicianDef = { id: 'guitar', kind: 'guitar', x: 0.34, z: 0.60 };
+const BASS: MusicianDef = { id: 'bass', kind: 'bass', x: 0.66, z: 0.60 };
+const DRUMS: MusicianDef = { id: 'drums', kind: 'drums', x: 0.50, z: 0.85 };
+const KEYS: MusicianDef = { id: 'keys', kind: 'keys', x: 0.24, z: 0.875 };
+
+const BAND_PRESETS: Record<Exclude<BandConfig, 'none'>, MusicianDef[]> = {
+  solo: [VOCAL],
+  'solo-chanteuse': [CHANTEUSE],
+  duo: [VOCAL, GUITAR],
+  trio: [VOCAL, GUITAR, DRUMS],
+  quartet: [VOCAL, GUITAR, BASS, DRUMS],
+  quintet: [VOCAL, GUITAR, BASS, DRUMS, KEYS],
+  sextet: [VOCAL, CHANTEUSE, GUITAR, BASS, DRUMS, KEYS],
+};
+
+function buildPositions(cfg: Exclude<BandConfig, 'none'>): Record<string, { x: number; z: number }> {
+  const map: Record<string, { x: number; z: number }> = {};
+  for (const p of BAND_PRESETS[cfg]) map[p.id] = { x: p.x, z: p.z };
+  return map;
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Failed to load ' + url));
+    img.src = url;
+  });
+}
+
+// Remove a solid background (e.g. white) connected to the image borders,
+// turning it transparent. Leaves already-transparent cutouts untouched.
+function removeBackground(imageData: ImageData) {
+  const { data, width, height } = imageData;
+  const w = width, h = height;
+
+  // Already a transparent cutout? (corners transparent) → leave as-is
+  const cornerAlpha = [
+    data[3],
+    data[(w - 1) * 4 + 3],
+    data[(h - 1) * w * 4 + 3],
+    data[((h - 1) * w + (w - 1)) * 4 + 3],
+  ];
+  if (cornerAlpha.filter(a => a < 128).length >= 3) return;
+
+  const ref = [
+    (data[0] + data[(w - 1) * 4] + data[(h - 1) * w * 4] + data[((h - 1) * w + (w - 1)) * 4]) / 4,
+    (data[1] + data[(w - 1) * 4 + 1] + data[(h - 1) * w * 4 + 1] + data[((h - 1) * w + (w - 1)) * 4 + 1]) / 4,
+    (data[2] + data[(w - 1) * 4 + 2] + data[(h - 1) * w * 4 + 2] + data[((h - 1) * w + (w - 1)) * 4 + 2]) / 4,
+  ];
+  const tol = 60;
+
+  const isBg = (x: number, y: number): boolean => {
+    const o = (y * w + x) * 4;
+    const dr = data[o] - ref[0], dg = data[o + 1] - ref[1], db = data[o + 2] - ref[2];
+    return (dr * dr + dg * dg + db * db) <= tol * tol;
+  };
+
+  const visited = new Uint8Array(w * h);
+  const queue: number[] = [];
+  const seed = (x: number, y: number) => {
+    if (isBg(x, y)) { visited[y * w + x] = 1; queue.push(y * w + x); }
+  };
+  for (let x = 0; x < w; x++) { seed(x, 0); seed(x, h - 1); }
+  for (let y = 0; y < h; y++) { seed(0, y); seed(w - 1, y); }
+
+  let head = 0;
+  while (head < queue.length) {
+    const idx = queue[head++];
+    const x = idx % w, y = (idx / w) | 0;
+    const n = [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]];
+    for (const [nx, ny] of n) {
+      if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+      const nidx = ny * w + nx;
+      if (visited[nidx]) continue;
+      if (isBg(nx, ny)) { visited[nidx] = 1; queue.push(nidx); }
+    }
+  }
+
+  for (let i = 0; i < visited.length; i++) {
+    if (visited[i]) data[i * 4 + 3] = 0;
+  }
+}
+
+async function loadMusicianTexture(kind: MusicianKind): Promise<THREE.CanvasTexture> {
+  return loadCutoutTexture(MUSICIAN_IMAGES[kind]);
+}
+
+async function loadCutoutTexture(url: string): Promise<THREE.CanvasTexture> {
+  const img = await loadImage(url);
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  const ctx = c.getContext('2d')!;
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, c.width, c.height);
+  removeBackground(data);
+  // All silhouettes are black: zero RGB of every opaque pixel (alpha kept)
+  for (let i = 0; i < data.data.length; i += 4) {
+    if (data.data[i + 3] > 0) { data.data[i] = 0; data.data[i + 1] = 0; data.data[i + 2] = 0; }
+  }
+  ctx.putImageData(data, 0, 0);
+
+  // Crop to the opaque bounding box so the sprite shows just the figure
+  let minX = c.width, minY = c.height, maxX = -1, maxY = -1;
+  for (let y = 0; y < c.height; y++) {
+    for (let x = 0; x < c.width; x++) {
+      if (data.data[(y * c.width + x) * 4 + 3] > 16) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return new THREE.CanvasTexture(c);
+
+  const pad = 2;
+  const cw = maxX - minX + 1 + pad * 2;
+  const ch = maxY - minY + 1 + pad * 2;
+  const out = document.createElement('canvas');
+  out.width = cw;
+  out.height = ch;
+  const octx = out.getContext('2d')!;
+  octx.drawImage(c, minX - pad, minY - pad, cw, ch, 0, 0, cw, ch);
+  return new THREE.CanvasTexture(out);
+}
 
 // ─── Channel Analysis (mirrors dmx-cues.ts analyzeFixture) ──
 
@@ -48,6 +233,8 @@ interface FixtureChannelMap {
   wheelCaps: DmxFixtureCapability[] | null;
   panOffset: number | null;
   tiltOffset: number | null;
+  panOffsets: number[];
+  tiltOffsets: number[];
   goboOffset: number | null;
 }
 
@@ -64,6 +251,8 @@ function analyzeFixtureChannels(
     wheelCaps: null,
     panOffset: null,
     tiltOffset: null,
+    panOffsets: [],
+    tiltOffsets: [],
     goboOffset: null,
   };
 
@@ -88,9 +277,11 @@ function analyzeFixtureChannels(
         break;
       case 'Pan':
         if (result.panOffset === null) result.panOffset = i;
+        if (!/\bfine\b/i.test(chName)) result.panOffsets.push(i);
         break;
       case 'Tilt':
         if (result.tiltOffset === null) result.tiltOffset = i;
+        if (!/\bfine\b/i.test(chName)) result.tiltOffsets.push(i);
         break;
       case 'Gobo':
         if (result.goboOffset === null) result.goboOffset = i;
@@ -146,6 +337,15 @@ function wheelValueToColor(
 
 // ─── Fixture 3D Object ───────────────────────────────────────
 
+interface ExtraHead3D {
+  headGroup: THREE.Group;       // Head group (tilt, X-axis rotation)
+  lightTarget: THREE.Object3D;  // Light exit point
+  pointLight?: THREE.PointLight;
+  beamCone?: THREE.Mesh;
+  tiltOffset: number;           // DMX offset (0-based) of this head's tilt channel
+  _mountTilt: number;           // Mount-mode tilt compensation
+}
+
 interface Fixture3D {
   id: string;
   group: THREE.Group;           // Root group (positioned on stage)
@@ -155,8 +355,13 @@ interface Fixture3D {
   lightTarget: THREE.Object3D;  // Where the light is attached
   pointLight?: THREE.PointLight;    // Dynamic point light
   beamCone?: THREE.Mesh;        // Volumetric beam cone
+  extraHeads?: ExtraHead3D[];   // Additional tilt heads (multi-arm fixtures)
   floorSpot?: THREE.Mesh;       // Light spot on the floor
   floorGlow?: THREE.Mesh;       // Soft outer glow on floor
+  // Movement pattern trail
+  trailLine?: THREE.Line;
+  trailPositions: THREE.Vector3[];
+  trailLastAdd: number;
   channelMap: FixtureChannelMap;
   universeIndex: number;        // Index into channelData map
   mountMode: 'top' | 'ground' | 'rear'; // beam default direction
@@ -177,6 +382,8 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
   const controlsRef = useRef<OrbitControls | null>(null);
   const fixturesRef = useRef<Map<string, Fixture3D>>(new Map());
   const timerRef = useRef<THREE.Timer>(new THREE.Timer());
+  const musiciansGroupRef = useRef<THREE.Group | null>(null);
+  const musiciansRef = useRef<{ sprite: THREE.Sprite; phase: number; baseY: number }[]>([]);
   const animFrameRef = useRef<number>(0);
   const lastDmxPollRef = useRef<number>(0);
   const dmxLastActivityRef = useRef<number>(0);
@@ -187,8 +394,33 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
   const [showBeams, setShowBeams] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [showSmoke, setShowSmoke] = useState(true);
+  const [bandConfig, setBandConfig] = useState<BandConfig>('quintet');
+  const musicianPositionsRef = useRef<Record<string, { x: number; z: number }>>(buildPositions('quintet'));
+  const dragMusicianRef = useRef<string | null>(null);
   const [fixtureDefsReady, setFixtureDefsReady] = useState(false);
+  const [lightOn, setLightOn] = useState(false);
+  const lastDmxFrameRef = useRef(performance.now());
+
+  // ── Stage scene config ────────────────────────────
+  type StageScene = 'rear' | 'rear-front' | 'full';
+  const [stageScene, setStageScene] = useState<StageScene>('rear-front');
+  const trussBeamsRef = useRef<{ back: THREE.Object3D | null; front: THREE.Object3D | null; left: THREE.Object3D | null; right: THREE.Object3D | null; poles: THREE.Object3D[] }>({ back: null, front: null, left: null, right: null, poles: [] });
   const [selectedFixtureId, setSelectedFixtureId] = useState<string | null>(null);
+  const [showFixtureList, setShowFixtureList] = useState(false);
+  const [fixtureSearch, setFixtureSearch] = useState('');
+  const stageDims = useShowStore((s) => s.stageDims);
+  const setStageDims = useShowStore((s) => s.setStageDims);
+  // ── Resizable stage dimensions (width × depth, meters) ──
+  // Fixture positions are normalized (0-1), so resizing scales hardware spacing proportionally.
+  const stageDimsRef = useRef(stageDims);
+  stageDimsRef.current = stageDims;
+  const [draftDims, setDraftDims] = useState({ width: stageDims.width, depth: stageDims.depth });
+  const commitStageDims = () => {
+    const w = Math.max(1, Number.isFinite(Number(draftDims.width)) ? Number(draftDims.width) : STAGE_WIDTH);
+    const d = Math.max(1, Number.isFinite(Number(draftDims.depth)) ? Number(draftDims.depth) : STAGE_DEPTH);
+    setStageDims({ width: w, depth: d });
+    setDraftDims({ width: w, depth: d });
+  };
   // ── Rotate selected fixture on drag ────────────────
   const dragRotateRef = useRef<{ startX: number; startY: number; fixtureId: string } | null>(null);
   const [hoveredFixtureId, setHoveredFixtureId] = useState<string | null>(null);
@@ -239,10 +471,10 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
     defs: Map<string, DmxFixtureDefinition>,
   ): Fixture3D => {
     const group = new THREE.Group();
-    const stageX = (pos.x - 0.5) * STAGE_WIDTH;
-    const stageZ = (pos.y - 0.5) * STAGE_DEPTH;
+    const stageX = (pos.x - 0.5) * stageDimsRef.current.width;
+    const stageZ = (pos.y - 0.5) * stageDimsRef.current.depth;
     // Map h (0-1) to actual meters: 0 → 0m, 1 → 5m
-    const stageY = pos.h * 5.0;
+    const stageY = STAGE_HEIGHT + pos.h * 5.0;
     group.position.set(stageX, stageY, stageZ);
     // Apply heading rotation (degrees → radians, Y axis rotation)
     group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
@@ -320,7 +552,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
         headGroup.position.y = 0.34;
         headGroup.name = 'head';
 
-        // T�te moving_head : sph�re (orientation-agnostic, 2x pour diagnostic visuel)
+        // Tï¿½te moving_head : sphï¿½re (orientation-agnostic, 2x pour diagnostic visuel)
         const headBody = new THREE.Mesh(
           new THREE.SphereGeometry(0.16, 24, 16), headMat);
         headBody.position.set(0, 0, 0);
@@ -504,6 +736,36 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
       }
     }
 
+    // Multi-arm fixtures (e.g. Tonio 6 arm): one extra head per additional tilt channel.
+    // Heads are arranged in a circle around the center and share the arm (pan).
+    const extraHeads: ExtraHead3D[] = [];
+    const extraTilts = (channelMap.tiltOffsets?.length ?? 0) > 1
+      ? channelMap.tiltOffsets.slice(1)
+      : [];
+    if (extraTilts.length > 0 && armGroup) {
+      const extraMat = new THREE.MeshStandardMaterial({
+        color: tierColor, roughness: 0.35, metalness: 0.5,
+        emissive: tierColor, emissiveIntensity: 0.2,
+      });
+      const n = extraTilts.length;
+      extraTilts.forEach((off, k) => {
+        const angle = (k / n) * Math.PI * 2;
+        const radius = 0.34;
+        const eh = new THREE.Group();
+        eh.position.set(Math.cos(angle) * radius, 0.30, Math.sin(angle) * radius);
+        eh.name = 'extraHead';
+        const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.11, 20, 14), extraMat);
+        sphere.castShadow = true;
+        eh.add(sphere);
+        const exit = new THREE.Group();
+        exit.position.set(0, -0.20, 0);
+        exit.name = 'lightExit';
+        eh.add(exit);
+        armGroup.add(eh);
+        extraHeads.push({ headGroup: eh, lightTarget: exit, tiltOffset: off, _mountTilt: 0 });
+      });
+    }
+
     group.castShadow = false;
     group.receiveShadow = false;
 
@@ -520,6 +782,9 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
       beamAngle: pos.beamAngle ?? 0.15,
       _staticTilt: (pos.tilt ?? 0) * Math.PI / 180,
       _mountTilt: 0,
+      trailPositions: [],
+      trailLastAdd: 0,
+      extraHeads: extraHeads.length > 0 ? extraHeads : undefined,
     };
   }, [universeIndexMap]);
 
@@ -530,6 +795,10 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
 
     const W = container.clientWidth;
     const H = container.clientHeight;
+
+    // Local stage dimensions (shadow module defaults) — scene rebuilds on resize
+    const STAGE_WIDTH = stageDims.width;
+    const STAGE_DEPTH = stageDims.depth;
 
     // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -547,21 +816,25 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0a14);
     scene.fog = new THREE.FogExp2(0x0a0a18, 0.0008);
+    // Environment map so metallic materials (aluminum truss, fixtures) read as bright metal
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
     sceneRef.current = scene;
 
     // Camera
-    const camera = new THREE.PerspectiveCamera(50, W / H, 0.5, 80);
-    camera.position.set(0, 8, 12);
-    camera.lookAt(0, 1.5, 0);
+    const camera = new THREE.PerspectiveCamera(50, W / H, 0.5, Math.max(80, STAGE_WIDTH + STAGE_DEPTH + 60));
+    camera.position.set(0, 1.2, -STAGE_DEPTH / 2 - 4); // audience view by default
+    camera.lookAt(0, STAGE_HEIGHT + 1.5, 0);
     cameraRef.current = camera;
 
     // OrbitControls
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 1.5, 0);
+    controls.target.set(0, STAGE_HEIGHT + 1.5, 0);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.minDistance = 3;
-    controls.maxDistance = 30;
+    controls.maxDistance = Math.max(30, STAGE_WIDTH + STAGE_DEPTH + 20);
     controls.maxPolarAngle = Math.PI * 0.85;
     controls.update();
     controlsRef.current = controls;
@@ -576,8 +849,8 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
     scene.add(hemiLight);
 
     // ── Floor ──────────────────────────────────────
-    // Floor plane
-    const floorGeo = new THREE.PlaneGeometry(STAGE_WIDTH + 6, STAGE_DEPTH + 6);
+    // Floor plane (ground level, extended for crowd pit)
+    const floorGeo = new THREE.PlaneGeometry(STAGE_WIDTH + 8, STAGE_DEPTH + 18);
     const floorMat = new THREE.MeshStandardMaterial({
       color: 0x1a1a2e,
       roughness: 0.9,
@@ -585,23 +858,36 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
     });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -0.01;
+    floor.position.set(0, -0.01, -4);
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // Grid
+    // Grid (on ground level)
     const gridHelper = new THREE.PolarGridHelper(
-      Math.max(STAGE_WIDTH, STAGE_DEPTH) / 2 + 3,
+      Math.max(STAGE_WIDTH, STAGE_DEPTH) / 2 + 5,
       64,
       32,
       64,
       0x2a2a4e,
       0x2a2a4e,
     );
-    gridHelper.position.y = 0.005;
+    gridHelper.position.set(0, 0.005, -4);
     scene.add(gridHelper);
 
-    // Stage platform
+    // Stage volume (3D box for thickness)
+    const stageVolumeGeo = new THREE.BoxGeometry(STAGE_WIDTH + 0.1, STAGE_THICKNESS, STAGE_DEPTH + 0.1);
+    const stageVolumeMat = new THREE.MeshStandardMaterial({
+      color: 0x111122,
+      roughness: 0.8,
+      metalness: 0.1,
+    });
+    const stageVolume = new THREE.Mesh(stageVolumeGeo, stageVolumeMat);
+    stageVolume.position.y = STAGE_HEIGHT - STAGE_THICKNESS / 2;
+    stageVolume.receiveShadow = true;
+    stageVolume.castShadow = true;
+    scene.add(stageVolume);
+
+    // Stage platform top
     const stageGeo = new THREE.PlaneGeometry(STAGE_WIDTH, STAGE_DEPTH);
     const stageMat = new THREE.MeshStandardMaterial({
       color: 0x151525,
@@ -610,54 +896,276 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
     });
     const stage = new THREE.Mesh(stageGeo, stageMat);
     stage.rotation.x = -Math.PI / 2;
-    stage.position.y = 0.01;
+    stage.position.y = STAGE_HEIGHT + 0.01;
     stage.receiveShadow = true;
     scene.add(stage);
 
-    // Stage edge
+    // Stage edge line
     const edgeGeo = new THREE.EdgesGeometry(stageGeo);
     const edgeLine = new THREE.LineSegments(
       edgeGeo,
       new THREE.LineBasicMaterial({ color: 0x3a3a5e, linewidth: 1 }),
     );
     edgeLine.rotation.x = -Math.PI / 2;
-    edgeLine.position.y = 0.015;
+    edgeLine.position.y = STAGE_HEIGHT + 0.015;
     scene.add(edgeLine);
 
-    // ── Truss ──────────────────────────────────────
+    // Stage front lip overlay (reinforces the edge visually)
+    const lipGeo = new THREE.BoxGeometry(STAGE_WIDTH + 0.05, 0.04, 0.15);
+    const lipMat = new THREE.MeshStandardMaterial({
+      color: 0x2a2a4a,
+      roughness: 0.5,
+      metalness: 0.4,
+    });
+    const lip = new THREE.Mesh(lipGeo, lipMat);
+    lip.position.set(0, STAGE_HEIGHT, -(STAGE_DEPTH / 2) - 0.07);
+    scene.add(lip);
+
+    // ── Truss (Prolyte H30-style triangular truss) ──
     const trussMat = new THREE.MeshStandardMaterial({
-      color: 0x3a3a4e, roughness: 0.5, metalness: 0.7,
+      color: 0xc8d0db, roughness: 0.22, metalness: 0.95,
     });
 
-    // Front truss
-    const frontTruss = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.05, 0.05, STAGE_WIDTH, 8),
-      trussMat,
-    );
-    frontTruss.rotation.z = Math.PI / 2;
-    frontTruss.position.set(0, TRUSS_HEIGHT, -STAGE_DEPTH / 2);
-    scene.add(frontTruss);
+    // Helper: cylinder strut between two points (used for diagonal web members)
+    const makeStrut = (a: THREE.Vector3, b: THREE.Vector3, r: number, mat: THREE.Material) => {
+      const dir = new THREE.Vector3().subVectors(b, a);
+      const len = dir.length();
+      if (len < 1e-4) return null;
+      const geo = new THREE.CylinderGeometry(r, r, len, 6);
+      const m = new THREE.Mesh(geo, mat);
+      m.position.copy(a).addScaledVector(dir, 0.5);
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+      return m;
+    };
 
-    // Back truss
-    const backTruss = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.05, 0.05, STAGE_WIDTH, 8),
-      trussMat,
-    );
-    backTruss.rotation.z = Math.PI / 2;
-    backTruss.position.set(0, TRUSS_HEIGHT, STAGE_DEPTH / 2);
-    scene.add(backTruss);
+    // Build a 3-chord triangular truss along local X, then orient to the target axis
+    const buildTriTruss = (length: number, axis: 'x' | 'y' | 'z') => {
+      const g = new THREE.Group();
+      const chordR = 0.04;   // main chord tube radius
+      const diagR = 0.02;    // diagonal web tube radius
+      const triW = 0.55;     // triangle base width
+      const triH = 0.55;     // triangle height (apex to base)
+      const half = length / 2;
 
-    // Vertical supports
-    for (const x of [-STAGE_WIDTH / 2, STAGE_WIDTH / 2]) {
-      for (const z of [-STAGE_DEPTH / 2, STAGE_DEPTH / 2]) {
-        const pole = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.04, 0.04, TRUSS_HEIGHT, 8),
-          trussMat,
-        );
-        pole.position.set(x, TRUSS_HEIGHT / 2, z);
-        scene.add(pole);
+      // 3 main chords (top apex + two bottom booms) running the full length
+      const chordGeo = new THREE.CylinderGeometry(chordR, chordR, length, 10);
+      chordGeo.rotateZ(Math.PI / 2); // cylinder Y-axis -> X-axis
+      const chordYs = [triH / 2, -triH / 2, -triH / 2];
+      const chordZs = [0, -triW / 2, triW / 2];
+      for (let i = 0; i < 3; i++) {
+        const c = new THREE.Mesh(chordGeo, trussMat);
+        c.position.set(0, chordYs[i], chordZs[i]);
+        g.add(c);
       }
+
+      // Warren/chevron diagonal web + bottom lateral rungs
+      const panel = 0.5;
+      const nPanels = Math.max(1, Math.round(length / panel));
+      const p = length / nPanels;
+      const top = (x: number) => new THREE.Vector3(x, triH / 2, 0);
+      const botL = (x: number) => new THREE.Vector3(x, -triH / 2, -triW / 2);
+      const botR = (x: number) => new THREE.Vector3(x, -triH / 2, triW / 2);
+
+      for (let i = 0; i <= nPanels; i++) {
+        const x = -half + i * p;
+        // bottom lateral rung (closes the triangle base at each node)
+        const rung = makeStrut(botL(x), botR(x), diagR, trussMat);
+        if (rung) g.add(rung);
+        // chevron: two diagonals from top node down to the two bottom nodes of next panel
+        if (i < nPanels) {
+          const xn = x + p;
+          const d1 = makeStrut(top(x), botL(xn), diagR, trussMat);
+          const d2 = makeStrut(top(x), botR(xn), diagR, trussMat);
+          if (d1) g.add(d1);
+          if (d2) g.add(d2);
+        }
+      }
+
+      // Orient along the requested axis
+      if (axis === 'z') g.rotation.y = Math.PI / 2;
+      else if (axis === 'y') g.rotation.z = Math.PI / 2;
+      return g;
+    };
+
+    const hw = STAGE_WIDTH / 2;
+    const hd = STAGE_DEPTH / 2;
+    const th = TRUSS_HEIGHT;
+
+    // Back beam (always visible)
+    const backBeam = buildTriTruss(STAGE_WIDTH, 'x');
+    backBeam.position.set(0, STAGE_HEIGHT + th, hd);
+    scene.add(backBeam);
+
+    // Front beam (rear-front / full)
+    const frontBeam = buildTriTruss(STAGE_WIDTH, 'x');
+    frontBeam.position.set(0, STAGE_HEIGHT + th, -hd);
+    frontBeam.visible = true;
+    scene.add(frontBeam);
+
+    // Left beam (full only)
+    const leftBeam = buildTriTruss(STAGE_DEPTH, 'z');
+    leftBeam.position.set(-hw, STAGE_HEIGHT + th, 0);
+    leftBeam.visible = false;
+    scene.add(leftBeam);
+
+    // Right beam (full only)
+    const rightBeam = buildTriTruss(STAGE_DEPTH, 'z');
+    rightBeam.position.set(hw, STAGE_HEIGHT + th, 0);
+    rightBeam.visible = false;
+    scene.add(rightBeam);
+
+    // Store beam refs
+    trussBeamsRef.current = { back: backBeam, front: frontBeam, left: leftBeam, right: rightBeam, poles: [] };
+
+    // Vertical support towers (4 corners, triangular truss columns)
+    const corners: [number, number][] = [[-hw, -hd], [hw, -hd], [-hw, hd], [hw, hd]];
+    for (const [cx, cz] of corners) {
+      const pole = buildTriTruss(TRUSS_HEIGHT, 'y');
+      pole.position.set(cx, STAGE_HEIGHT + th / 2, cz);
+      pole.userData = { corner: `${cx > 0 ? 'right' : 'left'}-${cz > 0 ? 'back' : 'front'}` };
+      scene.add(pole);
+      trussBeamsRef.current.poles.push(pole);
     }
+
+        // Crowd in the pit (canvas-drawn black silhouettes)
+    const crowdGroup = new THREE.Group();
+    crowdGroup.name = 'crowd';
+
+    // Canvas-generated fallback person texture (used if the image fails to load)
+    const createPersonTexture = (height: number, colorShift: number) => {
+      const scale = 4; // canvas resolution multiplier
+      const w = Math.round(48 * scale);
+      const h = Math.round(height * 64 * scale);
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext('2d')!;
+
+      const cx = w / 2;
+      const bodyTop = h * 0.18;
+      const bodyBot = h * 0.62;
+      const legBot = h * 0.98;
+      const bodyW = w * 0.32;
+      const legW = w * 0.12;
+
+      // Base silhouette color - pure black (colorShift kept for API compat)
+      const r = 0;
+      const g = 0;
+      const b = 0;
+
+      // Legs
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.beginPath();
+      // Left leg
+      ctx.moveTo(cx - bodyW * 0.55, bodyBot);
+      ctx.lineTo(cx - legW, legBot);
+      ctx.lineTo(cx - 1, legBot);
+      ctx.lineTo(cx - bodyW * 0.15, bodyBot);
+      ctx.fill();
+      // Right leg
+      ctx.beginPath();
+      ctx.moveTo(cx + bodyW * 0.15, bodyBot);
+      ctx.lineTo(cx + 1, legBot);
+      ctx.lineTo(cx + legW, legBot);
+      ctx.lineTo(cx + bodyW * 0.55, bodyBot);
+      ctx.fill();
+
+      // Torso (rounded rectangle)
+      const torsoR = bodyW * 0.3;
+      ctx.beginPath();
+      ctx.moveTo(cx - bodyW * 0.5 + torsoR, bodyTop);
+      ctx.lineTo(cx + bodyW * 0.5 - torsoR, bodyTop);
+      ctx.quadraticCurveTo(cx + bodyW * 0.5, bodyTop, cx + bodyW * 0.5, bodyTop + torsoR);
+      ctx.lineTo(cx + bodyW * 0.5, bodyBot - torsoR);
+      ctx.quadraticCurveTo(cx + bodyW * 0.5, bodyBot, cx + bodyW * 0.5 - torsoR, bodyBot);
+      ctx.lineTo(cx - bodyW * 0.5 + torsoR, bodyBot);
+      ctx.quadraticCurveTo(cx - bodyW * 0.5, bodyBot, cx - bodyW * 0.5, bodyBot - torsoR);
+      ctx.lineTo(cx - bodyW * 0.5, bodyTop + torsoR);
+      ctx.quadraticCurveTo(cx - bodyW * 0.5, bodyTop, cx - bodyW * 0.5 + torsoR, bodyTop);
+      ctx.fill();
+
+      // Arms — hanging down along the body
+      const shoulderY = bodyTop + bodyW * 0.2;
+      const armLen = bodyW * 0.95;
+      const armThick = legW * 0.9;
+      ctx.lineWidth = armThick;
+      ctx.strokeStyle = `rgb(${r},${g},${b})`;
+      ctx.lineCap = 'round';
+      // Left arm
+      ctx.beginPath();
+      ctx.moveTo(cx - bodyW * 0.44, shoulderY);
+      ctx.lineTo(cx - bodyW * 0.5, shoulderY + armLen);
+      ctx.stroke();
+      // Right arm
+      ctx.beginPath();
+      ctx.moveTo(cx + bodyW * 0.44, shoulderY);
+      ctx.lineTo(cx + bodyW * 0.5, shoulderY + armLen);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+
+      // Head
+      const headR = bodyW * 0.38;
+      const headCY = bodyTop - headR * 0.3;
+      ctx.beginPath();
+      ctx.arc(cx, headCY, headR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Warm backlight rim (stage glow)
+      const grad = ctx.createRadialGradient(cx, bodyTop - headR, bodyW * 0.1, cx, bodyTop + bodyW * 0.5, bodyW * 1.5);
+      grad.addColorStop(0, `rgba(${Math.round(60+colorShift)},${Math.round(50+colorShift*0.5)},${Math.round(40)},0.15)`);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+
+      return new THREE.CanvasTexture(c);
+    };
+
+    // 4 fallback person variations: height + arm pose + color shift
+    const crowdTextures = [
+      createPersonTexture(1.0, 0),    // standard
+      createPersonTexture(0.92, 6),   // shorter
+      createPersonTexture(1.08, -4),  // taller
+      createPersonTexture(0.96, 3),   // mid
+    ];
+
+    const crowdZStart = -(STAGE_DEPTH / 2) - 0.3;
+    const crowdZEnd = crowdZStart - 6.5;
+    const crowdXMin = -(STAGE_WIDTH / 2) + 0.4;
+    const crowdXMax = (STAGE_WIDTH / 2) - 0.4;
+    const crowdCount = 30; // requested: ~30 people in the pit
+
+    const crowdRng = mulberry32(42); // deterministic seed for stable layout
+
+    const crowdSprites: THREE.Sprite[] = [];
+    for (let i = 0; i < crowdCount; i++) {
+      const texIdx = i % crowdTextures.length;
+      const tex = crowdTextures[texIdx];
+      const mat = new THREE.SpriteMaterial({
+        map: tex,
+        transparent: true,
+        depthWrite: true,
+        depthTest: true,
+      });
+      const sprite = new THREE.Sprite(mat);
+
+      // Full random placement - real crowds cluster naturally
+      const x = crowdXMin + crowdRng() * (crowdXMax - crowdXMin);
+      const z = crowdZStart + crowdRng() * (crowdZEnd - crowdZStart);
+      // Person height ~1.65m (sprite scale in meters)
+      const personH = 1.55 + crowdRng() * 0.25;
+      sprite.userData.personH = personH;
+      const aspect = crowdTextures[texIdx].image
+        ? (crowdTextures[texIdx].image as HTMLCanvasElement).height / (crowdTextures[texIdx].image as HTMLCanvasElement).width
+        : 2;
+      sprite.scale.set(personH / aspect, personH, 1);
+      sprite.position.set(x, personH / 2, z);
+
+      crowdGroup.add(sprite);
+      crowdSprites.push(sprite);
+    }
+
+
+    scene.add(crowdGroup);
 
     // ── Smoke/Haze particles ───────────────────────
     const particleCount = 300;
@@ -666,7 +1174,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
     const velocities = new Float32Array(particleCount);
     for (let i = 0; i < particleCount; i++) {
       positions[i * 3] = (Math.random() - 0.5) * STAGE_WIDTH * 1.5;
-      positions[i * 3 + 1] = Math.random() * 4;
+      positions[i * 3 + 1] = STAGE_HEIGHT + Math.random() * 4;
       positions[i * 3 + 2] = (Math.random() - 0.5) * STAGE_DEPTH * 1.5;
       velocities[i] = 0.2 + Math.random() * 0.5;
     }
@@ -699,13 +1207,23 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
         const vels = particles.userData.velocities as Float32Array;
         for (let i = 0; i < particleCount; i++) {
           posArr[i * 3 + 1] += vels[i] * dt * 0.3;
-          if (posArr[i * 3 + 1] > 4) {
-            posArr[i * 3 + 1] = 0;
+          if (posArr[i * 3 + 1] > STAGE_HEIGHT + 4) {
+            posArr[i * 3 + 1] = STAGE_HEIGHT;
             posArr[i * 3] = (Math.random() - 0.5) * STAGE_WIDTH * 1.5;
             posArr[i * 3 + 2] = (Math.random() - 0.5) * STAGE_DEPTH * 1.5;
           }
         }
         particles.geometry.attributes.position.needsUpdate = true;
+      }
+
+      // Animate musicians (subtle sway)
+      const mg = musiciansGroupRef.current;
+      if (mg && mg.visible) {
+        const t = timer.getElapsed();
+        for (const m of musiciansRef.current) {
+          m.sprite.position.y = m.baseY + Math.sin(t * 1.6 + m.phase) * 0.025;
+          m.sprite.rotation.z = Math.sin(t * 0.9 + m.phase) * 0.04;
+        }
       }
 
       // DMX polling (30fps)
@@ -725,11 +1243,13 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
       cancelAnimationFrame(animFrameRef.current);
       renderer.dispose();
       controls.dispose();
+      // Fixtures live in the old scene — drop them so the sync effect re-adds them on rebuild
+      fixturesRef.current.clear();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [stageDims]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Handle resize ───────────────────────────────────
   useEffect(() => {
@@ -773,6 +1293,164 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
     }
   }, [showSmoke]);
 
+  // ── Virtual musicians: build sprites for the selected config ──
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    // Dispose previous group
+    const prev = musiciansGroupRef.current;
+    if (prev) {
+      if (prev.parent) prev.parent.remove(prev);
+      prev.traverse((o) => {
+        if (o instanceof THREE.Sprite) {
+          const m = (o as THREE.Sprite).material as THREE.SpriteMaterial;
+          m.map?.dispose();
+          m.dispose();
+        }
+      });
+    }
+    musiciansRef.current = [];
+    musiciansGroupRef.current = null;
+
+    if (bandConfig === 'none') return;
+
+    const group = new THREE.Group();
+    group.name = 'musicians';
+    musiciansGroupRef.current = group;
+
+    const dims = stageDimsRef.current;
+    const defs = BAND_PRESETS[bandConfig];
+    const refs: { sprite: THREE.Sprite; phase: number; baseY: number }[] = [];
+
+    defs.forEach((m, i) => {
+      const mat = new THREE.SpriteMaterial({ transparent: true, depthWrite: true, depthTest: true });
+      mat.visible = false; // hidden until the image texture loads
+      const sprite = new THREE.Sprite(mat);
+      sprite.userData.musicianId = m.id;
+      const personH = MUSICIAN_HEIGHTS[m.kind];
+      sprite.scale.set(personH, personH, 1); // placeholder; aspect set on load
+      const baseY = STAGE_HEIGHT + personH / 2;
+      const pos = musicianPositionsRef.current[m.id] ?? { x: m.x, z: m.z };
+      sprite.position.set((pos.x - 0.5) * dims.width, baseY, (pos.z - 0.5) * dims.depth);
+      group.add(sprite);
+      refs.push({ sprite, phase: i * 1.3, baseY });
+
+      loadMusicianTexture(m.kind)
+        .then(tex => {
+          mat.map = tex;
+          mat.needsUpdate = true;
+          mat.visible = true;
+          const img = tex.image as HTMLCanvasElement;
+          const aspect = img.height / img.width;
+          sprite.scale.set(personH / aspect, personH, 1);
+        })
+        .catch(() => {});
+    });
+
+    musiciansRef.current = refs;
+    scene.add(group);
+  }, [bandConfig, stageDims]);
+
+  // ── Virtual musicians: drag to reposition on stage ──
+  useEffect(() => {
+    const dom = rendererRef.current?.domElement;
+    if (!dom) return;
+
+    const pick = (e: PointerEvent): string | null => {
+      const container = containerRef.current;
+      const camera = cameraRef.current;
+      if (!container || !camera) return null;
+      const rect = container.getBoundingClientRect();
+      const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycasterRef.current.setFromCamera(new THREE.Vector2(nx, ny), camera);
+      const sprites = musiciansRef.current.map((m) => m.sprite);
+      if (sprites.length === 0) return null;
+      const hits = raycasterRef.current.intersectObjects(sprites, false);
+      if (hits.length === 0) return null;
+      return (hits[0].object.userData.musicianId as string) ?? null;
+    };
+
+    const stagePoint = (e: PointerEvent): THREE.Vector3 | null => {
+      const container = containerRef.current;
+      const camera = cameraRef.current;
+      if (!container || !camera) return null;
+      const rect = container.getBoundingClientRect();
+      const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycasterRef.current.setFromCamera(new THREE.Vector2(nx, ny), camera);
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -STAGE_HEIGHT);
+      const out = new THREE.Vector3();
+      return raycasterRef.current.ray.intersectPlane(plane, out) ? out : null;
+    };
+
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const id = pick(e);
+      if (!id) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      dragMusicianRef.current = id;
+      const controls = controlsRef.current;
+      if (controls) controls.enabled = false;
+    };
+
+    const onMove = (e: PointerEvent) => {
+      const id = dragMusicianRef.current;
+      if (!id) return;
+      const p = stagePoint(e);
+      if (!p) return;
+      const dims = stageDimsRef.current;
+      const nx = THREE.MathUtils.clamp((p.x + dims.width / 2) / dims.width, 0.03, 0.97);
+      const nz = THREE.MathUtils.clamp((p.z + dims.depth / 2) / dims.depth, 0.03, 0.97);
+      musicianPositionsRef.current[id] = { x: nx, z: nz };
+      const m = musiciansRef.current.find((mm) => mm.sprite.userData.musicianId === id);
+      if (m) {
+        m.sprite.position.x = (nx - 0.5) * dims.width;
+        m.sprite.position.z = (nz - 0.5) * dims.depth;
+      }
+    };
+
+    const onUp = () => {
+      if (dragMusicianRef.current) {
+        const controls = controlsRef.current;
+        if (controls) controls.enabled = true;
+        dragMusicianRef.current = null;
+      }
+    };
+
+    dom.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      dom.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [stageDims]);
+
+  // ── Truss visibility by stage scene ────────────────
+  useEffect(() => {
+    const tr = trussBeamsRef.current;
+    // Back beam always visible
+    if (tr.back) tr.back.visible = true;
+    // Front beam: rear-front or full
+    if (tr.front) tr.front.visible = stageScene !== 'rear';
+    // Side beams: full only
+    if (tr.left) tr.left.visible = stageScene === 'full';
+    if (tr.right) tr.right.visible = stageScene === 'full';
+    // Poles: back corners always visible; front corners for rear-front/full
+    for (const pole of tr.poles) {
+      const corner: string = pole.userData.corner || '';
+      if (corner.includes('back')) {
+        pole.visible = true;
+      } else {
+        pole.visible = stageScene !== 'rear';
+      }
+    }
+  }, [stageScene]);
+
   // ── Sync fixtures when definitions ready ────────────
   useEffect(() => {
     if (!fixtureDefsReady) return;
@@ -795,6 +1473,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
           if (f3d.beamCone) scene.remove(f3d.beamCone);
           if (f3d.floorSpot) scene.remove(f3d.floorSpot);
           if (f3d.floorGlow) scene.remove(f3d.floorGlow);
+          if (f3d.trailLine) { scene.remove(f3d.trailLine); f3d.trailLine.geometry.dispose(); (f3d.trailLine.material as THREE.Material).dispose(); }
           disposeFixture3D(f3d);
           fixturesRef.current.delete(id);
         }
@@ -817,7 +1496,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
         f3d.pointLight = pointLight;
 
         // Create beam cone - attached to lightTarget (lens), points along local -Y then rotated by headGroup
-        const coneHeight = 50;
+        const coneHeight = BEAM_LENGTH;
         const coneRadiusBottom = coneHeight * Math.tan(0.15);
         const coneGeo = new THREE.CylinderGeometry(0.03, coneRadiusBottom, coneHeight, 24, 1, true);
         const coneMat = new THREE.MeshBasicMaterial({
@@ -837,6 +1516,19 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
         // Attach to lightTarget (lightExit) - follows pan/tilt from lens face
         f3d.lightTarget.add(cone);
         f3d.beamCone = cone;
+
+        // Extra heads: one point light + beam cone per arm
+        for (const eh of f3d.extraHeads ?? []) {
+          const ehLight = new THREE.PointLight(0xffffff, 0, 8, 2);
+          ehLight.visible = showBeams;
+          eh.lightTarget.add(ehLight);
+          eh.pointLight = ehLight;
+          const ehCone = new THREE.Mesh(coneGeo, coneMat.clone());
+          ehCone.position.set(0, -coneHeight / 2, 0);
+          ehCone.visible = showBeams;
+          eh.lightTarget.add(ehCone);
+          eh.beamCone = ehCone;
+        }
 
         // ── Floor spot (light circle on stage floor) ──
         const spotRadius = 0.6;
@@ -875,6 +1567,24 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
         f3d.floorGlow = floorGlow;
 
         fixturesRef.current.set(pf.id, f3d);
+
+        // Movement trail line
+        const trailGeo = new THREE.BufferGeometry();
+        const trailVerts = new Float32Array(MAX_TRAIL_POINTS * 3);
+        trailVerts.fill(0);
+        trailGeo.setAttribute('position', new THREE.BufferAttribute(trailVerts, 3));
+        trailGeo.setDrawRange(0, 0);
+        const trailMat = new THREE.LineBasicMaterial({
+          color: 0x8b5cf6,
+          transparent: true,
+          opacity: 0.6,
+          linewidth: 1,
+          depthTest: true,
+          depthWrite: false,
+        });
+        const trailLine = new THREE.Line(trailGeo, trailMat);
+        scene.add(trailLine);
+        f3d.trailLine = trailLine;
       }
 
       // Update existing fixture positions
@@ -882,33 +1592,28 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
         const f3d = fixturesRef.current.get(pf.id);
         if (!f3d) continue;
         const pos = fixturePositions[pf.id] || { x: 0.5, y: 0.3, h: 0.5, heading: 0 };
-        const stageX = (pos.x - 0.5) * STAGE_WIDTH;
-        const stageZ = (pos.y - 0.5) * STAGE_DEPTH;
-        const stageY = (pos.mountMode || 'top') === 'ground' ? 0 : pos.h * 5.0;
+        const stageX = (pos.x - 0.5) * stageDimsRef.current.width;
+        const stageZ = (pos.y - 0.5) * stageDimsRef.current.depth;
+        const stageY = STAGE_HEIGHT + pos.h * 5.0;
         f3d.group.position.set(stageX, stageY, stageZ);
         f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
-        if (f3d.channelMap.panOffset !== null) {
-          // Reverse: 3D heading → DMX pan value → push to hardware
-          const panDmx = Math.round(((((pos.heading ?? 0) * Math.PI / 180) / (Math.PI * 3)) + 0.5) * 255);
-          dmxBridge.pushDesignChannel(f3d.universeIndex, pf.startAddress + f3d.channelMap.panOffset, panDmx);
-        }
         if (pos.mountMode) f3d.mountMode = pos.mountMode;
         fitMountRotation(f3d, pos.mountMode || 'top');
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
-        if (f3d.headGroup) f3d.headGroup.rotation.x = f3d._mountTilt + f3d._staticTilt;
-        if (f3d.channelMap.tiltOffset !== null) {
-          // Reverse: 3D tilt → DMX tilt value → push to hardware
-          const tiltDmx = Math.round(((f3d._staticTilt / (Math.PI * 1.5)) + 0.5) * 255);
-          dmxBridge.pushDesignChannel(f3d.universeIndex, pf.startAddress + f3d.channelMap.tiltOffset, tiltDmx);
-        }
         // Update beam angle (zoom)
         if (pos.beamAngle !== undefined && f3d.beamCone) {
           f3d.beamAngle = pos.beamAngle;
-          const ch = 50;
+          const ch = BEAM_LENGTH;
           const radius = ch * Math.tan(pos.beamAngle);
           f3d.beamCone.geometry?.dispose();
           f3d.beamCone.geometry = new THREE.CylinderGeometry(0.03, radius, ch, 24, 1, true);
           f3d.beamCone.position.set(0, -ch / 2, 0);
+          for (const eh of f3d.extraHeads ?? []) {
+            if (!eh.beamCone) continue;
+            eh.beamCone.geometry?.dispose();
+            eh.beamCone.geometry = new THREE.CylinderGeometry(0.03, radius, ch, 24, 1, true);
+            eh.beamCone.position.set(0, -ch / 2, 0);
+          }
         }
       }
     });
@@ -920,7 +1625,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
       }
       fixturesRef.current.clear();
     };
-  }, [fixtureDefsReady, patchedFixtures, showBeams, createFixtureGeometry]);
+  }, [fixtureDefsReady, patchedFixtures, showBeams, createFixtureGeometry, stageDims]);
 
   // ── Update fixture positions from store ─────────────
   // Separate effect - only updates positions, doesn't recreate geometry
@@ -930,32 +1635,28 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
       if (!f3d) continue;
       const pos = fixturePositions[pf.id];
       if (!pos) continue;
-      const stageX = (pos.x - 0.5) * STAGE_WIDTH;
-      const stageZ = (pos.y - 0.5) * STAGE_DEPTH;
-      // Ground-mounted fixtures always at Y=0 (floor level)
-      const stageY = (pos.mountMode || 'top') === 'ground' ? 0 : pos.h * 5.0;
+      const stageX = (pos.x - 0.5) * stageDimsRef.current.width;
+      const stageZ = (pos.y - 0.5) * stageDimsRef.current.depth;
+      const stageY = STAGE_HEIGHT + pos.h * 5.0;
       f3d.group.position.set(stageX, stageY, stageZ);
       f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
-      if (f3d.channelMap.panOffset !== null) {
-        const panDmx = Math.round(((((pos.heading ?? 0) * Math.PI / 180) / (Math.PI * 3)) + 0.5) * 255);
-        dmxBridge.pushDesignChannel(f3d.universeIndex, pf.startAddress + f3d.channelMap.panOffset, panDmx);
-      }
       if (pos.mountMode) f3d.mountMode = pos.mountMode;
       fitMountRotation(f3d, pos.mountMode || 'top');
       f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
-      if (f3d.headGroup) { f3d.headGroup.rotation.x = f3d._mountTilt + f3d._staticTilt; }
-      if (f3d.channelMap.tiltOffset !== null) {
-        const tiltDmx = Math.round(((f3d._staticTilt / (Math.PI * 1.5)) + 0.5) * 255);
-        dmxBridge.pushDesignChannel(f3d.universeIndex, pf.startAddress + f3d.channelMap.tiltOffset, tiltDmx);
-      }
       if (pos.beamAngle !== undefined && f3d.beamCone) {
         f3d.beamAngle = pos.beamAngle;
-        const ch = 50;
+        const ch = BEAM_LENGTH;
         const radius = ch * Math.tan(pos.beamAngle);
         f3d.beamCone.geometry?.dispose();
         f3d.beamCone.geometry = new THREE.CylinderGeometry(0.03, radius, ch, 24, 1, true);
         // Cone position: starts at origin (lens), extends down
         f3d.beamCone.position.set(0, -ch / 2, 0);
+        for (const eh of f3d.extraHeads ?? []) {
+          if (!eh.beamCone) continue;
+          eh.beamCone.geometry?.dispose();
+          eh.beamCone.geometry = new THREE.CylinderGeometry(0.03, radius, ch, 24, 1, true);
+          eh.beamCone.position.set(0, -ch / 2, 0);
+        }
       }
     }
   }, [fixturePositions, patchedFixtures]);
@@ -976,10 +1677,34 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
     let channelData = dmxState.channelData as Record<number, Uint8Array | number[]>;
     const blackout = dmxState.blackout ?? false;
     const grandMaster = dmxState.grandMaster ?? 255;
+    const maxPanTiltSpeed = dmxState.panTiltMaxSpeed ?? 120;
+    const nowFrame = performance.now();
+    const dt = Math.min(0.1, (nowFrame - lastDmxFrameRef.current) / 1000);
+    lastDmxFrameRef.current = nowFrame;
 
     for (const f3d of fixturesRef.current.values()) {
-      // Get DMX data for this fixture's universe
-      const rawData = channelData[f3d.universeIndex];
+      // Get DMX data for this fixture's universe (or synthesize from test override)
+      const testVals = fixtureTestState.get(f3d.id);
+      let rawData: Uint8Array | number[] | undefined = channelData[f3d.universeIndex];
+      if (testVals) {
+        // Merge test values over real data when available (keeps engine/modale pan-tilt).
+        // Otherwise start from a neutral buffer with pan/tilt centered (128) so the beam
+        // points forward instead of defaulting to DMX 0 (pointing down).
+        const pfOv = patchedFixtures.find(f => f.id === f3d.id);
+        const cmOv = f3d.channelMap;
+        const baseAddrOv = pfOv ? pfOv.startAddress - 1 : 0;
+        const base = rawData instanceof Uint8Array ? rawData : (rawData ? new Uint8Array(Object.values(rawData)) : undefined);
+        const buf = base ? new Uint8Array(base) : new Uint8Array(512);
+        if (!base) {
+          for (const po of cmOv.panOffsets ?? []) { if (po >= 0) buf[baseAddrOv + po] = 128; }
+          for (const to of cmOv.tiltOffsets ?? []) { if (to >= 0) buf[baseAddrOv + to] = 128; }
+        }
+        for (const [addrStr, v] of Object.entries(testVals)) {
+          const idx = Number(addrStr) - 1;
+          if (idx >= 0 && idx < 512) buf[idx] = v;
+        }
+        rawData = buf;
+      }
       if (!rawData) {
         if (f3d.pointLight) f3d.pointLight.intensity = 0;
         if (f3d.beamCone) { (f3d.beamCone.material as THREE.MeshBasicMaterial).opacity = 0; }
@@ -991,6 +1716,10 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
           const tiltTarget = f3d._mountTilt + Math.sin(t * 0.35 + 1.2) * 0.35 * Math.PI + (f3d._staticTilt ?? 0);
           f3d.armGroup.rotation.y += (panTarget - f3d.armGroup.rotation.y) * 0.15;
           f3d.headGroup.rotation.x += (tiltTarget - f3d.headGroup.rotation.x) * 0.15;
+          (f3d.extraHeads ?? []).forEach((eh, k) => {
+            const ehTarget = eh._mountTilt + Math.sin(t * 0.35 + 1.2 + (k + 1) * 1.1) * 0.35 * Math.PI + (f3d._staticTilt ?? 0);
+            eh.headGroup.rotation.x += (ehTarget - eh.headGroup.rotation.x) * 0.15;
+          });
         }
         continue;
       }
@@ -1063,13 +1792,91 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
       const tiltVal = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128) : 128;
       dmxLastActivityRef.current = performance.now();
 
+      // Rate-limited tracking: beam cannot turn faster than the real fixture motor
+      // (maxPanTiltSpeed in °/s), so the 3D view matches the physical movement speed.
       if (f3d.armGroup) {
-        f3d.armGroup.rotation.y += ((((panVal / 255) - 0.5) * Math.PI * 3) - f3d.armGroup.rotation.y) * 0.3;
+        const panTarget = ((panVal / 255) - 0.5) * Math.PI * 3;
+        let panDelta = panTarget - f3d.armGroup.rotation.y;
+        while (panDelta > Math.PI) panDelta -= 2 * Math.PI;
+        while (panDelta < -Math.PI) panDelta += 2 * Math.PI;
+        const panMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
+        f3d.armGroup.rotation.y += Math.max(-panMaxStep, Math.min(panMaxStep, panDelta));
       }
       if (f3d.headGroup) {
-        const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI * 1.5;
+        const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI;
         const tiltTarget = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
-        f3d.headGroup.rotation.x += (tiltTarget - f3d.headGroup.rotation.x) * 0.3;
+        const tiltDelta = tiltTarget - f3d.headGroup.rotation.x;
+        const tiltMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
+        f3d.headGroup.rotation.x += Math.max(-tiltMaxStep, Math.min(tiltMaxStep, tiltDelta));
+      }
+
+      // Extra heads: per-arm tilt, same color/intensity as the main head
+      for (const eh of f3d.extraHeads ?? []) {
+        const ehTiltVal = data[baseAddr + eh.tiltOffset] ?? 128;
+        const dmxTilt = ((ehTiltVal / 255) - 0.5) * Math.PI;
+        const ehTarget = eh._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
+        const ehDelta = ehTarget - eh.headGroup.rotation.x;
+        const ehMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
+        eh.headGroup.rotation.x += Math.max(-ehMaxStep, Math.min(ehMaxStep, ehDelta));
+        if (eh.pointLight) {
+          eh.pointLight.color.copy(color);
+          eh.pointLight.intensity = normIntensity * 25;
+        }
+        if (eh.beamCone) {
+          const m = eh.beamCone.material as THREE.MeshBasicMaterial;
+          m.color.copy(color);
+          m.opacity = normIntensity * 0.35;
+          eh.beamCone.visible = showBeams && normIntensity > 0.005;
+        }
+      }
+
+      // --- Movement trail: sample beam hit on stage floor ---
+      const nowTrail = performance.now();
+      if (nowTrail - f3d.trailLastAdd >= TRAIL_ADD_INTERVAL && normIntensity > 0.05) {
+        f3d.trailLastAdd = nowTrail;
+        // Get beam origin (lightTarget world position)
+        const origin = new THREE.Vector3();
+        f3d.lightTarget.getWorldPosition(origin);
+        // Get beam direction (-Z in local space, rotated by head/arm)
+        const dir = new THREE.Vector3(0, 0, -1);
+        const headWorld = new THREE.Matrix4();
+        if (f3d.headGroup) {
+          f3d.headGroup.matrixWorld.decompose(new THREE.Vector3(), new THREE.Quaternion(), new THREE.Vector3());
+          dir.applyQuaternion(f3d.headGroup.quaternion);
+        }
+        // Ray-plane intersection with stage floor (y=0)
+        if (Math.abs(dir.y) > 0.001) {
+          const t = -origin.y / dir.y;
+          if (t > 0 && t < 50) {
+            const hit = origin.clone().addScaledVector(dir, t);
+            // Clamp to stage bounds
+            hit.x = Math.max(-stageDimsRef.current.width/2, Math.min(stageDimsRef.current.width/2, hit.x));
+            hit.z = Math.max(-stageDimsRef.current.depth/2, Math.min(stageDimsRef.current.depth/2, hit.z));
+            hit.y = 0.05; // slight offset above floor
+            f3d.trailPositions.push(hit);
+            if (f3d.trailPositions.length > MAX_TRAIL_POINTS) {
+              f3d.trailPositions.shift();
+            }
+          }
+        }
+      }
+      // Update trail line geometry
+      if (f3d.trailLine && f3d.trailPositions.length >= 2) {
+        const geo = f3d.trailLine.geometry;
+        const posAttr = geo.attributes.position as THREE.BufferAttribute;
+        const arr = posAttr.array as Float32Array;
+        const n = f3d.trailPositions.length;
+        for (let i = 0; i < n; i++) {
+          const p = f3d.trailPositions[i];
+          arr[i * 3] = p.x;
+          arr[i * 3 + 1] = p.y;
+          arr[i * 3 + 2] = p.z;
+        }
+        // Fade older points by z-fighting them slightly higher
+        const mat = f3d.trailLine.material as THREE.LineBasicMaterial;
+        mat.opacity = normIntensity > 0.01 ? 0.6 : 0.3;
+        geo.setDrawRange(0, n);
+        posAttr.needsUpdate = true;
       }
 
       // --- Update PointLight ---
@@ -1117,21 +1924,21 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
     const controls = controlsRef.current;
     if (!camera || !controls) return;
 
-    const target = new THREE.Vector3(0, 1.5, 0);
+    const target = new THREE.Vector3(0, STAGE_HEIGHT + 1.5, 0);
     let pos: THREE.Vector3;
 
     switch (preset) {
       case 'front':
-        pos = new THREE.Vector3(0, 2, STAGE_DEPTH / 2 + 6);
+        pos = new THREE.Vector3(0, STAGE_HEIGHT + 2, stageDimsRef.current.depth / 2 + 6);
         break;
       case 'top':
         pos = new THREE.Vector3(0, 14, 0.1);
         break;
       case 'side':
-        pos = new THREE.Vector3(STAGE_WIDTH / 2 + 6, 2, 0);
+        pos = new THREE.Vector3(stageDimsRef.current.width / 2 + 6, STAGE_HEIGHT + 2, 0);
         break;
       case 'audience':
-        pos = new THREE.Vector3(0, 1.2, -STAGE_DEPTH / 2 - 4);
+        pos = new THREE.Vector3(0, 1.2, -stageDimsRef.current.depth / 2 - 4);
         break;
       default:
         return;
@@ -1159,6 +1966,42 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
     };
     requestAnimationFrame(animateCamera);
   }, []);
+
+  // ── Focus camera on a fixture (used by the quick-select list) ──
+  const focusFixture = useCallback((fid: string) => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    const pos = fixturePositions[fid];
+    if (!camera || !controls || !pos) return;
+    const dims = stageDimsRef.current;
+    const target = new THREE.Vector3(
+      (pos.x - 0.5) * dims.width,
+      STAGE_HEIGHT + (pos.h ?? 0) * 5.0,
+      (pos.y - 0.5) * dims.depth
+    );
+    // Keep the current viewing direction, pull closer
+    const dir = camera.position.clone().sub(controls.target);
+    if (dir.lengthSq() < 0.001) dir.set(0.3, 0.5, 1);
+    dir.normalize();
+    const dist = Math.max(3, (pos.h ?? 0) * 5.0 + 2.5);
+    const dest = target.clone().add(dir.multiplyScalar(dist));
+    dest.y = Math.max(dest.y, STAGE_HEIGHT + 0.8);
+
+    const startPos = camera.position.clone();
+    const startTarget = controls.target.clone();
+    const startTime = performance.now();
+    const duration = 600;
+    const animateCamera = (now: number) => {
+      const elapsed = now - startTime;
+      const t = Math.min(elapsed / duration, 1.0);
+      const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+      camera.position.lerpVectors(startPos, dest, ease);
+      controls.target.lerpVectors(startTarget, target, ease);
+      controls.update();
+      if (t < 1) requestAnimationFrame(animateCamera);
+    };
+    requestAnimationFrame(animateCamera);
+  }, [fixturePositions]);
 
   // ── Canvas click handler (raycasting) ─────────────────
   const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -1260,11 +2103,42 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
     ? patchedFixtures.find(f => f.id === hoveredFixtureId) ?? null
     : null;
 
+  // Toggle the selected fixture ON (dimmer max + white) / OFF on hardware + 3D
+  const handleFixtureOn = async () => {
+    if (!selectedFixture) return;
+    if (fixtureTestState.has(selectedFixture.id)) {
+      setLightOn(false);
+      try { await sendFixtureOff(selectedFixture, patchedFixtures, universes); } catch { /* hardware not available */ }
+    } else {
+      setLightOn(true);
+      try {
+        const defs = await loadFixtureDefinitions([selectedFixture.fixtureDefId]);
+        const def = defs.get(selectedFixture.fixtureDefId);
+        const channels = def?.modes?.[selectedFixture.modeIndex]?.channels ?? [];
+        await sendFixtureOn(selectedFixture, channels, patchedFixtures, universes);
+      } catch { /* hardware not available */ }
+    }
+  };
+
+  // Keep the button state in sync with the global test state when selection changes
+  useEffect(() => {
+    setLightOn(selectedFixture ? fixtureTestState.has(selectedFixture.id) : false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFixture?.id]);
+
   // ── Render ──────────────────────────────────────────
+  const filteredFixtures = fixtureSearch.trim()
+    ? patchedFixtures.filter((f) =>
+        (f.name || '').toLowerCase().includes(fixtureSearch.toLowerCase()) ||
+        String(f.startAddress).includes(fixtureSearch.trim())
+      )
+    : patchedFixtures;
+
   return (
     <div className="h-full flex flex-col bg-[#08080e]">
       {/* Toolbar */}
-      <div className="h-10 border-b border-gray-800/30 flex items-center px-4 gap-3 shrink-0 bg-[#0d0d14]">
+      <div className="h-10 border-b border-gray-800/30 flex items-center px-4 gap-3 shrink-0 bg-[#0d0d14] overflow-x-auto">
+        <div className="flex items-center gap-3 min-w-max">
         <span className="text-xs font-semibold text-gray-400 flex items-center gap-1.5">
           <Eye size={14} className="text-purple-400" /> 3D Stage
         </span>
@@ -1303,37 +2177,92 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
 
         <div className="w-px h-4 bg-gray-800" />
 
-        {/* Toggle buttons */}
+        {/* Stage scene selector */}
+        <div className="relative flex items-center">
+          <LayoutGrid size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
+          <select
+            value={stageScene}
+            onChange={e => setStageScene(e.target.value as StageScene)}
+            className="bg-gray-800/40 text-gray-300 text-[10px] pl-7 pr-2 py-1 rounded border border-gray-700/40 appearance-none cursor-pointer hover:border-gray-600/60 focus:outline-none focus:border-purple-500/50"
+            title="Configuration de scène"
+          >
+            <option value="rear" className="bg-[#0d0d14]">Pont arrière</option>
+            <option value="rear-front" className="bg-[#0d0d14]">Pont arrière + avant</option>
+            <option value="full" className="bg-[#0d0d14]">Arrière + avant + 2 côtés</option>
+          </select>
+        </div>
+
+        <div className="w-px h-4 bg-gray-800" />
+
+        {/* Stage size — resizable without upper limit; fixtures scale proportionally */}
+        <div className="flex items-center gap-1" title="Dimensions de la scène (largeur × profondeur, en mètres)">
+          <Maximize2 size={12} className="text-gray-500" />
+          <input
+            type="number"
+            min={1}
+            step={0.5}
+            value={draftDims.width}
+            onChange={e => setDraftDims(prev => ({ ...prev, width: Number(e.target.value) }))}
+            onBlur={commitStageDims}
+            onKeyDown={e => { if (e.key === 'Enter') commitStageDims(); }}
+            className="w-12 bg-gray-800/40 text-gray-200 text-[10px] px-1 py-0.5 rounded border border-gray-700/40 focus:outline-none focus:border-purple-500/50"
+            aria-label="Largeur de la scène (m)"
+          />
+          <span className="text-gray-600 text-[10px]">×</span>
+          <input
+            type="number"
+            min={1}
+            step={0.5}
+            value={draftDims.depth}
+            onChange={e => setDraftDims(prev => ({ ...prev, depth: Number(e.target.value) }))}
+            onBlur={commitStageDims}
+            onKeyDown={e => { if (e.key === 'Enter') commitStageDims(); }}
+            className="w-12 bg-gray-800/40 text-gray-200 text-[10px] px-1 py-0.5 rounded border border-gray-700/40 focus:outline-none focus:border-purple-500/50"
+            aria-label="Profondeur de la scène (m)"
+          />
+          <span className="text-gray-600 text-[10px]">m</span>
+        </div>
+
+        <div className="w-px h-4 bg-gray-800" />
+
+        <div className="relative flex items-center" title="Configuration des musiciens sur scène (glissez-les pour les déplacer)">
+          <Music size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
+          <select
+            value={bandConfig}
+            onChange={e => {
+              const cfg = e.target.value as BandConfig;
+              musicianPositionsRef.current = cfg === 'none' ? {} : buildPositions(cfg);
+              setBandConfig(cfg);
+            }}
+            className="bg-gray-800/40 text-gray-300 text-[10px] pl-7 pr-2 py-1 rounded border border-gray-700/40 appearance-none cursor-pointer hover:border-gray-600/60 focus:outline-none focus:border-purple-500/50"
+          >
+            <option value="none" className="bg-[#0d0d14]">Aucun musicien</option>
+            <option value="solo" className="bg-[#0d0d14]">Solo (chanteur)</option>
+            <option value="solo-chanteuse" className="bg-[#0d0d14]">Solo (chanteuse)</option>
+            <option value="duo" className="bg-[#0d0d14]">Duo (chant + guitare)</option>
+            <option value="trio" className="bg-[#0d0d14]">Trio (chant, guitare, batterie)</option>
+            <option value="quartet" className="bg-[#0d0d14]">Quatuor (chant, guitare, basse, batterie)</option>
+            <option value="quintet" className="bg-[#0d0d14]">Quintette (complet)</option>
+            <option value="sextet" className="bg-[#0d0d14]">Sextet (chant + chanteuse + complet)</option>
+          </select>
+        </div>
+
         <button
-          onClick={() => setShowBeams(v => !v)}
+          onClick={() => setShowFixtureList(v => !v)}
           className={`px-2 py-1 rounded text-[10px] flex items-center gap-1 transition-colors ${
-            showBeams ? 'bg-purple-600/20 text-purple-400' : 'text-gray-600'
+            showFixtureList ? 'bg-purple-600/20 text-purple-300' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/30'
           }`}
+          title="Liste des fixtures — retrouver rapidement une light"
         >
-          <Eye size={12} /> Beams
-        </button>
-        <button
-          onClick={() => setShowSmoke(v => !v)}
-          className={`px-2 py-1 rounded text-[10px] flex items-center gap-1 transition-colors ${
-            showSmoke ? 'bg-blue-600/20 text-blue-400' : 'text-gray-600'
-          }`}
-        >
-          Smoke
-        </button>
-        <button
-          onClick={() => setShowLabels(v => !v)}
-          className={`px-2 py-1 rounded text-[10px] flex items-center gap-1 transition-colors ${
-            showLabels ? 'bg-purple-600/20 text-purple-400' : 'text-gray-600'
-          }`}
-        >
-          Labels
+          <List size={12} /> Fixtures
         </button>
 
         <div className="flex-1" />
 
         <span className="text-[10px] text-gray-600">
-          {patchedFixtures.length} fixtures · drag to orbit · click to select
+          {patchedFixtures.length} fixtures · glisser pour orbiter · clic pour sélectionner · liste « Fixtures » pour retrouver une light
         </span>
+        </div>
       </div>
 
       {/* 3D Canvas */}
@@ -1358,6 +2287,65 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
           <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-[#1a1a28]/95 border border-gray-700/80 rounded-lg px-3 py-1.5 text-xs text-gray-300 pointer-events-none z-20 backdrop-blur-sm shadow-xl">
             <span className="font-medium text-gray-200">{hoveredFixture.name}</span>
             <span className="text-gray-600 ml-2">{hoveredFixture.fixtureType}</span>
+          </div>
+        )}
+
+        {/* Fixture quick-select list — search + click to select & zoom */}
+        {showFixtureList && (
+          <div
+            className="absolute top-3 left-3 z-20 w-72 max-h-[75%] bg-[#12121a]/95 border border-gray-800 rounded-xl shadow-2xl backdrop-blur-sm flex flex-col overflow-hidden"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800/50 shrink-0">
+              <span className="text-xs font-semibold text-gray-200 flex items-center gap-1.5">
+                <List size={12} className="text-purple-400" /> Fixtures ({filteredFixtures.length})
+              </span>
+              <button onClick={() => setShowFixtureList(false)} className="text-gray-600 hover:text-gray-300 transition-colors" title="Fermer">
+                <X size={14} />
+              </button>
+            </div>
+            <div className="p-2 border-b border-gray-800/50 shrink-0">
+              <div className="relative">
+                <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+                <input
+                  autoFocus
+                  value={fixtureSearch}
+                  onChange={(e) => setFixtureSearch(e.target.value)}
+                  placeholder="Nom ou n° DMX…"
+                  className="w-full bg-gray-800/50 border border-gray-700/50 rounded pl-7 pr-2 py-1.5 text-xs text-gray-300 placeholder-gray-600 outline-none focus:border-purple-500/50"
+                />
+              </div>
+            </div>
+            <div className="overflow-y-auto flex-1 py-1">
+              {filteredFixtures.length === 0 ? (
+                <div className="text-xs text-gray-600 text-center py-6 px-3">Aucune fixture ne correspond</div>
+              ) : (
+                filteredFixtures.map((f, idx) => {
+                  const uniIdx = universeIndexMap.get(f.universeId);
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => { setSelectedFixtureId(f.id); setShowFixtureList(false); focusFixture(f.id); }}
+                      className={`w-full text-left px-3 py-1.5 flex items-center gap-2.5 transition-colors ${
+                        selectedFixtureId === f.id ? 'bg-purple-600/15' : 'hover:bg-gray-800/30'
+                      }`}
+                    >
+                      <span className={`w-6 h-6 shrink-0 rounded-md border flex items-center justify-center text-[10px] font-mono ${
+                        selectedFixtureId === f.id ? 'bg-purple-600/20 border-purple-500/40 text-purple-300' : 'bg-gray-800 border-gray-700/50 text-gray-400'
+                      }`}>{idx + 1}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-xs text-gray-200 truncate">{f.name}</span>
+                        <span className="block text-[9px] text-gray-600 truncate">
+                          {f.fixtureType} · U{(uniIdx ?? 0) + 1} @ {f.startAddress}
+                        </span>
+                      </span>
+                      <Crosshair size={12} className="text-gray-600 shrink-0" />
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
         )}
 
@@ -1396,6 +2384,16 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
                   selectedFixture.tier === 'secondary' ? 'bg-blue-500/20 text-blue-400' :
                   'bg-gray-500/20 text-gray-400'
                 }`}>{selectedFixture.tier}</span>
+                <button
+                  onClick={handleFixtureOn}
+                  className={`px-2.5 py-1 rounded text-[10px] font-semibold flex items-center gap-1 transition-colors border ${lightOn
+                    ? 'bg-green-500/25 text-green-300 border-green-500/50'
+                    : 'bg-green-600/15 text-green-400 border-green-700/40 hover:bg-green-600/25'}`}
+                  title={lightOn ? 'Éteindre' : 'Allumer (dimmer max + blanc)'}
+                >
+                  <Zap size={11} />
+                  {lightOn ? 'Éteindre' : 'Allumer'}
+                </button>
               </div>
               <button
                 onClick={() => setSelectedFixtureId(null)}
@@ -1412,7 +2410,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
                   <span className="text-gray-500">X Position</span>
-                  <span className="text-gray-400 font-mono">{(selectedPos.x * STAGE_WIDTH).toFixed(1)}m</span>
+                  <span className="text-gray-400 font-mono">{(selectedPos.x * stageDims.width).toFixed(1)}m</span>
                 </div>
                 <input
                   type="range"
@@ -1424,7 +2422,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
                   className="w-full h-1 accent-purple-500 cursor-pointer"
                 />
                 <div className="flex justify-between text-[8px] text-gray-700">
-                  <span>0m</span><span>{STAGE_WIDTH}m</span>
+                  <span>0m</span><span>{stageDims.width}m</span>
                 </div>
               </div>
 
@@ -1432,7 +2430,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
                   <span className="text-gray-500">Z Depth</span>
-                  <span className="text-gray-400 font-mono">{(selectedPos.y * STAGE_DEPTH).toFixed(1)}m</span>
+                  <span className="text-gray-400 font-mono">{(selectedPos.y * stageDims.depth).toFixed(1)}m</span>
                 </div>
                 <input
                   type="range"
@@ -1444,7 +2442,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
                   className="w-full h-1 accent-purple-500 cursor-pointer"
                 />
                 <div className="flex justify-between text-[8px] text-gray-700">
-                  <span>0m</span><span>{STAGE_DEPTH}m</span>
+                  <span>0m</span><span>{stageDims.depth}m</span>
                 </div>
               </div>
 
@@ -1530,7 +2528,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
                 </div>
               </div>
 
-              {/* Heading / Rotation + Tilt - only for fixtures with Pan/Tilt channels */}
+              {/* Pan/Tilt tare — visual only, does NOT touch DMX */}
               {selectedFixture && selectedFixture.fixtureType && (() => {
                 const f3d = fixturesRef.current.get(selectedFixture.id);
                 const hasPan = f3d?.channelMap?.panOffset !== null && f3d?.channelMap?.panOffset !== undefined;
@@ -1540,7 +2538,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
                   <>
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-gray-500">Heading (Pan)</span>
+                  <span className="text-gray-500">Pan (tare visuelle)</span>
                   <span className="text-gray-400 font-mono">{((selectedPos.heading ?? 0)).toFixed(0)}°</span>
                 </div>
                 <input
@@ -1557,10 +2555,9 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
                 </div>
               </div>
 
-              {/* Beam Tilt */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-gray-500">Tilt</span>
+                  <span className="text-gray-500">Tilt (tare visuelle)</span>
                   <span className="text-gray-400 font-mono">{((selectedPos.tilt ?? 0)).toFixed(0)}°</span>
                 </div>
                 <input
@@ -1576,6 +2573,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
                   <span>-90°</span><span>+90°</span>
                 </div>
               </div>
+              <p className="text-[9px] text-gray-600">Réglage visuel uniquement — ne touche pas au DMX.</p>
                   </>
                 ) : null;
               })()}
@@ -1638,6 +2636,13 @@ function disposeFixture3D(f3d: Fixture3D): void {
     f3d.beamCone.geometry?.dispose();
     (f3d.beamCone.material as THREE.Material)?.dispose();
   }
+  for (const eh of f3d.extraHeads ?? []) {
+    if (eh.pointLight) eh.pointLight.dispose();
+    if (eh.beamCone) {
+      eh.beamCone.geometry?.dispose();
+      (eh.beamCone.material as THREE.Material)?.dispose();
+    }
+  }
   if (f3d.floorSpot) {
     f3d.floorSpot.geometry?.dispose();
     (f3d.floorSpot.material as THREE.Material)?.dispose();
@@ -1667,8 +2672,8 @@ function fitMountRotation(f3d: Fixture3D, mode: string): void {
   }
   // top: no modification (base at bottom, beam down)
 
-  // Apply mount-compensated head tilt
-  if (f3d.headGroup) {
-    f3d.headGroup.rotation.x = f3d._mountTilt + (f3d._staticTilt ?? 0);
+  // Extra heads follow the mount compensation (no independent static tilt)
+  for (const eh of f3d.extraHeads ?? []) {
+    eh._mountTilt = f3d._mountTilt;
   }
 }

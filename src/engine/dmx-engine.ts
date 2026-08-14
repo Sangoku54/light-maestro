@@ -85,6 +85,7 @@ export interface TierMultipliers {
   primary: number;
   secondary: number;
   tertiary: number;
+  other?: number;
 }
 
 export interface EngineConfig {
@@ -95,6 +96,8 @@ export interface EngineConfig {
   strobeLimit?: number;
   colorFadeMs?: number;
   disabledFixtures?: Set<string>;
+  /** Fixture stage positions for pan/tilt stage clamping; keyed by fixture id */
+  fixturePositions?: Record<string, { x: number; y: number }>;
 }
 
 // ═══════════════════════════════ Color Helpers ═══════════════════════════════════
@@ -364,7 +367,7 @@ export function analyzeFixture(
 
 // ═══════════════════════════ Tier Helpers ═══════════════════════════════
 
-const TIER_HUE: Record<FixtureTier, number> = { primary: 0, secondary: 120, tertiary: 120 };
+const TIER_HUE: Record<FixtureTier, number> = { primary: 0, secondary: 120, tertiary: 120, other: 0 };
 
 function getTierIntensityMult(tier: FixtureTier, overrides?: TierMultipliers): number {
   if (overrides) {
@@ -382,10 +385,38 @@ function getTierMovAmp(tier: FixtureTier): number {
   if (tier === 'primary') return 1.0;
   if (tier === 'secondary') return 0.8;
   if (tier === 'tertiary') return 0.5;
+  if (tier === 'other') return 0.4;
   return 1.0;
 }
 
 // ═══════════════════════════ Movement Engine ═══════════════════════════════════
+
+/**
+ * Clamp pan/tilt DMX values to keep beams on stage based on fixture position.
+ * - Fixtures on left edge (X=0) can only pan right → prevents pointing off stage left
+ * - Fixtures on right edge (X=1) can only pan left → prevents pointing off stage right
+ * - Fixtures at back (Y=0) can only tilt forward → prevents pointing at back wall
+ * - Fixtures at front (Y=1) can tilt freely in both directions
+ */
+function clampPanToStage(panDmx: number, fixtureX: number): number {
+  const panFromCenter = panDmx - 128; // negative = left, positive = right
+  // Max pan left: proportional to how far right the fixture is (X=0 → 0 left, X=1 → full left)
+  const maxLeft = Math.round(fixtureX * 128);
+  // Max pan right: proportional to how far left the fixture is (X=0 → full right, X=1 → 0)
+  const maxRight = Math.round((1 - fixtureX) * 128);
+  const clamped = Math.max(-maxLeft, Math.min(maxRight, panFromCenter));
+  return 128 + clamped;
+}
+
+function clampTiltToStage(tiltDmx: number, fixtureY: number): number {
+  const tiltFromCenter = tiltDmx - 128; // negative = up/back, positive = down/forward
+  // Max tilt back (negative): full at center, limited at back (Y=0 → 0 back)
+  const maxBack = Math.round(Math.max(0.2, fixtureY) * 128); // minimum 20% to avoid total freeze
+  // Max tilt forward (positive): full at center, full at front
+  const maxForward = Math.round(Math.min(1, fixtureY + 0.3) * 128); // generous forward range
+  const clamped = Math.max(-maxBack, Math.min(maxForward, tiltFromCenter));
+  return 128 + clamped;
+}
 
 type MovementPattern =
   | 'static' | 'sweep' | 'circle' | 'pulse' | 'wave'
@@ -456,6 +487,8 @@ export interface ComputeFrameOptions {
   fadeAlpha?: number;
   /** Per-fixture fade state (keyed by `${fixtureId}_${rgbOffset}`) */
   fadeState?: Map<string, { r: number; g: number; b: number }>;
+  /** Fixture stage position for pan/tilt clamping {x: 0-1, y: 0-1} */
+  fixturePosition?: { x: number; y: number };
 }
 
 export function computeFixtureFrame(opts: ComputeFrameOptions): Record<number, number> {
@@ -587,7 +620,8 @@ export function computeFixtureFrame(opts: ComputeFrameOptions): Record<number, n
     // Amplitude per tier
     let amplitude: number;
     if (input.movementAmplitude !== undefined) {
-      amplitude = Math.round(input.movementAmplitude * 128);
+      // genCues outputs DMX-scale amplitude; cap at 128 (= full edge-to-edge sweep from center)
+      amplitude = Math.min(128, Math.max(0, Math.round(input.movementAmplitude)));
     } else {
       if (pf.tier === 'primary') amplitude = 90;
       else if (pf.tier === 'secondary') amplitude = 70;
@@ -596,11 +630,21 @@ export function computeFixtureFrame(opts: ComputeFrameOptions): Record<number, n
     amplitude = Math.round(amplitude * getTierMovAmp(pf.tier));
 
     if (amplitude > 0) {
+      // Stage-aware pan/tilt clamping: use fixture position to keep beams on stage
+      const fxPos = opts.fixturePosition || { x: 0.5, y: 0.3 };
       for (let m = 0; m < motorCount; m++) {
         const motorPhase = m * (Math.PI * 2 / motorCount);
         const { px, py } = computeMovement(phase, motorPhase, movPattern);
-        if (m < panCount) chVals[pf.startAddress + fa.panOffsets[m]] = Math.max(0, Math.min(255, Math.round(128 + px * amplitude)));
-        if (m < tiltCount) chVals[pf.startAddress + fa.tiltOffsets[m]] = Math.max(0, Math.min(255, Math.round(128 + py * amplitude)));
+        if (m < panCount) {
+          const rawPan = Math.round(128 + px * amplitude);
+          const clampedPan = clampPanToStage(rawPan, fxPos.x);
+          chVals[pf.startAddress + fa.panOffsets[m]] = Math.max(0, Math.min(255, clampedPan));
+        }
+        if (m < tiltCount) {
+          const rawTilt = Math.round(128 + py * amplitude);
+          const clampedTilt = clampTiltToStage(rawTilt, fxPos.y);
+          chVals[pf.startAddress + fa.tiltOffsets[m]] = Math.max(0, Math.min(255, clampedTilt));
+        }
       }
     } else {
       for (const po of fa.panOffsets) chVals[pf.startAddress + po] = 128;
@@ -667,11 +711,12 @@ export function computeDmxCuesUnified(
     tierMultipliers?: TierMultipliers;
     strobeLimit?: number;
     disabledFixtures?: Set<string>;
+    fixturePositions?: Record<string, { x: number; y: number }>;
   },
 ): DmxCue[] {
   if (cues.length === 0 || patchedFixtures.length === 0) return [];
 
-  const { tierMultipliers, strobeLimit = 10, disabledFixtures } = options || {};
+  const { tierMultipliers, strobeLimit = 10, disabledFixtures, fixturePositions } = options || {};
 
   // Analyze all fixtures
   const analyses = patchedFixtures
@@ -712,8 +757,10 @@ export function computeDmxCuesUnified(
       const chVals: Record<number, number> = {};
 
       for (const fa of fixtures) {
+        const fxPos = fixturePositions?.[fa.fixture.id];
         const fixtureVals = computeFixtureFrame({
           fa, input, tierMultipliers, strobeLimit, movementPhase,
+          fixturePosition: fxPos,
         });
         Object.assign(chVals, fixtureVals);
       }

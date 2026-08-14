@@ -60,7 +60,7 @@ export interface FixtureTrack {
   enabled: boolean;
   colorBlocks: ColorBlock[];
   dimmerBlocks: DimmerBlock[];
-  strobeBlocks: StrobeBlocks[];
+  strobeBlocks: StrobeBlock[];
   movementBlocks: MovementBlock[];
   /** Additional channel overrides: addr → value (for gobo/prism/zoom etc.) */
   channelOverrides: Record<number, number>;

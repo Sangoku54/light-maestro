@@ -1,7 +1,7 @@
 ﻿/**
  * DMX Cue Computer - bridges AutoScript cues to DMX channel values.
  *
- * Takes patched fixtures + generated cues â†’ computes actual DMX values
+ * Takes patched fixtures + generated cues → computes actual DMX values
  * respecting fixture channel layouts (RGB, color wheel, dimmer, shutter, pan/tilt, gobo).
  *
  * Features an intelligent choreography engine:
@@ -17,7 +17,7 @@
 import type { PatchedFixture, FixtureTier } from '../stores/showStore';
 import { useShowStore, type FixtureGroup } from '../stores/showStore';
 
-// â”€â”€â”€ Inline fixture definition types (mirrors electron/fixtures/library.ts) â”€â”€
+// ─── Inline fixture definition types (mirrors electron/fixtures/library.ts) ──
 
 export interface DmxFixtureCapability {
   min: number;
@@ -66,7 +66,7 @@ export interface DmxFixtureDefinition {
   physical?: DmxFixturePhysical;
 }
 
-// â”€â”€â”€ DMX Cue type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── DMX Cue type ──────────────────────────────────────────────
 
 export interface DmxCue {
   time: number;
@@ -80,7 +80,7 @@ export interface DmxCue {
   manual?: boolean; // true when inserted by user via waveform context menu
 }
 
-// â”€â”€â”€ Cue input (from genCues) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Cue input (from genCues) ──────────────────────────────────
 
 export interface CueInput {
   time: number;
@@ -96,13 +96,15 @@ export interface CueInput {
   strobeProbability?: number;
   dimmerPulseOnBeat?: boolean;
   colorShiftSpeed?: number;
-  movement?: 'static' | 'sweep' | 'circle' | 'pulse' | 'wave';
+  movement?: string; // MovementPattern name: 'circle'|'zigzag'|'heartbeat'|etc (not section type)
+  movementAmplitude?: number; // 0-255 DMX amplitude, computed from audio features
+  movementSpeed?: number; // 0-1 speed multiplier, computed from audio features
   /** Continuous 0-1 audio energy at cue time (from energyCurve).
    *  When present, overrides string intensity for DMX value computation. */
   energy?: number;
 }
 
-// â”€â”€â”€ Movement Pattern Engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Movement Pattern Engine ───────────────────────────────────
 
 export type MovementPattern =
   | 'static'
@@ -129,7 +131,7 @@ export interface MovementConfig {
   phaseOffset: number;
 }
 
-// â”€â”€â”€ Section â†’ Movement config (fallback if cue.movement not set) â”€â”€
+// ─── Section → Movement config (fallback if cue.movement not set) ──
 
 const SECTION_MOVEMENT: Record<string, MovementConfig> = {
   intro:  { pattern: 'static',   centerX: 128, centerY: 128, amplitude: 50,  speed: 0.15, phaseOffset: 0.25 },
@@ -154,31 +156,45 @@ const DEFAULT_MOVEMENT: MovementConfig = {
  * When a cue specifies `movement`, use these presets with section-appropriate amplitude.
  */
 const MOVEMENT_BY_TYPE: Record<string, Omit<MovementConfig, 'amplitude'>> = {
-  static: { pattern: 'static', centerX: 128, centerY: 128, speed: 0.05, phaseOffset: 0.3 },
-  sweep:  { pattern: 'sweep',  centerX: 128, centerY: 128, speed: 0.35, phaseOffset: 0.15 },
-  circle: { pattern: 'circle', centerX: 128, centerY: 128, speed: 0.6,  phaseOffset: 0.1 },
-  pulse:  { pattern: 'bounce', centerX: 128, centerY: 128, speed: 0.8,  phaseOffset: 0.05 },
-  wave:   { pattern: 'wave',   centerX: 128, centerY: 128, speed: 0.5,  phaseOffset: 0.15 },
+  static:     { pattern: 'static',     centerX: 128, centerY: 128, speed: 0.05, phaseOffset: 0.3 },
+  sweep:      { pattern: 'sweep',      centerX: 128, centerY: 128, speed: 0.35, phaseOffset: 0.15 },
+  circle:     { pattern: 'circle',     centerX: 128, centerY: 128, speed: 0.6,  phaseOffset: 0.1 },
+  pulse:      { pattern: 'bounce',     centerX: 128, centerY: 128, speed: 0.8,  phaseOffset: 0.05 },
+  wave:       { pattern: 'wave',       centerX: 128, centerY: 128, speed: 0.5,  phaseOffset: 0.15 },
+  figure8:    { pattern: 'figure8',    centerX: 128, centerY: 128, speed: 0.45, phaseOffset: 0.12 },
+  zigzag:     { pattern: 'zigzag',     centerX: 128, centerY: 128, speed: 0.7,  phaseOffset: 0.08 },
+  diamond:    { pattern: 'diamond',    centerX: 128, centerY: 128, speed: 0.55, phaseOffset: 0.1 },
+  spiral:     { pattern: 'spiral',     centerX: 128, centerY: 128, speed: 0.4,  phaseOffset: 0.2 },
+  heartbeat:  { pattern: 'heartbeat',  centerX: 128, centerY: 128, speed: 0.75, phaseOffset: 0.05 },
+  randomWalk: { pattern: 'randomWalk', centerX: 128, centerY: 128, speed: 0.3,  phaseOffset: 0.25 },
+  panOnly:    { pattern: 'panOnly',    centerX: 128, centerY: 128, speed: 0.35, phaseOffset: 0.15 },
+  tiltOnly:   { pattern: 'tiltOnly',   centerX: 128, centerY: 128, speed: 0.35, phaseOffset: 0.15 },
+  bounce:     { pattern: 'bounce',     centerX: 128, centerY: 128, speed: 0.8,  phaseOffset: 0.05 }, // alias for pulse
 };
 
-function getMovementConfig(section: string, cueMovement?: string): MovementConfig {
+/** Select a movement pattern name using audio features from the cue. */
+function getMovementConfig(section: string, cueMovement?: string, movAmplitude?: number, movSpeed?: number): MovementConfig {
   // If cue provides a movement type, build from the type presets
   if (cueMovement && MOVEMENT_BY_TYPE[cueMovement]) {
     const base = MOVEMENT_BY_TYPE[cueMovement];
-    // Scale amplitude by section energy expectation
     const secKey = section.toLowerCase();
-    const secAmplitude = SECTION_MOVEMENT[secKey]?.amplitude ?? 40;
+    const secAmplitude = movAmplitude ?? SECTION_MOVEMENT[secKey]?.amplitude ?? 40;
     return {
       pattern: base.pattern as MovementPattern,
       centerX: base.centerX,
       centerY: base.centerY,
       amplitude: secAmplitude,
-      speed: base.speed,
+      speed: movSpeed ?? base.speed,
       phaseOffset: base.phaseOffset,
     };
   }
   const key = section.toLowerCase();
-  return SECTION_MOVEMENT[key] ?? DEFAULT_MOVEMENT;
+  const fallback = SECTION_MOVEMENT[key] ?? DEFAULT_MOVEMENT;
+  return {
+    ...fallback,
+    amplitude: movAmplitude ?? fallback.amplitude,
+    speed: movSpeed ?? fallback.speed,
+  };
 }
 
 function computeMovement(
@@ -282,7 +298,7 @@ function computeMovement(
   };
 }
 
-// â”€â”€â”€ Strobe configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Strobe configuration ──────────────────────────────────────
 
 const STROBE_DISABLED_SECTIONS = new Set(['intro', 'verse', 'bridge', 'outro']);
 
@@ -324,7 +340,7 @@ function shouldStrobe(section: string, strobeInput: boolean, strobeProbability?:
   return strobeInput;
 }
 
-// â”€â”€â”€ Gobo helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Gobo helpers ──────────────────────────────────────────────
 
 const BEAT_INTERVAL = 0.5;
 
@@ -342,7 +358,7 @@ function getGoboValue(
   return Math.round((cap.min + cap.max) / 2);
 }
 
-// â”€â”€â”€ Color helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Color helpers ─────────────────────────────────────────────
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');
@@ -456,6 +472,7 @@ export interface TierMultipliers {
   primary: number;    // 0-100 percentage
   secondary: number;  // 0-100 percentage
   tertiary: number;   // 0-100 percentage
+  other?: number;     // 0-100 percentage (optional)
 }
 
 function getTierIntensityMultiplier(tier: FixtureTier, overrides?: TierMultipliers): number {
@@ -479,6 +496,7 @@ function getTierMovementMultiplier(tier: FixtureTier): number {
     case 'primary': return 1.0;
     case 'secondary': return 0.8;
     case 'tertiary': return 0.5;
+    case 'other': return 0.4;
     default: return 1.0;
   }
 }
@@ -500,7 +518,7 @@ function getTierColorIndex(tier: FixtureTier, paletteIndex: number, paletteLengt
   }
 }
 
-// â”€â”€â”€ Options â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Options ───────────────────────────────────────────────────
 
 export interface ComputeDmxCuesOptions {
   cues: CueInput[];
@@ -514,7 +532,7 @@ export interface ComputeDmxCuesOptions {
   universeIds?: string[];
 }
 
-// â”€â”€â”€ Channel analysis â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Channel analysis ──────────────────────────────────────────
 
 interface FixtureChannelAnalysis {
   fixture: PatchedFixture;
@@ -530,6 +548,8 @@ interface FixtureChannelAnalysis {
   panFineOffset: number | null;
   tiltOffset: number | null;
   tiltFineOffset: number | null;
+  panOffsets: number[];
+  tiltOffsets: number[];
   prismOffset: number | null;
   effectOffset: number | null;
   effectCaps: DmxFixtureCapability[] | null;
@@ -559,6 +579,8 @@ function analyzeFixture(
     panFineOffset: null,
     tiltOffset: null,
     tiltFineOffset: null,
+    panOffsets: [],
+    tiltOffsets: [],
     prismOffset: null,
     effectOffset: null,
     effectCaps: null,
@@ -600,11 +622,13 @@ function analyzeFixture(
         break;
       case 'Pan':
         if (fa.panOffset === null) fa.panOffset = off;
-        else if (fa.panFineOffset === null) fa.panFineOffset = off;
+        else if (fa.panFineOffset === null && /\bfine\b/i.test(chName)) fa.panFineOffset = off;
+        if (!/\bfine\b/i.test(chName)) fa.panOffsets.push(off);
         break;
       case 'Tilt':
         if (fa.tiltOffset === null) fa.tiltOffset = off;
-        else if (fa.tiltFineOffset === null) fa.tiltFineOffset = off;
+        else if (fa.tiltFineOffset === null && /\bfine\b/i.test(chName)) fa.tiltFineOffset = off;
+        if (!/\bfine\b/i.test(chName)) fa.tiltOffsets.push(off);
         break;
       case 'Gobo':
         if (fa.goboOffset === null) {
@@ -672,7 +696,7 @@ function analyzeFixture(
   return fa;
 }
 
-// â”€â”€â”€ Main compute â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Main compute ──────────────────────────────────────────────
 
 export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
   const { cues, patchedFixtures, fixtureDefs, strobeLimit = 10, fixtureGroups = [], tierMultipliers } = options;
@@ -722,13 +746,13 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
     fixturesByUniverse.set(fa.universeIndex, list);
   }
 
-  // â”€â”€â”€ Diagnostic: track first cue per section â”€â”€â”€
+  // ─── Diagnostic: track first cue per section ───
 
 
   let cueIndex = 0;
   for (const cue of cues) {
-    // â”€â”€ NEW: Atmosphere-aware parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const movementConfig = getMovementConfig(cue.section, cue.movement);
+    // ── NEW: Atmosphere-aware parameters ──────────────
+    const movementConfig = getMovementConfig(cue.section, cue.movement, cue.movementAmplitude, cue.movementSpeed);
     const enableStrobe = shouldStrobe(cue.section, cue.strobe, cue.strobeProbability);
     const strobeRate = enableStrobe ? getStrobeRate(cue.section, cue.strobeProbability) : 0;
     const isDrop = cue.section.toLowerCase() === 'drop';
@@ -787,7 +811,7 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
         const fa = activeList[fi];
         const pf = fa.fixture;
 
-        // â”€â”€ 1. Intensity (HTP) - tier-scaled, dimmer-pulse aware â”€â”€
+        // ── 1. Intensity (HTP) - tier-scaled, dimmer-pulse aware ──
         // SoundSwitch principle: EVERY patched fixture ALWAYS gets dimmer >= absolute minimum.
         // Sections differ by movement pattern and strobe, NOT by going dark.
         let computedIntensity = 0;
@@ -935,8 +959,8 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
           if (enableStrobe && shouldTierStrobe(pf.tier)) {
             channelValues[shutterAddr] = strobeRate;
           } else if (fa.intensityOffset === null && computedIntensity > 0) {
-            // No dedicated dimmer â†’ map intensity to shutter range (8 = open min, 255 = open max)
-            // Linear mapping: intensity 0-255 â†’ shutter 8-255
+            // No dedicated dimmer → map intensity to shutter range (8 = open min, 255 = open max)
+            // Linear mapping: intensity 0-255 → shutter 8-255
             const shutterVal = 8 + Math.round((computedIntensity / 255) * 247);
             channelValues[shutterAddr] = Math.max(8, Math.min(255, shutterVal));
           } else {
@@ -947,7 +971,7 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
 
         }
 
-        // â”€â”€ 4. Pan/Tilt - choreography engine (tier-scaled) â”€â”€
+        // ── 4. Pan/Tilt - choreography engine (tier-scaled) ──
         const tierMovMult = getTierMovementMultiplier(pf.tier);
         if (tierMovMult > 0 && (fa.panOffset !== null || fa.tiltOffset !== null)) {
           const movement = computeMovement(
@@ -961,7 +985,9 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
           if (fa.panOffset !== null) {
             const centerX = movementConfig.centerX;
             const pan = Math.round(centerX + (movement.pan - centerX) * tierMovMult);
-            channelValues[pf.startAddress + fa.panOffset] = Math.max(0, Math.min(255, pan));
+            for (const po of fa.panOffsets.length > 0 ? fa.panOffsets : [fa.panOffset]) {
+              channelValues[pf.startAddress + po] = Math.max(0, Math.min(255, pan));
+            }
             if (fa.panFineOffset !== null) {
               channelValues[pf.startAddress + fa.panFineOffset] = pan;
             }
@@ -979,7 +1005,10 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
             } else {
               tilt = Math.round(centerY + (movement.tilt - centerY) * tierMovMult);
             }
-            channelValues[pf.startAddress + fa.tiltOffset] = Math.max(0, Math.min(255, tilt));
+            const tiltOffs = fa.tiltOffsets.length > 0 ? fa.tiltOffsets : [fa.tiltOffset];
+            for (const to of tiltOffs) {
+              channelValues[pf.startAddress + to] = Math.max(0, Math.min(255, tilt));
+            }
             if (fa.tiltFineOffset !== null) {
               channelValues[pf.startAddress + fa.tiltFineOffset] = tilt;
             }
@@ -988,7 +1017,7 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
           }
         }
 
-        // â”€â”€ 5. Gobo - rotate on beat boundaries, speed-aware â”€â”€
+        // ── 5. Gobo - rotate on beat boundaries, speed-aware ──
         if (fa.goboOffset !== null && fa.goboCaps && fa.goboCaps.length > 0) {
           const goboVal = getGoboValue(
             fa.goboCaps,
@@ -998,14 +1027,14 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
           channelValues[pf.startAddress + fa.goboOffset] = goboVal;
         }
 
-        // â”€â”€ 6. Prism - active on drops/chorus, rotate synced to beat â”€â”€
+        // ── 6. Prism - active on drops/chorus, rotate synced to beat ──
         if (fa.prismOffset !== null && (isDrop || isChorus)) {
           // Rotate prism on beat: cycle between prism insert + rotation
           const beatPhase = Math.floor(cue.time * 4) % 4;
           channelValues[pf.startAddress + fa.prismOffset] = beatPhase === 0 ? 255 : (beatPhase === 2 ? 128 : 0);
         }
 
-        // â”€â”€ 7. Effect macros - cycle through built-in fixture effects by section â”€â”€
+        // ── 7. Effect macros - cycle through built-in fixture effects by section ──
         if (fa.effectOffset !== null && fa.effectCaps && fa.effectCaps.length > 0) {
           const caps = fa.effectCaps;
           // Filter out "No Effect" caps (min=0) to avoid killing light output
@@ -1024,7 +1053,7 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
           if (effVal >= 8) channelValues[pf.startAddress + fa.effectOffset] = effVal;
         }
 
-        // â”€â”€ 8. Beam - zoom/focus variation by section energy â”€â”€
+        // ── 8. Beam - zoom/focus variation by section energy ──
         if (fa.beamOffset !== null) {
           // Wide beam on chorus/drop (high value), narrow on verse (low value)
           const beamVal = isDrop || isChorus ? 200 + Math.round(energy * 55)
@@ -1033,7 +1062,7 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
           channelValues[pf.startAddress + fa.beamOffset] = Math.max(0, Math.min(255, beamVal));
         }
 
-        // â”€â”€ 9. Speed - vary pan/tilt & effect speed by section â”€â”€
+        // ── 9. Speed - vary pan/tilt & effect speed by section ──
         if (fa.speedOffset !== null) {
           const speedVal = isDrop ? 220 + Math.round(energy * 35)
             : isChorus ? 180 + Math.round(energy * 40)
@@ -1059,7 +1088,7 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
         fixtureNames.push(pf.name);
       }
 
-      // ALWAYS ensure minimum DMX output â€” even if no fixture channels matched.
+      // ALWAYS ensure minimum DMX output — even if no fixture channels matched.
       // Every cue must produce at least dimmer=128 on all universe fixtures.
       if (activeList.length > 0 && Object.keys(channelValues).length === 0) {
         for (const fa of activeList) {
@@ -1102,7 +1131,7 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
 }
 
 
-// â”€â”€â”€ Fixture definition loader (async, with caching) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Fixture definition loader (async, with caching) ───────────
 
 let _defCache: Map<string, DmxFixtureDefinition> | null = null;
 let _defLoadPromise: Promise<Map<string, DmxFixtureDefinition>> | null = null;

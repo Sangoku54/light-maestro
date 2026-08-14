@@ -212,7 +212,7 @@
   },
   "design": {
     "tabs": {
-      "fixtures": "Projecteurs",
+      "fixtures": "map DMX",
       "groups": "Groupes",
       "scenes": "Scènes",
       "chasers": "Chasers",
