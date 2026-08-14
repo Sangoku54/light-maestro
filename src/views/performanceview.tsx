@@ -2531,47 +2531,542 @@ const SimpleDeskPanel: React.FC = () => {
 // MIDI MAPPING PANEL
 // ═══════════════════════════════════════════════════════════
 
-const MIDIMappingPanel: React.FC = () => { const { t } = useTranslation(); return (
-  <div className="h-full p-8 overflow-y-auto">
-    <div className="flex items-center justify-between mb-6">
-      <div>
-        <h2 className="text-xl font-bold text-white flex items-center gap-2">
-          <Sliders size={20} className="text-purple-400" /> {t('perform.midi.title')}
-        </h2>
-        <p className="text-xs text-gray-500 mt-0.5">{t('perform.midi.subtitle')}</p>
-      </div>
-      <button className="px-3 py-1.5 bg-purple-600/20 text-purple-300 rounded-lg text-xs font-medium hover:bg-purple-600/30">
-        {t('perform.midi.midiLearn')}
-      </button>
-    </div>
 
-    <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
-      <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-gray-800/50 text-[10px] font-medium text-gray-500 uppercase tracking-wider">
-        <span className="col-span-2">{t('perform.midi.columns.midi')}</span>
-        <span className="col-span-3">{t('perform.midi.columns.controller')}</span>
-        <span className="col-span-4">{t('perform.midi.columns.target')}</span>
-        <span className="col-span-2">{t('perform.midi.columns.range')}</span>
-        <span className="col-span-1"></span>
+// ─── MIDI API contract (miroir de electron/midi/manager.ts + preload) ───────
+// La surface preload (M1, agent parallèle) n'expose pas encore
+// startLearn/stopLearn/addMapping/removeMapping/onMappingChanged dans
+// src/types.d.ts : on bridge via un type local (cast) pour compiler dès
+// aujourd'hui contre le CONTRAT, et fonctionner dès que le main sera prêt.
+
+type MidiTypeName = 'note' | 'cc' | 'program';
+
+interface MidiDeviceInfo {
+  id: string;
+  name: string;
+  manufacturer?: string;
+  input?: boolean;
+  output?: boolean;
+}
+
+type MidiTargetSpec =
+  | { type: 'dmx-channel'; universe: number; channel: number }
+  | { type: 'widget'; widgetId: string; property: string }
+  | { type: 'scene'; sceneId: string; action: 'play' | 'stop' | 'toggle' }
+  | { type: 'chaser'; chaserId: string; action: 'play' | 'stop' | 'next' | 'previous' }
+  | { type: 'cueList'; cueListId: string; action: 'go' | 'back' | 'stop' }
+  | { type: 'blackout' }
+  | { type: 'grandMaster' }
+  | { type: 'autoscript'; action: 'toggle' | 'nextEffect' | 'intensity' };
+
+interface MidiMappingEntry {
+  id: string;
+  midiChannel: number;
+  midiType: MidiTypeName;
+  midiValue: number;
+  midiRange?: [number, number];
+  target: MidiTargetSpec;
+  feedback?: boolean;
+}
+
+interface MidiStatusEvent { connected: boolean; deviceId?: string }
+interface MidiActivityEvent { channel: number; type: MidiTypeName; note: number; value?: number }
+
+interface MidiApiContract {
+  listDevices: () => Promise<MidiDeviceInfo[]>;
+  connect: (deviceId: string) => Promise<void>;
+  disconnect: () => Promise<void>;
+  getMapping: () => Promise<MidiMappingEntry[]>;
+  setMapping: (mapping: MidiMappingEntry[]) => Promise<void>;
+  addMapping: (mapping: MidiMappingEntry) => Promise<void>;
+  removeMapping: (id: string) => Promise<void>;
+  startLearn: (target: MidiTargetSpec) => Promise<void>;
+  stopLearn: () => Promise<void>;
+  onStatus: (cb: (status: MidiStatusEvent) => void) => (() => void) | void;
+  onActivity: (cb: (activity: MidiActivityEvent) => void) => (() => void) | void;
+  onMappingChanged: (cb: (mapping: MidiMappingEntry[]) => void) => (() => void) | void;
+  onClock: (cb: (clock: { bpm: number; running: boolean }) => void) => (() => void) | void;
+}
+
+function getMidiApi(): MidiApiContract | null {
+  const api = window.lightMaestro?.midi;
+  return api ? (api as unknown as MidiApiContract) : null;
+}
+
+type MidiTargetKind = 'blackout' | 'grandMaster' | 'scene' | 'chaser' | 'cueList' | 'dmx' | 'widget';
+
+const MIDIMappingPanel: React.FC = () => {
+  const { t } = useTranslation();
+  const scenes = useShowStore((s) => s.scenes);
+  const chasers = useShowStore((s) => s.chasers);
+  const cueLists = useShowStore((s) => s.cueLists);
+  const universes = useShowStore((s) => s.universes);
+  const widgets = usePerformStore((s) => s.vcWidgets);
+
+  const [devices, setDevices] = useState<MidiDeviceInfo[]>([]);
+  const [devicesLoading, setDevicesLoading] = useState(true);
+  const [connectedId, setConnectedId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [mappings, setMappings] = useState<MidiMappingEntry[]>([]);
+  const [mappingsLoading, setMappingsLoading] = useState(true);
+  const [learning, setLearning] = useState(false);
+  const [activityOn, setActivityOn] = useState(false);
+  const [clockInfo, setClockInfo] = useState<{ bpm: number; running: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [targetKind, setTargetKind] = useState<MidiTargetKind>('blackout');
+  const [targetSceneId, setTargetSceneId] = useState('');
+  const [targetChaserId, setTargetChaserId] = useState('');
+  const [targetCueListId, setTargetCueListId] = useState('');
+  const [targetUniverseIdx, setTargetUniverseIdx] = useState(0);
+  const [targetChannel, setTargetChannel] = useState(1);
+  const [targetWidgetId, setTargetWidgetId] = useState('');
+
+  const activityTimer = useRef<number | null>(null);
+
+  // Garde l'univers sélectionné dans les bornes quand la liste change
+  useEffect(() => {
+    if (universes.length > 0 && targetUniverseIdx >= universes.length) {
+      setTargetUniverseIdx(universes.length - 1);
+    }
+  }, [universes, targetUniverseIdx]);
+
+  // Mount : liste des devices + mapping, abonnements status/activity/mappingChanged
+  useEffect(() => {
+    const api = getMidiApi();
+    let cancelled = false;
+    const unsubs: Array<(() => void) | undefined> = [];
+    if (!api) {
+      setDevicesLoading(false);
+      setMappingsLoading(false);
+      return;
+    }
+
+    api.listDevices()
+      .then((devs) => { if (!cancelled) { setDevices(devs || []); setDevicesLoading(false); } })
+      .catch(() => { if (!cancelled) setDevicesLoading(false); });
+
+    api.getMapping()
+      .then((m) => { if (!cancelled) { setMappings(m || []); setMappingsLoading(false); } })
+      .catch(() => { if (!cancelled) setMappingsLoading(false); });
+
+    const s = api.onStatus((st) => {
+      if (cancelled) return;
+      setConnectedId(st.connected ? (st.deviceId ?? null) : null);
+    });
+    if (typeof s === 'function') unsubs.push(s);
+
+    const a = api.onActivity(() => {
+      if (cancelled) return;
+      setActivityOn(true);
+      if (activityTimer.current) window.clearTimeout(activityTimer.current);
+      activityTimer.current = window.setTimeout(() => setActivityOn(false), 220);
+    });
+    if (typeof a === 'function') unsubs.push(a);
+
+    const m = api.onMappingChanged((list) => {
+      if (cancelled) return;
+      setMappings(list || []);
+      // Le learn s'arrête tout seul côté main une fois le mapping créé
+      setLearning(false);
+    });
+    if (typeof m === 'function') unsubs.push(m);
+
+    // M5 — MIDI clock : BPM affiché en direct (le hook midi-trigger scale
+    // aussi le tempo des chasers actifs depuis ce même canal).
+    const clk = api.onClock((clock) => {
+      if (cancelled) return;
+      setClockInfo(clock && clock.bpm > 0 ? clock : null);
+    });
+    if (typeof clk === 'function') unsubs.push(clk);
+
+    return () => {
+      cancelled = true;
+      unsubs.forEach((fn) => { if (fn) fn(); });
+      if (activityTimer.current) window.clearTimeout(activityTimer.current);
+      try { api.stopLearn(); } catch { /* le main peut ne pas être branché (tests/aperçu) */ }
+    };
+  }, []);
+
+  const buildTarget = (): MidiTargetSpec | null => {
+    switch (targetKind) {
+      case 'blackout': return { type: 'blackout' };
+      case 'grandMaster': return { type: 'grandMaster' };
+      case 'scene': return targetSceneId ? { type: 'scene', sceneId: targetSceneId, action: 'toggle' } : null;
+      case 'chaser': return targetChaserId ? { type: 'chaser', chaserId: targetChaserId, action: 'play' } : null;
+      case 'cueList': return targetCueListId ? { type: 'cueList', cueListId: targetCueListId, action: 'go' } : null;
+      case 'dmx': return { type: 'dmx-channel', universe: targetUniverseIdx, channel: targetChannel };
+      case 'widget': return targetWidgetId ? { type: 'widget', widgetId: targetWidgetId, property: 'flash' } : null;
+      default: return null;
+    }
+  };
+
+  const handleStartLearn = async () => {
+    const api = getMidiApi();
+    if (!api) return;
+    const target = buildTarget();
+    if (!target) { setError(t('perform.midi.errors.noTarget')); return; }
+    setError(null);
+    setLearning(true);
+    try { await api.startLearn(target); }
+    catch { setLearning(false); setError(t('perform.midi.errors.learn')); }
+  };
+
+  const handleStopLearn = async () => {
+    const api = getMidiApi();
+    if (!api) return;
+    setLearning(false);
+    try { await api.stopLearn(); } catch { /* silencieux */ }
+  };
+
+  const handleConnect = async (deviceId: string) => {
+    const api = getMidiApi();
+    if (!api) return;
+    setBusyId(deviceId);
+    setError(null);
+    try { await api.connect(deviceId); }
+    catch { setError(t('perform.midi.errors.connect')); }
+    finally { setBusyId(null); }
+  };
+
+  const handleDisconnect = async () => {
+    const api = getMidiApi();
+    if (!api) return;
+    setBusyId(connectedId);
+    setError(null);
+    try { await api.disconnect(); }
+    catch { setError(t('perform.midi.errors.disconnect')); }
+    finally { setBusyId(null); }
+  };
+
+  const handleRemoveMapping = async (id: string) => {
+    const api = getMidiApi();
+    if (!api) return;
+    setError(null);
+    try { await api.removeMapping(id); }
+    catch { setError(t('perform.midi.errors.remove')); }
+  };
+
+  const midiTypeLabel = (type: MidiTypeName): string => {
+    if (type === 'cc') return t('perform.midi.midiTypes.cc');
+    if (type === 'program') return t('perform.midi.midiTypes.program');
+    return t('perform.midi.midiTypes.note');
+  };
+
+  const actionLabel = (action: string): string => {
+    const v = t(`perform.midi.actions.${action}`);
+    return v !== `perform.midi.actions.${action}` ? v : action;
+  };
+
+  const targetLabel = (target: MidiTargetSpec): string => {
+    switch (target.type) {
+      case 'blackout': return t('perform.midi.targets.blackout');
+      case 'grandMaster': return t('perform.midi.targets.grandMaster');
+      case 'scene': {
+        const sc = scenes.find((x) => x.id === target.sceneId);
+        return `${t('perform.midi.targets.scene')} : ${sc ? sc.name : target.sceneId}`;
+      }
+      case 'chaser': {
+        const ch = chasers.find((x) => x.id === target.chaserId);
+        return `${t('perform.midi.targets.chaser')} : ${ch ? ch.name : target.chaserId}`;
+      }
+      case 'cueList': {
+        const cl = cueLists.find((x) => x.id === target.cueListId);
+        return `${t('perform.midi.targets.cueList')} : ${cl ? cl.name : target.cueListId}`;
+      }
+      case 'dmx-channel': {
+        const u = universes[target.universe];
+        return `DMX ${target.universe + 1}${u ? ` · ${u.name}` : ''} · ${t('perform.midi.columns.channel')} ${target.channel}`;
+      }
+      case 'widget': {
+        const w = widgets.find((x) => x.id === target.widgetId);
+        const label = w && w.config && w.config.label ? w.config.label : w ? w.type : target.widgetId;
+        return `${t('perform.midi.targets.widget')} : ${label} (${actionLabel(target.property)})`;
+      }
+      case 'autoscript': return `${t('perform.midi.targets.autoScript')} (${actionLabel(target.action)})`;
+      default: return 'MIDI';
+    }
+  };
+
+  return (
+    <div className="h-full p-8 overflow-y-auto">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <Sliders size={20} className="text-purple-400" /> {t('perform.midi.title')}
+          </h2>
+          <p className="text-xs text-gray-500 mt-0.5">{t('perform.midi.subtitle')}</p>
+        </div>
+        {/* Voyant d'activité : flash à chaque message MIDI reçu */}
+        <div className="flex items-center gap-2 bg-[#0d0d14] border border-gray-800/50 rounded-lg px-3 py-1.5">
+          {clockInfo && clockInfo.running && (
+            <span className="flex items-center gap-1.5 text-[10px] text-purple-300 font-mono mr-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+              {Math.round(clockInfo.bpm)} BPM
+            </span>
+          )}
+          <Zap size={14} className={activityOn ? 'text-green-400' : 'text-gray-600'} />
+          <span
+            className={`w-2 h-2 rounded-full transition-colors duration-150 ${activityOn ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.9)]' : 'bg-gray-700'}`}
+          />
+          <span className="text-[10px] text-gray-500">{t('perform.midi.activity')}</span>
+        </div>
       </div>
-      {[
-        { midi: 'CH1 · CC 7', controller: 'Korg nanoKONTROL', target: t('perform.midi.targets.grandMaster'), range: '0-255' },
-        { midi: 'CH1 · CC 1', controller: 'Korg nanoKONTROL', target: t('perform.midi.targets.chaseSpeed'), range: '0.1-20' },
-        { midi: 'CH1 · Note 36', controller: 'AKAI APC Mini', target: t('perform.midi.targets.blackout'), range: 'Toggle' },
-        { midi: 'CH2 · CC 10', controller: 'Behringer BCF2000', target: t('perform.midi.targets.washIntensity'), range: '0-255' },
-      ].map((row, i) => (
-        <div key={i} className="grid grid-cols-12 gap-2 px-4 py-2 text-xs hover:bg-gray-800/20 border-b border-gray-800/20 last:border-0">
-          <span className="col-span-2 text-gray-300 font-mono">{row.midi}</span>
-          <span className="col-span-3 text-gray-400">{row.controller}</span>
-          <span className="col-span-4 text-gray-300">{row.target}</span>
-          <span className="col-span-2 text-gray-500">{row.range}</span>
-          <span className="col-span-1 text-right">
-            <button className="text-gray-600 hover:text-red-400">✕</button>
+
+      {error && (
+        <div className="mb-4 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400">
+          {error}
+        </div>
+      )}
+
+      {/* ── Périphériques MIDI ── */}
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden mb-5">
+        <div className="px-4 py-2.5 border-b border-gray-800/50 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-gray-300">{t('perform.midi.devices')}</span>
+            <span className={`w-2 h-2 rounded-full ${connectedId ? 'bg-green-400' : 'bg-red-500/70'}`} />
+          </div>
+          <span className="text-[10px] text-gray-600">
+            {connectedId
+              ? t('perform.midi.connectedTo', { name: (devices.find((d) => d.id === connectedId) || {}).name || connectedId })
+              : t('perform.midi.notConnected')}
           </span>
         </div>
-      ))}
+        {devicesLoading ? (
+          <div className="px-4 py-6 text-xs text-gray-600 flex items-center gap-2">
+            <Loader size={14} className="animate-spin text-gray-500" /> {t('perform.midi.loadingDevices')}
+          </div>
+        ) : devices.length === 0 ? (
+          <div className="px-4 py-6 text-xs text-gray-600">{t('perform.midi.noDevices')}</div>
+        ) : (
+          <div className="divide-y divide-gray-800/30">
+            {devices.map((d) => {
+              const isConnected = d.id === connectedId;
+              return (
+                <div key={d.id} className="px-4 py-2.5 flex items-center gap-3">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isConnected ? 'bg-green-400' : 'bg-gray-700'}`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-gray-300 truncate">{d.name}</div>
+                    <div className="text-[10px] text-gray-600 truncate">
+                      {d.manufacturer || '—'} ·{' '}
+                      {d.input && d.output
+                        ? t('perform.midi.inout')
+                        : d.input
+                        ? t('perform.midi.input')
+                        : t('perform.midi.output')}
+                    </div>
+                  </div>
+                  {isConnected ? (
+                    <button
+                      onClick={handleDisconnect}
+                      disabled={busyId !== null}
+                      className="px-2.5 py-1 text-[10px] rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 disabled:opacity-50 shrink-0"
+                    >
+                      {busyId === d.id ? <Loader size={11} className="animate-spin" /> : t('perform.midi.disconnect')}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleConnect(d.id)}
+                      disabled={busyId !== null}
+                      className="px-2.5 py-1 text-[10px] rounded-lg bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 disabled:opacity-50 shrink-0"
+                    >
+                      {busyId === d.id ? <Loader size={11} className="animate-spin" /> : t('perform.midi.connect')}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── MIDI Learn ── */}
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-4 mb-5">
+        <div className="text-xs font-medium text-gray-300 mb-3">{t('perform.midi.learn.title')}</div>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] text-gray-600">{t('perform.midi.learn.kind')}</span>
+            <select
+              value={targetKind}
+              onChange={(e) => setTargetKind(e.target.value as MidiTargetKind)}
+              className="bg-[#0a0a0f] border border-gray-800/60 rounded-lg px-2 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-500/50"
+            >
+              <option value="blackout">{t('perform.midi.targets.blackout')}</option>
+              <option value="grandMaster">{t('perform.midi.targets.grandMaster')}</option>
+              <option value="scene">{t('perform.midi.targets.scene')}</option>
+              <option value="chaser">{t('perform.midi.targets.chaser')}</option>
+              <option value="cueList">{t('perform.midi.targets.cueList')}</option>
+              <option value="dmx">{t('perform.midi.targets.dmxChannel')}</option>
+              <option value="widget">{t('perform.midi.targets.widget')}</option>
+            </select>
+          </div>
+
+          {targetKind === 'scene' && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] text-gray-600">{t('perform.midi.learn.target')}</span>
+              <select
+                value={targetSceneId}
+                onChange={(e) => setTargetSceneId(e.target.value)}
+                className="bg-[#0a0a0f] border border-gray-800/60 rounded-lg px-2 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-500/50 min-w-[160px]"
+              >
+                <option value="">{t('perform.midi.learn.selectPlaceholder')}</option>
+                {scenes.length === 0 && <option value="" disabled>{t('perform.midi.learn.noScenes')}</option>}
+                {scenes.map((sc) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
+              </select>
+            </div>
+          )}
+
+          {targetKind === 'chaser' && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] text-gray-600">{t('perform.midi.learn.target')}</span>
+              <select
+                value={targetChaserId}
+                onChange={(e) => setTargetChaserId(e.target.value)}
+                className="bg-[#0a0a0f] border border-gray-800/60 rounded-lg px-2 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-500/50 min-w-[160px]"
+              >
+                <option value="">{t('perform.midi.learn.selectPlaceholder')}</option>
+                {chasers.length === 0 && <option value="" disabled>{t('perform.midi.learn.noChasers')}</option>}
+                {chasers.map((ch) => <option key={ch.id} value={ch.id}>{ch.name}</option>)}
+              </select>
+            </div>
+          )}
+
+          {targetKind === 'cueList' && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] text-gray-600">{t('perform.midi.learn.target')}</span>
+              <select
+                value={targetCueListId}
+                onChange={(e) => setTargetCueListId(e.target.value)}
+                className="bg-[#0a0a0f] border border-gray-800/60 rounded-lg px-2 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-500/50 min-w-[160px]"
+              >
+                <option value="">{t('perform.midi.learn.selectPlaceholder')}</option>
+                {cueLists.length === 0 && <option value="" disabled>{t('perform.midi.learn.noCueLists')}</option>}
+                {cueLists.map((cl) => <option key={cl.id} value={cl.id}>{cl.name}</option>)}
+              </select>
+            </div>
+          )}
+
+          {targetKind === 'widget' && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] text-gray-600">{t('perform.midi.learn.target')}</span>
+              <select
+                value={targetWidgetId}
+                onChange={(e) => setTargetWidgetId(e.target.value)}
+                className="bg-[#0a0a0f] border border-gray-800/60 rounded-lg px-2 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-500/50 min-w-[160px]"
+              >
+                <option value="">{t('perform.midi.learn.selectPlaceholder')}</option>
+                {widgets.length === 0 && <option value="" disabled>{t('perform.midi.learn.noWidgets')}</option>}
+                {widgets.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.config && w.config.label ? w.config.label : w.type}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {targetKind === 'dmx' && (
+            <>
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] text-gray-600">{t('perform.midi.targets.universe')}</span>
+                <select
+                  value={targetUniverseIdx}
+                  onChange={(e) => setTargetUniverseIdx(Number(e.target.value))}
+                  className="bg-[#0a0a0f] border border-gray-800/60 rounded-lg px-2 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-500/50"
+                >
+                  {universes.length === 0
+                    ? <option value={0}>1</option>
+                    : universes.map((u, i) => (
+                        <option key={u.id} value={i}>{i + 1}{u.name ? ` · ${u.name}` : ''}</option>
+                      ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] text-gray-600">{t('perform.midi.columns.channel')}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={512}
+                  value={targetChannel}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setTargetChannel(Number.isFinite(v) ? Math.min(512, Math.max(1, v)) : 1);
+                  }}
+                  className="w-20 bg-[#0a0a0f] border border-gray-800/60 rounded-lg px-2 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-500/50"
+                />
+              </div>
+            </>
+          )}
+
+          <div className="flex-1" />
+
+          {learning ? (
+            <div className="flex items-center gap-3 px-3 py-2 bg-purple-600/10 border border-purple-500/30 rounded-lg">
+              <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+              <span className="text-xs text-purple-300">{t('perform.midi.learn.waiting')}</span>
+              <button
+                onClick={handleStopLearn}
+                className="px-2.5 py-1 text-[10px] rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
+              >
+                {t('perform.midi.learn.cancel')}
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleStartLearn}
+              className="px-3 py-1.5 bg-purple-600/20 text-purple-300 rounded-lg text-xs font-medium hover:bg-purple-600/30"
+            >
+              {t('perform.midi.midiLearn')}
+            </button>
+          )}
+        </div>
+        <p className="text-[10px] text-gray-600 mt-2">{t('perform.midi.learn.hint')}</p>
+      </div>
+
+      {/* ── Table de mapping ── */}
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-gray-800/50 flex items-center justify-between">
+          <span className="text-xs font-medium text-gray-300">{t('perform.midi.mappings')}</span>
+          <span className="text-[10px] text-gray-600">{mappings.length}</span>
+        </div>
+        <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-gray-800/50 text-[10px] font-medium text-gray-500 uppercase tracking-wider">
+          <span className="col-span-3">{t('perform.midi.columns.midi')}</span>
+          <span className="col-span-2">{t('perform.midi.columns.channel')}</span>
+          <span className="col-span-5">{t('perform.midi.columns.target')}</span>
+          <span className="col-span-2 text-right">{t('perform.midi.columns.actions')}</span>
+        </div>
+        {mappingsLoading ? (
+          <div className="px-4 py-6 text-xs text-gray-600 flex items-center gap-2">
+            <Loader size={14} className="animate-spin text-gray-500" /> {t('perform.midi.loadingMappings')}
+          </div>
+        ) : mappings.length === 0 ? (
+          <div className="px-4 py-6 text-xs text-gray-600">{t('perform.midi.noMappings')}</div>
+        ) : (
+          mappings.map((m) => {
+            const label = targetLabel(m.target);
+            return (
+              <div key={m.id} className="grid grid-cols-12 gap-2 px-4 py-2 text-xs hover:bg-gray-800/20 border-b border-gray-800/20 last:border-0 items-center">
+                <span className="col-span-3 text-gray-300 font-mono">
+                  {midiTypeLabel(m.midiType)} {m.midiValue}
+                </span>
+                <span className="col-span-2 text-gray-400">CH {m.midiChannel}</span>
+                <span className="col-span-5 text-gray-300 truncate" title={label}>{label}</span>
+                <span className="col-span-2 text-right">
+                  <button
+                    onClick={() => handleRemoveMapping(m.id)}
+                    title={t('perform.midi.deleteMapping')}
+                    className="text-gray-600 hover:text-red-400"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </span>
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
-  </div>
-); };
+  );
+};
 
 // ═══════════════════════════════════════════════════════════
 const CueListViewPanel: React.FC = () => {
@@ -2860,16 +3355,19 @@ const PerformSettingsPanel: React.FC = () => { const { t } = useTranslation(); r
     </h2>
     <div className="grid grid-cols-2 gap-4 max-w-lg">
       {[
-        { label: t('perform.settings.midiFeedback'), desc: t('perform.settings.midiFeedbackDesc'), on: true },
-        { label: t('perform.settings.midiThru'), desc: t('perform.settings.midiThruDesc'), on: false },
-        { label: t('perform.settings.touchOsc'), desc: t('perform.settings.touchOscDesc'), on: true },
-        { label: t('perform.settings.grandMasterFade'), desc: t('perform.settings.grandMasterFadeDesc'), on: true },
-        { label: t('perform.settings.vcLock'), desc: t('perform.settings.vcLockDesc'), on: false },
+        { label: t('perform.settings.midiFeedback'), desc: t('perform.settings.midiFeedbackDesc'), on: true, backlog: true },
+        { label: t('perform.settings.midiThru'), desc: t('perform.settings.midiThruDesc'), on: false, backlog: true },
+        { label: t('perform.settings.touchOsc'), desc: t('perform.settings.touchOscDesc'), on: true, backlog: false },
+        { label: t('perform.settings.grandMasterFade'), desc: t('perform.settings.grandMasterFadeDesc'), on: true, backlog: false },
+        { label: t('perform.settings.vcLock'), desc: t('perform.settings.vcLockDesc'), on: false, backlog: false },
       ].map((s, i) => (
         <div key={i} className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-4 flex items-center justify-between">
           <div>
             <div className="text-sm text-gray-300">{s.label}</div>
             <div className="text-[10px] text-gray-600">{s.desc}</div>
+            {s.backlog && (
+              <div className="text-[9px] text-gray-700 mt-0.5">{t('perform.settings.backlogNote')}</div>
+            )}
           </div>
           <label className="relative w-9 h-5 cursor-pointer">
             <input type="checkbox" defaultChecked={s.on} className="sr-only peer" />

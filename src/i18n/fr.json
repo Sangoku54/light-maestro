@@ -493,17 +493,79 @@
       "title": "Mappage MIDI",
       "subtitle": "Associer les contrôleurs physiques aux canaux DMX et widgets",
       "midiLearn": "MIDI Learn",
+      "activity": "Activité MIDI",
+      "devices": "Périphériques MIDI",
+      "noDevices": "Aucun device MIDI détecté",
+      "loadingDevices": "Recherche des périphériques…",
+      "connect": "Connecter",
+      "disconnect": "Déconnecter",
+      "connectedTo": "Connecté : {{name}}",
+      "notConnected": "Aucun périphérique connecté",
+      "input": "Entrée",
+      "output": "Sortie",
+      "inout": "Entrée/Sortie",
+      "mappings": "Mappages",
+      "noMappings": "Aucun mapping — utilisez MIDI Learn pour en créer un",
+      "loadingMappings": "Chargement des mappages…",
+      "deleteMapping": "Supprimer le mappage",
+      "midiTypes": {
+        "note": "Note",
+        "cc": "CC",
+        "program": "PGM"
+      },
+      "learn": {
+        "title": "MIDI Learn",
+        "hint": "Choisissez une cible, appuyez sur MIDI Learn, puis jouez un message sur votre contrôleur : le mappage se crée automatiquement.",
+        "waiting": "En attente d'un message MIDI…",
+        "cancel": "Annuler",
+        "kind": "Type de cible",
+        "target": "Cible",
+        "selectPlaceholder": "— Sélectionner —",
+        "noScenes": "Aucune scène disponible",
+        "noChasers": "Aucun chaser disponible",
+        "noCueLists": "Aucune cue list disponible",
+        "noWidgets": "Aucun widget disponible"
+      },
+      "actions": {
+        "toggle": "Toggle",
+        "flash": "Flash",
+        "go": "GO",
+        "play": "Lecture",
+        "stop": "Stop",
+        "back": "Retour",
+        "next": "Suivant",
+        "previous": "Précédent",
+        "nextEffect": "Effet suivant",
+        "intensity": "Intensité"
+      },
+      "errors": {
+        "connect": "Échec de la connexion au périphérique MIDI",
+        "disconnect": "Échec de la déconnexion",
+        "remove": "Échec de la suppression du mappage",
+        "learn": "Échec du démarrage du MIDI Learn",
+        "noTarget": "Sélectionnez d'abord une cible complète"
+      },
       "columns": {
         "midi": "MIDI",
         "controller": "Contrôleur",
         "target": "Cible",
-        "range": "Plage"
+        "range": "Plage",
+        "channel": "Canal",
+        "actions": "Actions"
       },
       "targets": {
         "grandMaster": "Grand Master",
         "chaseSpeed": "Vitesse Chase",
         "blackout": "Blackout",
-        "washIntensity": "Intensité Wash L"
+        "washIntensity": "Intensité Wash L",
+        "scene": "Scène",
+        "chaser": "Chaser",
+        "cueList": "Cue List",
+        "dmxChannel": "Canal DMX",
+        "widget": "Widget",
+        "autoScript": "AutoScript",
+        "universe": "Univers",
+        "channel": "Canal"
       }
     },
     "stage": {
@@ -540,6 +602,7 @@
       "midiFeedbackDesc": "Envoyer les valeurs LED aux contrôleurs",
       "midiThru": "MIDI Thru",
       "midiThruDesc": "Transmettre l'entrée MIDI à la sortie",
+      "backlogNote": "Fonction réelle : backlog (feedback LED)",
       "touchOsc": "Touch OSC",
       "touchOscDesc": "Activer le contrôle à distance OSC",
       "grandMasterFade": "Fondu Grand Master",

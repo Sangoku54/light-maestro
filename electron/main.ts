@@ -6,7 +6,7 @@ import { DMXEngine } from './dmx/engine';
 import { FixtureLibrary } from './fixtures/library';
 import { checkForFixtureUpdates, getUpdateStatus as getFixtureUpdateStatus } from './fixtures/updater';
 import { ShowStorage } from './show/storage';
-import { MidiManager } from './midi/manager';
+import { MidiManager, type MidiMapping, type MidiTarget } from './midi/manager';
 import { AudioAnalyzer } from './audio/analyzer';
 
 // Disable GPU cache to avoid permission errors on Windows
@@ -47,6 +47,8 @@ const dmxEngine = new DMXEngine();
 const fixtureLibrary = new FixtureLibrary();
 const showStorage = new ShowStorage();
 const midiManager = new MidiManager();
+// Restore the persisted MIDI mapping at boot (file I/O, safe before ready)
+void midiManager.loadMapping();
 const audioAnalyzer = new AudioAnalyzer();
 
 function createWindow() {
@@ -309,35 +311,38 @@ ipcMain.handle('midi:listDevices', async () => midiManager.listDevices());
 ipcMain.handle('midi:connect', async (_, deviceId: string) => midiManager.connect(deviceId));
 ipcMain.handle('midi:disconnect', async () => midiManager.disconnect());
 ipcMain.handle('midi:getMapping', async () => midiManager.getMapping());
-ipcMain.handle('midi:setMapping', async (_, mapping: any) => midiManager.setMapping(mapping));
-ipcMain.on('midi:event', (_, event) => midiManager.handleEvent(event));
+ipcMain.handle('midi:setMapping', async (_, mapping: MidiMapping[]) => midiManager.setMapping(mapping));
+ipcMain.handle('midi:addMapping', async (_, mapping: MidiMapping) => midiManager.addMapping(mapping));
+ipcMain.handle('midi:removeMapping', async (_, id: string) => midiManager.removeMapping(id));
+ipcMain.handle('midi:startLearn', async (_, target: MidiTarget) => midiManager.startLearn(target));
+ipcMain.handle('midi:stopLearn', async () => midiManager.stopLearn());
 
 // ─── MIDI → Action Execution ─────────────────────────────────
 // The mapping engine emits 'mapped' when incoming MIDI matches a
 // registered mapping. This listener translates mapped events into
 // DMX engine calls (direct) or scene/chaser triggers (forwarded
 // to renderer where show state lives).
-midiManager.on('mapped', ({ mapping, value, rawValue }: {
-  mapping: import('./midi/manager').MidiMapping;
+midiManager.on('mapped', ({ mapping, value, rawValue, release }: {
+  mapping: MidiMapping;
   value: number;
   rawValue: number;
+  release: boolean;
 }) => {
   const { target, midiChannel, midiType, midiValue } = mapping;
 
   // Always tell the renderer about MIDI activity (indicator light)
   mainWindow?.webContents.send('midi:activity', {
     channel: midiChannel,
-    type: midiType,
+    type: release ? 'note-off' : midiType,
     note: midiValue,
-    velocity: rawValue,
-    target,
-    timestamp: Date.now(),
+    value: rawValue,
   });
 
   switch (target.type) {
     // ── Direct DMX control (zero IPC latency) ──────────────
     case 'dmx-channel':
-      dmxEngine.setChannel(target.universe, target.channel, value);
+      // MIDI values are normalized 0..127; DMX channels are 0..255.
+      dmxEngine.setChannel(target.universe, target.channel, Math.round((value / 127) * 255));
       break;
 
     case 'blackout':
@@ -356,10 +361,22 @@ midiManager.on('mapped', ({ mapping, value, rawValue }: {
     case 'scene':
     case 'chaser':
     case 'cueList':
-    case 'widget':
     case 'autoscript':
+      // A note-off / release must NOT re-trigger play/toggle actions
+      if (release) break;
       mainWindow?.webContents.send('midi:trigger', {
-        target,
+        mapping,
+        value,
+        rawValue,
+        timestamp: Date.now(),
+      });
+      break;
+
+    case 'widget':
+      // Widgets are press/release sensitive (flash, slider drag): forward
+      // BOTH press and release so the renderer can stop on release.
+      mainWindow?.webContents.send('midi:trigger', {
+        mapping,
         value,
         rawValue,
         timestamp: Date.now(),
@@ -374,6 +391,14 @@ midiManager.on('connected', (deviceId: string) => {
 });
 midiManager.on('disconnected', () => {
   mainWindow?.webContents.send('midi:status', { connected: false });
+});
+
+// Forward MIDI clock (throttled ~4 Hz) and mapping changes to renderer
+midiManager.on('clock', (clock: { bpm: number; running: boolean }) => {
+  mainWindow?.webContents.send('midi:clock', clock);
+});
+midiManager.on('mappingChanged', (mapping: MidiMapping[]) => {
+  mainWindow?.webContents.send('midi:mapping-changed', mapping);
 });
 
 // ─── IPC Handlers: Audio ─────────────────────────────────────

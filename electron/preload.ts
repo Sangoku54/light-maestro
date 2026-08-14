@@ -60,17 +60,32 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     disconnect: () => ipcRenderer.invoke('midi:disconnect'),
     getMapping: () => ipcRenderer.invoke('midi:getMapping'),
     setMapping: (mapping: any) => ipcRenderer.invoke('midi:setMapping', mapping),
-    onEvent: (callback: (event: any) => void) => {
-      ipcRenderer.on('midi:event', (_, data) => callback(data));
+    addMapping: (mapping: any) => ipcRenderer.invoke('midi:addMapping', mapping),
+    removeMapping: (id: string) => ipcRenderer.invoke('midi:removeMapping', id),
+    startLearn: (target: any) => ipcRenderer.invoke('midi:startLearn', target),
+    stopLearn: () => ipcRenderer.invoke('midi:stopLearn'),
+    onActivity: (callback: (a: { channel: number; type: string; note: number; value?: number }) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('midi:activity', handler);
+      return () => { ipcRenderer.removeListener('midi:activity', handler); };
     },
-    onActivity: (callback: (activity: any) => void) => {
-      ipcRenderer.on('midi:activity', (_, data) => callback(data));
+    onTrigger: (callback: (t: { mapping: any; value: number; rawValue: number }) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('midi:trigger', handler);
+      return () => { ipcRenderer.removeListener('midi:trigger', handler); };
     },
-    onTrigger: (callback: (trigger: any) => void) => {
-      ipcRenderer.on('midi:trigger', (_, data) => callback(data));
+    onStatus: (callback: (s: { connected: boolean; deviceId?: string }) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('midi:status', handler);
+      return () => { ipcRenderer.removeListener('midi:status', handler); };
     },
-    onStatus: (callback: (status: any) => void) => {
-      ipcRenderer.on('midi:status', (_, data) => callback(data));
+    onClock: (callback: (c: { bpm: number; running: boolean }) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('midi:clock', handler);
+      return () => { ipcRenderer.removeListener('midi:clock', handler); };
+    },
+    onMappingChanged: (callback: (m: any[]) => void) => {
+      ipcRenderer.on('midi:mapping-changed', (_, data) => callback(data));
     },
   },
 

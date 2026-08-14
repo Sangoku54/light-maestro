@@ -493,17 +493,79 @@
       "title": "MIDI Mapping",
       "subtitle": "Map physical controllers to DMX channels and widgets",
       "midiLearn": "MIDI Learn",
+      "activity": "MIDI Activity",
+      "devices": "MIDI Devices",
+      "noDevices": "No MIDI devices detected",
+      "loadingDevices": "Scanning for devices…",
+      "connect": "Connect",
+      "disconnect": "Disconnect",
+      "connectedTo": "Connected: {{name}}",
+      "notConnected": "No device connected",
+      "input": "Input",
+      "output": "Output",
+      "inout": "In/Out",
+      "mappings": "Mappings",
+      "noMappings": "No mappings — use MIDI Learn to create one",
+      "loadingMappings": "Loading mappings…",
+      "deleteMapping": "Delete mapping",
+      "midiTypes": {
+        "note": "Note",
+        "cc": "CC",
+        "program": "PGM"
+      },
+      "learn": {
+        "title": "MIDI Learn",
+        "hint": "Pick a target, press MIDI Learn, then play a message on your controller: the mapping is created automatically.",
+        "waiting": "Waiting for a MIDI message…",
+        "cancel": "Cancel",
+        "kind": "Target type",
+        "target": "Target",
+        "selectPlaceholder": "— Select —",
+        "noScenes": "No scenes available",
+        "noChasers": "No chasers available",
+        "noCueLists": "No cue lists available",
+        "noWidgets": "No widgets available"
+      },
+      "actions": {
+        "toggle": "Toggle",
+        "flash": "Flash",
+        "go": "GO",
+        "play": "Play",
+        "stop": "Stop",
+        "back": "Back",
+        "next": "Next",
+        "previous": "Previous",
+        "nextEffect": "Next effect",
+        "intensity": "Intensity"
+      },
+      "errors": {
+        "connect": "Failed to connect to MIDI device",
+        "disconnect": "Failed to disconnect",
+        "remove": "Failed to delete mapping",
+        "learn": "Failed to start MIDI Learn",
+        "noTarget": "Select a complete target first"
+      },
       "columns": {
         "midi": "MIDI",
         "controller": "Controller",
         "target": "Target",
-        "range": "Range"
+        "range": "Range",
+        "channel": "Channel",
+        "actions": "Actions"
       },
       "targets": {
         "grandMaster": "Grand Master",
         "chaseSpeed": "Chase Speed",
         "blackout": "Blackout",
-        "washIntensity": "Wash L Intensity"
+        "washIntensity": "Wash L Intensity",
+        "scene": "Scene",
+        "chaser": "Chaser",
+        "cueList": "Cue List",
+        "dmxChannel": "DMX Channel",
+        "widget": "Widget",
+        "autoScript": "AutoScript",
+        "universe": "Universe",
+        "channel": "Channel"
       }
     },
     "stage": {
@@ -540,6 +602,7 @@
       "midiFeedbackDesc": "Send LED values to controllers",
       "midiThru": "MIDI Thru",
       "midiThruDesc": "Pass MIDI input to output",
+      "backlogNote": "Actual function: backlog (LED feedback)",
       "touchOsc": "Touch OSC",
       "touchOscDesc": "Enable OSC remote control",
       "grandMasterFade": "Grand Master Fade",

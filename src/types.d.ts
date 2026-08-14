@@ -6,6 +6,10 @@
 
 export {};
 
+// MIDI types are defined once in the main process (electron/midi/manager.ts)
+// and shared with the renderer through the preload API below.
+import type { MidiDevice, MidiMapping, MidiTarget } from '@electron/midi/manager';
+
 /** One external sACN source seen on a monitored universe. */
 export interface SacnNetworkSource {
   cid: string;
@@ -88,15 +92,20 @@ interface LightMaestroAPI {
     openDialog: () => Promise<any | null>;
   };
   midi: {
-    listDevices: () => Promise<any[]>;
+    listDevices: () => Promise<MidiDevice[]>;
     connect: (deviceId: string) => Promise<void>;
     disconnect: () => Promise<void>;
-    getMapping: () => Promise<any[]>;
-    setMapping: (mapping: any) => Promise<void>;
-    onEvent: (callback: (event: any) => void) => void;
-    onActivity: (callback: (activity: any) => void) => void;
-    onTrigger: (callback: (trigger: any) => void) => void;
-    onStatus: (callback: (status: any) => void) => void;
+    getMapping: () => Promise<MidiMapping[]>;
+    setMapping: (mapping: MidiMapping[]) => Promise<void>;
+    addMapping: (mapping: MidiMapping) => Promise<void>;
+    removeMapping: (id: string) => Promise<void>;
+    startLearn: (target: MidiTarget) => Promise<void>;
+    stopLearn: () => Promise<void>;
+    onActivity: (cb: (a: { channel: number; type: string; note: number; value?: number }) => void) => () => void;
+    onTrigger: (cb: (t: { mapping: MidiMapping; value: number; rawValue: number }) => void) => () => void;
+    onStatus: (cb: (s: { connected: boolean; deviceId?: string }) => void) => () => void;
+    onClock: (cb: (c: { bpm: number; running: boolean }) => void) => () => void;
+    onMappingChanged: (cb: (m: MidiMapping[]) => void) => void;
   };
   audio: {
     getDevices: () => Promise<any[]>;

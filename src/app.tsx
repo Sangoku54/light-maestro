@@ -11,6 +11,7 @@ import { PerformanceView } from './views/PerformanceView';
 import { AudioCaptureProvider } from './hooks/useAudioCapture';
 import { useAudioFileLoader } from './hooks/useAudioFileLoader';
 import { useRgbMatrixPlayback } from './hooks/rgb-matrix-playback';
+import { useMidiTriggers } from './hooks/midi-trigger';
 import { getLatencyMs } from './utils/latency-meter';
 import { dmxBridge } from './utils/dmx-bridge';
 import './styles/global.css';
@@ -129,6 +130,9 @@ const App: React.FC = () => {
 
   // RGB Matrix playback engine — runs globally, writes DMX directly
   useRgbMatrixPlayback();
+
+  // MIDI triggers — global (scènes/chasers/cuelists/autoscript/widgets)
+  useMidiTriggers();
 
   // Clear old persisted widgets from localStorage (now saved in project file)
   useEffect(() => {
