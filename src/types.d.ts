@@ -101,6 +101,39 @@ export interface RemoteStateSnapshot {
   timestamp?: number;
 }
 
+/**
+ * Statut du serveur OSC (électron/osc/server.ts) servi par `osc:getStatus`.
+ * Les compteurs `packetsReceived`/`lastAddress` alimentent le voyant
+ * d'activité du panneau OSC (preuve qu'un contrôleur parle bien au serveur).
+ */
+export interface OscStatus {
+  running: boolean;
+  /** Vrai pendant la fenêtre asynchrone entre `bind()` et l'event `listening`/`error`. */
+  starting: boolean;
+  port: number;
+  /** Timestamp (ms) du dernier démarrage, null si arrêté. */
+  startedAt: number | null;
+  /** Erreur du dernier démarrage (ex. EADDRINUSE), null si aucun souci. */
+  lastError: string | null;
+  /** Nombre total de messages OSC traités (un datagramme bundle en compte plusieurs). */
+  packetsReceived: number;
+  /** Dernière adresse OSC traitée (voyant d'activité UI). */
+  lastAddress: string | null;
+  /** Timestamp (ms) de la dernière activité, null si aucune. */
+  lastActivityAt: number | null;
+}
+
+/**
+ * Commande OSC normalisée émise au renderer (canal `osc:command`). Miroir de
+ * `RemoteCommand` (electron/remote/server.ts) + résolution par index 1-based
+ * (`index` est 0-based dans la commande, cf. electron/osc/server.ts).
+ */
+export type OscCommand =
+  | { type: 'scene'; id?: string; index?: number; action: 'play' | 'stop' | 'toggle' }
+  | { type: 'chaser'; id?: string; index?: number; action: 'play' | 'stop' | 'next' | 'previous' }
+  | { type: 'blackout'; on: boolean }
+  | { type: 'grandMaster'; value: number };
+
 interface LightMaestroAPI {
   dmx: {
     start: () => Promise<void>;
@@ -198,6 +231,19 @@ interface LightMaestroAPI {
     onCommand: (callback: (cmd: unknown) => void) => () => void;
     /** Snapshot d'état poussé par le renderer vers le serveur LAN (cache HTTP). */
     pushState: (snapshot: RemoteStateSnapshot) => void;
+  };
+
+  // ─── OSC entrant (serveur UDP, electron/osc/server.ts) ───────────────────
+  /** Statut du serveur OSC retourné par `osc.getStatus()`. */
+  osc: {
+    /** Statut du serveur UDP (running, port, compteurs d'activité). */
+    getStatus: () => Promise<OscStatus>;
+    /** Démarre le serveur UDP (port optionnel, défaut 9000 / env LM_OSC_PORT). */
+    start: (port?: number) => Promise<OscStatus>;
+    /** Arrête le serveur UDP et libère le port. */
+    stop: () => Promise<OscStatus>;
+    /** Commande OSC mappée reçue par le serveur UDP, forwardée au renderer. */
+    onCommand: (callback: (cmd: unknown) => void) => () => void;
   };
 }
 

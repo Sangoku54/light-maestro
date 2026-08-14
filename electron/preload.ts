@@ -162,4 +162,17 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     // Snapshot d'état poussé par le renderer vers le serveur LAN (cache HTTP)
     pushState: (snapshot: any) => { ipcRenderer.send('remote:state', snapshot); },
   },
+
+  // OSC entrant (UDP LAN — contrôleur TouchOSC/Lemur/consoles)
+  osc: {
+    getStatus: () => ipcRenderer.invoke('osc:getStatus'),
+    start: (port?: number) => ipcRenderer.invoke('osc:start', port),
+    stop: () => ipcRenderer.invoke('osc:stop'),
+    // Commandes OSC reçues par le serveur UDP, forwardées au renderer
+    onCommand: (callback: (cmd: any) => void) => {
+      const handler = (_: any, cmd: any) => callback(cmd);
+      ipcRenderer.on('osc:command', handler);
+      return () => { ipcRenderer.removeListener('osc:command', handler); };
+    },
+  },
 });

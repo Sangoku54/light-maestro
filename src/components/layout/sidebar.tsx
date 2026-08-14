@@ -157,6 +157,7 @@ function getSidebarItems(mode: AppMode, t: (key: string) => string): SidebarItem
         { key: 'midi', label: t('sidebar.midiMapping'), icon: <Sliders size={16} /> },
         { key: 'remote', label: t('sidebar.remote'), icon: <Wifi size={16} /> },
         { key: 'mtc', label: t('sidebar.mtc'), icon: <Timer size={16} /> },
+        { key: 'osc', label: t('sidebar.osc'), icon: <Radio size={16} /> },
         { key: 'simpledesk', label: t('sidebar.simpleDesk'), icon: <Sliders size={16} /> },
         { key: 'stage', label: t('sidebar.stageView'), icon: <Eye size={16} /> },
         { key: 'cuelist', label: t('sidebar.cueList'), icon: <ListMusic size={16} /> },

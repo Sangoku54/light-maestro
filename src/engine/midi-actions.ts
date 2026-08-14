@@ -75,6 +75,8 @@ export const MIDI_SOURCE_ID = 'midi'; // scènes + cue lists
 export const MIDI_CHASER_SOURCE_ID = 'midi-chaser'; // chasers
 export const REMOTE_SOURCE_ID = 'remote'; // scènes — Remote web LAN (lot #17)
 export const REMOTE_CHASER_SOURCE_ID = 'remote-chaser'; // chasers — Remote web LAN (lot #17)
+export const OSC_SOURCE_ID = 'osc'; // scènes — OSC entrant (lot #16)
+export const OSC_CHASER_SOURCE_ID = 'osc-chaser'; // chasers — OSC entrant (lot #16)
 export const MTC_SOURCE_ID = 'mtc'; // scènes — timecode (lot #15)
 export const MTC_CHASER_SOURCE_ID = 'mtc-chaser'; // chasers — timecode (lot #15)
 
@@ -88,6 +90,11 @@ function ensureSourcesRegistered(): void {
   // LTP 70 : sous 'midi' (75), au-dessus de 'default' (50) et des HTP.
   dmxBridge.registerSource(REMOTE_SOURCE_ID, 'ltp', 70);
   dmxBridge.registerSource(REMOTE_CHASER_SOURCE_ID, 'ltp', 70);
+  // LTP 71 : entre 'remote' (70) et 'mtc' (72) — un contrôleur OSC (TouchOSC/
+  // Lemur) reprend la main sur le web LAN, le timecode et le MIDI physique
+  // reprennent la main sur l'OSC.
+  dmxBridge.registerSource(OSC_SOURCE_ID, 'ltp', 71);
+  dmxBridge.registerSource(OSC_CHASER_SOURCE_ID, 'ltp', 71);
   // LTP 72 : entre 'remote' (70) et 'midi' (75) — un trigger MIDI physique
   // reprend la main sur une cue timecode, qui reprend la main sur le web.
   dmxBridge.registerSource(MTC_SOURCE_ID, 'ltp', 72);
@@ -493,6 +500,47 @@ export function remoteChaserNext(chaserId: string): void {
 
 export function remoteChaserPrevious(chaserId: string): void {
   midiChaserPrevious(chaserId, REMOTE_CHASER_SOURCE_ID);
+}
+
+// ████████████████████████████████████████████████████████████████████████
+// OSC entrant (lot #16) — wrappers sources 'osc' / 'osc-chaser'
+// ████████████████████████████████████████████████████████████████████████
+// Le hook useOscTriggers() (src/hooks/osc-trigger.ts) consomme le canal
+// `osc:command` et dispatch vers ces wrappers, qui délèguent au même moteur
+// fade/hold que MIDI/Remote avec les sources arbitre dédiées (LTP 71, entre
+// 'remote' 70 et 'mtc' 72). Le stop/toggle réutilise la source stockée dans
+// le handle (la source qui a démarré la lecture) : une scène lancée par OSC
+// ne peut être arrêtée que par OSC (ou un stop global), comme pour Remote.
+// Le blackout et le grand master passent par les mêmes chemins que Remote
+// (dmx:applyGrandMaster est optionnel — grandMaster est appliqué côté moteur
+// par l'arbitre HTP/LTP).
+
+export function oscPlayScene(sceneId: string): void {
+  midiPlayScene(sceneId, OSC_SOURCE_ID);
+}
+
+export function oscStopScene(sceneId: string): void {
+  midiStopScene(sceneId);
+}
+
+export function oscToggleScene(sceneId: string): void {
+  midiToggleScene(sceneId, OSC_SOURCE_ID);
+}
+
+export function oscPlayChaser(chaserId: string): void {
+  midiPlayChaser(chaserId, OSC_CHASER_SOURCE_ID);
+}
+
+export function oscStopChaser(chaserId: string): void {
+  midiStopChaser(chaserId);
+}
+
+export function oscChaserNext(chaserId: string): void {
+  midiChaserNext(chaserId, OSC_CHASER_SOURCE_ID);
+}
+
+export function oscChaserPrevious(chaserId: string): void {
+  midiChaserPrevious(chaserId, OSC_CHASER_SOURCE_ID);
 }
 
 // ═══════════════════════════════════════════════════════════

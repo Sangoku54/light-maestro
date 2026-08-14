@@ -94,7 +94,8 @@
     "simpleDesk": "Simple Desk",
     "stageView": "Vue Scène",
     "cueList": "Cue List",
-    "mtc": "Timecode"
+    "mtc": "Timecode",
+    "osc": "OSC"
   },
   "topbar": {
     "showAuto": "Show Auto",
@@ -703,6 +704,42 @@
         "play": "Play",
         "stop": "Stop",
         "toggle": "Toggle"
+      }
+    },
+    "osc": {
+      "title": "Contrôle OSC",
+      "subtitle": "Pilotez scènes et chasers depuis un contrôleur OSC (TouchOSC, Lemur, consoles) sur le réseau local",
+      "server": "Serveur OSC (UDP)",
+      "offline": "Serveur arrêté",
+      "loading": "Chargement…",
+      "statusActive": "Actif",
+      "statusStopped": "Arrêté",
+      "statusStarting": "Démarrage…",
+      "port": "Port d'écoute",
+      "portHint": "Défaut 9000 (sortie TouchOSC). Relancez le serveur pour appliquer.",
+      "activity": "Messages reçus",
+      "lastAddress": "Dernière adresse",
+      "lastActivity": "Dernière activité",
+      "never": "jamais",
+      "start": "Démarrer le serveur",
+      "stop": "Arrêter le serveur",
+      "working": "En cours…",
+      "unavailable": "Module OSC indisponible (preload non connecté)",
+      "stoppedHint": "Le serveur est arrêté. Démarrez-le pour recevoir les commandes OSC sur le réseau local.",
+      "mapping": "Adresses OSC",
+      "mappingScene": "déclenche une scène (id)",
+      "mappingSceneIndex": "déclenche la scène n°n (1-based)",
+      "mappingChaser": "pilote un chaser (id)",
+      "mappingChaserIndex": "pilote le chaser n°n (1-based)",
+      "mappingBlackout": "valeur non-zéro = blackout ON, zéro = OFF",
+      "mappingGrandmaster": "f 0-1 ou i 0-100 → niveau grand master",
+      "mappingGrandmasterAddr": "valeur dans l'adresse (0-1)",
+      "mappingHint": "Les routes d'action se déclenchent à la réception (valeur ignorée) : un push TouchOSC envoie 1.0 au press et 0.0 au release, le release ne doit pas créer de stop fantôme.",
+      "errors": {
+        "status": "Impossible de lire l'état du serveur OSC",
+        "start": "Impossible de démarrer le serveur (port occupé ?)",
+        "stop": "Impossible d'arrêter le serveur",
+        "port": "Port invalide — attendu 1-65535"
       }
     }
   },

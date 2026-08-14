@@ -14,6 +14,7 @@ import { useRgbMatrixPlayback } from './hooks/rgb-matrix-playback';
 import { useMidiTriggers } from './hooks/midi-trigger';
 import { useRemoteTriggers } from './hooks/remote-trigger';
 import { useMtcTriggers } from './hooks/mtc-trigger';
+import { useOscTriggers } from './hooks/osc-trigger';
 import { getLatencyMs } from './utils/latency-meter';
 import { dmxBridge } from './utils/dmx-bridge';
 import './styles/global.css';
@@ -142,6 +143,9 @@ const App: React.FC = () => {
 
   // MTC entrant (lot #15) — cues sur timecode (global, toutes vues)
   useMtcTriggers();
+
+  // OSC entrant (lot #16) — commandes UDP TouchOSC/Lemur (global, toutes vues)
+  useOscTriggers();
 
   // Clear old persisted widgets from localStorage (now saved in project file)
   useEffect(() => {

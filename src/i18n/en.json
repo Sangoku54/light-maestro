@@ -94,7 +94,8 @@
     "simpleDesk": "Simple Desk",
     "stageView": "Stage View",
     "cueList": "Cue List",
-    "mtc": "Timecode"
+    "mtc": "Timecode",
+    "osc": "OSC"
   },
   "topbar": {
     "showAuto": "Show Auto",
@@ -703,6 +704,42 @@
         "play": "Play",
         "stop": "Stop",
         "toggle": "Toggle"
+      }
+    },
+    "osc": {
+      "title": "OSC Control",
+      "subtitle": "Drive scenes and chasers from an OSC controller (TouchOSC, Lemur, consoles) on the local network",
+      "server": "OSC server (UDP)",
+      "offline": "Server stopped",
+      "loading": "Loading…",
+      "statusActive": "Active",
+      "statusStopped": "Stopped",
+      "statusStarting": "Starting…",
+      "port": "Listen port",
+      "portHint": "Default 9000 (TouchOSC outgoing). Restart the server to apply.",
+      "activity": "Messages received",
+      "lastAddress": "Last address",
+      "lastActivity": "Last activity",
+      "never": "never",
+      "start": "Start server",
+      "stop": "Stop server",
+      "working": "Working…",
+      "unavailable": "OSC module unavailable (preload not connected)",
+      "stoppedHint": "The server is stopped. Start it to receive OSC commands on the local network.",
+      "mapping": "OSC addresses",
+      "mappingScene": "trigger a scene (id)",
+      "mappingSceneIndex": "trigger scene #n (1-based)",
+      "mappingChaser": "drive a chaser (id)",
+      "mappingChaserIndex": "drive chaser #n (1-based)",
+      "mappingBlackout": "non-zero value = blackout ON, zero = OFF",
+      "mappingGrandmaster": "f 0-1 or i 0-100 → grand master level",
+      "mappingGrandmasterAddr": "value in the address (0-1)",
+      "mappingHint": "Action routes trigger on reception (value ignored): a TouchOSC push sends 1.0 on press and 0.0 on release, the release must not create a ghost stop.",
+      "errors": {
+        "status": "Unable to read OSC server status",
+        "start": "Unable to start the server (port in use?)",
+        "stop": "Unable to stop the server",
+        "port": "Invalid port — expected 1-65535"
       }
     }
   },

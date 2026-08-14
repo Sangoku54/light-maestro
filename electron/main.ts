@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import { execSync } from 'child_process';
 import { RemoteServer, type RemoteStateSnapshot } from './remote/server';
+import { OscServer } from './osc/server';
 import { DMXEngine } from './dmx/engine';
 import { FixtureLibrary } from './fixtures/library';
 import { checkForFixtureUpdates, getUpdateStatus as getFixtureUpdateStatus } from './fixtures/updater';
@@ -54,6 +55,7 @@ const midiManager = new MidiManager();
 void midiManager.loadMapping();
 const audioAnalyzer = new AudioAnalyzer();
 const remoteServer = new RemoteServer();
+const oscServer = new OscServer();
 
 function createWindow() {
   const isDev = !app.isPackaged;
@@ -76,6 +78,7 @@ function createWindow() {
     }
   });
   remoteServer.setMainWindow(mainWindow);
+  oscServer.setMainWindow(mainWindow);
 
   // Maximize at launch
   mainWindow.maximize();
@@ -107,7 +110,7 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
 
-  mainWindow.on('closed', () => { mainWindow = null; remoteServer.setMainWindow(null); });
+  mainWindow.on('closed', () => { mainWindow = null; remoteServer.setMainWindow(null); oscServer.setMainWindow(null); });
 
   // ─── Close guard: intercept close, let renderer decide ───
   mainWindow.on('close', (e) => {
@@ -160,6 +163,19 @@ ipcMain.handle('remote:state', (_event, payload: unknown) => {
   const wrapped = payload as { state?: unknown } | null;
   remoteServer.setSnapshot((wrapped && 'state' in wrapped ? wrapped.state : payload) as RemoteStateSnapshot | null);
 });
+
+// ████████ IPC Handlers: OSC entrant ████████████████████████████████████
+// Serveur UDP (0.0.0.0, port par défaut 9000, aucun token - LAN de confiance,
+// parité Remote). Les commandes OSC mappées sont émises au renderer par le
+// serveur lui-même (fenêtre cible fournie via setMainWindow, canal
+// `osc:command` - cf. electron/osc/server.ts). Le port optionnel passé à
+// `osc:start` vient du panneau UI (persisté côté renderer via storage).
+ipcMain.handle('osc:start', (_event, port?: number) => oscServer.start(port));
+ipcMain.handle('osc:stop', () => {
+  oscServer.stop();
+  return oscServer.getStatus();
+});
+ipcMain.handle('osc:getStatus', () => oscServer.getStatus());
 
 // ─── IPC Handlers: DMX ───────────────────────────────────────
 ipcMain.handle('dmx:start', async () => {
@@ -557,6 +573,7 @@ app.on('window-all-closed', async () => {
   midiManager.disconnect();
   audioAnalyzer.stopCapture();
   remoteServer.stop();
+  oscServer.stop();
   if (process.platform !== 'darwin') app.quit();
 });
 

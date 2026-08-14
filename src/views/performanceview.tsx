@@ -5,7 +5,7 @@ import {
   Plus, MousePointer2, ToggleLeft, GripHorizontal, Columns, Trash2,
   Copy, Maximize2, Minimize2, Square, Keyboard, Eye, EyeOff,
   ChevronUp, ChevronDown, Hash, Download, Upload, RotateCcw, Loader, Wifi,
-  Timer as TimerIcon
+  Timer as TimerIcon, Radio
 } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { useShowStore, type SavedCueList, type CueListCue, type SongPreset } from '../stores/showStore';
@@ -35,6 +35,7 @@ export const PerformanceView: React.FC = () => {
   // encore 'remote' (lot serveur en parallèle) ; comparaison élargie pour
   // enregistrer le panneau dans le même conteneur que MIDIMappingPanel.
   if ((activeTab as string) === 'remote') return <RemotePanel />;
+  if ((activeTab as string) === 'osc') return <OscPanel />;
 
   switch (activeTab) {
     case 'vconsole': return <VirtualConsolePanel />;
@@ -3352,6 +3353,296 @@ const RemotePanel: React.FC = () => {
             {busy && <Loader size={13} className="animate-spin" />}
             {busy ? t('perform.remote.working') : running ? t('perform.remote.stop') : t('perform.remote.start')}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════
+// OSC entrant (lot #16) — panneau de contrôle du serveur UDP
+// ═══════════════════════════════════════════════════════════
+
+/** Statut du serveur OSC (miroir local de electron/osc/server.ts). */
+interface OscStatus {
+  running: boolean;
+  /** Vrai pendant la fenêtre asynchrone entre `bind()` et l'event `listening`/`error`. */
+  starting?: boolean;
+  port: number;
+  startedAt: number | null;
+  lastError?: string | null;
+  packetsReceived: number;
+  lastAddress: string | null;
+  lastActivityAt: number | null;
+}
+
+interface OscApiContract {
+  getStatus: () => Promise<OscStatus>;
+  start: (port?: number) => Promise<OscStatus>;
+  stop: () => Promise<OscStatus>;
+}
+
+/**
+ * #16 — Accès typé à `window.lightMaestro.osc`. Le cast local (même pattern
+ * que getRemoteApi()) garde ce panneau indépendant du typage partagé.
+ */
+function getOscApi(): OscApiContract | null {
+  const api = (window.lightMaestro as unknown as { osc?: OscApiContract }).osc;
+  return api ?? null;
+}
+
+/** Clé de persistance du port OSC (mécanisme générique storage:get/set). */
+const OSC_CONFIG_KEY = 'osc-config';
+
+/** Formatage relatif court d'un timestamp (alimenté par le polling 3 s). */
+function fmtAgo(ts: number | null): string {
+  if (!ts) return '—';
+  const sec = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (sec < 60) return `${sec}s`;
+  return `${Math.floor(sec / 60)}m${sec % 60}s`;
+}
+
+const OscPanel: React.FC = () => {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<OscStatus | null>(null);
+  const [portText, setPortText] = useState('9000');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const lastStatus = useRef<OscStatus | null>(null);
+
+  // Polling : état au montage puis toutes les 3 s (pas de push côté main) +
+  // chargement du port persisté (osc-config).
+  useEffect(() => {
+    const api = getOscApi();
+    let cancelled = false;
+
+    // Port persisté : récupéré une fois au montage (meilleur effort).
+    try {
+      const win = window as unknown as {
+        lightMaestro?: { storage?: { get: (key: string) => Promise<{ port?: number } | null> } };
+      };
+      const storage = win.lightMaestro?.storage;
+      if (storage && typeof storage.get === 'function') {
+        void storage.get(OSC_CONFIG_KEY).then((cfg) => {
+          if (!cancelled && cfg && typeof cfg.port === 'number' && cfg.port > 0) {
+            setPortText(String(cfg.port));
+          }
+        }).catch(() => { /* meilleur effort */ });
+      }
+    } catch { /* meilleur effort */ }
+
+    const refresh = async () => {
+      if (!api) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      try {
+        const st = await api.getStatus();
+        if (cancelled) return;
+        lastStatus.current = st;
+        setStatus(st);
+        setError(st.lastError ?? null);
+      } catch {
+        if (!cancelled && lastStatus.current === null) {
+          setError(t('perform.osc.errors.status'));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    refresh();
+    const id = window.setInterval(refresh, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [t]);
+
+  /** Persiste le port (osc-config) en meilleur effort. */
+  const savePort = (port: number) => {
+    try {
+      const win = window as unknown as {
+        lightMaestro?: { storage?: { set: (key: string, data: unknown) => Promise<boolean> } };
+      };
+      const storage = win.lightMaestro?.storage;
+      if (storage && typeof storage.set === 'function') {
+        void storage.set(OSC_CONFIG_KEY, { port }).catch(() => { /* meilleur effort */ });
+      }
+    } catch { /* meilleur effort */ }
+  };
+
+  const parsePort = (): number | null => {
+    const n = Number(portText.trim());
+    return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : null;
+  };
+
+  const handleStart = async () => {
+    const api = getOscApi();
+    if (!api || busy) return;
+    const port = parsePort();
+    if (port === null) {
+      setError(t('perform.osc.errors.port'));
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const st = await api.start(port);
+      savePort(port);
+      lastStatus.current = st;
+      setStatus(st);
+      if (st.lastError) setError(st.lastError);
+    } catch {
+      setError(t('perform.osc.errors.start'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleStop = async () => {
+    const api = getOscApi();
+    if (!api || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const st = await api.stop();
+      lastStatus.current = st;
+      setStatus(st);
+    } catch {
+      setError(t('perform.osc.errors.stop'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const apiAvailable = getOscApi() !== null;
+  const running = !!status?.running;
+  const starting = !!status?.starting;
+  const badge = loading
+    ? t('perform.osc.loading')
+    : starting
+      ? t('perform.osc.statusStarting')
+      : running
+        ? t('perform.osc.statusActive')
+        : t('perform.osc.statusStopped');
+  // Voyant d'activité : vert si un paquet OSC a été reçu dans les 3 dernières
+  // secondes (preuve qu'un contrôleur parle bien au serveur).
+  const live = !!status && status.lastActivityAt !== null && Date.now() - status.lastActivityAt < 3000;
+
+  return (
+    <div className="h-full p-8 overflow-y-auto">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <Radio size={20} className="text-purple-400" /> {t('perform.osc.title')}
+          </h2>
+          <p className="text-xs text-gray-500 mt-0.5">{t('perform.osc.subtitle')}</p>
+        </div>
+        <div className={`flex items-center gap-2 bg-[#0d0d14] border rounded-lg px-3 py-1.5 ${running || starting ? 'border-green-500/30' : 'border-gray-800/50'}`}>
+          <span className={`w-2 h-2 rounded-full ${running ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.9)]' : starting ? 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)]' : 'bg-gray-700'}`} />
+          <span className={`text-[10px] font-medium ${running ? 'text-green-400' : starting ? 'text-amber-300' : 'text-gray-500'}`}>
+            {badge}
+          </span>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-4 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400">
+          {error}
+        </div>
+      )}
+
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden mb-5">
+        <div className="px-4 py-2.5 border-b border-gray-800/50 flex items-center justify-between">
+          <span className="text-xs font-medium text-gray-300">{t('perform.osc.server')}</span>
+          <span className="text-[10px] font-mono text-gray-600">
+            {running && status && status.port > 0 ? `:${status.port}` : t('perform.osc.offline')}
+          </span>
+        </div>
+
+        {loading ? (
+          <div className="px-4 py-6 text-xs text-gray-600 flex items-center gap-2">
+            <Loader size={14} className="animate-spin text-gray-500" /> {t('perform.osc.loading')}
+          </div>
+        ) : !apiAvailable ? (
+          <div className="px-4 py-6 text-xs text-gray-600">{t('perform.osc.unavailable')}</div>
+        ) : (
+          <div className="p-4 space-y-4">
+            <div className="flex items-end gap-3">
+              <div className="flex-1 max-w-[200px]">
+                <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">{t('perform.osc.port')}</div>
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={portText}
+                  disabled={running || busy}
+                  onChange={(e) => setPortText(e.target.value)}
+                  onBlur={() => {
+                    const p = parsePort();
+                    if (p !== null) savePort(p);
+                  }}
+                  className="w-full bg-[#0a0a0f] border border-gray-800/60 rounded-lg px-3 py-2 text-xs font-mono text-white disabled:opacity-50"
+                />
+                <p className="text-[10px] text-gray-600 mt-1">{t('perform.osc.portHint')}</p>
+              </div>
+            </div>
+
+            {running && status && (
+              <div className="grid grid-cols-3 gap-3 pt-2 border-t border-gray-800/50">
+                <div className={`rounded-lg px-3 py-2 border ${live ? 'border-green-500/30 bg-green-500/5' : 'border-gray-800/60 bg-[#0a0a0f]'}`}>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-1.5 h-1.5 rounded-full ${live ? 'bg-green-400 animate-pulse' : 'bg-gray-700'}`} />
+                    <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">{t('perform.osc.activity')}</span>
+                  </div>
+                  <div className="text-lg font-mono text-white mt-1">{status.packetsReceived}</div>
+                </div>
+                <div className="rounded-lg px-3 py-2 border border-gray-800/60 bg-[#0a0a0f]">
+                  <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">{t('perform.osc.lastAddress')}</span>
+                  <div className="text-xs font-mono text-purple-300 mt-1 truncate" title={status.lastAddress ?? undefined}>
+                    {status.lastAddress ?? t('perform.osc.never')}
+                  </div>
+                </div>
+                <div className="rounded-lg px-3 py-2 border border-gray-800/60 bg-[#0a0a0f]">
+                  <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">{t('perform.osc.lastActivity')}</span>
+                  <div className="text-xs font-mono text-gray-300 mt-1">{fmtAgo(status.lastActivityAt)}</div>
+                </div>
+              </div>
+            )}
+
+            {!running && <p className="text-xs text-gray-600">{t('perform.osc.stoppedHint')}</p>}
+          </div>
+        )}
+
+        <div className="px-4 py-3 border-t border-gray-800/50 flex items-center justify-end">
+          <button
+            onClick={running ? handleStop : handleStart}
+            disabled={busy || loading}
+            className={`px-4 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center gap-2 ${running ? 'border border-red-500/30 text-red-400 hover:bg-red-500/10' : 'bg-purple-600/20 text-purple-300 hover:bg-purple-600/30'}`}
+          >
+            {busy && <Loader size={13} className="animate-spin" />}
+            {busy ? t('perform.osc.working') : running ? t('perform.osc.stop') : t('perform.osc.start')}
+          </button>
+        </div>
+      </div>
+
+      {/* Documentation du mapping d'adresses (statique — les routes OSC sont du code) */}
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-gray-800/50">
+          <span className="text-xs font-medium text-gray-300">{t('perform.osc.mapping')}</span>
+        </div>
+        <div className="p-4 space-y-1.5 font-mono text-[11px]">
+          <div className="flex justify-between gap-4"><span className="text-purple-300">/scene/&lt;id&gt;/play · stop · toggle</span><span className="text-gray-600">{t('perform.osc.mappingScene')}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-purple-300">/scene/index/&lt;n&gt;/play · stop · toggle</span><span className="text-gray-600">{t('perform.osc.mappingSceneIndex')}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-purple-300">/chaser/&lt;id&gt;/play · stop · next · previous</span><span className="text-gray-600">{t('perform.osc.mappingChaser')}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-purple-300">/chaser/index/&lt;n&gt;/play · stop · next · previous</span><span className="text-gray-600">{t('perform.osc.mappingChaserIndex')}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-purple-300">/blackout</span><span className="text-gray-600">{t('perform.osc.mappingBlackout')}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-purple-300">/grandmaster</span><span className="text-gray-600">{t('perform.osc.mappingGrandmaster')}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-purple-300">/grandmaster/&lt;v&gt;</span><span className="text-gray-600">{t('perform.osc.mappingGrandmasterAddr')}</span></div>
+          <p className="pt-2 text-[10px] text-gray-600 font-sans">{t('perform.osc.mappingHint')}</p>
         </div>
       </div>
     </div>
