@@ -7,6 +7,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { MtcState } from '@electron/midi/mtc';
 import { dmxBridge } from '../utils/dmx-bridge';
 
 /**
@@ -136,6 +137,10 @@ interface PerformState {
   sdHighlightActive: boolean;
   sdClipboard: Record<number, number> | null;
 
+  // MTC (lot #15) — état courant reçu du main (miroir UI, non persisté)
+  mtcState: MtcState;
+  setMtcState: (state: MtcState) => void;
+
   // VC Actions
   vcAddPage: (name?: string) => void;
   vcDeletePage: (index: number) => void;
@@ -174,6 +179,18 @@ export const usePerformStore = create<PerformState>()(
   sdSelectedChannel: null,
   sdHighlightActive: false,
   sdClipboard: null,
+
+  mtcState: {
+    locked: false,
+    hours: 0,
+    minutes: 0,
+    seconds: 0,
+    frames: 0,
+    rate: '30',
+    fps: 30,
+    lastSource: 'qf',
+  },
+  setMtcState: (state) => set({ mtcState: state }),
 
   // ── Virtual Console ──
 

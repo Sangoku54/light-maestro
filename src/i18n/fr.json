@@ -93,7 +93,8 @@
     "remote": "Remote",
     "simpleDesk": "Simple Desk",
     "stageView": "Vue Scène",
-    "cueList": "Cue List"
+    "cueList": "Cue List",
+    "mtc": "Timecode"
   },
   "topbar": {
     "showAuto": "Show Auto",
@@ -180,13 +181,48 @@
       "build": "Montée"
     },
     "effectNames": {
-      "low": ["Lueur Douce", "Lavage Léger", "Atténuation Subtile", "Pulsation Chaude"],
-      "medium": ["Shift Couleur", "Chase Modéré", "Balayage Pan", "Vague Groove"],
-      "high": ["Chase Intense", "Lavage Complet", "Balayage Rapide", "Pic Lumineux"],
-      "dynamic": ["Montée", "Pulsation Croissante", "Rampe Énergie", "Chase Ascendant"],
-      "drop": ["Pic Drop", "Rafale Strobe", "Intensité Max", "Tempête Flash"],
-      "intro": ["Fondu Entrant", "Dérive Ambiante", "Révélation Lente", "Émergence"],
-      "outro": ["Fondu Sortant", "Atténuation", "Sortie Douce", "Résolution"]
+      "low": [
+        "Lueur Douce",
+        "Lavage Léger",
+        "Atténuation Subtile",
+        "Pulsation Chaude"
+      ],
+      "medium": [
+        "Shift Couleur",
+        "Chase Modéré",
+        "Balayage Pan",
+        "Vague Groove"
+      ],
+      "high": [
+        "Chase Intense",
+        "Lavage Complet",
+        "Balayage Rapide",
+        "Pic Lumineux"
+      ],
+      "dynamic": [
+        "Montée",
+        "Pulsation Croissante",
+        "Rampe Énergie",
+        "Chase Ascendant"
+      ],
+      "drop": [
+        "Pic Drop",
+        "Rafale Strobe",
+        "Intensité Max",
+        "Tempête Flash"
+      ],
+      "intro": [
+        "Fondu Entrant",
+        "Dérive Ambiante",
+        "Révélation Lente",
+        "Émergence"
+      ],
+      "outro": [
+        "Fondu Sortant",
+        "Atténuation",
+        "Sortie Douce",
+        "Résolution"
+      ]
     },
     "intensities": {
       "low": "Basse",
@@ -428,9 +464,55 @@
   "perform": {
     "virtualConsole": "Console Virtuelle",
     "midiMapping": "Mappage MIDI",
-    "simpleDesk": "Simple Desk",
+    "simpleDesk": {
+      "title": "Simple Desk",
+      "highlightActive": "Surligner Canaux Actifs",
+      "copyUniverse": "Copier l'Univers",
+      "pasteUniverse": "Coller l'Univers",
+      "allToZero": "Tout à 0",
+      "channelJump": "Entrée",
+      "selectChannel": "Sélectionnez un canal",
+      "clickFader": "Cliquez sur un fader pour éditer",
+      "shiftRange": "Shift+clic pour sélection plage",
+      "typeJump": "Tapez CH# + Entrée pour sauter",
+      "channelDetail": "Canal",
+      "dmxValue": "VALEUR DMX",
+      "snapTo0": "Mettre à 0",
+      "info": {
+        "range": "Plage",
+        "universe": "Univers",
+        "value": "Valeur",
+        "percent": "Pourcentage"
+      },
+      "status": {
+        "universe": "Univers",
+        "channels": "Canaux : 1-512",
+        "range": "Plage"
+      }
+    },
     "stageView": "Vue Scène",
-    "cueList": "Cue List",
+    "cueList": {
+      "title": "Cue List",
+      "subtitle": "Pile de cues style théâtre",
+      "go": "GO",
+      "back": "RETOUR",
+      "stop": "STOP",
+      "now": "▶ EN COURS",
+      "done": "✓ FAIT",
+      "next": "SUIVANT",
+      "fade": "Fondu",
+      "follow": "Manuel",
+      "auto": "Auto",
+      "cues": {
+        "houseFull": "Lumières Salle Plein",
+        "houseHalf": "Salle à Moitié",
+        "curtainSpeech": "Discours Rideau — Lavage Chaud",
+        "scene1": "Scène 1 : Salon Jour",
+        "crossfade": "Fondu Enchaîné vers Nuit",
+        "scene2": "Scène 2 : Chambre",
+        "blackout": "Noir"
+      }
+    },
     "performanceSettings": "Paramètres Performance",
     "vc": {
       "addWidget": "Ajouter Widget",
@@ -463,32 +545,6 @@
       "group": "Groupe",
       "dragWidgetsHere": "Glissez les widgets ici",
       "blackoutLabel": "⚫ BLACKOUT"
-    },
-    "simpleDesk": {
-      "title": "Simple Desk",
-      "highlightActive": "Surligner Canaux Actifs",
-      "copyUniverse": "Copier l'Univers",
-      "pasteUniverse": "Coller l'Univers",
-      "allToZero": "Tout à 0",
-      "channelJump": "Entrée",
-      "selectChannel": "Sélectionnez un canal",
-      "clickFader": "Cliquez sur un fader pour éditer",
-      "shiftRange": "Shift+clic pour sélection plage",
-      "typeJump": "Tapez CH# + Entrée pour sauter",
-      "channelDetail": "Canal",
-      "dmxValue": "VALEUR DMX",
-      "snapTo0": "Mettre à 0",
-      "info": {
-        "range": "Plage",
-        "universe": "Univers",
-        "value": "Valeur",
-        "percent": "Pourcentage"
-      },
-      "status": {
-        "universe": "Univers",
-        "channels": "Canaux : 1-512",
-        "range": "Plage"
-      }
     },
     "midi": {
       "title": "Mappage MIDI",
@@ -576,28 +632,6 @@
       "fixturesDrag": "projecteurs · glisser pour positionner",
       "noFixtures": "Aucun projecteur patché — ajoutez des projecteurs en mode Configuration"
     },
-    "cueList": {
-      "title": "Cue List",
-      "subtitle": "Pile de cues style théâtre",
-      "go": "GO",
-      "back": "RETOUR",
-      "stop": "STOP",
-      "now": "▶ EN COURS",
-      "done": "✓ FAIT",
-      "next": "SUIVANT",
-      "fade": "Fondu",
-      "follow": "Manuel",
-      "auto": "Auto",
-      "cues": {
-        "houseFull": "Lumières Salle Plein",
-        "houseHalf": "Salle à Moitié",
-        "curtainSpeech": "Discours Rideau — Lavage Chaud",
-        "scene1": "Scène 1 : Salon Jour",
-        "crossfade": "Fondu Enchaîné vers Nuit",
-        "scene2": "Scène 2 : Chambre",
-        "blackout": "Noir"
-      }
-    },
     "settings": {
       "midiFeedback": "Retour MIDI",
       "midiFeedbackDesc": "Envoyer les valeurs LED aux contrôleurs",
@@ -619,7 +653,7 @@
       "loading": "Chargement…",
       "statusActive": "Actif",
       "statusStopped": "Arrêté",
-    "statusStarting": "Démarrage…",
+      "statusStarting": "Démarrage…",
       "controlUrls": "URLs de contrôle",
       "noUrls": "Aucune URL disponible",
       "token": "Token",
@@ -635,6 +669,40 @@
         "start": "Impossible de démarrer le serveur (port occupé ?)",
         "stop": "Impossible d'arrêter le serveur",
         "status": "Impossible de lire l'état du serveur"
+      }
+    },
+    "mtc": {
+      "title": "Timecode MIDI (MTC)",
+      "subtitle": "Synchronisez vos lumières sur un flux MTC entrant (DAW, console) : scènes et chasers déclenchés à des positions temporelles",
+      "locked": "Verrouillé — flux MTC reçu",
+      "unlocked": "Pas de flux MTC — en attente…",
+      "addMarker": "Nouveau marqueur",
+      "markers": "Marqueurs timecode",
+      "noMarkers": "Aucun marqueur. Ajoutez-en un ci-dessus : à la position indiquée, la scène ou le chaser cible sera déclenché.",
+      "add": "Ajouter",
+      "capture": "Capturer",
+      "captureHint": "Utilise la position MTC courante",
+      "namePlaceholder": "Nom du marqueur",
+      "errors": {
+        "position": "Position invalide — attendu HH:MM:SS:FF",
+        "target": "Choisissez une cible (scène ou chaser)",
+        "dropFrame": "Position invalide en 29.97 DF — les frames 0-1 des minutes non divisibles par 10 n'existent pas"
+      },
+      "columns": {
+        "position": "Position",
+        "rate": "Rate",
+        "name": "Nom",
+        "target": "Cible",
+        "action": "Action"
+      },
+      "targets": {
+        "scene": "Scène",
+        "chaser": "Chaser"
+      },
+      "actions": {
+        "play": "Play",
+        "stop": "Stop",
+        "toggle": "Toggle"
       }
     }
   },
@@ -708,7 +776,19 @@
       "yOffset": "Décalage Y",
       "fixtures": "Projecteurs"
     },
-    "patterns": ["Cercle", "Ligne", "Huit", "Carré", "Triangle"],
-    "fixturesOptions": ["Tous", "Spot 1", "Spot 2", "Wash G", "Wash D"]
+    "patterns": [
+      "Cercle",
+      "Ligne",
+      "Huit",
+      "Carré",
+      "Triangle"
+    ],
+    "fixturesOptions": [
+      "Tous",
+      "Spot 1",
+      "Spot 2",
+      "Wash G",
+      "Wash D"
+    ]
   }
 }

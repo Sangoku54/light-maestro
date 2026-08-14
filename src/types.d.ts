@@ -9,6 +9,7 @@ export {};
 // MIDI types are defined once in the main process (electron/midi/manager.ts)
 // and shared with the renderer through the preload API below.
 import type { MidiDevice, MidiMapping, MidiTarget } from '@electron/midi/manager';
+import type { MtcRate, MtcState } from '@electron/midi/mtc';
 
 /** One external sACN source seen on a monitored universe. */
 export interface SacnNetworkSource {
@@ -153,6 +154,8 @@ interface LightMaestroAPI {
     onTrigger: (cb: (t: { mapping: MidiMapping; value: number; rawValue: number }) => void) => () => void;
     onStatus: (cb: (s: { connected: boolean; deviceId?: string }) => void) => () => void;
     onClock: (cb: (c: { bpm: number; running: boolean }) => void) => () => void;
+    /** État MTC (lot #15) : frame décodée / Full Frame / transition lock. */
+    onMtc: (cb: (s: MtcState) => void) => () => void;
     onMappingChanged: (cb: (m: MidiMapping[]) => void) => void;
   };
   audio: {

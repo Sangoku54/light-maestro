@@ -75,6 +75,8 @@ export const MIDI_SOURCE_ID = 'midi'; // scènes + cue lists
 export const MIDI_CHASER_SOURCE_ID = 'midi-chaser'; // chasers
 export const REMOTE_SOURCE_ID = 'remote'; // scènes — Remote web LAN (lot #17)
 export const REMOTE_CHASER_SOURCE_ID = 'remote-chaser'; // chasers — Remote web LAN (lot #17)
+export const MTC_SOURCE_ID = 'mtc'; // scènes — timecode (lot #15)
+export const MTC_CHASER_SOURCE_ID = 'mtc-chaser'; // chasers — timecode (lot #15)
 
 let _sourcesRegistered = false;
 function ensureSourcesRegistered(): void {
@@ -86,6 +88,10 @@ function ensureSourcesRegistered(): void {
   // LTP 70 : sous 'midi' (75), au-dessus de 'default' (50) et des HTP.
   dmxBridge.registerSource(REMOTE_SOURCE_ID, 'ltp', 70);
   dmxBridge.registerSource(REMOTE_CHASER_SOURCE_ID, 'ltp', 70);
+  // LTP 72 : entre 'remote' (70) et 'midi' (75) — un trigger MIDI physique
+  // reprend la main sur une cue timecode, qui reprend la main sur le web.
+  dmxBridge.registerSource(MTC_SOURCE_ID, 'ltp', 72);
+  dmxBridge.registerSource(MTC_CHASER_SOURCE_ID, 'ltp', 72);
 }
 ensureSourcesRegistered();
 
@@ -487,6 +493,36 @@ export function remoteChaserNext(chaserId: string): void {
 
 export function remoteChaserPrevious(chaserId: string): void {
   midiChaserPrevious(chaserId, REMOTE_CHASER_SOURCE_ID);
+}
+
+// ═══════════════════════════════════════════════════════════
+// MTC entrant (lot #15) — wrappers sources 'mtc' / 'mtc-chaser'
+// ═══════════════════════════════════════════════════════════
+// Le hook useMtcTriggers() (src/hooks/mtc-trigger.ts) consomme le canal
+// `midi:mtc` (état décodé en main) et dispatch vers ces wrappers, qui
+// délèguent au même moteur fade/hold que MIDI/Remote avec les sources
+// arbitre dédiées (LTP 72, entre 'remote' 70 et 'midi' 75). Le stop/toggle
+// réutilise la source stockée dans le handle (la source qui a démarré la
+// lecture), donc aucun comportement MIDI/Remote ne change.
+
+export function mtcPlayScene(sceneId: string): void {
+  midiPlayScene(sceneId, MTC_SOURCE_ID);
+}
+
+export function mtcStopScene(sceneId: string): void {
+  midiStopScene(sceneId);
+}
+
+export function mtcToggleScene(sceneId: string): void {
+  midiToggleScene(sceneId, MTC_SOURCE_ID);
+}
+
+export function mtcPlayChaser(chaserId: string): void {
+  midiPlayChaser(chaserId, MTC_CHASER_SOURCE_ID);
+}
+
+export function mtcStopChaser(chaserId: string): void {
+  midiStopChaser(chaserId);
 }
 
 /** Ids des scènes actuellement jouées (toutes sources : midi + remote). */

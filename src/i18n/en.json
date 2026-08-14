@@ -93,7 +93,8 @@
     "remote": "Remote",
     "simpleDesk": "Simple Desk",
     "stageView": "Stage View",
-    "cueList": "Cue List"
+    "cueList": "Cue List",
+    "mtc": "Timecode"
   },
   "topbar": {
     "showAuto": "Show Auto",
@@ -180,13 +181,48 @@
       "build": "Build"
     },
     "effectNames": {
-      "low": ["Gentle Glow", "Soft Wash", "Subtle Dim", "Warm Pulse Slow"],
-      "medium": ["Color Shift", "Moderate Chase", "Pan Sweep", "Groove Wave"],
-      "high": ["Intense Chase", "Full Wash", "Rapid Sweep", "Peak Glow"],
-      "dynamic": ["Build Up", "Rising Pulse", "Energy Ramp", "Climbing Chase"],
-      "drop": ["Peak Drop", "Strobe Blast", "Full Intensity", "Flash Storm"],
-      "intro": ["Fade In", "Ambient Drift", "Slow Reveal", "Emergence"],
-      "outro": ["Fade Out", "Dim Down", "Gentle Exit", "Resolution"]
+      "low": [
+        "Gentle Glow",
+        "Soft Wash",
+        "Subtle Dim",
+        "Warm Pulse Slow"
+      ],
+      "medium": [
+        "Color Shift",
+        "Moderate Chase",
+        "Pan Sweep",
+        "Groove Wave"
+      ],
+      "high": [
+        "Intense Chase",
+        "Full Wash",
+        "Rapid Sweep",
+        "Peak Glow"
+      ],
+      "dynamic": [
+        "Build Up",
+        "Rising Pulse",
+        "Energy Ramp",
+        "Climbing Chase"
+      ],
+      "drop": [
+        "Peak Drop",
+        "Strobe Blast",
+        "Full Intensity",
+        "Flash Storm"
+      ],
+      "intro": [
+        "Fade In",
+        "Ambient Drift",
+        "Slow Reveal",
+        "Emergence"
+      ],
+      "outro": [
+        "Fade Out",
+        "Dim Down",
+        "Gentle Exit",
+        "Resolution"
+      ]
     },
     "intensities": {
       "low": "Low",
@@ -428,9 +464,55 @@
   "perform": {
     "virtualConsole": "Virtual Console",
     "midiMapping": "MIDI Mapping",
-    "simpleDesk": "Simple Desk",
+    "simpleDesk": {
+      "title": "Simple Desk",
+      "highlightActive": "Highlight Active Channels",
+      "copyUniverse": "Copy Universe",
+      "pasteUniverse": "Paste Universe",
+      "allToZero": "All to 0",
+      "channelJump": "Enter",
+      "selectChannel": "Select a channel",
+      "clickFader": "Click any fader to edit",
+      "shiftRange": "Shift+click to range select",
+      "typeJump": "Type CH# + Enter to jump",
+      "channelDetail": "Channel",
+      "dmxValue": "DMX VALUE",
+      "snapTo0": "Snap to 0",
+      "info": {
+        "range": "Range",
+        "universe": "Universe",
+        "value": "Value",
+        "percent": "Percent"
+      },
+      "status": {
+        "universe": "Universe",
+        "channels": "Channels: 1-512",
+        "range": "Range"
+      }
+    },
     "stageView": "Stage View",
-    "cueList": "Cue List",
+    "cueList": {
+      "title": "Cue List",
+      "subtitle": "Theater-style cue stack",
+      "go": "GO",
+      "back": "BACK",
+      "stop": "STOP",
+      "now": "▶ NOW",
+      "done": "✓ DONE",
+      "next": "NEXT",
+      "fade": "Fade",
+      "follow": "Manual",
+      "auto": "Auto",
+      "cues": {
+        "houseFull": "House Lights Full",
+        "houseHalf": "House to Half",
+        "curtainSpeech": "Curtain Speech — Warm Wash",
+        "scene1": "Scene 1: Living Room Day",
+        "crossfade": "Crossfade to Night",
+        "scene2": "Scene 2: Bedroom",
+        "blackout": "Blackout"
+      }
+    },
     "performanceSettings": "Performance Settings",
     "vc": {
       "addWidget": "Add Widget",
@@ -463,32 +545,6 @@
       "group": "Group",
       "dragWidgetsHere": "Drag widgets here",
       "blackoutLabel": "⚫ BLACKOUT"
-    },
-    "simpleDesk": {
-      "title": "Simple Desk",
-      "highlightActive": "Highlight Active Channels",
-      "copyUniverse": "Copy Universe",
-      "pasteUniverse": "Paste Universe",
-      "allToZero": "All to 0",
-      "channelJump": "Enter",
-      "selectChannel": "Select a channel",
-      "clickFader": "Click any fader to edit",
-      "shiftRange": "Shift+click to range select",
-      "typeJump": "Type CH# + Enter to jump",
-      "channelDetail": "Channel",
-      "dmxValue": "DMX VALUE",
-      "snapTo0": "Snap to 0",
-      "info": {
-        "range": "Range",
-        "universe": "Universe",
-        "value": "Value",
-        "percent": "Percent"
-      },
-      "status": {
-        "universe": "Universe",
-        "channels": "Channels: 1-512",
-        "range": "Range"
-      }
     },
     "midi": {
       "title": "MIDI Mapping",
@@ -576,28 +632,6 @@
       "fixturesDrag": "fixtures · drag to position",
       "noFixtures": "No fixtures patched — add fixtures in Configuration mode"
     },
-    "cueList": {
-      "title": "Cue List",
-      "subtitle": "Theater-style cue stack",
-      "go": "GO",
-      "back": "BACK",
-      "stop": "STOP",
-      "now": "▶ NOW",
-      "done": "✓ DONE",
-      "next": "NEXT",
-      "fade": "Fade",
-      "follow": "Manual",
-      "auto": "Auto",
-      "cues": {
-        "houseFull": "House Lights Full",
-        "houseHalf": "House to Half",
-        "curtainSpeech": "Curtain Speech — Warm Wash",
-        "scene1": "Scene 1: Living Room Day",
-        "crossfade": "Crossfade to Night",
-        "scene2": "Scene 2: Bedroom",
-        "blackout": "Blackout"
-      }
-    },
     "settings": {
       "midiFeedback": "MIDI Feedback",
       "midiFeedbackDesc": "Send LED values to controllers",
@@ -619,7 +653,7 @@
       "loading": "Loading…",
       "statusActive": "Active",
       "statusStopped": "Stopped",
-    "statusStarting": "Starting…",
+      "statusStarting": "Starting…",
       "controlUrls": "Control URLs",
       "noUrls": "No URLs available",
       "token": "Token",
@@ -635,6 +669,40 @@
         "start": "Failed to start the server (port in use?)",
         "stop": "Failed to stop the server",
         "status": "Failed to read server status"
+      }
+    },
+    "mtc": {
+      "title": "MIDI Time Code (MTC)",
+      "subtitle": "Sync your lights to an incoming MTC stream (DAW, console): scenes and chasers triggered at time positions",
+      "locked": "Locked — MTC stream received",
+      "unlocked": "No MTC stream — waiting…",
+      "addMarker": "New marker",
+      "markers": "Timecode markers",
+      "noMarkers": "No markers yet. Add one above: at the given position, the target scene or chaser will be triggered.",
+      "add": "Add",
+      "capture": "Capture",
+      "captureHint": "Use the current MTC position",
+      "namePlaceholder": "Marker name",
+      "errors": {
+        "position": "Invalid position — expected HH:MM:SS:FF",
+        "target": "Pick a target (scene or chaser)",
+        "dropFrame": "Invalid 29.97 DF position — frames 0-1 of minutes not divisible by 10 do not exist"
+      },
+      "columns": {
+        "position": "Position",
+        "rate": "Rate",
+        "name": "Name",
+        "target": "Target",
+        "action": "Action"
+      },
+      "targets": {
+        "scene": "Scene",
+        "chaser": "Chaser"
+      },
+      "actions": {
+        "play": "Play",
+        "stop": "Stop",
+        "toggle": "Toggle"
       }
     }
   },
@@ -708,7 +776,19 @@
       "yOffset": "Y Offset",
       "fixtures": "Fixtures"
     },
-    "patterns": ["Circle", "Line", "Eight", "Square", "Triangle"],
-    "fixturesOptions": ["All", "Spot 1", "Spot 2", "Wash L", "Wash R"]
+    "patterns": [
+      "Circle",
+      "Line",
+      "Eight",
+      "Square",
+      "Triangle"
+    ],
+    "fixturesOptions": [
+      "All",
+      "Spot 1",
+      "Spot 2",
+      "Wash L",
+      "Wash R"
+    ]
   }
 }

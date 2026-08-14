@@ -13,6 +13,7 @@ import { useAudioFileLoader } from './hooks/useAudioFileLoader';
 import { useRgbMatrixPlayback } from './hooks/rgb-matrix-playback';
 import { useMidiTriggers } from './hooks/midi-trigger';
 import { useRemoteTriggers } from './hooks/remote-trigger';
+import { useMtcTriggers } from './hooks/mtc-trigger';
 import { getLatencyMs } from './utils/latency-meter';
 import { dmxBridge } from './utils/dmx-bridge';
 import './styles/global.css';
@@ -86,6 +87,7 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
         cueLists: showState.cueLists,
         shows: showState.shows,
         songPresets: showState.songPresets,
+        mtcMarkers: showState.mtcMarkers,
       },
       vcWidgets: widgets,
       version: 1,
@@ -137,6 +139,9 @@ const App: React.FC = () => {
 
   // Remote web LAN (lot #17) — commandes HTTP du serveur + push d'état
   useRemoteTriggers();
+
+  // MTC entrant (lot #15) — cues sur timecode (global, toutes vues)
+  useMtcTriggers();
 
   // Clear old persisted widgets from localStorage (now saved in project file)
   useEffect(() => {
@@ -237,6 +242,7 @@ const App: React.FC = () => {
       ss.setCueLists([]);
       ss.setShows([]);
       ss.setSongPresets([]);
+      ss.setMtcMarkers([]);
       usePerformStore.getState().vcSetWidgets([]);
       // Also remove persisted show-store from disk
       window.lightMaestro?.storage?.remove('show-store').catch(() => {});
@@ -266,6 +272,7 @@ const App: React.FC = () => {
           if (data.showStore.cueLists) ss.setCueLists(data.showStore.cueLists);
           if (data.showStore.shows) ss.setShows(data.showStore.shows);
           if (data.showStore.songPresets) ss.setSongPresets(data.showStore.songPresets);
+          if (data.showStore.mtcMarkers) ss.setMtcMarkers(data.showStore.mtcMarkers);
         }
         if (data.appStore) {
           useAppStore.setState(data.appStore);

@@ -9,6 +9,7 @@ import { FixtureLibrary } from './fixtures/library';
 import { checkForFixtureUpdates, getUpdateStatus as getFixtureUpdateStatus } from './fixtures/updater';
 import { ShowStorage } from './show/storage';
 import { MidiManager, type MidiMapping, type MidiTarget } from './midi/manager';
+import type { MtcState } from './midi/mtc';
 import { AudioAnalyzer } from './audio/analyzer';
 
 // Disable GPU cache to avoid permission errors on Windows
@@ -438,6 +439,12 @@ midiManager.on('clock', (clock: { bpm: number; running: boolean }) => {
 });
 midiManager.on('mappingChanged', (mapping: MidiMapping[]) => {
   mainWindow?.webContents.send('midi:mapping-changed', mapping);
+});
+
+// Forward MTC state (lot #15) — frame décodée / Full Frame / transition
+// lock↔unlock, ≤ ~30 msg/s (jamais par QF brut).
+midiManager.on('mtc', (state: MtcState) => {
+  mainWindow?.webContents.send('midi:mtc', state);
 });
 
 // ─── IPC Handlers: Audio ─────────────────────────────────────

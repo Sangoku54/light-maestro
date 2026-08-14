@@ -85,6 +85,11 @@ contextBridge.exposeInMainWorld('lightMaestro', {
       ipcRenderer.on('midi:clock', handler);
       return () => { ipcRenderer.removeListener('midi:clock', handler); };
     },
+    onMtc: (callback: (s: any) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('midi:mtc', handler);
+      return () => { ipcRenderer.removeListener('midi:mtc', handler); };
+    },
     onMappingChanged: (callback: (m: any[]) => void) => {
       ipcRenderer.on('midi:mapping-changed', (_, data) => callback(data));
     },

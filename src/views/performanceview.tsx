@@ -4,7 +4,8 @@ import {
   Grid, Sliders, Crosshair, Music, Zap, ChevronRight, Settings,
   Plus, MousePointer2, ToggleLeft, GripHorizontal, Columns, Trash2,
   Copy, Maximize2, Minimize2, Square, Keyboard, Eye, EyeOff,
-  ChevronUp, ChevronDown, Hash, Download, Upload, RotateCcw, Loader, Wifi
+  ChevronUp, ChevronDown, Hash, Download, Upload, RotateCcw, Loader, Wifi,
+  Timer as TimerIcon
 } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { useShowStore, type SavedCueList, type CueListCue, type SongPreset } from '../stores/showStore';
@@ -14,6 +15,7 @@ import { SongPresetPlayer } from '../components/SongPresetPlayer';
 import { analyzeAudioBuffer, type TrackAnalysis } from '../hooks/audio-analysis';
 import { sendChannelsToHardware, sendToUniverse } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
+import { timecodeToMs, msToTimecode, isValidTimecode } from '../engine/mtc-markers';
 import { Stage3D } from './stage3d';
 import {
   usePerformStore,
@@ -37,6 +39,7 @@ export const PerformanceView: React.FC = () => {
   switch (activeTab) {
     case 'vconsole': return <VirtualConsolePanel />;
     case 'midi': return <MIDIMappingPanel />;
+    case 'mtc': return <MTCPanel />;
     case 'simpledesk': return <SimpleDeskPanel />;
     case 'cuelist': return <CueListViewPanel />;
     case 'settings': return <PerformSettingsPanel />;
@@ -3666,3 +3669,271 @@ const PerformSettingsPanel: React.FC = () => { const { t } = useTranslation(); r
     </div>
   </div>
 ); };
+
+// ═══════════════════════════════════════════════════════════
+// MTC PANEL (lot #15) — MIDI Time Code entrant + cues sur timecode
+// ═══════════════════════════════════════════════════════════
+// L'état MTC est poussé par useMtcTriggers() (src/hooks/mtc-trigger.ts)
+// dans performStore.mtcState (~30 msg/s max, décodé en main). Les marqueurs
+// vivent dans showStore.mtcMarkers (persistés dans le .lmproj) et sont
+// déclenchés par le même hook (edge-trigger, sources 'mtc' LTP 72).
+
+const MTC_RATES = ['24', '25', '30drop', '30'] as const;
+type MtcRateLabel = (typeof MTC_RATES)[number];
+
+function fmtTc(h: number, m: number, s: number, f: number): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(h)}:${p(m)}:${p(s)}:${p(f)}`;
+}
+
+/** Parse « HH:MM:SS:FF » → ms (rate donné). `dropFrame` = position illégale
+ *  en 29.97 DF (frames 0-1 d'une minute non ÷10) — à signaler à l'utilisateur. */
+function parseTcInput(text: string, rate: MtcRateLabel): { ms: number | null; dropFrame: boolean } {
+  const parts = text.trim().split(':');
+  if (parts.length !== 4) return { ms: null, dropFrame: false };
+  const h = Number(parts[0]);
+  const m = Number(parts[1]);
+  const s = Number(parts[2]);
+  const f = Number(parts[3]);
+  if (![h, m, s, f].every((n) => Number.isFinite(n))) return { ms: null, dropFrame: false };
+  if (h < 0 || h > 23 || m < 0 || m > 59 || s < 0 || s > 59 || f < 0 || f > 29) return { ms: null, dropFrame: false };
+  if (!isValidTimecode(h, m, s, f, rate)) return { ms: null, dropFrame: true };
+  return { ms: timecodeToMs(h, m, s, f, rate), dropFrame: false };
+}
+
+const MTCPanel: React.FC = () => {
+  const { t } = useTranslation();
+  const mtcState = usePerformStore((s) => s.mtcState);
+  const markers = useShowStore((s) => s.mtcMarkers);
+  const scenes = useShowStore((s) => s.scenes);
+  const chasers = useShowStore((s) => s.chasers);
+  const addMtcMarker = useShowStore((s) => s.addMtcMarker);
+  const updateMtcMarker = useShowStore((s) => s.updateMtcMarker);
+  const deleteMtcMarker = useShowStore((s) => s.deleteMtcMarker);
+
+  const [posText, setPosText] = useState('');
+  const [name, setName] = useState('');
+  const [targetType, setTargetType] = useState<'scene' | 'chaser'>('scene');
+  const [targetId, setTargetId] = useState('');
+  const [action, setAction] = useState<'play' | 'stop' | 'toggle'>('play');
+  const [formRate, setFormRate] = useState<MtcRateLabel>('30');
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const sorted = [...markers].sort((a, b) => a.positionMs - b.positionMs);
+  const targets = targetType === 'scene' ? scenes : chasers;
+
+  const captureCurrent = () => {
+    if (!mtcState.locked) return;
+    setPosText(fmtTc(mtcState.hours, mtcState.minutes, mtcState.seconds, mtcState.frames));
+    setFormRate(mtcState.rate);
+    setFormError(null);
+  };
+
+  const handleAdd = () => {
+    const parsed = parseTcInput(posText, formRate);
+    if (parsed.ms === null) {
+      setFormError(
+        parsed.dropFrame ? t('perform.mtc.errors.dropFrame') : t('perform.mtc.errors.position')
+      );
+      return;
+    }
+    const positionMs = parsed.ms;
+    const target =
+      targetType === 'scene'
+        ? { type: 'scene' as const, sceneId: targetId }
+        : { type: 'chaser' as const, chaserId: targetId };
+    if ((targetType === 'scene' && !targetId) || (targetType === 'chaser' && !targetId)) {
+      setFormError(t('perform.mtc.errors.target'));
+      return;
+    }
+    addMtcMarker({
+      name: name.trim() || `MTC ${sorted.length + 1}`,
+      positionMs,
+      rate: formRate,
+      target,
+      action,
+      enabled: true,
+    });
+    setPosText('');
+    setName('');
+    setFormError(null);
+  };
+
+  const rateBadge = (rate: MtcRateLabel): string => {
+    if (rate === '30drop') return '29.97 DF';
+    return `${rate} fps`;
+  };
+
+  return (
+    <div className="h-full p-8 overflow-y-auto">
+      <h2 className="text-xl font-bold text-white flex items-center gap-2 mb-1">
+        <TimerIcon size={20} className="text-purple-400" /> {t('perform.mtc.title')}
+      </h2>
+      <p className="text-xs text-gray-500 mb-6">{t('perform.mtc.subtitle')}</p>
+
+      {/* État MTC */}
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-4 mb-6 max-w-lg">
+        <div className="flex items-center gap-3">
+          <span
+            className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+              mtcState.locked ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : 'bg-red-500'
+            }`}
+          />
+          <span className="font-mono text-2xl text-white tracking-wider">
+            {fmtTc(mtcState.hours, mtcState.minutes, mtcState.seconds, mtcState.frames)}
+          </span>
+          <span className="text-[10px] text-gray-500 border border-gray-800 rounded px-1.5 py-0.5">
+            {rateBadge(mtcState.rate)}
+          </span>
+        </div>
+        <div className="mt-2 text-xs">
+          {mtcState.locked ? (
+            <span className="text-green-500">{t('perform.mtc.locked')}</span>
+          ) : (
+            <span className="text-red-500">{t('perform.mtc.unlocked')}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Ajout d'un marqueur */}
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-4 mb-6 max-w-2xl">
+        <div className="text-sm font-medium text-gray-300 mb-3">{t('perform.mtc.addMarker')}</div>
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label className="block text-[10px] text-gray-600 mb-1">{t('perform.mtc.columns.position')}</label>
+            <div className="flex gap-1">
+              <input
+                value={posText}
+                onChange={(e) => setPosText(e.target.value)}
+                placeholder="HH:MM:SS:FF"
+                className="bg-[#15151f] border border-gray-800 rounded px-2 py-1.5 text-xs font-mono text-white w-32 focus:border-purple-500 outline-none"
+              />
+              <button
+                onClick={captureCurrent}
+                disabled={!mtcState.locked}
+                title={t('perform.mtc.captureHint')}
+                className="text-xs text-purple-400 hover:text-purple-300 disabled:text-gray-700 px-1"
+              >
+                {t('perform.mtc.capture')}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] text-gray-600 mb-1">{t('perform.mtc.columns.rate')}</label>
+            <select
+              value={formRate}
+              onChange={(e) => setFormRate(e.target.value as MtcRateLabel)}
+              className="bg-[#15151f] border border-gray-800 rounded px-2 py-1.5 text-xs text-gray-300 focus:border-purple-500 outline-none"
+            >
+              {MTC_RATES.map((r) => (
+                <option key={r} value={r}>{rateBadge(r)}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] text-gray-600 mb-1">{t('perform.mtc.columns.name')}</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={t('perform.mtc.namePlaceholder')}
+              className="bg-[#15151f] border border-gray-800 rounded px-2 py-1.5 text-xs text-white w-36 focus:border-purple-500 outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-gray-600 mb-1">{t('perform.mtc.columns.target')}</label>
+            <div className="flex gap-1">
+              <select
+                value={targetType}
+                onChange={(e) => { setTargetType(e.target.value as 'scene' | 'chaser'); setTargetId(''); }}
+                className="bg-[#15151f] border border-gray-800 rounded px-1 py-1.5 text-xs text-gray-300 focus:border-purple-500 outline-none"
+              >
+                <option value="scene">{t('perform.mtc.targets.scene')}</option>
+                <option value="chaser">{t('perform.mtc.targets.chaser')}</option>
+              </select>
+              <select
+                value={targetId}
+                onChange={(e) => setTargetId(e.target.value)}
+                className="bg-[#15151f] border border-gray-800 rounded px-2 py-1.5 text-xs text-gray-300 w-36 focus:border-purple-500 outline-none"
+              >
+                <option value="">—</option>
+                {targets.map((s: any) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] text-gray-600 mb-1">{t('perform.mtc.columns.action')}</label>
+            <select
+              value={action}
+              onChange={(e) => setAction(e.target.value as 'play' | 'stop' | 'toggle')}
+              className="bg-[#15151f] border border-gray-800 rounded px-2 py-1.5 text-xs text-gray-300 focus:border-purple-500 outline-none"
+            >
+              <option value="play">{t('perform.mtc.actions.play')}</option>
+              <option value="stop">{t('perform.mtc.actions.stop')}</option>
+              <option value="toggle">{t('perform.mtc.actions.toggle')}</option>
+            </select>
+          </div>
+          <button
+            onClick={handleAdd}
+            className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium rounded px-3 py-2"
+          >
+            <Plus size={12} className="inline mr-1" />
+            {t('perform.mtc.add')}
+          </button>
+        </div>
+        {formError && <div className="mt-2 text-[11px] text-red-500">{formError}</div>}
+      </div>
+
+      {/* Liste des marqueurs */}
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden max-w-2xl">
+        <div className="px-4 py-2 border-b border-gray-800/50 flex items-center justify-between">
+          <span className="text-xs font-medium text-gray-400">
+            {t('perform.mtc.markers')} — {sorted.length}
+          </span>
+        </div>
+        {sorted.length === 0 ? (
+          <div className="p-8 text-center text-xs text-gray-600">{t('perform.mtc.noMarkers')}</div>
+        ) : (
+          sorted.map((mk) => {
+            const tc = msToTimecode(mk.positionMs, mk.rate);
+            const tgt = mk.target;
+            const targetName =
+              tgt.type === 'scene'
+                ? scenes.find((s) => s.id === tgt.sceneId)?.name || tgt.sceneId
+                : chasers.find((c) => c.id === tgt.chaserId)?.name || tgt.chaserId;
+            return (
+              <div key={mk.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-800/20 last:border-0">
+                <span className="font-mono text-xs text-gray-300 w-24 shrink-0">{fmtTc(tc.hours, tc.minutes, tc.seconds, tc.frames)}</span>
+                <span className="text-[9px] text-gray-600 w-14 shrink-0">{rateBadge(mk.rate)}</span>
+                <span className="flex-1 text-xs text-gray-400 truncate">{mk.name}</span>
+                <span className="text-[10px] text-gray-500 shrink-0">
+                  {tgt.type === 'scene' ? t('perform.mtc.targets.scene') : t('perform.mtc.targets.chaser')}: {targetName}
+                </span>
+                <span className="text-[10px] text-gray-600 w-10 shrink-0">
+                  {t(`perform.mtc.actions.${mk.action}`)}
+                </span>
+                <label className="relative w-7 h-4 cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={mk.enabled}
+                    onChange={(e) => updateMtcMarker(mk.id, { enabled: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-full h-full bg-gray-700 rounded-full peer-checked:bg-purple-600 transition-colors" />
+                  <div className="absolute w-2.5 h-2.5 bg-white rounded-full top-0.5 left-0.5 peer-checked:left-4 transition-all" />
+                </label>
+                <button
+                  onClick={() => deleteMtcMarker(mk.id)}
+                  className="text-gray-600 hover:text-red-400 shrink-0"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+};

@@ -6,6 +6,7 @@
  */
 
 import { create } from 'zustand';
+import type { MtcMarker } from '../engine/mtc-markers';
 import type { DmxCue } from '../hooks/dmx-cues';
 
 // ─── Types ─────────────────────────────────────────────────
@@ -305,6 +306,13 @@ interface ShowState {
   removeSongPreset: (id: string) => void;
   updateSongPreset: (id: string, updates: Partial<SongPreset>) => void;
   setSongPresets: (presets: SongPreset[]) => void;
+
+  // MTC markers (lot #15) — cues sur timecode
+  mtcMarkers: MtcMarker[];
+  addMtcMarker: (marker: Omit<MtcMarker, 'id'>) => string;
+  updateMtcMarker: (id: string, updates: Partial<MtcMarker>) => void;
+  deleteMtcMarker: (id: string) => void;
+  setMtcMarkers: (markers: MtcMarker[]) => void;
 }
 
 // ─── Store ─────────────────────────────────────────────────
@@ -912,6 +920,35 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   setSongPresets: (presets) => {
     set({ songPresets: presets });
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+  },
+
+  // ── MTC markers (lot #15) — cues sur timecode ──
+  mtcMarkers: [],
+
+  addMtcMarker: (marker) => {
+    const id = `mtc-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    set((state) => ({ mtcMarkers: [...state.mtcMarkers, { ...marker, id }] }));
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    return id;
+  },
+
+  updateMtcMarker: (id, updates) => {
+    set((state) => ({
+      mtcMarkers: state.mtcMarkers.map((m) => (m.id === id ? { ...m, ...updates } : m)),
+    }));
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+  },
+
+  deleteMtcMarker: (id) => {
+    set((state) => ({
+      mtcMarkers: state.mtcMarkers.filter((m) => m.id !== id),
+    }));
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+  },
+
+  setMtcMarkers: (markers) => {
+    set({ mtcMarkers: markers });
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
   },
 }));

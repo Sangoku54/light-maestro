@@ -19,6 +19,7 @@
 import { EventEmitter } from 'events';
 import fs from 'fs';
 import path from 'path';
+import { MtcDecoder, type MtcState } from './mtc';
 
 export interface MidiDevice {
   id: string;
@@ -65,6 +66,11 @@ export class MidiManager extends EventEmitter {
   private clockIntervals: number[] = [];
   private clockBpm: number = 0;
   private clockLastEmit: number = 0;
+
+  // ─── MTC (lot #15) ────────────────────────────────────────
+  private mtcDecoder = new MtcDecoder();
+  private mtcCheckTimer: NodeJS.Timeout | null = null;
+  private mtcLastLocked: boolean | null = null;
 
   // ─── Devices ────────────────────────────────────────────
 
@@ -148,10 +154,12 @@ export class MidiManager extends EventEmitter {
         throw new Error(`MIDI input port ${inputIndex} does not exist`);
       }
       input.openPort(inputIndex);
-      // Accept timing clock (0xF8): node-midi ignores sysex/timing/active
-      // sensing by default, so the MIDI clock would never arrive otherwise.
+      // Accept timing clock (0xF8) AND sysex: node-midi ignores them by
+      // default. The sysex is required for MTC Full Frame (lot #15) — all
+      // non-MTC sysex is consumed/ignored in handleMidiMessage (never
+      // reaches the mapping matcher).
       // ignoreTypes(sysex, timing, activeSensing)
-      input.ignoreTypes(true, false, true);
+      input.ignoreTypes(false, false, true);
       input.on('message', (_deltaTime: number, message: number[]) => {
         this.handleMidiMessage(message);
       });
@@ -172,6 +180,7 @@ export class MidiManager extends EventEmitter {
       this.input = newInput;
       this.output = newOutput;
       this.connected = true;
+      this.startMtcCheck();
       this.emit('connected', deviceId);
     } catch (e) {
       // Never leave a half-open port behind on failure. Only close the
@@ -200,6 +209,12 @@ export class MidiManager extends EventEmitter {
       this.output = null;
     }
     this.connected = false;
+    this.stopMtcCheck();
+    // Le décodeur et l'état MTC appartiennent au port fermé : reset pour
+    // ne jamais exposer un état stale d'un ancien device (connect A →
+    // connect B échoue → le renderer ne doit pas voir le MTC de A).
+    this.mtcDecoder.reset();
+    this.mtcLastLocked = null;
   }
 
   disconnect(): void {
@@ -216,6 +231,10 @@ export class MidiManager extends EventEmitter {
     this.clockRunning = false;
     this.clockLastPulse = 0;
     this.clockIntervals = [];
+    // Reset the MTC decoder (lot #15) — no stale timecode after reconnect
+    this.stopMtcCheck();
+    this.mtcDecoder.reset();
+    this.mtcLastLocked = null;
     this.emit('disconnected');
     this.emit('clock', { bpm: this.clockBpm, running: false });
   }
@@ -341,6 +360,25 @@ export class MidiManager extends EventEmitter {
   private handleMidiMessage(message: number[]): void {
     if (!Array.isArray(message) || message.length === 0) return;
     const status = message[0];
+
+    // ── MTC (lot #15) : intercepté AVANT tout le reste — jamais un mapping ──
+    // Quarter Frame (0xF1) : System Common, pas de running status, chaque
+    // message est une paire `F1 <data>` complète.
+    if (status === 0xF1) {
+      const data1 = message[1] ?? 0;
+      if (this.mtcDecoder.pushQuarterFrame(data1)) this.emitMtc();
+      return;
+    }
+    // SysEx (0xF0) : seul le Full Frame MTC nous intéresse ; tout le reste
+    // est consommé proprement (ne doit jamais atteindre le matcher, qui le
+    // verrait comme une pseudo-note canal 1 valeur 0x7F, apprenable).
+    if (status === 0xF0) {
+      if (this.mtcDecoder.pushFullFrame(message)) this.emitMtc();
+      return;
+    }
+    // Song Position (0xF2) / Song Select (0xF3) / Tune Request (0xF6) :
+    // System Common non pertinent — ignorés, jamais des mappings.
+    if (status === 0xF2 || status === 0xF3 || status === 0xF6) return;
 
     // Realtime messages (MIDI clock family) - never touch mappings
     if (status >= 0xF8) {
@@ -480,5 +518,43 @@ export class MidiManager extends EventEmitter {
   private normalizeMidiValue(rawValue: number, range: [number, number]): number {
     const [min, max] = range;
     return min + (rawValue / 127) * (max - min);
+  }
+
+  // ─── MTC (lot #15) ─────────────────────────────────────────
+
+  /**
+   * Émet l'état MTC courant. Appelé à chaque frame décodée (cycle QF
+   * complet, ~25-30 Hz max) et à chaque Full Frame — jamais par QF brut
+   * (200+ msg/s). Le renderer reçoit donc ≤ ~30 événements/s.
+   */
+  private emitMtc(): void {
+    const st: MtcState = this.mtcDecoder.getState();
+    this.mtcLastLocked = st.locked;
+    this.emit('mtc', st);
+  }
+
+  /**
+   * Détecte la perte de lock silencieuse : le timeout d'unlock n'est pas
+   * déclenché par un message entrant (c'est l'ABSENCE de message). Un timer
+   * 500 ms compare l'état et émet à la transition locked↔unlocked.
+   */
+  private startMtcCheck(): void {
+    this.stopMtcCheck();
+    this.mtcLastLocked = null;
+    this.mtcCheckTimer = setInterval(() => {
+      const st: MtcState = this.mtcDecoder.getState();
+      if (this.mtcLastLocked !== null && st.locked !== this.mtcLastLocked) {
+        this.mtcLastLocked = st.locked;
+        this.emit('mtc', st);
+      }
+    }, 500);
+  }
+
+  private stopMtcCheck(): void {
+    if (this.mtcCheckTimer) {
+      clearInterval(this.mtcCheckTimer);
+      this.mtcCheckTimer = null;
+    }
+    this.mtcLastLocked = null;
   }
 }
