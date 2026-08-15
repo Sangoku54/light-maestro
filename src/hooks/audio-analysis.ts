@@ -759,6 +759,42 @@ function classifySections(
 // 8. Multi-band beat tracking with autocorrelation
 // ═══════════════════════════════════════════════════════════
 
+/** Bass-focused ODF for beat tracking: sub-bass (kick) + bass only.
+ *  Filters out hi-hat/cymbal noise that causes double-time errors. */
+function computeBassODF(frames: SpectralFrame[]): number[] {
+  const n = frames.length;
+  const odf = new Array(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    const prev = frames[i - 1];
+    const curr = frames[i];
+    if (!prev || !curr) continue;
+    const subDiff = Math.max(0, curr.rawBands.sub - prev.rawBands.sub);
+    const bassDiff = Math.max(0, curr.rawBands.bass - prev.rawBands.bass);
+    // Sub-bass weighted 1.5x (kick drum dominant), bass 1.0x
+    odf[i] = subDiff * 1.5 + bassDiff * 1.0;
+  }
+  return odf;
+}
+
+/** Harmonic sum: reinforces fundamental tempo by summing autocorrelation
+ *  at sub-multiples (τ, τ/2, τ/3, τ/4). Standard librosa technique. */
+function harmonicSum(acorr: number[], lag: number, maxLag: number, K: number = 4): number {
+  let sum = 0;
+  for (let k = 1; k <= K; k++) {
+    const subLag = lag / k;
+    if (subLag < 1 || subLag > maxLag) continue;
+    // Linear interpolation for non-integer lags
+    const lo = Math.floor(subLag);
+    const hi = Math.ceil(subLag);
+    const frac = subLag - lo;
+    const val = (hi <= maxLag && hi !== lo)
+      ? acorr[lo] * (1 - frac) + acorr[hi] * frac
+      : acorr[lo];
+    sum += val / k;  // higher harmonics contribute less
+  }
+  return sum;
+}
+
 function computeOnsetFunction(frames: SpectralFrame[]): number[] {
   const n = frames.length;
   const odf = new Array(n).fill(0);
@@ -802,13 +838,13 @@ function trackBeats(
   const rate = analysisRate;
 
   // ═══════════════════════════════════════════════════════════════
-  // BPM DETECTION — ODF autocorrelation + log-Gaussian tempo prior
+  // BPM DETECTION — Bass ODF autocorrelation + harmonic sum + tempo prior
   // ═══════════════════════════════════════════════════════════════
-  // Industry-standard approach (librosa, essentia, voice.ai):
-  // 1. Autocorrelation on onset detection function (spectral flux)
-  // 2. Normalize to [0, 1]
-  // 3. Multiply by log-Gaussian tempo prior (center=120 BPM, sigma=0.5)
-  // 4. Pick argmax
+  // Industry-standard approach (librosa, essentia):
+  // 1. Autocorrelation on bass-filtered onset detection function
+  // 2. Harmonic sum (K=4) to reinforce fundamental tempo
+  // 3. Multiply by log-Gaussian tempo prior (center=120 BPM, sigma=0.6)
+  // 4. Pick argmax + parabolic interpolation
   //
   // This is fundamentally different from the energy-derivative approach
   // which captures ALL onsets (incl. eighth-notes) and produces octave errors.
@@ -833,24 +869,27 @@ function trackBeats(
   // Log-Gaussian tempo prior centered at 120 BPM
   // prior(bpm) = exp(-0.5 * ((log2(bpm/mu)) / sigma)²)
   // mu=120 BPM (most common global tempo), sigma=0.5 (covers 60-240 range)
-  const muBpm = 120, sigmaLog = 0.35; // tight: prior(200)≈0.11, prior(110)≈0.94
+  const muBpm = 120, sigmaLog = 0.6; // widened: let data speak (was 0.35)
   const tempoPrior = (bpm: number) =>
     Math.exp(-0.5 * ((Math.log2(bpm / muBpm)) / sigmaLog) ** 2);
 
-  // Score every lag: normalized autocorrelation × tempo prior
+  // Score every lag: harmonic sum × tempo prior (replaces raw autocorrelation)
   let bestLag = minLag;
   let bestScore = -Infinity;
-  const debugCandidates: { lag: number; bpm: number; acorr: number; norm: number; prior: number; score: number }[] = [];
+  const debugCandidates: { lag: number; bpm: number; acorr: number; hs: number; norm: number; prior: number; score: number }[] = [];
 
   for (let lag = minLag; lag <= maxLag; lag++) {
     const bpm = 60 * rate / lag;
-    const norm = acorr[lag] / maxAcorr;
+    const hs = harmonicSum(acorr, lag, maxLag, 4);
+    const hsMax = Math.max(1e-10, hs);
+    const norm = hs / hsMax; // normalize harmonic sum
     const prior = tempoPrior(bpm);
     const score = norm * prior;
 
     debugCandidates.push({
       lag, bpm: Math.round(bpm),
       acorr: Number(acorr[lag].toFixed(4)),
+      hs: Number(hs.toFixed(4)),
       norm: Number(norm.toFixed(4)),
       prior: Number(prior.toFixed(4)),
       score: Number(score.toFixed(4)),
@@ -1518,7 +1557,7 @@ export function analyzeAudioBuffer(
   const sampleRate = buffer.sampleRate;
   const data = buffer.getChannelData(0);
 
-  const analysisRate = 10;
+  const analysisRate = 50;  // 50 Hz: 20ms/frame → lag at 120 BPM = 25 frames (was 5 at 10 Hz)
   const hopSize = Math.floor(sampleRate / analysisRate);
   const numFrames = Math.floor(data.length / hopSize);
 
@@ -1691,10 +1730,11 @@ export function analyzeAudioBuffer(
     });
   }
 
-  // ══ Phase H: Beat tracking (multi-band ODF + autocorrelation) ══
+  // ══ Phase H: Beat tracking (bass-focused ODF + harmonic sum autocorrelation) ══
   const odf = computeOnsetFunction(spectralFrames);
+  const bassOdf = computeBassODF(spectralFrames);
 
-  const { beats, bpm, beatStrengths } = trackBeats(odf, analysisRate, normLow, normMid, normHigh, energyCurve, duration);
+  const { beats, bpm, beatStrengths } = trackBeats(bassOdf, analysisRate, normLow, normMid, normHigh, energyCurve, duration);
 
   const nFrames = Math.floor(data.length / hopSize);
   const downbeats = detectDownbeats(beats, beatStrengths, spectralFrames, analysisRate);
