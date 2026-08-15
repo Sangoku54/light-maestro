@@ -271,7 +271,7 @@ import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, startsW
 import type { ChannelAnalysis } from '../engine/dmx-channel';
 import { analyzeChannels } from '../engine/dmx-channel';
 import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSmartMovement } from '../engine/dmx-movement';
-import { useAppStore } from '../stores/appstore';
+import { useAppStore } from '../stores/appStore';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { recordAudioTick } from '../utils/latency-meter';
 
@@ -656,6 +656,32 @@ export function useDmxPlayback(options: {
       }
       const efxMap=efxActive||{};
 
+      // ── Hoist per-frame computations OUT of the fixture loop (perf P1) ──
+      // Pre-compute once per frame instead of once per fixture
+      const dimmerOverrides = dimmerTracksRef?.current && dimmerTracksRef.current.length > 0
+        ? computeDimmerTrackOverrides(dimmerTracksRef.current, ct, patchedFixturesRef.current, fixtureGroupsRef?.current || [])
+        : null;
+      const strobeOverrides = strobeTracksRef?.current && strobeTracksRef.current.length > 0
+        ? computeStrobeTrackOverrides(strobeTracksRef.current, ct, patchedFixturesRef.current, fixtureGroupsRef?.current || [])
+        : null;
+      // Pre-compute fixture-track targets for this frame
+      const fixtureTrackTargets: Array<{ ft: FixtureTrack; targets: string[] }> = [];
+      if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
+        for (const ft of fixtureTracksRef.current) {
+          if (!ft.enabled) { fixtureTrackTargets.push({ ft, targets: [] }); continue; }
+          fixtureTrackTargets.push({ ft, targets: resolveTrackTargets(ft, patchedFixturesRef.current, fixtureGroupsRef.current) });
+        }
+      }
+      // Build a per-fixture lookup: fixtureId → array of { ft, targets }
+      const fixtureTrackMap = new Map<string, Array<{ ft: FixtureTrack; targets: string[] }>>();
+      for (const entry of fixtureTrackTargets) {
+        if (entry.targets.length === 0) continue;
+        for (const fid of entry.targets) {
+          if (!fixtureTrackMap.has(fid)) fixtureTrackMap.set(fid, []);
+          fixtureTrackMap.get(fid)!.push(entry);
+        }
+      }
+
       for(const[uniIdx,fixtures]of analysis.byUniverse.entries()){
         const uid=analysis.uniIds[uniIdx];if(!uid)continue;
         const chVals:Record<number,number>={};
@@ -667,12 +693,10 @@ export function useDmxPlayback(options: {
           if (disabledFixturesRef?.current?.has(pf.id)) continue;
 
           let dimmerVal = (() => {
-            // Fixture track override check
-            if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
-              for (const ft of fixtureTracksRef.current) {
-                if (!ft.enabled) continue;
-                const targets = resolveTrackTargets(ft, patchedFixturesRef.current, fixtureGroupsRef.current);
-                if (!targets.includes(pf.id)) continue;
+            // Fixture track override check (pre-computed targets)
+            const ftEntries = fixtureTrackMap.get(pf.id);
+            if (ftEntries) {
+              for (const { ft } of ftEntries) {
                 const activeBlock = ft.dimmerBlocks.find(b => ct >= b.time && ct < b.endTime);
                 if (activeBlock) {
                   let val = activeBlock.value;
@@ -688,9 +712,8 @@ export function useDmxPlayback(options: {
             return active.forcedDimmerVal !== undefined ? active.forcedDimmerVal : mapIntensity(active.intensity, effectiveEnergy, pf.tier, tierMultipliers);
           })();
           // Dimmer track override (highest priority for intensity)
-          if (dimmerTracksRef?.current) {
-            const dto = computeDimmerTrackOverrides(dimmerTracksRef.current, ct, patchedFixturesRef.current, fixtureGroupsRef?.current || []);
-            const dimmerOverride = dto.get(pf.id);
+          if (dimmerOverrides) {
+            const dimmerOverride = dimmerOverrides.get(pf.id);
             if (dimmerOverride) {
               dimmerVal = Math.round(255 * dimmerOverride.value / 100);
             }
@@ -702,12 +725,10 @@ export function useDmxPlayback(options: {
             if (colorTrackColors.has(pf.id)) {
               return colorTrackColors.get(pf.id)!;
             }
-            // Fixture track override check
-            if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
-              for (const ft of fixtureTracksRef.current) {
-                if (!ft.enabled) continue;
-                const targets = resolveTrackTargets(ft, patchedFixturesRef.current, fixtureGroupsRef.current);
-                if (!targets.includes(pf.id)) continue;
+            // Fixture track override check (pre-computed targets)
+            const ftEntries2 = fixtureTrackMap.get(pf.id);
+            if (ftEntries2) {
+              for (const { ft } of ftEntries2) {
                 const activeBlock = ft.colorBlocks.find(b => ct >= b.time && ct < b.endTime);
                 if (activeBlock) {
                   if (activeBlock.endColor && activeBlock.endColor !== activeBlock.color) {
@@ -788,20 +809,12 @@ export function useDmxPlayback(options: {
 
           // Shutter
           if(fa.shutterOffset!==null){const sAddr=pf.startAddress+fa.shutterOffset;
-            // Strobe track override (highest priority)
-            const strobeTrackOverride = (() => {
-              if (strobeTracksRef?.current) {
-                const sto = computeStrobeTrackOverrides(strobeTracksRef.current, ct, patchedFixturesRef.current, fixtureGroupsRef?.current || []);
-                return sto.get(pf.id) || null;
-              }
-              return null;
-            })();
+            // Strobe track override (highest priority, pre-computed)
+            const strobeTrackOverride = strobeOverrides ? (strobeOverrides.get(pf.id) || null) : null;
             const trackStrobe = (() => {
-              if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
-                for (const ft of fixtureTracksRef.current) {
-                  if (!ft.enabled) continue;
-                  const targets = resolveTrackTargets(ft, patchedFixturesRef.current, fixtureGroupsRef.current);
-                  if (!targets.includes(pf.id)) continue;
+              const ftEntries3 = fixtureTrackMap.get(pf.id);
+              if (ftEntries3) {
+                for (const { ft } of ftEntries3) {
                   const activeBlock = ft.strobeBlocks.find(b => ct >= b.time && ct < b.endTime);
                   if (activeBlock) {
                     let speed = activeBlock.speed;
@@ -853,11 +866,9 @@ export function useDmxPlayback(options: {
               for(let m=0;m<motorCount;m++){if(m<panCount)chVals[pf.startAddress+fa.panOffsets[m]]=ept.pan;if(m<tiltCount)chVals[pf.startAddress+fa.tiltOffsets[m]]=ept.tilt;}
             }else{
               const trackMovement = (() => {
-                if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
-                  for (const ft of fixtureTracksRef.current) {
-                    if (!ft.enabled) continue;
-                    const targets = resolveTrackTargets(ft, patchedFixturesRef.current, fixtureGroupsRef.current);
-                    if (!targets.includes(pf.id)) continue;
+                const ftEntries4 = fixtureTrackMap.get(pf.id);
+                if (ftEntries4) {
+                  for (const { ft } of ftEntries4) {
                     const activeBlock = ft.movementBlocks.find(b => ct >= b.time && ct < b.endTime);
                     if (activeBlock) return activeBlock;
                   }

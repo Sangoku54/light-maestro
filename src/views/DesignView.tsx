@@ -239,13 +239,13 @@ interface AnalyzedFixtureChannels {
 
 function analyzeFixtureChannels(
   fixture: PatchedFixture,
-  modeChannels: Array<{ name: string; type: string; defaultValue?: number; capabilities?: any[] }>
+  modeChannels: Array<{ name: string; type: string; defaultValue?: number; capabilities?: any[]; offset?: number }>
 ): AnalyzedFixtureChannels {
   const channels: AnalyzedChannel[] = modeChannels.map((ch, i) => ({
-    index: i,
+    index: ch.offset ?? i,
     name: ch.name || `Ch ${i + 1}`,
     type: ch.type || 'Nothing',
-    dmxAddress: fixture.startAddress + i,
+    dmxAddress: fixture.startAddress + (ch.offset ?? i),
     defaultValue: ch.defaultValue,
     capabilities: ch.capabilities,
   }));

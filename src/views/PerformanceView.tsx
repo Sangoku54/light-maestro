@@ -16,7 +16,7 @@ import { analyzeAudioBuffer, type TrackAnalysis } from '../hooks/audio-analysis'
 import { sendChannelsToHardware, sendToUniverse } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { timecodeToMs, msToTimecode, isValidTimecode } from '../engine/mtc-markers';
-import { Stage3D } from './stage3d';
+import { Stage3D } from './Stage3D';
 import {
   usePerformStore,
   ConsoleWidget,

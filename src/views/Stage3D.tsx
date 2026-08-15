@@ -262,29 +262,30 @@ function analyzeFixtureChannels(
 
   for (let i = 0; i < channels.length; i++) {
     const ch = channels[i];
+    const off = ch.offset ?? i;
     const chName = ch.name || '';
     const hasColorCaps = ch.capabilities?.some(cap => cap.color);
     if (startsWithRgb.test(chName) || ch.type === 'Colour' || (ch.type === 'Beam' && hasColorWord.test(chName)) || hasColorCaps) {
-      colourChannels.push({ offset: i, name: chName, caps: ch.capabilities });
+      colourChannels.push({ offset: off, name: chName, caps: ch.capabilities });
       continue;
     }
     switch (ch.type) {
       case 'Intensity':
-        if (result.intensityOffset === null) result.intensityOffset = i;
+        if (result.intensityOffset === null) result.intensityOffset = off;
         break;
       case 'Shutter':
-        if (result.shutterOffset === null) result.shutterOffset = i;
+        if (result.shutterOffset === null) result.shutterOffset = off;
         break;
       case 'Pan':
-        if (result.panOffset === null) result.panOffset = i;
-        if (!/\bfine\b/i.test(chName)) result.panOffsets.push(i);
+        if (result.panOffset === null) result.panOffset = off;
+        if (!/\bfine\b/i.test(chName)) result.panOffsets.push(off);
         break;
       case 'Tilt':
-        if (result.tiltOffset === null) result.tiltOffset = i;
-        if (!/\bfine\b/i.test(chName)) result.tiltOffsets.push(i);
+        if (result.tiltOffset === null) result.tiltOffset = off;
+        if (!/\bfine\b/i.test(chName)) result.tiltOffsets.push(off);
         break;
       case 'Gobo':
-        if (result.goboOffset === null) result.goboOffset = i;
+        if (result.goboOffset === null) result.goboOffset = off;
         break;
     }
   }

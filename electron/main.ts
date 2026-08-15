@@ -176,6 +176,8 @@ function createWindow() {
       exitCode: details.exitCode,
       message: `Renderer process gone: ${details.reason} (exit code ${details.exitCode})`,
     });
+    // Immediate blackout — don't wait for watchdog (2s delay)
+    try { dmxEngine.blackout(); } catch (e) { console.error('[render-gone] blackout failed:', e); }
     try {
       if (!mainWindow || mainWindow.isDestroyed()) {
         createWindow();
@@ -758,7 +760,20 @@ app.whenReady().then(async () => {
   console.error('App startup failed:', err);
 });
 
+app.on('before-quit', (event) => {
+  if (!isQuitting) {
+    event.preventDefault();
+    isQuitting = true;
+    // Guaranteed blackout before exit — 100ms for USB frame to flush
+    try { dmxEngine.blackout(); } catch (e) { console.error('[before-quit] blackout failed:', e); }
+    setTimeout(() => app.exit(), 100);
+    return;
+  }
+});
+
 app.on('window-all-closed', async () => {
+  // Double safety: blackout before stop (before-quit already does it, but cover all paths)
+  try { dmxEngine.blackout(); } catch {}
   await dmxEngine.stop();
   midiManager.disconnect();
   audioAnalyzer.stopCapture();
