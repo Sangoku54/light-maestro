@@ -438,9 +438,10 @@ function detectSectionBoundaries(
 
   // Pass 1: global adaptive threshold (percentile-based, not std)
   const sorted = [...noveltyCurve].sort((a, b) => a - b);
+  const p75 = sorted[Math.floor(n * 0.75)];
   const p90 = sorted[Math.floor(n * 0.90)];
   const p95 = sorted[Math.floor(n * 0.95)];
-  const globalThreshold = p90 * 0.8 + p95 * 0.2; // weighted: top 5-10% peaks
+  const globalThreshold = Math.max(0.15, p75 * 0.5 + p90 * 0.5);
 
   const minGap = Math.floor(analysisRate * minSectionSec);
   const adaptiveWindow = Math.floor(analysisRate * 2);
@@ -487,8 +488,8 @@ function detectSectionBoundaries(
     const bassContrast = Math.abs(afterB - beforeB) / Math.max(0.01, Math.max(afterB, beforeB));
 
     const contrastScore = energyContrast * 0.5 + centroidContrast * 0.3 + bassContrast * 0.2;
-    // Lower threshold for strong novelty peaks
-    const contrastThreshold = noveltyCurve[i] > p95 ? 0.04 : noveltyCurve[i] > p90 ? 0.08 : 0.15;
+    // Lower threshold for strong novelty peaks (Bug #2: was 0.04/0.08/0.15)
+    const contrastThreshold = noveltyCurve[i] > p95 ? 0.03 : noveltyCurve[i] > p90 ? 0.06 : 0.10;
 
     if (contrastScore > contrastThreshold) {
       boundaries.push(i);
@@ -537,16 +538,28 @@ function computeSegmentSimilarityMatrix(segments: SegmentFeatures[]): number[][]
   for (let i = 0; i < n; i++) {
     matrix[i] = new Array(n).fill(0);
   }
+  if (n < 2) return matrix;
+
+  // Standardize features (z-score) to avoid correlated features dominating
+  // Bug #3 fix: raw cosine on [0,1]-correlated features made everything similar
+  const featKeys = ['energy', 'bassRatio', 'centroidNorm', 'flatness', 'subBassRatio'] as const;
+  const featMeans: Record<string, number> = {};
+  const featStds: Record<string, number> = {};
+  for (const k of featKeys) {
+    const vals = segments.map(s => s[k]);
+    featMeans[k] = mean(vals);
+    featStds[k] = Math.max(1e-6, std(vals, featMeans[k]));
+  }
+
+  const getFeat = (s: SegmentFeatures) => featKeys.map(k => (s[k] - featMeans[k]) / featStds[k]);
 
   for (let i = 0; i < n; i++) {
     for (let j = i; j < n; j++) {
-      const a = segments[i];
-      const b = segments[j];
-      const featA = [a.energy, a.bassRatio, a.centroidNorm, a.flatness, a.subBassRatio];
-      const featB = [b.energy, b.bassRatio, b.centroidNorm, b.flatness, b.subBassRatio];
-      const sim = cosineSimilarity(featA, featB);
-      matrix[i][j] = sim;
-      matrix[j][i] = sim;
+      const sim = cosineSimilarity(getFeat(segments[i]), getFeat(segments[j]));
+      // Clamp to [0, 1] — standardized cosine can go negative
+      const clamped = Math.max(0, sim);
+      matrix[i][j] = clamped;
+      matrix[j][i] = clamped;
     }
   }
   return matrix;
@@ -658,6 +671,8 @@ function classifySections(
 
   const classByEnergy = [...classMeanEnergy.entries()].sort((a, b) => b[1] - a[1]);
   const highestEnergyClass = classByEnergy[0]?.[0] || '';
+  const numDistinctClasses = classByEnergy.length;
+  const globalMeanEnergy = mean(segments.map(s => s.energy));
 
   for (let i = 0; i < N; i++) {
     const seg = segments[i];
@@ -676,8 +691,10 @@ function classifySections(
     }
 
     const isHighestEnergy = label === highestEnergyClass;
+    const energyRatio = seg.energy / Math.max(0.01, globalMeanEnergy);
 
-    if (isRepeated && isHighestEnergy && classEnergy > 0.3) {
+    // Bug #4 fix: require >1 distinct class and higher energy threshold for chorus
+    if (isRepeated && isHighestEnergy && classEnergy > 0.45 && numDistinctClasses > 1 && energyRatio > 1.1) {
       result[i].type = 'chorus';
       continue;
     }
@@ -1575,6 +1592,16 @@ export function analyzeAudioBuffer(
   const boundaries = detectSectionBoundaries(noveltyCurve, normEnergy, normLow, spectralCentroidCurve, analysisRate, duration, 4);
 
   // ══ Phase C: Build segments with spectral features ══
+  // Bug #6 fix: extract real spectral flatness curve from spectralFrames
+  // Bug #7 fix: extract subBass from rawBands.sub (independent from normLow)
+  const spectralFlatnessCurve: number[] = [];
+  const subBassRawCurve: number[] = [];
+  for (const sf of spectralFrames) {
+    spectralFlatnessCurve.push(sf.flatness);
+    subBassRawCurve.push(sf.rawBands.sub);
+  }
+  const normSubBass = normalize(subBassRawCurve);
+
   const segments: SegmentFeatures[] = [];
   for (let i = 0; i < boundaries.length - 1; i++) {
     const sf = boundaries[i];
@@ -1584,8 +1611,8 @@ export function analyzeAudioBuffer(
     const segE = normEnergy.slice(sf, ef);
     const segBass = normLow.slice(sf, ef);
     const segCentroids = spectralCentroidCurve.slice(sf, ef);
-    const segFlatness = spectralFluxCurve.slice(sf, ef);
-    const segSubBass = normLow.slice(sf, ef);
+    const segFlatness = spectralFlatnessCurve.slice(sf, ef);
+    const segSubBass = normSubBass.slice(sf, ef);
 
     const avgE = segE.length > 0 ? r4(mean(segE)) : 0;
     const avgBassRatio = segE.length > 0
@@ -1621,19 +1648,23 @@ export function analyzeAudioBuffer(
 
   // ══ Phase D: Self-similarity matrix & pattern detection ══
   const ssm = computeSegmentSimilarityMatrix(segments);
-  const structuralLabels = detectRepeatingPatterns(ssm, 0.72);
+  const structuralLabels = detectRepeatingPatterns(ssm, 0.85);
 
   // ══ Phase E: Classify sections (spectral + repetition) ══
   const classified = classifySections(segments, duration, structuralLabels);
 
   // ══ Phase F: Merge adjacent same-type sections ══
+  // Bug #5 fix: limit merge duration to 30% of total to prevent giant blocks
+  const maxMergeDuration = duration * 0.30;
   const mergedTypes: TrackSection['type'][] = [classified[0]?.type || 'unknown'];
   const mergedSegs: SegmentFeatures[] = [segments[0]];
   const mergedLabels: string[] = [structuralLabels[0] || '?'];
 
   for (let i = 1; i < classified.length; i++) {
+    const wouldBeDuration = segments[i].endT - mergedSegs[mergedSegs.length - 1].startT;
     if (classified[i].type === mergedTypes[mergedTypes.length - 1] &&
-        structuralLabels[i] === mergedLabels[mergedLabels.length - 1]) {
+        structuralLabels[i] === mergedLabels[mergedLabels.length - 1] &&
+        wouldBeDuration < maxMergeDuration) {
       mergedSegs[mergedSegs.length - 1] = {
         ...mergedSegs[mergedSegs.length - 1],
         endF: segments[i].endF,
