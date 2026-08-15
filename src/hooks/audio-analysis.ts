@@ -1782,7 +1782,7 @@ export function analyzeAudioBuffer(
   // Spectral ODF (10 Hz, FFT-based) for onset detection — unchanged
   const odf = computeOnsetFunction(spectralFrames);
   // Bass ODF at 50 Hz using fast time-domain band energy (no FFT → no renderer freeze)
-  const beatRate = 50;
+  const beatRate = 25;  // 25 Hz: 40ms/frame → lag at 120 BPM = 12.5 frames (was 5 at 10 Hz)
   const bassOdf = smoothODF(computeBassODFFast(data, sampleRate, beatRate));
 
   const { beats, bpm, beatStrengths } = trackBeats(bassOdf, beatRate, normLow, normMid, normHigh, energyCurve, duration);
