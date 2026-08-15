@@ -73,6 +73,42 @@ function vcZeroAllUniverses() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// Virtual Console — Audio Mutual Exclusion Registry
+// ═══════════════════════════════════════════════════════════
+// Ensures only ONE audio source plays at a time across all widgets.
+// Any widget that plays audio must register here and call stopAll()
+// before starting its own playback.
+
+type AudioPlaybackController = {
+  stop: () => void;
+  widgetId: string;
+};
+
+const _activeAudioRegistry: AudioPlaybackController[] = [];
+
+/** Stop and deregister ALL active audio playback. Called before any new audio starts. */
+function stopAllAudioPlayback() {
+  for (const ctl of _activeAudioRegistry.splice(0)) {
+    try { ctl.stop(); } catch {}
+  }
+  // Also stop the global show playback (loadShow)
+  if ((window as any).__lm_perfPlayActive) {
+    try { (window as any).__lm_perfStopPlayback?.(); } catch {}
+  }
+}
+
+/** Register a new audio playback. Stops all others first. */
+function registerAudioPlayback(widgetId: string, stop: () => void): () => void {
+  stopAllAudioPlayback();
+  const ctl: AudioPlaybackController = { stop, widgetId };
+  _activeAudioRegistry.push(ctl);
+  return () => {
+    const idx = _activeAudioRegistry.indexOf(ctl);
+    if (idx >= 0) _activeAudioRegistry.splice(idx, 1);
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
 // VIRTUAL CONSOLE PANEL
 // ═══════════════════════════════════════════════════════════
 
@@ -95,6 +131,11 @@ const VirtualConsolePanel: React.FC = () => {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; widgetId: string } | null>(null);
   const [showWidgetConfig, setShowWidgetConfig] = useState<string | null>(null);
   const paletteRef = useRef<HTMLDivElement>(null);
+
+  // Cleanup: stop all audio when leaving Virtual Console (e.g. switching tabs)
+  useEffect(() => {
+    return () => { stopAllAudioPlayback(); };
+  }, []);
 
   // Floating 3D stage view
   const [showFloating3D, setShowFloating3D] = useState(false);
@@ -1408,6 +1449,7 @@ const VCButtonWidget: React.FC<{
   const regeneratingRef = useRef(false);
   const playIntentRef = useRef(false);
   const [songPlayer, setSongPlayer] = useState<SongPreset | null>(null);
+  const unregisterAudioRef = useRef<(() => void) | null>(null);
 
   const { config } = widget;
   const color = config.color || '#a855f7';
@@ -1435,6 +1477,15 @@ const VCButtonWidget: React.FC<{
     console.log('AudioAutoScript: starting', config.audioFileName, 'cues:', cues.length);
     const audio = new Audio(config.audioDataUrl);
     autoAudioRef.current = audio;
+    // Register with global mutex: stop all other audio, then track this one
+    unregisterAudioRef.current = registerAudioPlayback(widget.id, () => {
+      audio.pause();
+      audio.currentTime = 0;
+      cancelAnimationFrame(autoRafRef.current);
+      autoAudioRef.current = null;
+      vcZeroAllUniverses();
+      setActive(false);
+    });
     let startTime = 0;
     let firstFrameDone = false;
     const firedCues = new Set<string>();
@@ -1462,6 +1513,7 @@ const VCButtonWidget: React.FC<{
       cancelAnimationFrame(autoRafRef.current);
       vcZeroAllUniverses();
       autoAudioRef.current = null;
+      if (unregisterAudioRef.current) { unregisterAudioRef.current(); unregisterAudioRef.current = null; }
       setActive(false);
     };
     audio.onerror = (e) => console.error('AudioAutoScript error:', e);
@@ -1489,8 +1541,11 @@ const VCButtonWidget: React.FC<{
           // Toggle: if already playing, stop
           if ((window as any).__lm_perfPlayActive) {
             (window as any).__lm_perfStopPlayback?.();
+            stopAllAudioPlayback();
             return;
           }
+          // Stop any other widget audio before starting show playback
+          stopAllAudioPlayback();
           // Use pre-loaded show data, or find it in the store, or open file picker
           let p = config.showData;
           if (!p) {
@@ -1581,13 +1636,25 @@ const VCButtonWidget: React.FC<{
       // Playback no longer requires an audio file: SongPresetPlayer uses a
       // virtual clock when the audio is missing or not yet playable.
       // Toggle the full live playback (SongPresetPlayer) on/off
-      setSongPlayer((prev) => (prev ? null : preset));
+      if (songPlayer) {
+        // Already playing this preset → stop
+        if (unregisterAudioRef.current) { unregisterAudioRef.current(); unregisterAudioRef.current = null; }
+        setSongPlayer(null);
+        return;
+      }
+      // Stop all other audio, then register this playback
+      unregisterAudioRef.current = registerAudioPlayback(widget.id, () => {
+        setSongPlayer(null);
+        setActive(false);
+      });
+      setSongPlayer(preset);
       return;
     }
 
     if (config.actionType === 'audioAutoScript' && config.audioDataUrl) {
       // Toggle: if already playing this button, stop
       if (autoAudioRef.current) {
+        if (unregisterAudioRef.current) { unregisterAudioRef.current(); unregisterAudioRef.current = null; }
         autoAudioRef.current.pause();
         autoAudioRef.current.currentTime = 0;
         cancelAnimationFrame(autoRafRef.current);
@@ -1839,6 +1906,8 @@ const VCButtonWidget: React.FC<{
     }
     // Stop playSong playback
     setSongPlayer(null);
+    // Unregister from global audio mutex
+    if (unregisterAudioRef.current) { unregisterAudioRef.current(); unregisterAudioRef.current = null; }
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -1934,7 +2003,11 @@ const VCButtonWidget: React.FC<{
       {songPlayer && (
         <SongPresetPlayer
           preset={songPlayer}
-          onEnded={() => { setSongPlayer(null); setActive(false); }}
+          onEnded={() => {
+            setSongPlayer(null);
+            setActive(false);
+            if (unregisterAudioRef.current) { unregisterAudioRef.current(); unregisterAudioRef.current = null; }
+          }}
         />
       )}
     </div>
