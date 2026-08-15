@@ -858,13 +858,13 @@ function computeOnsetFunction(frames: SpectralFrame[]): number[] {
 function trackBeats(
   odf: number[],
   analysisRate: number,
-  lowCurve: number[],
-  midCurve: number[],
-  highCurve: number[],
-  energyCurve: number[],
+  _lowCurve: number[],
+  _midCurve: number[],
+  _highCurve: number[],
+  _energyCurve: number[],
   duration: number,
 ): { beats: number[]; bpm: number; beatStrengths: ('strong' | 'weak')[] } {
-  const n = Math.min(energyCurve.length, odf.length);
+  const n = odf.length;
   if (n < 10) return { beats: [], bpm: 120, beatStrengths: [] };
   const rate = analysisRate;
 
@@ -971,68 +971,96 @@ function trackBeats(
     }
   }
 
-  // ── Step 6: Build multiOdf for beat peak refinement only (not BPM) ──
-  const multiOdf = new Array(n).fill(0);
-  for (let i = 1; i < n; i++) {
-    const dRMS = Math.max(0, (lowCurve[i] || 0) - (lowCurve[i - 1] || 0));
-    multiOdf[i] = dRMS * 1.2 + odf[i] * 1.0;
-  }
+  // ══ Ellis (2007) Dynamic Programming beat tracking ══
+  // Reference: "Beat Tracking by Dynamic Programming", JNMR 36(1), 51-60.
+  // Same algorithm as librosa.beat.beat_track.
+  //
+  // Objective: find the sequence of beat times B = {b_1, ..., b_K} that maximizes:
+  //   C(B) = Σ onset[b_k] - α * Σ (log((b_k - b_{k-1}) / τ))²
+  // where τ = beatPeriod (estimated tempo), α = tightness penalty.
+  //
+  // DP recurrence:
+  //   score[t] = onset[t] + max_{τ' in [τ*0.7, τ*1.5]} (score[t - τ'] - α * log(τ'/τ)²)
+  //   back[t] = argmax τ'
+  //
+  // Then backtrace from the best score in the last ~beatPeriod frames.
 
-  // ── Step 7: Phase alignment — maximize downbeat energy on beat 1 ──
-  const barLength = bestLag * 4;
-  let bestOffset = 0;
-  let bestPhaseScore = -Infinity;
-  for (let offset = 0; offset < Math.min(barLength, n); offset++) {
-    let score = 0;
-    let count = 0;
-    for (let t = offset; t < n; t += barLength) {
-      if (t < n) { score += multiOdf[t] * 1.5 + odf[t]; count++; }
-    }
-    score = count > 0 ? score / count : 0;
-    if (score > bestPhaseScore) { bestPhaseScore = score; bestOffset = offset; }
-  }
-
-  // ── Step 8: Track beats with local peak refinement on multiOdf ──
   const beatPeriod = bestLag;
-  const beats: number[] = [];
-  const searchWindow = Math.floor(beatPeriod * 0.35);
-  let lastBeatSample = bestOffset - beatPeriod;
-  const energyMeanVal = mean(lowCurve.concat(midCurve));
+  const tightness = 100;  // librosa default (range ~1-1000; higher = stricter timing)
+  const minBeatGap = Math.floor(beatPeriod * 0.7);  // 70% of beat period
+  const maxBeatGap = Math.floor(beatPeriod * 1.5);  // 150% of beat period
 
-  for (let expectedBeat = bestOffset; expectedBeat < n; expectedBeat += beatPeriod) {
-    const ws = Math.max(0, expectedBeat - searchWindow);
-    const we = Math.min(n - 1, expectedBeat + searchWindow);
-    let peakIdx = expectedBeat;
-    let peakVal = multiOdf[expectedBeat] || 0;
-    for (let t = ws; t <= we; t++) {
-      const val = multiOdf[t] * 0.7 + odf[t] * 0.3;
-      if (val > peakVal) { peakVal = val; peakIdx = t; }
+  // Precompute transition penalty lookup: penalty[delta] = tightness * (log(delta/beatPeriod))²
+  const penaltyTable = new Float64Array(maxBeatGap + 1);
+  for (let delta = 1; delta <= maxBeatGap; delta++) {
+    penaltyTable[delta] = tightness * Math.pow(Math.log(delta / beatPeriod), 2);
+  }
+
+  // DP arrays
+  const dpScore = new Float64Array(n).fill(-Infinity);
+  const dpBack = new Int32Array(n).fill(-1);  // previous beat index
+
+  // Initialize: first beat can start anywhere in the first beatPeriod frames
+  for (let t = 0; t < Math.min(beatPeriod, n); t++) {
+    dpScore[t] = odf[t];
+  }
+
+  // Forward pass: for each frame, find the best previous beat
+  for (let t = beatPeriod; t < n; t++) {
+    let bestPrevScore = -Infinity;
+    let bestPrevIdx = -1;
+    // Search all valid previous beats (minBeatGap..maxBeatGap frames ago)
+    const searchStart = Math.max(0, t - maxBeatGap);
+    const searchEnd = t - minBeatGap;
+    for (let prev = searchStart; prev <= searchEnd; prev++) {
+      if (dpScore[prev] === -Infinity) continue;
+      const delta = t - prev;
+      const score = dpScore[prev] - penaltyTable[delta];
+      if (score > bestPrevScore) {
+        bestPrevScore = score;
+        bestPrevIdx = prev;
+      }
     }
-
-    const localRadius = Math.floor(beatPeriod * 0.4);
-    const localSlice: number[] = [];
-    for (let t = Math.max(0, peakIdx - localRadius); t < Math.min(n, peakIdx + localRadius); t++) {
-      localSlice.push(multiOdf[t]);
-    }
-    const localMean = mean(localSlice);
-    const localStd = std(localSlice, localMean);
-    const threshold = localMean + Math.max(0.005, localStd * 0.8);
-
-    if (peakVal > threshold && (peakIdx - lastBeatSample) >= beatPeriod * 0.55) {
-      beats.push(r4(peakIdx / rate));
-      lastBeatSample = peakIdx;
+    if (bestPrevIdx >= 0) {
+      dpScore[t] = odf[t] + bestPrevScore;
+      dpBack[t] = bestPrevIdx;
     }
   }
 
-  // Beat strengths
+  // Backtrace: find the best ending frame in the last beatPeriod frames
+  let bestEnd = n - 1;
+  let bestEndScore = -Infinity;
+  const endSearchStart = Math.max(0, n - beatPeriod);
+  for (let t = endSearchStart; t < n; t++) {
+    if (dpScore[t] > bestEndScore) {
+      bestEndScore = dpScore[t];
+      bestEnd = t;
+    }
+  }
+
+  // Walk backwards through the back pointers
+  const beatFrames: number[] = [];
+  let current = bestEnd;
+  while (current >= 0) {
+    beatFrames.push(current);
+    current = dpBack[current];
+  }
+  beatFrames.reverse();
+
+  // Convert frame indices to seconds
+  const beats: number[] = beatFrames.map(f => r4(f / rate));
+
+  // Beat strengths based on ODF value at each beat
   const beatStrengths: ('strong' | 'weak')[] = [];
-  for (let i = 0; i < beats.length; i++) {
-    const fi = Math.min(n - 1, Math.floor(beats[i] * rate));
-    const bassE = (lowCurve[fi] || 0);
-    const odfV = multiOdf[fi] || 0;
-    const isBarStart = i % 4 === 0;
-    const score2 = bassE * 2.0 + odfV * 1.5 + (isBarStart ? 1.0 : 0);
-    beatStrengths.push(score2 > energyMeanVal * 1.8 ? 'strong' : 'weak');
+  // Compute mean ODF for threshold
+  let odfSum = 0;
+  for (let i = 0; i < n; i++) odfSum += odf[i];
+  const odfMean = odfSum / n;
+  for (let i = 0; i < beatFrames.length; i++) {
+    const fi = beatFrames[i];
+    const isBarStart = i % 4 === 0;  // assume 4/4
+    const score2 = odf[fi] * 1.5 + (isBarStart ? 0.5 : 0);
+    beatStrengths.push(score2 > odfMean * 1.5 ? 'strong' : 'weak');
   }
 
   return { beats, bpm: bestBpm, beatStrengths };
