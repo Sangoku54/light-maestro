@@ -1,7 +1,29 @@
 {
   "app": {
     "title": "Light Maestro",
-    "version": "Light Maestro v1.0"
+    "version": "Light Maestro v1.0",
+    "update": {
+      "checking": "Checking for updates…",
+      "available": "Update v{{version}} available",
+      "downloading": "Downloading… {{percent}}%",
+      "downloaded": "Update ready",
+      "installAndRestart": "Install and restart",
+      "error": "Update failed",
+      "upToDate": "Up to date"
+    },
+    "crash": {
+      "title": "Crash Logs",
+      "noLogs": "No crashes recorded",
+      "lastSession": "A crash was detected during the last session.",
+      "seeDetails": "View details",
+      "dismiss": "Dismiss",
+      "liveError": "A non-fatal error occurred",
+      "rendererGone": "Renderer process crashed. Reloading…",
+      "unresponsive": "Interface became unresponsive",
+      "logsDir": "Logs directory",
+      "fileSize": "{{size}} KB",
+      "noContent": "Empty or unreadable content"
+    }
   },
   "common": {
     "save": "Save",

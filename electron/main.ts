@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, crashReporter } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { execSync } from 'child_process';
+import { autoUpdater } from 'electron-updater';
 import { RemoteServer, type RemoteStateSnapshot } from './remote/server';
 import { OscServer } from './osc/server';
 import { DMXEngine } from './dmx/engine';
@@ -12,6 +13,7 @@ import { ShowStorage } from './show/storage';
 import { MidiManager, type MidiMapping, type MidiTarget } from './midi/manager';
 import type { MtcState } from './midi/mtc';
 import { AudioAnalyzer } from './audio/analyzer';
+import { crashLogger } from './utils/crash-logger';
 
 // Disable GPU cache to avoid permission errors on Windows
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
@@ -24,6 +26,61 @@ app.commandLine.appendSwitch('disable-features', 'Autofill');
 if (!app.isPackaged) app.commandLine.appendSwitch('disable-http-cache');
 process.env.UV_THREADPOOL_SIZE = '8';
 app.setPath('userData', path.join(app.getPath('appData'), 'light-maestro'));
+
+// ─── Crash reporter (native minidumps, local only — Phase 1) ───
+if (app.isPackaged) {
+  const minidumpDir = path.join(app.getPath('userData'), 'logs', 'minidumps');
+  try { fs.mkdirSync(minidumpDir, { recursive: true }); } catch {}
+  try {
+    crashReporter.start({
+      submitURL: '',
+      uploadToServer: false,
+      compress: true,
+      ignoreSystemCrashHandler: true,
+      extra: {
+        appName: 'Light Maestro',
+        appVersion: app.getVersion(),
+        platform: process.platform,
+      },
+    });
+  } catch (e) { console.error('[crashReporter] start failed:', e); }
+}
+
+// ─── Main process exception handlers ───
+let isCrashing = false;
+process.on('uncaughtException', (error: Error) => {
+  if (isCrashing) return;
+  isCrashing = true;
+  crashLogger.log('uncaughtException', {
+    message: error.message,
+    stack: error.stack || '',
+    name: error.name,
+  });
+  try { dmxEngine.blackout(); } catch {}
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('app:crash-log', {
+      type: 'uncaughtException',
+      message: error.message,
+      timestamp: Date.now(),
+    });
+  }
+  setTimeout(() => app.quit(), 500);
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+  crashLogger.log('unhandledRejection', {
+    message: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack || '' : '',
+    name: reason instanceof Error ? reason.name : 'Unknown',
+  });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('app:crash-log', {
+      type: 'unhandledRejection',
+      message: reason instanceof Error ? reason.message : String(reason),
+      timestamp: Date.now(),
+    });
+  }
+});
 
 // ─── Auto-build before showing window (packaged app ships pre-built; dev always fresh) ───
 let _autoBuildDone = false;
@@ -111,6 +168,56 @@ function createWindow() {
   }
 
   mainWindow.on('closed', () => { mainWindow = null; remoteServer.setMainWindow(null); oscServer.setMainWindow(null); });
+
+  // ─── Renderer crash handlers ───
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    crashLogger.log('render-process-gone', {
+      reason: details.reason,
+      exitCode: details.exitCode,
+      message: `Renderer process gone: ${details.reason} (exit code ${details.exitCode})`,
+    });
+    try {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        createWindow();
+      } else {
+        mainWindow.webContents.reload();
+      }
+    } catch (e) {
+      crashLogger.log('renderer-reload-failed', {
+        message: `Failed to reload renderer: ${e instanceof Error ? e.message : String(e)}`,
+      });
+      app.quit();
+    }
+  });
+
+  let unresponsiveTimer: NodeJS.Timeout | null = null;
+  mainWindow.webContents.on('unresponsive', () => {
+    crashLogger.log('renderer-unresponsive', {
+      message: 'Renderer became unresponsive',
+    });
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('app:crash-log', {
+        type: 'unresponsive',
+        message: 'Renderer became unresponsive',
+        timestamp: Date.now(),
+      });
+    }
+    unresponsiveTimer = setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        crashLogger.log('renderer-unresponsive-kill', {
+          message: 'Renderer killed after 10s unresponsive timeout',
+        });
+        mainWindow.webContents.forcefullyCrashRenderer();
+      }
+    }, 10_000);
+  });
+
+  mainWindow.webContents.on('responsive', () => {
+    if (unresponsiveTimer) {
+      clearTimeout(unresponsiveTimer);
+      unresponsiveTimer = null;
+    }
+  });
 
   // ─── Close guard: intercept close, let renderer decide ───
   mainWindow.on('close', (e) => {
@@ -540,9 +647,91 @@ ipcMain.handle('app:close-action', async (_event, action: 'save-and-quit' | 'dis
   }
 });
 
+// ─── IPC Handlers: Auto-Update ──────────────────────────────
+type UpdateStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'available'; version: string; releaseNotes?: string }
+  | { state: 'not-available' }
+  | { state: 'downloading'; percent: number }
+  | { state: 'downloaded'; version: string }
+  | { state: 'error'; message: string };
+
+let currentUpdateStatus: UpdateStatus = { state: 'idle' };
+
+function sendUpdateStatus(status: UpdateStatus): void {
+  currentUpdateStatus = status;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('app:update-status', status);
+  }
+}
+
+function setupAutoUpdater(): void {
+  if (!app.isPackaged) {
+    console.log('[autoUpdater] Dev mode — auto-update disabled');
+    return;
+  }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    console.log('[autoUpdater] Checking for update...');
+    sendUpdateStatus({ state: 'checking' });
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    console.log(`[autoUpdater] Update available: v${info.version}`);
+    sendUpdateStatus({
+      state: 'available',
+      version: info.version,
+      releaseNotes: typeof info.releaseNotes === 'string' ? info.releaseNotes : undefined,
+    });
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    console.log('[autoUpdater] Up to date');
+    sendUpdateStatus({ state: 'not-available' });
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    sendUpdateStatus({ state: 'downloading', percent: Math.round(progress.percent) });
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log(`[autoUpdater] Update downloaded: v${info.version}`);
+    sendUpdateStatus({ state: 'downloaded', version: info.version });
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('[autoUpdater] Error:', err?.message || err);
+    sendUpdateStatus({ state: 'error', message: err?.message || String(err) });
+  });
+
+  autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+    console.error('[autoUpdater] checkForUpdatesAndNotify failed:', err?.message || err);
+  });
+}
+
+ipcMain.handle('app:install-update', async () => {
+  if (currentUpdateStatus.state === 'downloaded') {
+    isQuitting = true;
+    setTimeout(() => autoUpdater.quitAndInstall(), 500);
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('app:get-update-status', async () => currentUpdateStatus);
+
+// ─── IPC Handlers: Crash Logs ───────────────────────────────
+ipcMain.handle('app:get-crash-logs', async () => crashLogger.listLogs());
+ipcMain.handle('app:read-crash-log', async (_event, filename: string) => crashLogger.readLog(filename));
+
 app.whenReady().then(async () => {
   createWindow();
   createTray();
+  setupAutoUpdater();
   try {
     await fixtureLibrary.load();
   } catch (err) {

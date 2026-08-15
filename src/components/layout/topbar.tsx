@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AppMode, useAppStore } from '../../stores/appStore';
+import { UpdateNotification } from './update-notification';
 import {
   Zap,       // Quick
   PenTool,   // Design
@@ -142,6 +143,9 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
       >
         {i18n.language === 'fr' ? '🇫🇷 FR' : '🇬🇧 EN'}
       </button>
+
+      {/* Auto-update notification */}
+      <UpdateNotification />
 
       {/* Fixture update status */}
       <FixtureUpdateBadge />

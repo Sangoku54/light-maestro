@@ -147,6 +147,24 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     },
     closeAction: (action: 'save-and-quit' | 'discard') =>
       ipcRenderer.invoke('app:close-action', action),
+
+    // Auto-update
+    onUpdateStatus: (callback: (status: any) => void) => {
+      const handler = (_: any, status: any) => callback(status);
+      ipcRenderer.on('app:update-status', handler);
+      return () => { ipcRenderer.removeListener('app:update-status', handler); };
+    },
+    installUpdate: () => ipcRenderer.invoke('app:install-update'),
+    getUpdateStatus: () => ipcRenderer.invoke('app:get-update-status'),
+
+    // Crash reporting
+    onCrashLog: (callback: (data: { type: string; message: string; timestamp: number }) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('app:crash-log', handler);
+      return () => { ipcRenderer.removeListener('app:crash-log', handler); };
+    },
+    getCrashLogs: () => ipcRenderer.invoke('app:get-crash-logs'),
+    readCrashLog: (filename: string) => ipcRenderer.invoke('app:read-crash-log', filename),
   },
 
   // Remote web server (contrôle LAN — panneau UI en polling sur getStatus)

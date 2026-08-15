@@ -134,6 +134,29 @@ export type OscCommand =
   | { type: 'blackout'; on: boolean }
   | { type: 'grandMaster'; value: number };
 
+// ─── Auto-Update ───
+export type UpdateStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'available'; version: string; releaseNotes?: string }
+  | { state: 'not-available' }
+  | { state: 'downloading'; percent: number }
+  | { state: 'downloaded'; version: string }
+  | { state: 'error'; message: string };
+
+// ─── Crash Reporting ───
+export interface CrashLogNotification {
+  type: string;
+  message: string;
+  timestamp: number;
+}
+
+export interface CrashLogEntry {
+  filename: string;
+  size: number;
+  mtime: number;
+}
+
 interface LightMaestroAPI {
   dmx: {
     start: () => Promise<void>;
@@ -220,6 +243,14 @@ interface LightMaestroAPI {
   app: {
     onBeforeClose: (callback: () => void) => () => void;
     closeAction: (action: 'save-and-quit' | 'discard') => Promise<void>;
+    // Auto-update
+    onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
+    installUpdate: () => Promise<boolean>;
+    getUpdateStatus: () => Promise<UpdateStatus>;
+    // Crash reporting
+    onCrashLog: (callback: (data: CrashLogNotification) => void) => () => void;
+    getCrashLogs: () => Promise<CrashLogEntry[]>;
+    readCrashLog: (filename: string) => Promise<string | null>;
   };
   remote: {
     /** Statut du serveur LAN (running, port, URLs d'accès avec token). */
