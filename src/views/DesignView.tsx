@@ -9,7 +9,7 @@ import { Stage2DEditor } from './Stage2DEditor';
 import { Stage3D } from './Stage3D';
 import { useFixtureTest } from '../hooks/useFixtureTest';
 import { loadFixtureDefinitions, type DmxFixtureDefinition, clearFixtureDefCache } from '../hooks/dmx-cues';
-import { analyzeChannels } from '../engine/dmx-channel';
+import { analyzeChannels } from '../engine/fixture-analyzer';
 import { sendChannelsToHardware, sendToUniverse, sendFixtureOn, sendFixtureOff, sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { fixtureTestState } from '../utils/fixture-test-state';

@@ -268,8 +268,8 @@ export function computeChaserTrackOverrides(
 // ─── Extracted utilities (pure functions, no React) ──────
 import type { RgbSegment } from '../engine/dmx-color';
 import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, findBestWheelCap } from '../engine/dmx-color';
-import type { ChannelAnalysis } from '../engine/dmx-channel';
-import { analyzeChannels } from '../engine/dmx-channel';
+import type { ChannelAnalysis } from '../engine/fixture-analyzer';
+import { analyzeChannels } from '../engine/fixture-analyzer';
 import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSmartMovement } from '../engine/dmx-movement';
 import { useAppStore } from '../stores/appStore';
 import { dmxBridge } from '../utils/dmx-bridge';

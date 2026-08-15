@@ -10,7 +10,7 @@ import type { GenreProfile } from '../hooks/audio-analysis';
 import { computeFixtureTrackOverrides, computeEfxOverrides, type FixtureTrack } from '../hooks/fixture-tracks';
 import { loadFixtureDefinitions, clearFixtureDefCache, type DmxCue, type DmxFixtureDefinition } from '../hooks/dmx-cues';
 import { useDmxPlayback, computeDmxForCue, computeColorTrackColors, type ColorTrackRef, type DimmerTrackRef, computeDimmerTrackOverrides, computeStrobeTrackOverrides, computeChaserTrackOverrides, type ChaserTrackRef } from '../hooks/dmx-playback';
-import { analyzeChannels } from '../engine/dmx-channel';
+import { analyzeChannels } from '../engine/fixture-analyzer';
 import { Stage3D } from './Stage3D';
 import TrackTimeline from './TrackTimeline';
 import type { EfxTrack, EfxTrackEntry, ColorTrack, ColorTrackEntry, StrobeTrack, StrobeTrackEntry, DimmerTrack, DimmerTrackEntry, ChaserTrack, ChaserTrackEntry } from './TrackTimeline';

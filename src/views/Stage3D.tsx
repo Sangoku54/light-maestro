@@ -20,6 +20,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { useShowStore, type PatchedFixture, type FixturePos } from '../stores/showStore';
+import { analyzeFixtureChannels, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
 import { useAppStore } from '../stores/appStore';
 import {
   loadFixtureDefinitions,
@@ -225,87 +226,8 @@ async function loadCutoutTexture(url: string): Promise<THREE.CanvasTexture> {
 
 // ─── Channel Analysis (mirrors dmx-cues.ts analyzeFixture) ──
 
-interface FixtureChannelMap {
-  intensityOffset: number | null;
-  shutterOffset: number | null;
-  rgbOffsets: number[] | null;
-  wheelOffset: number | null;
-  wheelCaps: DmxFixtureCapability[] | null;
-  panOffset: number | null;
-  tiltOffset: number | null;
-  panOffsets: number[];
-  tiltOffsets: number[];
-  goboOffset: number | null;
-}
-
-function analyzeFixtureChannels(
-  pf: PatchedFixture,
-  def: DmxFixtureDefinition | undefined,
-): FixtureChannelMap {
-  const channels = def?.modes[pf.modeIndex]?.channels ?? [];
-  const result: FixtureChannelMap = {
-    intensityOffset: null,
-    shutterOffset: null,
-    rgbOffsets: null,
-    wheelOffset: null,
-    wheelCaps: null,
-    panOffset: null,
-    tiltOffset: null,
-    panOffsets: [],
-    tiltOffsets: [],
-    goboOffset: null,
-  };
-
-  const colourChannels: { offset: number; name: string; caps?: DmxFixtureCapability[] }[] = [];
-  const startsWithRgb = /^(red|green|blue|white|amber|uv|warm\s*white|cool\s*white)/i;
-  const hasColorWord = /\b(red|green|blue|white|amber|colour|color|rgb|uv|warm|cool)\b/i;
-
-  for (let i = 0; i < channels.length; i++) {
-    const ch = channels[i];
-    const off = ch.offset ?? i;
-    const chName = ch.name || '';
-    const hasColorCaps = ch.capabilities?.some(cap => cap.color);
-    if (startsWithRgb.test(chName) || ch.type === 'Colour' || (ch.type === 'Beam' && hasColorWord.test(chName)) || hasColorCaps) {
-      colourChannels.push({ offset: off, name: chName, caps: ch.capabilities });
-      continue;
-    }
-    switch (ch.type) {
-      case 'Intensity':
-        if (result.intensityOffset === null) result.intensityOffset = off;
-        break;
-      case 'Shutter':
-        if (result.shutterOffset === null) result.shutterOffset = off;
-        break;
-      case 'Pan':
-        if (result.panOffset === null) result.panOffset = off;
-        if (!/\bfine\b/i.test(chName)) result.panOffsets.push(off);
-        break;
-      case 'Tilt':
-        if (result.tiltOffset === null) result.tiltOffset = off;
-        if (!/\bfine\b/i.test(chName)) result.tiltOffsets.push(off);
-        break;
-      case 'Gobo':
-        if (result.goboOffset === null) result.goboOffset = off;
-        break;
-    }
-  }
-
-  if (colourChannels.length >= 3) {
-    const rIdx = colourChannels.findIndex(c => !/\bfine\b/i.test(c.name) && /red|\br\b/i.test(c.name));
-    const gIdx = colourChannels.findIndex(c => !/\bfine\b/i.test(c.name) && /green|\bg\b/i.test(c.name));
-    const bIdx = colourChannels.findIndex(c => !/\bfine\b/i.test(c.name) && /blue|\bb\b/i.test(c.name));
-    if (rIdx >= 0 && gIdx >= 0 && bIdx >= 0) {
-      result.rgbOffsets = [colourChannels[rIdx].offset, colourChannels[gIdx].offset, colourChannels[bIdx].offset];
-    } else {
-      result.rgbOffsets = colourChannels.slice(0, 3).map(c => c.offset);
-    }
-  } else if (colourChannels.length === 1) {
-    result.wheelOffset = colourChannels[0].offset;
-    result.wheelCaps = colourChannels[0].caps?.filter(c => c.color) ?? null;
-  }
-
-  return result;
-}
+// FixtureChannelMap is now FixtureChannelAnalysis from fixture-analyzer.ts
+type FixtureChannelMap = FixtureChannelAnalysis;
 
 // ─── Color wheel → hex (simplified) ──────────────────────────
 
