@@ -302,6 +302,7 @@ ipcMain.handle('fixtures:getDefinition', async (_, id: string) => fixtureLibrary
 ipcMain.handle('fixtures:addCustom', async (_, def: any) => fixtureLibrary.addCustom(def));
 ipcMain.handle('fixtures:importQLC', async (_, filePath: string) => fixtureLibrary.importQLC(filePath));
 ipcMain.handle('fixtures:getAll', async () => fixtureLibrary.getAll());
+ipcMain.handle('fixtures:getBudgetList', async () => fixtureLibrary.getBudgetList());
 ipcMain.handle('fixtures:reloadLibrary', async () => {
   const count = await fixtureLibrary.load();
   return { count };

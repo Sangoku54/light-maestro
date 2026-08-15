@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     addCustom: (def: any) => ipcRenderer.invoke('fixtures:addCustom', def),
     importQLC: (filePath: string) => ipcRenderer.invoke('fixtures:importQLC', filePath),
     getAll: () => ipcRenderer.invoke('fixtures:getAll'),
+    getBudgetList: () => ipcRenderer.invoke('fixtures:getBudgetList'),
     reloadLibrary: () => ipcRenderer.invoke('fixtures:reloadLibrary'),
     getUpdateStatus: () => ipcRenderer.invoke('fixtures:getUpdateStatus'),
     onUpdateStatus: (callback: (status: any) => void) => {

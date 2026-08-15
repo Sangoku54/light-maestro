@@ -162,6 +162,7 @@ interface LightMaestroAPI {
     addCustom: (def: any) => Promise<void>;
     importQLC: (filePath: string) => Promise<any>;
     getAll: () => Promise<any[]>;
+    getBudgetList: () => Promise<{ entries: { manufacturer: string; model: string; priceMin?: number; priceMax?: number; priceLabel?: string; type?: string; tags?: string[] }[] }>;
     reloadLibrary: () => Promise<{ count: number }>;
     getUpdateStatus: () => Promise<{ checking: boolean; lastCheck: number; lastSha: string; newCount: number; error?: string }>;
     onUpdateStatus: (callback: (status: any) => void) => void;

@@ -359,7 +359,9 @@
       "fixturesCount": "{count} projecteur",
       "fixturesCount_plural": "{count} projecteurs",
       "modeCount": "{count} mode",
-      "modeCount_plural": "{count} modes"
+      "modeCount_plural": "{count} modes",
+      "budgetOnly": "Budget < 100 € uniquement",
+      "budgetCount": "{{count}} projecteur budget"
     },
     "fixtureDetail": {
       "editFixture": "Modifier",

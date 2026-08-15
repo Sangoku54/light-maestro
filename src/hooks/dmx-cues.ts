@@ -666,9 +666,9 @@ function analyzeFixture(
     );
 
     if (colourChannels.some(c => rgbKeywords(c.name)) && colourChannels.length >= 3) {
-      const rIdx = colourChannels.findIndex(c => /red|\br\b/i.test(c.name));
-      const gIdx = colourChannels.findIndex(c => /green|\bg\b/i.test(c.name));
-      const bIdx = colourChannels.findIndex(c => /blue|\bb\b/i.test(c.name));
+      const rIdx = colourChannels.findIndex(c => !/\bfine\b/i.test(c.name) && /red|\br\b/i.test(c.name));
+      const gIdx = colourChannels.findIndex(c => !/\bfine\b/i.test(c.name) && /green|\bg\b/i.test(c.name));
+      const bIdx = colourChannels.findIndex(c => !/\bfine\b/i.test(c.name) && /blue|\bb\b/i.test(c.name));
       if (rIdx >= 0 && gIdx >= 0 && bIdx >= 0) {
         fa.rgbOffsets = [
           colourChannels[rIdx].offset,

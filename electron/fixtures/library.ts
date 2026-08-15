@@ -81,6 +81,21 @@ export interface FixtureDefinition {
   qlcplusFile?: string;
 }
 
+/** Entrée de la bibliothèque « Budget < 100 € » (resources/fixtures/ofl/budget.json). */
+export interface BudgetEntry {
+  manufacturer: string;
+  model: string;
+  priceMin?: number;
+  priceMax?: number;
+  priceLabel?: string;
+  type?: string;
+  tags?: string[];
+  /** Source de prix vérifiée (URL publique, devise EUR). */
+  url?: string;
+  /** Date de consultation du prix (AAAA-MM-JJ). */
+  checkedAt?: string;
+}
+
 // ─── Preset → Type mapping ─────────────────────────────────
 
 const PRESET_TYPE_MAP: Record<string, FixtureChannel['type']> = {
@@ -187,6 +202,9 @@ const OFL_TYPE_MAP: Record<string, FixtureChannel['type']> = {
   PanContinuous: 'Pan',
   Tilt: 'Tilt',
   TiltContinuous: 'Tilt',
+  // Fine variants (arrivent avec les updates GitHub OFL)
+  PositionPanFine: 'Pan',
+  PositionTiltFine: 'Tilt',
 
   // Speed
   PanTiltSpeed: 'Speed',
@@ -202,6 +220,13 @@ const OFL_TYPE_MAP: Record<string, FixtureChannel['type']> = {
   // Prism
   Prism: 'Prism',
   PrismRotation: 'Prism',
+
+  // Gobo family (types OFL plus récents)
+  GoboWheel: 'Gobo',
+  GoboWheelRotation: 'Gobo',
+  GoboIndex: 'Gobo',
+  GoboStencil: 'Gobo',
+  GoboShake: 'Gobo',
 
   // Beam
   BeamAngle: 'Beam',
@@ -247,6 +272,26 @@ function oflCapTypeToChannelType(capType: string, channelName: string): FixtureC
     return 'Gobo';
   }
   return OFL_TYPE_MAP[capType] || 'Nothing';
+}
+
+/**
+ * Normalise une defaultValue OFL vers un octet DMX 0-255 :
+ * - nombre 16-bit (ex. 32639 = 0x7F7F) → octet haut (coarse)
+ * - string "50%" → 127/128
+ * - nombre 0-255 → tel quel
+ */
+function normalizeOflDefault(raw: unknown): number {
+  if (typeof raw === 'string' && raw.endsWith('%')) {
+    const pct = parseFloat(raw);
+    if (Number.isFinite(pct)) return Math.round((pct / 100) * 255);
+    return 0;
+  }
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    if (raw > 255) return (raw >> 8) & 0xFF;
+    if (raw >= 0) return Math.round(raw);
+    return 0;
+  }
+  return 0;
 }
 
 // ─── OFL Manufacturer Key → Proper Name ───────────────────
@@ -411,6 +456,7 @@ export class FixtureLibrary {
     this.fixtures.clear();
     this.searchIndex = [];
     this.normalizedKeys.clear();
+    this.budgetCache = null; // invalidate budget cache on reload
 
     // Load bundled QXF/JSON fixtures (recursively)
     const fixturesDir = path.join(app.getAppPath(), 'resources', 'fixtures');
@@ -711,6 +757,9 @@ export class FixtureLibrary {
     try {
       const data = JSON.parse(json);
 
+      // ── OFL redirect: skip fixture-redirect.json (points to another fixture) ──
+      if (data.redirectTo) return null;
+
       // ── Manufacturer / Model ────────────────────────────
       const manufacturer = OFL_MANUFACTURER_MAP[manufacturerKey] || manufacturerKey;
       const model = data.name || 'Unknown';
@@ -739,12 +788,14 @@ export class FixtureLibrary {
 
       // ── Parse availableChannels → channel definitions ───
       const availableChannels = data.availableChannels || {};
-      const channelDefs = new Map<string, {
+      interface ChannelDef {
         name: string;
         type: FixtureChannel['type'];
         defaultValue: number;
+        rawDefault?: unknown; // valeur brute OFL (16-bit / %) pour dériver le fine
         capabilities: FixtureCapability[];
-      }>();
+      }
+      const channelDefs = new Map<string, ChannelDef>();
 
       for (const [chName, chData] of Object.entries(availableChannels)) {
         const chAny = chData as any;
@@ -794,39 +845,191 @@ export class FixtureLibrary {
         channelDefs.set(chName.toLowerCase(), {
           name: chName,
           type: chType,
-          defaultValue: 0,
+          defaultValue: normalizeOflDefault(chAny.defaultValue),
+          rawDefault: chAny.defaultValue,
           capabilities,
         });
       }
 
+      // ── Index des aliases fine / switching (OFL) ───────────
+      // `fineChannelAliases` (ex. "Pan" → ["Pan fine"]) : le canal alias est un
+      // clone typé du parent, sans capabilities, nom = alias. Le defaultValue du
+      // fine = octet bas du parent 16-bit (neutre), sinon 0.
+      const fineAliasMap = new Map<string, ChannelDef>();
+      const switchingAliasMap = new Map<string, ChannelDef>();
+      for (const [chName, chData] of Object.entries(availableChannels)) {
+        const chAny = chData as any;
+        const parent = channelDefs.get(chName.toLowerCase());
+        if (!parent) continue;
+        const aliases: string[] = Array.isArray(chAny.fineChannelAliases) ? chAny.fineChannelAliases : [];
+        for (const alias of aliases) {
+          const raw = parent.rawDefault;
+          const fineDefault = typeof raw === 'number' && raw > 255 ? raw & 0xFF : 0;
+          fineAliasMap.set(alias.toLowerCase(), { ...parent, name: alias, defaultValue: fineDefault, capabilities: [] });
+        }
+        const switchAliases: string[] = Array.isArray(chAny.switchingChannelAliases) ? chAny.switchingChannelAliases : [];
+        for (const alias of switchAliases) {
+          switchingAliasMap.set(alias.toLowerCase(), { ...parent, name: alias, capabilities: [] });
+        }
+        if (chAny.switchingChannels && !Array.isArray(chAny.switchingChannelAliases)) {
+          // Canal de commutation déclaré sans alias : conservé tel quel dans les modes
+          // (résolution via channelDefs), on log simplement pour visibilité.
+          console.warn(`OFL switchingChannels sur « ${chName} » : canaux de commutation conservés tels quels`);
+        }
+      }
+
+      // ── Résolution templateChannels ($pixelKey / $pixelGroup) ──
+      const templateChannels = data.templateChannels || {};
+      const matrix = data.matrix || {};
+      // Pixels : aplatir matrix.pixelKeys (3D) → 1D ; sinon pixelCount → 1..N
+      const pixelKeys: string[] = [];
+      for (const row of matrix.pixelKeys || []) {
+        for (const cell of row) {
+          for (const px of cell) pixelKeys.push(String(px));
+        }
+      }
+      if (pixelKeys.length === 0 && Array.isArray(matrix.pixelCount)) {
+        let total = 1;
+        for (const n of matrix.pixelCount) total *= Number(n) || 1;
+        for (let i = 1; i <= total; i++) pixelKeys.push(String(i));
+      }
+      // Groupes : nom → pixels (une valeur peut être "all" = tous les pixels)
+      const pixelGroups: Record<string, string[]> = {};
+      for (const [g, list] of Object.entries(matrix.pixelGroups || {})) {
+        if (Array.isArray(list)) {
+          pixelGroups[g] = list.map(String);
+        } else if (list === 'all') {
+          pixelGroups[g] = pixelKeys.slice();
+        } else {
+          pixelGroups[g] = [String(list)];
+        }
+      }
+      // Valeurs candidates de substitution : pixels + noms de groupes
+      const pixelCandidates = [...pixelKeys];
+      for (const g of Object.keys(pixelGroups)) {
+        if (!pixelCandidates.includes(g)) pixelCandidates.push(g);
+      }
+
+      // Reverse-match : déduire des valeurs de $pixelKey depuis les réfs de mode
+      // (fixtures sans matrix, ex. templates "$pixelKey Laser" + réfs "Red Laser")
+      const modeList: any[] = data.modes || [];
+      for (const mode of modeList) {
+        for (const chRef of (mode.channels || [])) {
+          if (typeof chRef !== 'string') continue;
+          for (const tplName of Object.keys(templateChannels)) {
+            if (!tplName.includes('$pixelKey')) continue;
+            const rx = new RegExp('^' + tplName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\$pixelKey/g, '(.+)') + '$', 'i');
+            const m = chRef.match(rx);
+            if (m && m[1] && !pixelCandidates.includes(m[1])) pixelCandidates.push(m[1]);
+          }
+        }
+      }
+
+      // Map <nom résolu (minuscules) → def> : clé de template substituée
+      const resolvedTemplates = new Map<string, ChannelDef>();
+      const buildResolved = (tplName: string, tplAny: any, variables: Record<string, string>): void => {
+        let resolvedName = tplName;
+        for (const [k, v] of Object.entries(variables)) {
+          resolvedName = resolvedName.replace(new RegExp('\\$' + k, 'g'), v);
+        }
+        if (!resolvedName.includes('$')) {
+          // Nom final : champ `name` du template substitué, sinon clé substituée
+          let displayName = resolvedName;
+          if (typeof tplAny.name === 'string' && tplAny.name.includes('$')) {
+            displayName = tplAny.name;
+            for (const [k, v] of Object.entries(variables)) {
+              displayName = displayName.replace(new RegExp('\\$' + k, 'g'), v);
+            }
+          }
+          resolvedTemplates.set(resolvedName.toLowerCase(), {
+            name: displayName,
+            type: oflCapTypeToChannelType(tplAny.capability?.type || (Array.isArray(tplAny.capabilities) ? tplAny.capabilities[0]?.type : '') || '', tplName),
+            defaultValue: normalizeOflDefault(tplAny.defaultValue),
+            capabilities: [],
+          });
+        }
+      };
+      for (const [tplName, tplData] of Object.entries(templateChannels)) {
+        const tplAny = tplData as any;
+        if (tplName.includes('$pixelKey')) {
+          for (const val of pixelCandidates) buildResolved(tplName, tplAny, { pixelKey: val });
+        } else if (tplName.includes('$pixelGroup')) {
+          for (const g of Object.keys(pixelGroups)) buildResolved(tplName, tplAny, { pixelGroup: g });
+        }
+      }
+
       // ── Parse modes ─────────────────────────────────────
       const modes: FixtureMode[] = [];
-      const modeList: any[] = data.modes || [];
+      const resolveRef = (chRef: string): FixtureChannel | null => {
+        if (!chRef || !chRef.trim()) return null; // réfs vides / null ignorées
+        const key = chRef.toLowerCase();
+        const def = channelDefs.get(key) || fineAliasMap.get(key) || switchingAliasMap.get(key) || resolvedTemplates.get(key);
+        if (def) {
+          return {
+            name: def.name,
+            type: def.type,
+            defaultValue: def.defaultValue,
+            capabilities: def.capabilities.length > 0 ? def.capabilities : undefined,
+          };
+        }
+        return { name: chRef, type: 'Nothing', defaultValue: 0 };
+      };
+      const resolveRefs = (refs: unknown[]): FixtureChannel[] => {
+        const out: FixtureChannel[] = [];
+        for (const chRef of refs) {
+          if (chRef === null || chRef === undefined) continue;
+          if (typeof chRef === 'string') {
+            const ch = resolveRef(chRef);
+            if (ch) out.push(ch);
+            continue;
+          }
+          if (typeof chRef === 'object') {
+            // Réf objet : { insert: "matrixChannels", repeatFor, channelOrder, templateChannels }
+            const ins = (chRef as any).insert;
+            if (ins === 'matrixChannels') {
+              const repeatFor = String((chRef as any).repeatFor || 'eachPixelABC');
+              const channelOrder = String((chRef as any).channelOrder || 'perPixel');
+              const tplList: string[] = Array.isArray((chRef as any).templateChannels) ? (chRef as any).templateChannels : [];
+              // Ordre des pixels/groupe selon repeatFor
+              let order: string[] = [];
+              if (repeatFor === 'eachPixelGroup') {
+                order = Object.keys(pixelGroups);
+              } else if (repeatFor.includes(',')) {
+                order = repeatFor.split(',').map((s: string) => s.trim()).filter(Boolean);
+              } else {
+                order = pixelKeys.length > 0 ? pixelKeys : pixelCandidates;
+              }
+              if (order.length === 0) order = pixelCandidates;
+              // channelOrder perPixel → pour chaque pixel, tous les templates ;
+              // perChannel → pour chaque template, tous les pixels
+              if (channelOrder === 'perChannel') {
+                for (const tplName of tplList) {
+                  for (const val of order) {
+                    const ch = resolveRef(tplName.replace(/\$pixelKey/g, val));
+                    if (ch) out.push(ch);
+                  }
+                }
+              } else {
+                for (const val of order) {
+                  for (const tplName of tplList) {
+                    const ch = resolveRef(tplName.replace(/\$pixelKey/g, val));
+                    if (ch) out.push(ch);
+                  }
+                }
+              }
+            } else {
+              // insert inconnu → canal Nothing de secours
+              out.push({ name: JSON.stringify(chRef), type: 'Nothing', defaultValue: 0 });
+            }
+          }
+        }
+        return out;
+      };
 
       for (const mode of modeList) {
         const modeName = mode.name || 'Default';
-        const modeChannels = (mode.channels || []) as string[];
-
-        const channels: FixtureChannel[] = [];
-        for (const chRef of modeChannels) {
-          const def = channelDefs.get(chRef.toLowerCase());
-          if (def) {
-            channels.push({
-              name: def.name,
-              type: def.type,
-              defaultValue: def.defaultValue,
-              capabilities: def.capabilities.length > 0 ? def.capabilities : undefined,
-            });
-          } else {
-            channels.push({
-              name: chRef,
-              type: 'Nothing',
-              defaultValue: 0,
-            });
-          }
-        }
-
-        modes.push({ name: modeName, channels });
+        const modeChannels = (mode.channels || []) as unknown[];
+        modes.push({ name: modeName, channels: resolveRefs(modeChannels) });
       }
 
       // If no modes, create a default mode with all channels
@@ -893,7 +1096,10 @@ export class FixtureLibrary {
         modes,
         physical,
       };
-    } catch { return null; }
+    } catch (e) {
+      console.warn(`OFL parse failed (${manufacturerKey}):`, (e as Error).message);
+      return null;
+    }
   }
 
   // ─── Load OFL directory ─────────────────────────────────
@@ -1039,6 +1245,27 @@ export class FixtureLibrary {
       byManufacturer[def.manufacturer] = (byManufacturer[def.manufacturer] || 0) + 1;
     }
     return { total: this.fixtures.size, byType, byManufacturer };
+  }
+
+  // ─── Bibliothèque « Budget < 100 € » ──────────────────────
+  // Fichier racine de ofl/ (ignoré par loadOflDirectory qui n'itère que les
+  // sous-dossiers fabricants). NE PAS le déplacer dans resources/fixtures/
+  // (serait parsé comme fixture par loadDirectory).
+  private budgetCache: { entries: BudgetEntry[] } | null = null;
+
+  getBudgetList(): { entries: BudgetEntry[] } {
+    if (this.budgetCache) return this.budgetCache;
+    const p = path.join(app.getAppPath(), 'resources', 'fixtures', 'ofl', 'budget.json');
+    if (fs.existsSync(p)) {
+      try {
+        this.budgetCache = JSON.parse(fs.readFileSync(p, 'utf-8')) as { entries: BudgetEntry[] };
+        if (Array.isArray(this.budgetCache?.entries)) return this.budgetCache;
+        this.budgetCache = null;
+      } catch {
+        this.budgetCache = null;
+      }
+    }
+    return { entries: [] };
   }
 
   // ─── Fixture Instance Creator ────────────────────────────

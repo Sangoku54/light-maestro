@@ -82,13 +82,13 @@ export function buildRgbSegments(colourChannels: Array<{offset:number;name:strin
   const segments: RgbSegment[]=[]; const used=new Set<number>();
   for(let i=0;i<colourChannels.length;i++){
     if(used.has(i))continue;
-    let ri=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&isRed.test(colourChannels[j].name)){ri=j;break;}}
+    let ri=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&!/\bfine\b/i.test(colourChannels[j].name)&&isRed.test(colourChannels[j].name)){ri=j;break;}}
     if(ri<0)continue;
-    let gi=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&j!==ri&&isGreen.test(colourChannels[j].name)){gi=j;break;}}
+    let gi=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&j!==ri&&!/\bfine\b/i.test(colourChannels[j].name)&&isGreen.test(colourChannels[j].name)){gi=j;break;}}
     if(gi<0)continue;
-    let bi=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&j!==ri&&j!==gi&&isBlue.test(colourChannels[j].name)){bi=j;break;}}
+    let bi=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&j!==ri&&j!==gi&&!/\bfine\b/i.test(colourChannels[j].name)&&isBlue.test(colourChannels[j].name)){bi=j;break;}}
     if(bi<0)continue;
-    let wi=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&j!==ri&&j!==gi&&j!==bi&&isWhite.test(colourChannels[j].name)){wi=j;break;}}
+    let wi=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&j!==ri&&j!==gi&&j!==bi&&!/\bfine\b/i.test(colourChannels[j].name)&&isWhite.test(colourChannels[j].name)){wi=j;break;}}
     used.add(ri);used.add(gi);used.add(bi);if(wi>=0)used.add(wi);
     segments.push({r:colourChannels[ri].offset,g:colourChannels[gi].offset,b:colourChannels[bi].offset,w:wi>=0?colourChannels[wi].offset:null});
   }
