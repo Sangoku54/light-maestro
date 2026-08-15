@@ -723,7 +723,8 @@ export function useDmxPlayback(options: {
               dimmerVal = Math.round(255 * dimmerOverride.value / 100);
             }
           }
-          if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=dimmerVal;}
+          const _dimmerTrackActive = !!(dimmerOverrides && dimmerOverrides.get(pf.id));
+          if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(_dimmerTrackActive){chVals[addr]=dimmerVal;}else if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=dimmerVal;}
 
           let paletteColor = (() => {
             // Color track override (highest priority)
@@ -863,6 +864,33 @@ export function useDmxPlayback(options: {
             }
             else if(fa.intensityOffset===null){chVals[sAddr]=Math.max(8,Math.min(255,8+Math.round((dimmerVal/255)*247)));}
             else{chVals[sAddr]=255;}}
+          // No dedicated shutter channel: simulate strobe by oscillating dimmer/intensity
+          if(fa.shutterOffset===null){
+            const strobeTrackOverride = strobeOverrides ? (strobeOverrides.get(pf.id) || null) : null;
+            const trackStrobeNoShutter = (() => {
+              const ftEntriesNS = fixtureTrackMap.get(pf.id);
+              if (ftEntriesNS) {
+                for (const { ft } of ftEntriesNS) {
+                  const activeBlockNS = ft.strobeBlocks.find(b => ct >= b.time && ct < b.endTime);
+                  if (activeBlockNS) return { active: true, speed: activeBlockNS.speed || 10 };
+                }
+              }
+              return null;
+            })();
+            const useStrobeNoShutter = strobeTrackOverride
+              ? strobeTrackOverride.active
+              : trackStrobeNoShutter
+              ? trackStrobeNoShutter.active
+              : forcedStrobe !== undefined ? forcedStrobe : ((isDrop || isChorus) && active.strobe && pf.tier === 'primary');
+            if (useStrobeNoShutter && fa.intensityOffset !== null) {
+              const baseSpeedNS = Math.min(strobeTrackOverride?.speed || trackStrobeNoShutter?.speed || active.strobeSpeed || 10, strobeLimit);
+              const sectionMultNS = isDrop ? 1.5 : isChorus ? 1.2 : sec === 'build' ? 1.3 : sec === 'bridge' ? 1.0 : sec === 'verse' ? 0.8 : 0.5;
+              const adaptedSpeedNS = Math.min(baseSpeedNS * sectionMultNS, strobeLimit);
+              const strobePhaseNS = Math.sin(ct * Math.PI * 2 * adaptedSpeedNS);
+              const iAddrNS = pf.startAddress + fa.intensityOffset;
+              chVals[iAddrNS] = strobePhaseNS >= 0 ? dimmerVal : 0;
+            }
+          }
 
           // PAN/TILT — check EFX override first, fall back to auto pattern
           const panCount=fa.panOffsets.length;const tiltCount=fa.tiltOffsets.length;const motorCount=Math.max(panCount,tiltCount,1);

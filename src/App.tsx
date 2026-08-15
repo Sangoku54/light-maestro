@@ -288,7 +288,9 @@ const App: React.FC = () => {
           if (data.showStore.mtcMarkers) ss.setMtcMarkers(data.showStore.mtcMarkers);
         }
         if (data.appStore) {
-          useAppStore.setState(data.appStore);
+          // Don't restore session-only fields from project file
+          const { presetName: _discardedPreset, projectName: _discardedProj, ...restAppStore } = data.appStore;
+          useAppStore.setState(restAppStore);
         }
         // Restore virtual console widgets
         if (data.vcWidgets) {

@@ -936,11 +936,20 @@ function trackBeats(
   let bestScore = -Infinity;
   const debugCandidates: { lag: number; bpm: number; acorr: number; hs: number; norm: number; score: number }[] = [];
 
+  // First pass: compute HS for all lags and find the global maximum
+  const hsValues = new Float64Array(maxLag + 1);
+  let globalHsMax = 1e-10;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    const hs = harmonicSum(acorr, lag, maxLag, 4);
+    hsValues[lag] = hs;
+    if (hs > globalHsMax) globalHsMax = hs;
+  }
+
+  // Second pass: score using properly normalized HS
   for (let lag = minLag; lag <= maxLag; lag++) {
     const bpm = 60 * rate / lag;
-    const hs = harmonicSum(acorr, lag, maxLag, 4);
-    const hsMax = Math.max(1e-10, hs);
-    const norm = hs / hsMax; // normalize harmonic sum
+    const hs = hsValues[lag];
+    const norm = hs / globalHsMax; // normalize by global maximum
     const score = norm;
 
     debugCandidates.push({
@@ -965,16 +974,18 @@ function trackBeats(
   // (110 BPM → ideal lag ≈ 5.45). This misses the true autocorrelation peak.
   // Parabolic interpolation estimates the continuous peak from 3 adjacent lags.
   if (bestLag > minLag && bestLag < maxLag) {
-    const a0 = acorr[bestLag - 1];
-    const a1 = acorr[bestLag];
-    const a2 = acorr[bestLag + 1];
+    // Interpolate on harmonic sum (same function used for scoring), not raw acorr.
+    // The raw acorr peak can be at a different lag than the HS peak.
+    const a0 = hsValues[bestLag - 1];
+    const a1 = hsValues[bestLag];
+    const a2 = hsValues[bestLag + 1];
     const denom = 2 * (a0 - 2 * a1 + a2);
     if (Math.abs(denom) > 1e-9 && a1 > 0) {
       const offset = (a0 - a2) / denom;
       // Allow up to 0.95 lag offset: the harmonic sum can place bestLag one slot
       // away from the raw acorr peak. E.g., a 105 BPM track has higher raw acorr
       // at lag=6 (100 BPM) than lag=5 (120 BPM), but harmonic sum favors 120.
-      // Parabola through [4,5,6] finds the true peak at lag≈5.71 → 105 BPM.
+      // Parabola through HS[4,5,6] finds the true peak at lag≈5.71 → 105 BPM.
       if (Math.abs(offset) > 0.01 && Math.abs(offset) < 0.95) {
         const refinedLag = bestLag + offset;
         const refinedBpm = Math.round(60 * rate / refinedLag);
@@ -1828,7 +1839,9 @@ export async function analyzeAudioBuffer(
   // Spectral ODF (10 Hz, FFT-based) for onset detection — unchanged
   const odf = computeOnsetFunction(spectralFrames);
   // Bass ODF at 25 Hz using fast time-domain band energy (no FFT → no renderer freeze)
-  const beatRate = 25;  // 25 Hz: 40ms/frame → lag at 120 BPM = 12.5 frames (was 5 at 10 Hz)
+  const beatRate = 50;  // 50 Hz: 20ms/frame → lag at 120 BPM = 25 frames, 2.6 BPM resolution
+                        // (was 25 Hz / 5 BPM resolution). Safe since analyzeAudioBuffer is async
+                        // with yieldToEventLoop (commit a7bc132).
   const bassOdf = smoothODF(computeBassODFFast(data, sampleRate, beatRate));
 
   const { beats, bpm, beatStrengths } = trackBeats(bassOdf, beatRate, normLow, normMid, normHigh, energyCurve, duration);
