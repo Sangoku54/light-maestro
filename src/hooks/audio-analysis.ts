@@ -795,6 +795,26 @@ function harmonicSum(acorr: number[], lag: number, maxLag: number, K: number = 4
   return sum;
 }
 
+/** Smooth ODF librosa-style: max-filter (1 frame) then mean-filter (3 frames).
+ *  Reduces noise and produces a cleaner onset envelope for autocorrelation. */
+function smoothODF(odf: number[]): number[] {
+  const n = odf.length;
+  if (n < 3) return odf;
+  // Max filter: keep the local maximum within a 1-frame window
+  const maxed = new Array(n);
+  for (let i = 0; i < n; i++) {
+    maxed[i] = Math.max(odf[i], odf[Math.max(0, i - 1)], odf[Math.min(n - 1, i + 1)]);
+  }
+  // Mean filter: 3-frame moving average
+  const smoothed = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const lo = Math.max(0, i - 1);
+    const hi = Math.min(n - 1, i + 1);
+    smoothed[i] = (maxed[lo] + maxed[i] + maxed[hi]) / 3;
+  }
+  return smoothed;
+}
+
 function computeOnsetFunction(frames: SpectralFrame[]): number[] {
   const n = frames.length;
   const odf = new Array(n).fill(0);
@@ -838,18 +858,17 @@ function trackBeats(
   const rate = analysisRate;
 
   // ═══════════════════════════════════════════════════════════════
-  // BPM DETECTION — Bass ODF autocorrelation + harmonic sum + tempo prior
+  // BPM DETECTION — Bass ODF autocorrelation + harmonic sum (no prior, data-driven)
   // ═══════════════════════════════════════════════════════════════
-  // Industry-standard approach (librosa, essentia):
-  // 1. Autocorrelation on bass-filtered onset detection function
+  // librosa-style approach (no tempo prior, data-driven):
+  // 1. Autocorrelation on smoothed bass-filtered ODF
   // 2. Harmonic sum (K=4) to reinforce fundamental tempo
-  // 3. Multiply by log-Gaussian tempo prior (center=120 BPM, sigma=0.6)
-  // 4. Pick argmax + parabolic interpolation
+  // 3. Pick argmax + parabolic interpolation
   //
   // This is fundamentally different from the energy-derivative approach
   // which captures ALL onsets (incl. eighth-notes) and produces octave errors.
   // The ODF weights spectral changes over simple volume changes, and the
-  // log-Gaussian prior mathematically guarantees preference for 60-180 BPM.
+  // Restrict search to 50-240 BPM — harmonic sum naturally prefers fundamental tempo.
   //
   // BPM range 50-240 → lag range 0.25-1.2 s at analysisRate samples/sec
   const minBpm = 50, maxBpm = 240;
@@ -866,32 +885,27 @@ function trackBeats(
   }
   if (maxAcorr === 0) maxAcorr = 1;
 
-  // Log-Gaussian tempo prior centered at 120 BPM
-  // prior(bpm) = exp(-0.5 * ((log2(bpm/mu)) / sigma)²)
-  // mu=120 BPM (most common global tempo), sigma=0.5 (covers 60-240 range)
-  const muBpm = 120, sigmaLog = 0.6; // widened: let data speak (was 0.35)
-  const tempoPrior = (bpm: number) =>
-    Math.exp(-0.5 * ((Math.log2(bpm / muBpm)) / sigmaLog) ** 2);
+  // No tempo prior — librosa and madmom are purely data-driven.
+  // A prior centered at 120 BPM pulls 105 → 119, which is worse, not better.
+  // The harmonic sum + bass filter already disambiguate sub-divisions.
 
-  // Score every lag: harmonic sum × tempo prior (replaces raw autocorrelation)
+  // Score every lag: harmonic sum only (replaces raw autocorrelation × prior)
   let bestLag = minLag;
   let bestScore = -Infinity;
-  const debugCandidates: { lag: number; bpm: number; acorr: number; hs: number; norm: number; prior: number; score: number }[] = [];
+  const debugCandidates: { lag: number; bpm: number; acorr: number; hs: number; norm: number; score: number }[] = [];
 
   for (let lag = minLag; lag <= maxLag; lag++) {
     const bpm = 60 * rate / lag;
     const hs = harmonicSum(acorr, lag, maxLag, 4);
     const hsMax = Math.max(1e-10, hs);
     const norm = hs / hsMax; // normalize harmonic sum
-    const prior = tempoPrior(bpm);
-    const score = norm * prior;
+    const score = norm;
 
     debugCandidates.push({
       lag, bpm: Math.round(bpm),
       acorr: Number(acorr[lag].toFixed(4)),
       hs: Number(hs.toFixed(4)),
       norm: Number(norm.toFixed(4)),
-      prior: Number(prior.toFixed(4)),
       score: Number(score.toFixed(4)),
     });
 
@@ -915,9 +929,9 @@ function trackBeats(
     const denom = 2 * (a0 - 2 * a1 + a2);
     if (Math.abs(denom) > 1e-9 && a1 > 0) {
       const offset = (a0 - a2) / denom;
-      // Allow up to 0.95 lag offset: the score prior can push bestLag one slot
+      // Allow up to 0.95 lag offset: the harmonic sum can place bestLag one slot
       // away from the raw acorr peak. E.g., a 105 BPM track has higher raw acorr
-      // at lag=6 (100 BPM) than lag=5 (120 BPM), but the prior favors 120.
+      // at lag=6 (100 BPM) than lag=5 (120 BPM), but harmonic sum favors 120.
       // Parabola through [4,5,6] finds the true peak at lag≈5.71 → 105 BPM.
       if (Math.abs(offset) > 0.01 && Math.abs(offset) < 0.95) {
         const refinedLag = bestLag + offset;
@@ -931,8 +945,6 @@ function trackBeats(
   }
 
   // ══ Octave correction: check ODF autocorrelation at BPM/2 ══
-  // The normalized low-band curve was unreliable (all curves compressed to [0,1]).
-  // Instead, directly check if there's significant ODF autocorrelation at half the detected BPM.
   // For true double-time (drum & bass, 170+), ODF has almost no correlation at BPM/2.
   // For octave errors (ballad detected at 200), BPM/2 ≈ true tempo → high correlation at half-lag.
   if (bestBpm > 160) {
@@ -941,10 +953,7 @@ function trackBeats(
     if (halfLag >= minLag && halfLag <= maxLag) {
       const halfNorm = acorr[halfLag] / maxAcorr;
       // Threshold 0.12: if 12%+ of max autocorrelation exists at BPM/2, it's an octave error.
-      // For genuine fast tracks (DnB 170), BPM/2 has near-zero ODF correlation.
       if (halfNorm > 0.12) {
-        const halfPrior = tempoPrior(halfBpm);
-        const halfScore = halfNorm * halfPrior;
         bestBpm = halfBpm;
         bestLag = halfLag;
       }
@@ -1732,7 +1741,7 @@ export function analyzeAudioBuffer(
 
   // ══ Phase H: Beat tracking (bass-focused ODF + harmonic sum autocorrelation) ══
   const odf = computeOnsetFunction(spectralFrames);
-  const bassOdf = computeBassODF(spectralFrames);
+  const bassOdf = smoothODF(computeBassODF(spectralFrames));
 
   const { beats, bpm, beatStrengths } = trackBeats(bassOdf, analysisRate, normLow, normMid, normHigh, energyCurve, duration);
 
