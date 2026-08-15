@@ -254,9 +254,9 @@ export function computeChaserTrackOverrides(
     const scene = scenes.find(s => s.id === step.sceneId);
     if (!scene || !scene.channels) continue;
     const addrMap: Record<number, number> = {};
-    for (const [addrStr, v] of Object.entries(scene.channels)) {
+    for (const addrStr in scene.channels) {
       const addr = Number(addrStr);
-      const val = Number(v);
+      const val = Number(scene.channels[addrStr]);
       addrMap[addr] = Math.max(0, Math.min(255, Math.round(Number.isFinite(val) ? val * scale : 0)));
     }
     for (const fid of targets) controlled.set(fid, addrMap);
@@ -295,7 +295,8 @@ export function dispatchChannelsByFixture(
     const endAddr = base + pf.channelCount;
 
     const uniVals = dispatched.get(uniNum) || {};
-    for (const [addrStr, val] of Object.entries(channelValues)) {
+    for (const addrStr in channelValues) {
+      const val = channelValues[addrStr];
       const addr = Number(addrStr);
       if (addr >= base && addr < endAddr) {
         // HTP merge within universe
@@ -466,7 +467,8 @@ export function useDmxPlayback(options: {
             const factor = 1.0 - (t * t);
             for(const[uniIdx,channels]of savedChannels.entries()){
               const faded:Record<number,number>={};
-              for(const[ch,val]of Object.entries(channels)){
+              for(const chStr in channels){
+                const ch=Number(chStr);const val=channels[chStr];
                 faded[Number(ch)]=Math.round(Number(val) * factor);
               }
               useAppStore.getState().setUniverseData(uniIdx, faded);
@@ -513,7 +515,8 @@ export function useDmxPlayback(options: {
     }
 
     const movementPhase=Math.random()*1000;
-    let lastSig='';
+    let lastSig=0;
+    let lastStoreUpdate=0;
 
     // Color fade: EMA smoothing between palette changes (~250ms at 60fps)
     const fadeState=new Map();const FADE_ALPHA=colorFadeMs>0?1-Math.exp(Math.log(0.1)/(colorFadeMs/16.67)):0.98;
@@ -999,7 +1002,8 @@ export function useDmxPlayback(options: {
                 for (let a = pfx.startAddress; a < pfx.startAddress + pfx.channelCount; a++) {
                   if (chVals[a] !== undefined) delete chVals[a];
                 }
-                for (const [addrStr, v] of Object.entries(cmap)) {
+                for (const addrStr in cmap) {
+                  const v = cmap[addrStr];
                   const addr = Number(addrStr);
                   if (addr >= pfx.startAddress && addr < pfx.startAddress + pfx.channelCount) chVals[addr] = v;
                 }
@@ -1027,21 +1031,32 @@ export function useDmxPlayback(options: {
 
         // Apply master fade factor for end fade-out
         if (fadeFactor < 1.0) {
-          for (const ch of Object.keys(chVals)) {
-            chVals[Number(ch)] = Math.round(chVals[Number(ch)] * fadeFactor);
+          for (const chStr in chVals) {
+            chVals[Number(chStr)] = Math.round(chVals[Number(chStr)] * fadeFactor);
           }
         }
 
-        if(Object.keys(chVals).length>0){
-          const sig=String(uniIdx)+':'+Object.entries(chVals).sort((a,b)=>Number(a[0])-Number(b[0])).map(([k,v])=>`${k}=${v}`).join(',');
+        {
+          let hasVals=false;
+          for(const _ in chVals){hasVals=true;break;}
+          if(hasVals){
+          // Numeric hash instead of string concatenation (P1.3 perf)
+          let sig=uniIdx;
+          for(const chStr in chVals){sig=(sig*31+Number(chStr)*17+chVals[chStr])|0;}
           if(sig!==lastSig){lastSig=sig;
-            // Mirror DMX to React store for 3D Stage view
-            useAppStore.getState().setUniverseData(uniIdx, chVals);
+            // Throttle React store updates to ~30 FPS (P2.2 perf)
+            const now=performance.now();
+            if(now-lastStoreUpdate>33){
+              useAppStore.getState().setUniverseData(uniIdx, chVals);
+              lastStoreUpdate=now;
+            }
             // Arbitrated bridge — computes final buffer and flushes to hardware
             dmxBridge.push(uniIdx, chVals, arbSource);
             if (onVirtualDmx) onVirtualDmx(uniIdx, chVals);
             // Save for pause fade-out
-            lastChannelsRef.current.set(uniIdx, {...chVals});}
+            lastChannelsRef.current.set(uniIdx, {...chVals});
+          }
+          }
         }
       }
       rafRef.current=requestAnimationFrame(tick);
@@ -1322,7 +1337,8 @@ export function computeDmxForCue(
         for (let a = pf.startAddress; a < pf.startAddress + pf.channelCount; a++) {
           if (chVals[a] !== undefined) delete chVals[a];
         }
-        for (const [addrStr, v] of Object.entries(cmap)) {
+        for (const addrStr in cmap) {
+          const v = cmap[addrStr];
           const addr = Number(addrStr);
           if (addr >= pf.startAddress && addr < pf.startAddress + pf.channelCount) chVals[addr] = v;
         }

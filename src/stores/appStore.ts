@@ -401,15 +401,15 @@ export const useAppStore = create<AppState>()(
         const prev = (raw as any)[universe];
         let data: Uint8Array;
         if (prev instanceof Uint8Array) {
-          data = new Uint8Array(prev); // copy to avoid mutation surprises
+          data = prev; // mutate in-place — avoids 512-byte copy per frame
         } else if (prev && typeof prev === 'object') {
           data = new Uint8Array(Object.values(prev as Record<number, number>));
         } else {
           data = new Uint8Array(512);
         }
-        for (const [ch, val] of Object.entries(values)) {
-          const idx = Number(ch) - 1;
-          if (idx >= 0 && idx < 512) data[idx] = val;
+        for (const chStr in values) {
+          const idx = Number(chStr) - 1;
+          if (idx >= 0 && idx < 512) data[idx] = values[chStr];
         }
         set({ dmx: { ...dmx, channelData: { ...(raw as any), [universe]: data } } });
       },

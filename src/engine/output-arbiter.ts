@@ -92,10 +92,10 @@ export class OutputArbiter {
     const spec = this._sources.get(id);
     if (!spec) return false;
     const clean: Record<number, number> = {};
-    for (const [chStr, v] of Object.entries(channels)) {
+    for (const chStr in channels) {
       const ch = Number(chStr);
       if (!Number.isFinite(ch) || ch < 0) continue;
-      clean[ch] = clampChannel(Number(v));
+      clean[ch] = clampChannel(Number(channels[chStr]));
     }
     let uni = this._values.get(universe);
     if (!uni) {
@@ -131,6 +131,12 @@ export class OutputArbiter {
   getBuffer(universe: number): Record<number, number> {
     const uni = this._values.get(universe);
     if (!uni || uni.size === 0) return {};
+
+    // Fast path: single source — skip sort + Set + Map allocations
+    if (uni.size === 1) {
+      const [, vals] = uni.entries().next().value;
+      return vals;
+    }
 
     const sorted: Array<{ id: string; spec: RegisteredSource; vals: Record<number, number> }> = [];
     for (const [id, vals] of uni) {
