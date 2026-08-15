@@ -759,19 +759,30 @@ function classifySections(
 // 8. Multi-band beat tracking with autocorrelation
 // ═══════════════════════════════════════════════════════════
 
-/** Bass-focused ODF for beat tracking: sub-bass (kick) + bass only.
- *  Filters out hi-hat/cymbal noise that causes double-time errors. */
-function computeBassODF(frames: SpectralFrame[]): number[] {
-  const n = frames.length;
-  const odf = new Array(n).fill(0);
-  for (let i = 1; i < n; i++) {
-    const prev = frames[i - 1];
-    const curr = frames[i];
-    if (!prev || !curr) continue;
-    const subDiff = Math.max(0, curr.rawBands.sub - prev.rawBands.sub);
-    const bassDiff = Math.max(0, curr.rawBands.bass - prev.rawBands.bass);
-    // Sub-bass weighted 1.5x (kick drum dominant), bass 1.0x
-    odf[i] = subDiff * 1.5 + bassDiff * 1.0;
+/** Fast bass ODF at high rate (50 Hz) using time-domain band energy.
+ *  No FFT needed — uses bandEnergy() approximation on raw samples.
+ *  This avoids freezing the renderer while giving 5x tempo resolution. */
+function computeBassODFFast(data: Float32Array, sampleRate: number, beatRate: number = 50): number[] {
+  const hopSize = Math.floor(sampleRate / beatRate);
+  const numFrames = Math.floor(data.length / hopSize);
+  const odf = new Array(numFrames).fill(0);
+  const windowSize = Math.min(2048, hopSize);  // samples per window
+  let prevSub = 0, prevBass = 0;
+  for (let i = 0; i < numFrames; i++) {
+    const start = i * hopSize;
+    const end = Math.min(start + windowSize, data.length);
+    if (end - start < 16) continue;
+    const samples = data.subarray(start, end);
+    // Sub-bass: 20-60 Hz (kick drum), Bass: 60-250 Hz
+    const sub = bandEnergy(samples, sampleRate, 20, 60);
+    const bass = bandEnergy(samples, sampleRate, 60, 250);
+    if (i > 0) {
+      const subDiff = Math.max(0, sub - prevSub);
+      const bassDiff = Math.max(0, bass - prevBass);
+      odf[i] = subDiff * 1.5 + bassDiff * 1.0;
+    }
+    prevSub = sub;
+    prevBass = bass;
   }
   return odf;
 }
@@ -1566,7 +1577,7 @@ export function analyzeAudioBuffer(
   const sampleRate = buffer.sampleRate;
   const data = buffer.getChannelData(0);
 
-  const analysisRate = 50;  // 50 Hz: 20ms/frame → lag at 120 BPM = 25 frames (was 5 at 10 Hz)
+  const analysisRate = 10;  // 10 Hz for spectral analysis (FFT-based, heavier)
   const hopSize = Math.floor(sampleRate / analysisRate);
   const numFrames = Math.floor(data.length / hopSize);
 
@@ -1739,11 +1750,14 @@ export function analyzeAudioBuffer(
     });
   }
 
-  // ══ Phase H: Beat tracking (bass-focused ODF + harmonic sum autocorrelation) ══
+  // ══ Phase H: Beat tracking (bass ODF 50 Hz time-domain + harmonic sum) ══
+  // Spectral ODF (10 Hz, FFT-based) for onset detection — unchanged
   const odf = computeOnsetFunction(spectralFrames);
-  const bassOdf = smoothODF(computeBassODF(spectralFrames));
+  // Bass ODF at 50 Hz using fast time-domain band energy (no FFT → no renderer freeze)
+  const beatRate = 50;
+  const bassOdf = smoothODF(computeBassODFFast(data, sampleRate, beatRate));
 
-  const { beats, bpm, beatStrengths } = trackBeats(bassOdf, analysisRate, normLow, normMid, normHigh, energyCurve, duration);
+  const { beats, bpm, beatStrengths } = trackBeats(bassOdf, beatRate, normLow, normMid, normHigh, energyCurve, duration);
 
   const nFrames = Math.floor(data.length / hopSize);
   const downbeats = detectDownbeats(beats, beatStrengths, spectralFrames, analysisRate);
