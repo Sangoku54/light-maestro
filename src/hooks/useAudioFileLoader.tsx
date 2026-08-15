@@ -45,7 +45,7 @@ export function useAudioFileLoader() {
       const ctx = getAudioContext();
       const arrayBuffer = await file.arrayBuffer();
       const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-      const analysis = analyzeAudioBuffer(audioBuffer, file.name, file.size);
+      const analysis = await analyzeAudioBuffer(audioBuffer, file.name, file.size);
       setState(s => ({ ...s, file, audioBuffer, analysis, isAnalyzing: false, currentTime: 0 }));
     } catch (err: any) {
       setState(s => ({ ...s, error: `Failed: ${err.message}`, isAnalyzing: false }));

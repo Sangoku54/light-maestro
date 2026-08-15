@@ -1596,11 +1596,17 @@ function classifyAtmosphere(sectionAnalyses: SectionAnalysis[], bpm: number): At
 // 14. MAIN: analyzeAudioBuffer — entry point
 // ═══════════════════════════════════════════════════════════
 
-export function analyzeAudioBuffer(
+/** Yield to the event loop so the renderer watchdog can ping the main process.
+ *  Without this, long synchronous analysis blocks the watchdog → FAIL-SAFE BLACKOUT. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+export async function analyzeAudioBuffer(
   buffer: AudioBuffer,
   fileName: string,
   fileSize: number,
-): TrackAnalysis {
+): Promise<TrackAnalysis> {
   const duration = buffer.duration;
   const sampleRate = buffer.sampleRate;
   const data = buffer.getChannelData(0);
@@ -1627,6 +1633,9 @@ export function analyzeAudioBuffer(
 
   for (let frame = 0; frame < numFrames; frame++) {
     const start = frame * hopSize;
+
+    // Yield every 200 frames (~20s at 10 Hz) so the watchdog can ping
+    if (frame > 0 && frame % 200 === 0) await yieldToEventLoop();
 
     const sframe = computeSpectralFrame(data, start, FFT_SIZE, sampleRate);
     if (sframe) {
@@ -1673,6 +1682,8 @@ export function analyzeAudioBuffer(
     ? lowCurve.reduce((s, v, i) => s + v / (midCurve[i] + highCurve[i] + 0.001), 0) / lowCurve.length
     : 0.5;
   const rmsCurve = normalize(rmsCurveRaw);
+
+  await yieldToEventLoop();
 
   // ══ Phase B: Novelty curve & section boundaries ══
   const noveltyCurve = computeNoveltyCurve(spectralFrames);
@@ -1733,6 +1744,8 @@ export function analyzeAudioBuffer(
     });
   }
 
+  await yieldToEventLoop();
+
   // ══ Phase D: Self-similarity matrix & pattern detection ══
   const ssm = computeSegmentSimilarityMatrix(segments);
   const structuralLabels = detectRepeatingPatterns(ssm, 0.85);
@@ -1778,10 +1791,12 @@ export function analyzeAudioBuffer(
     });
   }
 
-  // ══ Phase H: Beat tracking (bass ODF 50 Hz time-domain + harmonic sum) ══
+  await yieldToEventLoop();
+
+  // ══ Phase H: Beat tracking (bass ODF 25 Hz time-domain + harmonic sum) ══
   // Spectral ODF (10 Hz, FFT-based) for onset detection — unchanged
   const odf = computeOnsetFunction(spectralFrames);
-  // Bass ODF at 50 Hz using fast time-domain band energy (no FFT → no renderer freeze)
+  // Bass ODF at 25 Hz using fast time-domain band energy (no FFT → no renderer freeze)
   const beatRate = 25;  // 25 Hz: 40ms/frame → lag at 120 BPM = 12.5 frames (was 5 at 10 Hz)
   const bassOdf = smoothODF(computeBassODFFast(data, sampleRate, beatRate));
 
@@ -1822,6 +1837,8 @@ export function analyzeAudioBuffer(
 
   // ══ Phase K: Genre, key, section analysis, atmosphere ══
   const genre = detectGenre(normEnergy, normLow, normMid, normHigh, bpm, beats, spectralCentroidCurve, spectralFluxCurve, rmsCurve, rawBassRatio);
+
+  await yieldToEventLoop();
 
   const keyResult = detectKey(data, sampleRate);
   const sectionAnalyses = analyzeSections(buffer, sections, beats, onsets);

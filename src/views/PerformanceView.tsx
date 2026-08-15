@@ -1163,7 +1163,7 @@ const AudioAutoScriptConfig: React.FC<{
       const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
       // 2. Analyze
-      const analysis = analyzeAudioBuffer(
+      const analysis = await analyzeAudioBuffer(
         audioBuffer,
         audioFileName || 'imported.mp3',
         arrayBuffer.byteLength
@@ -1606,7 +1606,7 @@ const VCButtonWidget: React.FC<{
             const buf = await resp.arrayBuffer();
             const ctx = new AudioContext();
             const ab = await ctx.decodeAudioData(buf);
-            analysis = analyzeAudioBuffer(ab, config.audioFileName || 'audio.mp3', buf.byteLength);
+            analysis = await analyzeAudioBuffer(ab, config.audioFileName || 'audio.mp3', buf.byteLength);
             ctx.close();
             (config as any).audioAnalysis = analysis;
           }
