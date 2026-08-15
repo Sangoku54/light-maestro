@@ -152,41 +152,53 @@ export const SongPresetPlayer: React.FC<{
   // otherwise a virtual wall-clock takes over so the show ALWAYS advances
   // (audio data may be missing, still decoding, or blocked by autoplay policy).
   useEffect(() => {
-    const audio = preset.audioFileBase64 ? new Audio(preset.audioFileBase64) : null;
     let rafId = 0;
     let hasAudio = false;
     const startWall = performance.now();
+    let audioCtx: AudioContext | null = null;
+    let audioSrc: AudioBufferSourceNode | null = null;
+    let audioStartTime = 0; // ctx.currentTime when audio started
+    let audioPause = false;
 
     const stop = () => {
       cancelAnimationFrame(rafId);
       zeroDmx();
-      if (audio) { try { audio.pause(); } catch {} }
+      if (audioSrc) { try { audioSrc.stop(); } catch {} }
+      if (audioCtx) { try { audioCtx.close(); } catch {} }
       onEnded();
     };
 
-    if (audio) {
-      audio.onended = stop;
-      audio.onerror = () => { /* keep virtual clock running */ };
-      audio.play().then(() => {
-        hasAudio = true;
-        // Re-align a late-starting audio element onto the virtual clock
-        const elapsed = (performance.now() - startWall) / 1000;
+    // Async audio: decode base64 → AudioBuffer → start source node
+    // This avoids the multi-second latency of new Audio(dataUrl) which
+    // blocks until the entire base64 blob is decoded by the browser.
+    if (preset.audioFileBase64) {
+      (async () => {
         try {
-          if (audio.readyState >= 1 && audio.duration > 0 && Math.abs(audio.currentTime - elapsed) > 0.1) {
-            audio.currentTime = Math.min(Math.max(0, elapsed), Math.max(0, audio.duration - 0.05));
-          }
-        } catch { /* ignore seek errors */ }
-      }).catch(() => { /* keep virtual clock running */ });
+          audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const resp = await fetch(preset.audioFileBase64);
+          const ab = await resp.arrayBuffer();
+          const buffer = await audioCtx.decodeAudioData(ab);
+          if (audioCtx.state === 'suspended') await audioCtx.resume();
+          audioSrc = audioCtx.createBufferSource();
+          audioSrc.buffer = buffer;
+          audioSrc.connect(audioCtx.destination);
+          audioSrc.onended = stop;
+          // Calculate offset from virtual clock already elapsed
+          const elapsed = (performance.now() - startWall) / 1000;
+          const offset = Math.min(Math.max(0, elapsed), Math.max(0, buffer.duration - 0.05));
+          audioStartTime = audioCtx.currentTime - offset;
+          audioSrc.start(0, offset);
+          hasAudio = true;
+        } catch { /* keep virtual clock running */ }
+      })();
     }
 
     const raf = () => {
-      currentTimeRef.current = resolvePlaybackTime(
-        hasAudio,
-        audio ? audio.paused : true,
-        audio ? audio.currentTime : 0,
-        startWall,
-        performance.now(),
-      );
+      if (hasAudio && audioCtx && !audioPause) {
+        currentTimeRef.current = audioCtx.currentTime - audioStartTime;
+      } else {
+        currentTimeRef.current = (performance.now() - startWall) / 1000;
+      }
       // End of show: stop when the authored duration is reached
       const total = totalDurRef.current;
       if (total > 0 && currentTimeRef.current >= total) { stop(); return; }
@@ -197,7 +209,8 @@ export const SongPresetPlayer: React.FC<{
     return () => {
       cancelAnimationFrame(rafId);
       zeroDmx();
-      if (audio) { try { audio.pause(); } catch {} }
+      if (audioSrc) { try { audioSrc.stop(); } catch {} }
+      if (audioCtx) { try { audioCtx.close(); } catch {} }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preset]);

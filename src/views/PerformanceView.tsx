@@ -213,17 +213,17 @@ const VirtualConsolePanel: React.FC = () => {
   }, [contextMenu]);
 
   // ── Show Playback Engine (local RAF loop) ──
+  // Listens for show-play requests via custom event (from widget activate())
   useEffect(() => {
-    const run = (window as any).__lm_perfPlayShow;
-    if (!run) return;
-    delete (window as any).__lm_perfPlayShow;
-    const showData = run;
+    let cleanup: (() => void) | null = null;
 
-    // Cleanup any previous playback
-    if (showPlaybackRef.current) {
-      cancelAnimationFrame(showPlaybackRef.current.rafId);
-      for (const src of showPlaybackRef.current.audioSources) { try { src.stop(); } catch {} }
-    }
+    const startShowPlayback = (showData: any) => {
+      // Cleanup any previous playback
+      if (showPlaybackRef.current) {
+        cancelAnimationFrame(showPlaybackRef.current.rafId);
+        for (const src of showPlaybackRef.current.audioSources) { try { src.stop(); } catch {} }
+        try { showPlaybackRef.current.audioCtx?.close(); } catch {}
+      }
 
     const fixtureDefs = new Map<string, any>();
     const audioBuffers = new Map<string, AudioBuffer>();
@@ -510,9 +510,37 @@ const VirtualConsolePanel: React.FC = () => {
       startedAudios,
     };
     showPlaybackRef.current.rafId = requestAnimationFrame(tick);
+    };
+
+    // Stop function accessible from cleanup
+    const stopAll = () => {
+      if (showPlaybackRef.current) {
+        cancelAnimationFrame(showPlaybackRef.current.rafId);
+        for (const src of showPlaybackRef.current.audioSources) { try { src.stop(); } catch {} }
+        try { showPlaybackRef.current.audioCtx?.close(); } catch {}
+      }
+      showPlaybackRef.current = null;
+      delete (window as any).__lm_perfPlayActive;
+      vcZeroAllUniverses();
+    };
+
+    // Listen for show-play requests from widget activate()
+    const handlePlayShow = (e: Event) => {
+      const showData = (e as CustomEvent).detail;
+      if (showData) startShowPlayback(showData);
+    };
+    window.addEventListener('lm-perf-play-show', handlePlayShow as EventListener);
+
+    // Also check for any pending signal from before mount
+    const pending = (window as any).__lm_perfPlayShow;
+    if (pending) {
+      delete (window as any).__lm_perfPlayShow;
+      startShowPlayback(pending);
+    }
 
     return () => {
-      stopPlayback();
+      window.removeEventListener('lm-perf-play-show', handlePlayShow as EventListener);
+      stopAll();
     };
   }, []);
 
@@ -1614,14 +1642,14 @@ const VCButtonWidget: React.FC<{
               audioFileName: p.audioFileName,
             };
             s.setShows([...s.shows.filter((sh: any) => sh.id !== showData.id), showData]);
-            // Trigger playback via window signal (picked up by useEffect in this component)
-            (window as any).__lm_perfPlayShow = showData;
+            // Trigger playback via custom event (picked up by VirtualConsolePanel useEffect)
+            window.dispatchEvent(new CustomEvent('lm-perf-play-show', { detail: showData }));
           } else {
             // .lmproject format - load into QuickShow
             useAppStore.getState().setMode?.('quick');
             (window as any).__lm_triggerPlay?.();
           }
-        } catch { /* silent */ }
+        } catch (err) { console.error('[VC loadShow] failed:', err); }
       })();
       return;
     }
