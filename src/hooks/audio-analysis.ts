@@ -726,12 +726,31 @@ function classifySections(
       continue;
     }
 
+    // Build / pre-chorus: non-repeated segment with rising energy before a chorus
+    if (!isRepeated && i < N - 1) {
+      const nextLabel = structuralLabels[i + 1];
+      const nextIsChorusCandidate = (labelCounts.get(nextLabel) || 0) > 1
+        && nextLabel === highestEnergyClass;
+      const energyRising = i > 0 && seg.energy > segments[i - 1].energy;
+      if (nextIsChorusCandidate && (energyRising || seg.energy >= 0.35)) {
+        result[i].type = 'build';
+        continue;
+      }
+    }
+
+    // Non-repeated moderate-energy segment → bridge
+    if (!isRepeated && seg.energy < 0.55) {
+      result[i].type = 'bridge';
+      continue;
+    }
+
     if (isRepeated) {
       result[i].type = 'verse';
       continue;
     }
 
-    result[i].type = 'unknown';
+    // Final fallback: never leave 'unknown' — verse is the safest default
+    result[i].type = 'verse';
   }
 
   for (let i = 0; i < N; i++) {
@@ -748,6 +767,18 @@ function classifySections(
     const prevRepeated = i > 0 && structuralLabels[i - 1] === structuralLabels[i];
     const nextRepeated = i < N - 1 && structuralLabels[i + 1] === structuralLabels[i];
     if (!prevRepeated && !nextRepeated && i > 0 && i < N - 1) {
+      result[i].type = 'verse';
+    }
+  }
+
+  // Safety net: eliminate any remaining 'unknown' by contextual inference
+  for (let i = 0; i < N; i++) {
+    if (result[i].type !== 'unknown') continue;
+    const prevType = i > 0 ? result[i - 1].type : null;
+    const nextType = i < N - 1 ? result[i + 1].type : null;
+    if (prevType === 'chorus' || nextType === 'chorus') {
+      result[i].type = 'bridge';
+    } else {
       result[i].type = 'verse';
     }
   }

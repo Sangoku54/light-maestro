@@ -779,6 +779,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
   const scenes = useShowStore((s) => s.scenes);
   const chasers = useShowStore((s) => s.chasers);
   const songPresets = useShowStore((s) => s.songPresets);
+  const storeShows = useShowStore((s) => s.shows);
 
   const [config, setConfig] = useState({ ...widget.config });
   const [title, setTitle] = useState(widget.config.title || widget.type);
@@ -874,9 +875,26 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
               {config.actionType === 'loadShow' && (
                 <div className="space-y-2">
                   {config.showName ? (
-                    <p className="text-[10px] text-emerald-400">?️ {config.showName}</p>
+                    <p className="text-[10px] text-emerald-400">📂 {config.showName}</p>
                   ) : (
-                    <p className="text-[9px] text-purple-400">Pick a saved .lmproject show file</p>
+                    <p className="text-[9px] text-purple-400">Pick a show from the store or load a .lmshow file</p>
+                  )}
+                  {storeShows.length > 0 && (
+                    <select
+                      value={config.showId || ''}
+                      onChange={(e) => {
+                        const show = storeShows.find((s) => s.id === e.target.value);
+                        if (show) {
+                          setConfig({ ...config, showId: show.id, showName: show.name, showData: show });
+                        }
+                      }}
+                      className="w-full text-[10px] bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-gray-300"
+                    >
+                      <option value="">— Select a show —</option>
+                      {storeShows.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
                   )}
                   <button
                     onClick={async () => {
@@ -893,7 +911,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                   </button>
                   {config.showData && (
                     <button
-                      onClick={() => setConfig({ ...config, showName: undefined as any, showData: undefined as any })}
+                      onClick={() => setConfig({ ...config, showName: undefined as any, showData: undefined as any, showId: undefined as any })}
                       className="text-[9px] text-red-400 hover:text-red-300"
                     >
                       Clear selection
@@ -1473,8 +1491,15 @@ const VCButtonWidget: React.FC<{
             (window as any).__lm_perfStopPlayback?.();
             return;
           }
-          // Use pre-loaded show data or open file picker if not yet loaded
+          // Use pre-loaded show data, or find it in the store, or open file picker
           let p = config.showData;
+          if (!p) {
+            // Try to find the show in the store by name or ID (showData was stripped on save)
+            const storeShows = useShowStore.getState().shows;
+            p = storeShows.find((s: any) =>
+              s.name === config.showName || s.id === config.showId
+            ) as any;
+          }
           if (!p) {
             const r = await window.lightMaestro?.dialog?.openFile?.([{ name: 'Light Maestro Show', extensions: ['lmshow', 'lmproj'] }]);
             if (!r?.content) return;

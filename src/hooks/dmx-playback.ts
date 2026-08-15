@@ -618,11 +618,15 @@ export function useDmxPlayback(options: {
       for(const cue of c){if(cue.time>ct&&(!nextCue||cue.time<nextCue.time))nextCue=cue;}
       let nextCueDmx:Array<{universe:number;channelValues:Record<number,number>}>|null=null;
       if(nextCue&&active){const gap=nextCue.time-active.time;if(gap>0&&gap<0.3){const window=Math.min(0.15,gap*0.5);const start=nextCue.time-window;if(ct>=start){crossfadeT=Math.min(1,(ct-start)/window);}}}
+      // Pre-compute strobe overrides early so they're available for crossfade
+      const strobeOverridesEarly = strobeTracksRef?.current && strobeTracksRef.current.length > 0
+        ? computeStrobeTrackOverrides(strobeTracksRef.current, ct, patchedFixturesRef.current, fixtureGroupsRef?.current || [])
+        : null;
       if(crossfadeT>0&&nextCue){
         try{
           nextCueDmx=computeDmxForCue(
             nextCue,patchedFixturesRef.current,fixtureDefs,universes as any,tierMultipliers,undefined,
-            colorTrackColors,undefined,undefined,disabledFixturesRef?.current,fixturePositions
+            colorTrackColors,strobeOverridesEarly,undefined,disabledFixturesRef?.current,fixturePositions
           );
         }catch(e){crossfadeT=0;nextCueDmx=null;console.warn('[crossfade] computeDmxForCue failed, skipping:',e);}
       }
@@ -664,9 +668,7 @@ export function useDmxPlayback(options: {
       const dimmerOverrides = dimmerTracksRef?.current && dimmerTracksRef.current.length > 0
         ? computeDimmerTrackOverrides(dimmerTracksRef.current, ct, patchedFixturesRef.current, fixtureGroupsRef?.current || [])
         : null;
-      const strobeOverrides = strobeTracksRef?.current && strobeTracksRef.current.length > 0
-        ? computeStrobeTrackOverrides(strobeTracksRef.current, ct, patchedFixturesRef.current, fixtureGroupsRef?.current || [])
-        : null;
+      const strobeOverrides = strobeOverridesEarly;
       // Pre-compute fixture-track targets for this frame
       const fixtureTrackTargets: Array<{ ft: FixtureTrack; targets: string[] }> = [];
       if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
@@ -842,14 +844,21 @@ export function useDmxPlayback(options: {
               const sectionMult = isDrop ? 1.5 : isChorus ? 1.2 : sec === 'build' ? 1.3 : sec === 'bridge' ? 1.0 : sec === 'verse' ? 0.8 : 0.5;
               const baseSpeed = Math.min(strobeTrackOverride?.speed || trackStrobe?.speed || active.strobeSpeed || 10, strobeLimit);
               const adaptedSpeed = Math.min(baseSpeed * sectionMult, strobeLimit);
+              // Strobe track override: oscillate shutter between open/closed at the track speed
+              if (strobeTrackOverride) {
+                const strobePhase = Math.sin(ct * Math.PI * 2 * adaptedSpeed);
+                chVals[sAddr] = strobePhase >= 0 ? 255 : 0;
+              }
               // Soft strobe: pulse dimmer + hold shutter open when fixture has separate intensity
-              if (fa.intensityOffset !== null && !strobeTrackOverride && !trackStrobe) {
+              else if (fa.intensityOffset !== null && !trackStrobe) {
                 const pulse = 0.5 + 0.5 * Math.sin(ct * Math.PI * 2 * adaptedSpeed);
                 const iAddr = pf.startAddress + fa.intensityOffset;
                 if (!chVals[iAddr] || Math.round(dimmerVal * pulse) > chVals[iAddr]) chVals[iAddr] = Math.round(dimmerVal * pulse);
                 chVals[sAddr] = 255; // shutter stays open
               } else {
-                chVals[sAddr] = Math.min(255, 180 + Math.floor(adaptedSpeed * 3));
+                // For cue-based strobe without track, oscillate manually for visibility
+                const strobePhase = Math.sin(ct * Math.PI * 2 * adaptedSpeed);
+                chVals[sAddr] = strobePhase >= 0 ? 255 : 0;
               }
             }
             else if(fa.intensityOffset===null){chVals[sAddr]=Math.max(8,Math.min(255,8+Math.round((dimmerVal/255)*247)));}
@@ -1200,7 +1209,8 @@ export function computeDmxForCue(
           : (cue as any).forcedStrobe !== undefined ? (cue as any).forcedStrobe : ((isDrop || isChorus) && cue.strobe && pf.tier === 'primary');
         if (useStrobe) {
           const speed = Math.min(strobeTrackStrobe?.speed || trackStrobe?.speed || (cue as any).strobeSpeed || 10, 10);
-          chVals[sAddr] = Math.min(255, 180 + Math.floor(speed * 3));
+          // Use a value in the typical strobe capability range (16-131) instead of 180-255 (shutter open)
+          chVals[sAddr] = Math.min(131, 16 + Math.floor(speed * 11));
         } else if (fa.intensityOffset === null) {
           chVals[sAddr] = Math.max(8, Math.min(255, 8 + Math.round((dimmerVal / 255) * 247)));
         } else {

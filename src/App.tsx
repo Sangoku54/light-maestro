@@ -68,11 +68,20 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     const perfState = usePerformStore.getState();
     const appState = useAppStore.getState();
     const { isDirty, markDirty, markClean, ...persistable } = appState;
-    // Strip showData from widget configs (large binary, stored separately in preset)
-    const widgets = perfState.vcWidgets.map(w => ({
-      ...w,
-      config: w.config?.showData ? { ...w.config, showData: undefined } : w.config,
-    }));
+    // Strip showData from widget configs (large binary, stored separately in show store)
+    // but preserve showId and showName so the show can be found in the store on load.
+    const widgets = perfState.vcWidgets.map(w => {
+      if (!w.config?.showData) return w;
+      const { showData, ...rest } = w.config;
+      return {
+        ...w,
+        config: {
+          ...rest,
+          showId: showData.id,
+          showName: showData.name,
+        },
+      };
+    });
     const data = {
       schemaVersion: 1,
       appStore: persistable,
