@@ -158,9 +158,11 @@ export const SongPresetPlayer: React.FC<{
     let audioCtx: AudioContext | null = null;
     let audioSrc: AudioBufferSourceNode | null = null;
     let audioStartTime = 0; // ctx.currentTime when audio started
-    let audioPause = false;
+    let cancelled = false;
 
     const stop = () => {
+      if (cancelled) return;
+      cancelled = true;
       cancelAnimationFrame(rafId);
       zeroDmx();
       if (audioSrc) { try { audioSrc.stop(); } catch {} }
@@ -178,7 +180,9 @@ export const SongPresetPlayer: React.FC<{
           const resp = await fetch(preset.audioFileBase64);
           const ab = await resp.arrayBuffer();
           const buffer = await audioCtx.decodeAudioData(ab);
+          if (cancelled || audioCtx.state === 'closed') return;
           if (audioCtx.state === 'suspended') await audioCtx.resume();
+          if (cancelled) return;
           audioSrc = audioCtx.createBufferSource();
           audioSrc.buffer = buffer;
           audioSrc.connect(audioCtx.destination);
@@ -194,7 +198,7 @@ export const SongPresetPlayer: React.FC<{
     }
 
     const raf = () => {
-      if (hasAudio && audioCtx && !audioPause) {
+      if (hasAudio && audioCtx) {
         currentTimeRef.current = audioCtx.currentTime - audioStartTime;
       } else {
         currentTimeRef.current = (performance.now() - startWall) / 1000;
@@ -207,6 +211,7 @@ export const SongPresetPlayer: React.FC<{
     rafId = requestAnimationFrame(raf);
 
     return () => {
+      cancelled = true;
       cancelAnimationFrame(rafId);
       zeroDmx();
       if (audioSrc) { try { audioSrc.stop(); } catch {} }

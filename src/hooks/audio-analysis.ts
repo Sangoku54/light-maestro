@@ -823,7 +823,7 @@ function computeBassODFFast(data: Float32Array, sampleRate: number, beatRate: nu
 function harmonicSum(acorr: number[], lag: number, maxLag: number, K: number = 4): number {
   let sum = 0;
   for (let k = 1; k <= K; k++) {
-    const subLag = lag / k;
+    const subLag = lag * k;  // librosa: sum multiples of fundamental lag (2×, 3×, 4×)
     if (subLag < 1 || subLag > maxLag) continue;
     // Linear interpolation for non-integer lags
     const lo = Math.floor(subLag);

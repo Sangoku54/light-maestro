@@ -1642,6 +1642,8 @@ const VCButtonWidget: React.FC<{
               audioFileName: p.audioFileName,
             };
             s.setShows([...s.shows.filter((sh: any) => sh.id !== showData.id), showData]);
+            // Mark active immediately so toggle stop works before React processes the event
+            (window as any).__lm_perfPlayActive = true;
             // Trigger playback via custom event (picked up by VirtualConsolePanel useEffect)
             window.dispatchEvent(new CustomEvent('lm-perf-play-show', { detail: showData }));
           } else {
