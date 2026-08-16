@@ -510,7 +510,9 @@
       "contextMenuHint": "Clic droit : déplacer dans un dossier",
       "deleteScene": "Supprimer la scène",
       "deleteSceneTitle": "Supprimer la scène ?",
-      "deleteSceneBody": "Cette action supprime définitivement la scène. Impossible de l’annuler."
+      "deleteSceneBody": "Cette action supprime définitivement la scène. Impossible de l’annuler.",
+      "dropSceneHint": "Déposer une scène ici",
+      "dropUncategorized": "Non classé"
     }
   },
   "perform": {

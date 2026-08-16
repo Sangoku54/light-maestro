@@ -510,7 +510,9 @@
       "contextMenuHint": "Right-click: move to a folder",
       "deleteScene": "Delete scene",
       "deleteSceneTitle": "Delete scene?",
-      "deleteSceneBody": "This will permanently delete this scene. This cannot be undone."
+      "deleteSceneBody": "This will permanently delete this scene. This cannot be undone.",
+      "dropSceneHint": "Drop a scene here",
+      "dropUncategorized": "Uncategorized"
     }
   },
   "perform": {

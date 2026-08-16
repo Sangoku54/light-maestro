@@ -365,11 +365,28 @@ const SceneList: React.FC = () => {
     });
   }, [scenes, sceneFilter, sceneSearch, byFixture, unassignedIds]);
 
+  // Drop a dragged scene into a folder ('' = remove from any folder).
+  const handleDropOnFolder = (folder: string) => {
+    const id = dragSceneId;
+    if (id) {
+      const sc = scenes.find((s) => s.id === id);
+      const target = normalizeFolderName(folder) || '';
+      if (sc && normalizeFolderName(sc.folder || '') !== target) {
+        updateScene(id, target ? { folder: target } : { folder: undefined });
+      }
+    }
+    setDragSceneId(null);
+    setDragOverFolder(null);
+  };
+
   const [ctxMenu, setCtxMenu] = useState<{ visible: boolean; x: number; y: number; sceneId: string; sceneName: string }>(
     { visible: false, x: 0, y: 0, sceneId: '', sceneName: '' }
   );
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
+  // Drag & drop: scene currently dragged (source) + folder chip hovered (target).
+  const [dragSceneId, setDragSceneId] = useState<string | null>(null);
+  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
 
   useEffect(() => {
     if (!ctxMenu.visible) return;
@@ -605,6 +622,62 @@ const SceneList: React.FC = () => {
             className="w-full pl-7 pr-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded-md text-xs text-gray-300 outline-none focus:border-purple-500/50"
           />
         </div>
+        {/* Folder chips: click to filter, drag a scene onto one to move it */}
+        {folderOptions.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {folderOptions.map((fo) => (
+              <button
+                key={fo.value}
+                onClick={() => setSceneFilter(fo.value)}
+                onDragOver={(e) => {
+                  if (!dragSceneId) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  setDragOverFolder(fo.name);
+                }}
+                onDragLeave={() => setDragOverFolder((cur) => (cur === fo.name ? null : cur))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleDropOnFolder(fo.name);
+                }}
+                title={t('design.scenes.dropSceneHint')}
+                className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                  dragOverFolder === fo.name
+                    ? 'border-purple-400 bg-purple-600/30 text-purple-200'
+                    : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:text-purple-300 hover:border-purple-500/50'
+                }`}
+              >
+                📁 {fo.name}
+              </button>
+            ))}
+            {uncategorizedCount < scenes.length && (
+              <button
+                onClick={() => setSceneFilter('uncategorized')}
+                onDragOver={(e) => {
+                  if (!dragSceneId) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  setDragOverFolder('');
+                }}
+                onDragLeave={() => setDragOverFolder((cur) => (cur === '' ? null : cur))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleDropOnFolder('');
+                }}
+                title={t('design.scenes.dropSceneHint')}
+                className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                  dragOverFolder === ''
+                    ? 'border-yellow-400 bg-yellow-600/20 text-yellow-200'
+                    : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:text-yellow-300 hover:border-yellow-500/50'
+                }`}
+              >
+                🚫 {t('design.scenes.dropUncategorized')}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {filteredScenes.length === 0 ? (
@@ -624,7 +697,17 @@ const SceneList: React.FC = () => {
           return (
             <div
               key={scene.id}
+              draggable
               onClick={() => setSelectedSceneId(scene.id)}
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', scene.id);
+                setDragSceneId(scene.id);
+              }}
+              onDragEnd={() => {
+                setDragSceneId(null);
+                setDragOverFolder(null);
+              }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 setCtxMenu({
@@ -638,6 +721,8 @@ const SceneList: React.FC = () => {
               }}
               title={t('design.scenes.contextMenuHint')}
               className={`px-2 py-1.5 rounded-md cursor-pointer group transition-colors ${
+                dragSceneId === scene.id ? 'opacity-40' : ''
+              } ${
                 isSelected ? 'bg-purple-600/15 border border-purple-500/20' : 'hover:bg-gray-800/30'
               }`}
             >
