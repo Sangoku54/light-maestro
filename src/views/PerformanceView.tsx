@@ -289,6 +289,8 @@ const VirtualConsolePanel: React.FC = () => {
       showPlaybackRef.current = null;
       delete (window as any).__lm_perfPlayActive;
       vcZeroAllUniverses();
+      // Notify widgets so their active state resets (natural end or stop)
+      try { window.dispatchEvent(new Event('lm-perf-play-stopped')); } catch {}
     };
 
     // Register stop callback
@@ -340,7 +342,6 @@ const VirtualConsolePanel: React.FC = () => {
           // Audio
           if (track.type === 'audio' && item.audioFileBase64 && !pb.startedAudios.has(item.id)) {
             pb.startedAudios.add(item.id);
-            const audioOffsetSec = Math.max(0, elapsed) / 1000;
             getAudioBuffer(item.audioFileBase64).then((buffer) => {
               if (!showPlaybackRef.current) return;
               // Lazy-init the AudioContext: it was never created before, so
@@ -355,6 +356,12 @@ const VirtualConsolePanel: React.FC = () => {
               const ctx = audioCtx;
               if (!ctx || ctx.state === 'closed') return;
               if (ctx.state === 'suspended') void ctx.resume();
+              // Recompute the offset at playback time: the async decode
+              // above took real time, so the offset captured at tick time
+              // would start the audio late relative to the show clock
+              // (the lights). Align on the show clock instead.
+              const startRef = showPlaybackRef.current;
+              const audioOffsetSec = Math.max(0, (performance.now() - startRef.startTime - itemStart)) / 1000;
               const source = ctx.createBufferSource();
               source.buffer = buffer;
               source.connect(ctx.destination);
@@ -1987,9 +1994,25 @@ const VCButtonWidget: React.FC<{
     }
     // Stop playSong playback
     setSongPlayer(null);
+    // Stop show playback (loadShow widget) — the toggle path: the 2nd
+    // click lands here (active=true → deactivate), not in activate()'s
+    // __lm_perfPlayActive check, so the show would otherwise keep running.
+    if (config.actionType === 'loadShow' && (window as any).__lm_perfPlayActive) {
+      try { (window as any).__lm_perfStopPlayback?.(); } catch {}
+    }
     // Unregister from global audio mutex
     if (unregisterAudioRef.current) { unregisterAudioRef.current(); unregisterAudioRef.current = null; }
   };
+
+  // Reset the widget's active state when the global show playback stops
+  // (natural end of the show or stop from another widget), so the next
+  // click restarts it instead of toggling a dead "active" state.
+  useEffect(() => {
+    if (config.actionType !== 'loadShow') return;
+    const onStop = () => setActive(false);
+    window.addEventListener('lm-perf-play-stopped', onStop);
+    return () => window.removeEventListener('lm-perf-play-stopped', onStop);
+  }, [config.actionType]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (isFlash) {
