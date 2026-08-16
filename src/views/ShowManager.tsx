@@ -497,31 +497,32 @@ export const ShowManager: React.FC = () => {
     const item = selectedShow?.tracks.find((t) => t.id === trackId)?.items.find((it) => it.id === itemId);
     if (!item) return;
     const startX = e.clientX;
-    setDraggingItem({ itemId, trackId, startX, origStartTime: item.startTime });
+    let latestDrag = { itemId, trackId, startX, origStartTime: item.startTime };
+    setDraggingItem(latestDrag);
     const onMove = (ev: MouseEvent) => {
       const dx = ev.clientX - startX;
       const containerW = timelineRef.current?.clientWidth ?? 1;
       const dt = (dx / containerW) * effectiveDuration;
-      setDraggingItem((prev) => prev ? { ...prev, origStartTime: Math.max(0, item.startTime + dt) } : null);
+      latestDrag = { ...latestDrag, origStartTime: Math.max(0, item.startTime + dt) };
+      setDraggingItem(latestDrag);
     };
     const onUp = () => {
-      setDraggingItem((prev) => {
-        if (prev && selectedShow) {
-          updateShow(selectedShow.id, {
-            tracks: selectedShow.tracks.map((t) =>
-              t.id === trackId
-                ? {
-                    ...t,
-                    items: t.items.map((it) =>
-                      it.id === itemId ? { ...it, startTime: Math.max(0, Math.round(prev.origStartTime)) } : it
-                    ),
-                  }
-                : t
-            ),
-          });
-        }
-        return null;
-      });
+      const finalStart = latestDrag.origStartTime;
+      setDraggingItem(null);
+      if (finalStart != null && selectedShow) {
+        updateShow(selectedShow.id, {
+          tracks: selectedShow.tracks.map((t) =>
+            t.id === trackId
+              ? {
+                  ...t,
+                  items: t.items.map((it) =>
+                    it.id === itemId ? { ...it, startTime: Math.max(0, Math.round(finalStart)) } : it
+                  ),
+                }
+              : t
+          ),
+        });
+      }
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
     };
@@ -534,51 +535,48 @@ export const ShowManager: React.FC = () => {
     e.preventDefault();
     const item = selectedShow?.tracks.find((t) => t.id === trackId)?.items.find((it) => it.id === itemId);
     if (!item) return;
-    setResizingItem({ itemId, trackId, edge, startX: e.clientX, origStartTime: item.startTime, origDuration: item.duration });
     const startX = e.clientX;
+    let latestResize = { itemId, trackId, edge, startX, origStartTime: item.startTime, origDuration: item.duration };
+    setResizingItem(latestResize);
     const onMove = (ev: MouseEvent) => {
       const dx = ev.clientX - startX;
       const containerW = timelineRef.current?.clientWidth ?? 1;
       const dt = (dx / containerW) * effectiveDuration;
-      setResizingItem((prev) => {
-        if (!prev) return null;
-        if (edge === 'left') {
-          const newStart = Math.max(0, item.startTime + dt);
-          const newDur = item.duration + (item.startTime - newStart);
-          return { ...prev, origStartTime: newStart, origDuration: Math.max(200, newDur) };
-        } else {
-          return { ...prev, origDuration: Math.max(200, item.duration + dt) };
-        }
-      });
+      if (edge === 'left') {
+        const newStart = Math.max(0, item.startTime + dt);
+        const newDur = item.duration + (item.startTime - newStart);
+        latestResize = { ...latestResize, origStartTime: newStart, origDuration: Math.max(200, newDur) };
+      } else {
+        latestResize = { ...latestResize, origDuration: Math.max(200, item.duration + dt) };
+      }
+      setResizingItem(latestResize);
     };
     const onUp = () => {
-      setResizingItem((prev) => {
-        if (prev && selectedShow) {
-          const newStart = Math.max(0, Math.round(prev.origStartTime));
-          const newDur = Math.round(prev.origDuration);
-          const itemEnd = newStart + newDur;
-          const updates: Partial<ShowData> = {
-            tracks: selectedShow.tracks.map((t) =>
-              t.id === trackId
-                ? {
-                    ...t,
-                    items: t.items.map((it) =>
-                      it.id === itemId
-                        ? { ...it, startTime: newStart, duration: newDur }
-                        : it
-                    ),
-                  }
-                : t
-            ),
-          };
-          // Read fresh state from store for accurate duration check
-          const latestShow = useShowStore.getState().shows.find((s) => s.id === selectedShow.id);
-          const latestDuration = latestShow?.duration ?? selectedShow.duration;
-          if (itemEnd > latestDuration) updates.duration = itemEnd;
-          updateShow(selectedShow.id, updates);
-        }
-        return null;
-      });
+      if (selectedShow) {
+        const newStart = Math.max(0, Math.round(latestResize.origStartTime));
+        const newDur = Math.round(latestResize.origDuration);
+        const itemEnd = newStart + newDur;
+        const updates: Partial<ShowData> = {
+          tracks: selectedShow.tracks.map((t) =>
+            t.id === trackId
+              ? {
+                  ...t,
+                  items: t.items.map((it) =>
+                    it.id === itemId
+                      ? { ...it, startTime: newStart, duration: newDur }
+                      : it
+                  ),
+                }
+              : t
+          ),
+        };
+        // Read fresh state from store for accurate duration check
+        const latestShow = useShowStore.getState().shows.find((s) => s.id === selectedShow.id);
+        const latestDuration = latestShow?.duration ?? selectedShow.duration;
+        if (itemEnd > latestDuration) updates.duration = itemEnd;
+        updateShow(selectedShow.id, updates);
+      }
+      setResizingItem(null);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
     };

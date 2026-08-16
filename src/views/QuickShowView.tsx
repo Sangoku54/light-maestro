@@ -17,6 +17,59 @@ import type { EfxTrack, EfxTrackEntry, ColorTrack, ColorTrackEntry, StrobeTrack,
 
 type EnrichedCue = DmxCue;
 
+/* ─── PromptModal ─────────────────────────────────────────
+ * Electron 21+ no longer supports window.prompt(). This inline
+ * modal replaces it for the few places that ask for a name.
+ */
+const PromptModal: React.FC<{
+  title: string;
+  initial?: string;
+  placeholder?: string;
+  onCancel: () => void;
+  onOk: (value: string) => void;
+}> = ({ title, initial = '', placeholder = '', onCancel, onOk }) => {
+  const [value, setValue] = useState(initial);
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
+  const submit = () => { if (value.trim()) onOk(value.trim()); };
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onCancel}
+      onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); }}
+    >
+      <div
+        className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[320px] p-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="text-sm font-semibold text-gray-200 mb-3">{title}</p>
+        <input
+          ref={ref}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+          placeholder={placeholder}
+          className="w-full px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-200 outline-none focus:border-purple-500/60"
+        />
+        <div className="flex justify-end gap-2 mt-4">
+          <button
+            onClick={onCancel}
+            className="px-3 py-1 rounded text-xs text-gray-400 hover:bg-gray-800/60 transition-colors"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={submit}
+            className="px-3 py-1 rounded text-xs font-medium bg-purple-600/40 text-purple-200 hover:bg-purple-600/60 border border-purple-500/40 transition-colors"
+          >
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /* ─── Helpers ──────────────────────────────────────────── */
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -1152,6 +1205,7 @@ const ColorPresetsPanel: React.FC = () => {
   const addColorPreset = useAppStore(s => s.addColorPreset);
   const deleteColorPreset = useAppStore(s => s.deleteColorPreset);
   const [activeTab, setActiveTab] = useState<'live' | 'sections' | 'presets'>('live');
+  const [promptOpen, setPromptOpen] = useState(false);
   const presets = qs.colorPresets || [];
   const customPal = qs.customPalette || { intro: [], verse: [], chorus: [], bridge: [], drop: [], outro: [], build: [] };
 
@@ -1444,11 +1498,7 @@ const ColorPresetsPanel: React.FC = () => {
               Vos palettes sauvegardées
             </p>
             <button
-              onClick={() => {
-                const name = prompt('Nom du preset :');
-                if (!name) return;
-                addColorPreset(name, activeColors);
-              }}
+              onClick={() => setPromptOpen(true)}
               className="px-2 py-0.5 rounded text-[10px] text-purple-400 border border-purple-500/30 hover:bg-purple-600/20 transition-colors"
             >
               + Sauvegarder la palette active
@@ -1509,6 +1559,13 @@ const ColorPresetsPanel: React.FC = () => {
           Le panneau AutoScript permet aussi l'édition contextuelle.
         </p>
       </div>
+      {promptOpen && (
+        <PromptModal
+          title="Nom du preset :"
+          onCancel={() => setPromptOpen(false)}
+          onOk={(name) => { addColorPreset(name, activeColors); setPromptOpen(false); }}
+        />
+      )}
     </div>
   );
 };
@@ -1568,6 +1625,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [showChaserPicker, setShowChaserPicker] = useState(false);
   const scenePickerRef = useRef<HTMLDivElement>(null);
   const chaserPickerRef = useRef<HTMLDivElement>(null);
+  // Electron 21+ has no window.prompt() — inline modal for preset naming
+  const [promptAction, setPromptAction] = useState<'save' | 'export' | null>(null);
   const [manualCues, setManualCues] = useState<DmxCue[]>([]);
   const [disabledFixtures, setDisabledFixtures] = useState<Set<string>>(new Set());
   const disabledFixturesRef = useRef<Set<string>>(new Set());
@@ -1914,9 +1973,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     });
   }, [audioFile, setQs, setSections, setManualCues, setEfxTracks, setFixtureTracks]);
 
-  const handleSaveAsPreset = useCallback(() => {
-    const name = prompt(t('presetName') || 'Preset name:');
-    if (!name) return;
+  const handleSaveAsPreset = useCallback((name: string) => {
     const file = audioFile.file;
     (async () => {
       try {
@@ -1997,9 +2054,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     })();
   }, [qs, resolvedAnalysis, sections, manualCues, efxTracks, fixtureTracks, chaserTracks, audioFile, effectiveBpm, key]);
 
-  const handleExportPreset = useCallback(() => {
-    const name = prompt(t('presetName') || 'Preset name for export:');
-    if (!name) return;
+  const handleExportPreset = useCallback((name: string) => {
     (async () => {
       try {
         const file = audioFile.file;
@@ -3048,13 +3103,13 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           </button>
           {presetsDropdown && (
             <div className="absolute top-full right-0 mt-1 z-50 bg-[#1a1a2e] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[220px]">
-              <button onClick={() => { setPresetsDropdown(false); handleSaveAsPreset(); }} className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2">
+              <button onClick={() => { setPresetsDropdown(false); setPromptAction('save'); }} className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2">
                 <Save className="w-3 h-3" /> Save Preset
               </button>
               <button onClick={() => { setPresetsDropdown(false); loadPresetFile(); }} className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2">
                 <FolderOpen className="w-3 h-3" /> Load from file...
               </button>
-              <button onClick={() => { setPresetsDropdown(false); handleExportPreset(); }} className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2">
+              <button onClick={() => { setPresetsDropdown(false); setPromptAction('export'); }} className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2">
                 <Download className="w-3 h-3" /> Export to file...
               </button>
               {savedPresets.length > 0 && <div className="border-t border-gray-800 my-0.5" />}
@@ -4354,6 +4409,18 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             </div>
           </div>
         </>
+      )}
+      {promptAction && (
+        <PromptModal
+          title={promptAction === 'save' ? (t('presetName') || 'Preset name:') : (t('presetName') || 'Preset name for export:')}
+          onCancel={() => setPromptAction(null)}
+          onOk={(name) => {
+            const action = promptAction;
+            setPromptAction(null);
+            if (action === 'save') handleSaveAsPreset(name);
+            else handleExportPreset(name);
+          }}
+        />
       )}
     </div>
   );

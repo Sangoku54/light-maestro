@@ -15,6 +15,7 @@ import { SongPresetPlayer } from '../components/SongPresetPlayer';
 import { analyzeAudioBuffer, type TrackAnalysis } from '../hooks/audio-analysis';
 import { sendChannelsToHardware, sendToUniverse } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
+import { preloadAudioUrl, decodeAudioUrl } from '../utils/audio-cache';
 import { timecodeToMs, msToTimecode, isValidTimecode } from '../engine/mtc-markers';
 import { Stage3D } from './Stage3D';
 import {
@@ -232,19 +233,13 @@ const VirtualConsolePanel: React.FC = () => {
     const startTime = performance.now();
     let audioCtx: AudioContext | null = null;
 
-    const getAudioCtx = () => {
-      if (!audioCtx) audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      return audioCtx;
-    };
-
     const getAudioBuffer = async (b64: string): Promise<AudioBuffer> => {
       if (audioBuffers.has(b64)) return audioBuffers.get(b64)!;
-      const ctx = getAudioCtx();
-      const resp = await fetch(b64);
-      const ab = await resp.arrayBuffer();
-      const buffer = await ctx.decodeAudioData(ab);
-      audioBuffers.set(b64, buffer);
-      return buffer;
+      // Use the shared decoded-buffer cache so preloaded audio (widget idle
+      // preload) starts instantly and repeated plays are free.
+      const buffer = await decodeAudioUrl(b64);
+      if (buffer) audioBuffers.set(b64, buffer);
+      return buffer!;
     };
 
     // Preload fixture definitions for EFX tracks (non-blocking, outside RAF)
@@ -525,11 +520,14 @@ const VirtualConsolePanel: React.FC = () => {
     };
 
     // Listen for show-play requests from widget activate()
-    const handlePlayShow = (e: Event) => {
-      const showData = (e as CustomEvent).detail;
-      if (showData) startShowPlayback(showData);
+    const handlePlayShow = () => {
+      const showData = (window as any).__lm_perfPlayShow;
+      if (showData) {
+        delete (window as any).__lm_perfPlayShow;
+        startShowPlayback(showData);
+      }
     };
-    window.addEventListener('lm-perf-play-show', handlePlayShow as EventListener);
+    window.addEventListener('lm-perf-play-show', handlePlayShow);
 
     // Also check for any pending signal from before mount
     const pending = (window as any).__lm_perfPlayShow;
@@ -539,7 +537,7 @@ const VirtualConsolePanel: React.FC = () => {
     }
 
     return () => {
-      window.removeEventListener('lm-perf-play-show', handlePlayShow as EventListener);
+      window.removeEventListener('lm-perf-play-show', handlePlayShow);
       stopAll();
     };
   }, []);
@@ -1496,6 +1494,16 @@ const VCButtonWidget: React.FC<{
     return sp ? `♪ ${sp.name}` : (config.songName ? `♪ ${config.songName}` : '♪ Song');
   };
 
+  // Pre-decode the preset's audio while the widget is idle (before any
+  // click), so playback starts with ~zero audio latency. The decoded
+  // AudioBuffer is cached module-wide and reused by SongPresetPlayer.
+  useEffect(() => {
+    if (config.actionType !== 'playSong') return;
+    const sp = songPresets.find((p) => p.id === config.songId)
+      || (config.songName ? songPresets.find((p) => p.name === config.songName) : undefined);
+    if (sp?.audioFileBase64) preloadAudioUrl(sp.audioFileBase64);
+  }, [config.actionType, config.songId, config.songName, songPresets]);
+
   // ─── audioAutoScript playback helper ──────────────────
   const _startAudioAutoScript = (cues: any[]) => {
     if (!cues || cues.length === 0) {
@@ -1503,13 +1511,23 @@ const VCButtonWidget: React.FC<{
       return;
     }
     console.log('AudioAutoScript: starting', config.audioFileName, 'cues:', cues.length);
-    const audio = new Audio(config.audioDataUrl);
-    autoAudioRef.current = audio;
+    // Use the shared decoded-buffer cache instead of new Audio(dataUrl):
+    // HTMLAudioElement blocks the renderer while decoding multi-MB base64,
+    // which stalls the watchdog and delays the first DMX frame by seconds.
+    let audioCtx: AudioContext | null = null;
+    let audioSrc: AudioBufferSourceNode | null = null;
+    let audioPlayOffset = 0; // seconds already elapsed before audio starts
+    const stopAudio = () => {
+      try { audioSrc?.stop(); } catch {}
+      try { audioCtx?.close(); } catch {}
+      audioSrc = null;
+      audioCtx = null;
+    };
+    autoAudioRef.current = { stop: stopAudio } as any;
     // Register with global mutex: stop all other audio, then track this one
     unregisterAudioRef.current = registerAudioPlayback(widget.id, () => {
-      audio.pause();
-      audio.currentTime = 0;
       cancelAnimationFrame(autoRafRef.current);
+      stopAudio();
       autoAudioRef.current = null;
       vcZeroAllUniverses();
       setActive(false);
@@ -1534,27 +1552,36 @@ const VCButtonWidget: React.FC<{
           } catch {}
         }
       }
-      if (!audio.paused && !audio.ended) autoRafRef.current = requestAnimationFrame(fireAutoDmx);
+      const playing = audioSrc !== null || (performance.now() - startTime) < (cues[cues.length - 1]?.time ?? 0) * 1000 + 2000;
+      if (playing) autoRafRef.current = requestAnimationFrame(fireAutoDmx);
     };
-    audio.onplay = () => { startTime = performance.now(); fireAutoDmx(); };
-    audio.onended = () => {
-      cancelAnimationFrame(autoRafRef.current);
-      vcZeroAllUniverses();
-      autoAudioRef.current = null;
-      if (unregisterAudioRef.current) { unregisterAudioRef.current(); unregisterAudioRef.current = null; }
-      setActive(false);
+    const beginPlayback = () => {
+      startTime = performance.now();
+      fireAutoDmx();
     };
-    audio.onerror = (e) => console.error('AudioAutoScript error:', e);
-    const tryPlay = (retries: number) => {
-      audio.play().catch((e) => {
-        if (retries > 0) {
-          setTimeout(() => tryPlay(retries - 1), 50);
-        } else {
-          console.error('AudioAutoScript play failed:', e);
-        }
-      });
-    };
-    tryPlay(2);
+    (async () => {
+      try {
+        audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+        const buffer = await decodeAudioUrl(config.audioDataUrl);
+        if (!buffer || !audioCtx || audioCtx.state === 'closed') { beginPlayback(); return; }
+        audioSrc = audioCtx.createBufferSource();
+        audioSrc.buffer = buffer;
+        audioSrc.connect(audioCtx.destination);
+        audioSrc.onended = () => {
+          cancelAnimationFrame(autoRafRef.current);
+          vcZeroAllUniverses();
+          autoAudioRef.current = null;
+          if (unregisterAudioRef.current) { unregisterAudioRef.current(); unregisterAudioRef.current = null; }
+          setActive(false);
+        };
+        audioSrc.start(0, audioPlayOffset);
+        beginPlayback();
+      } catch {
+        // Audio failed — still run the DMX script on the virtual clock
+        beginPlayback();
+      }
+    })();
   };
 
   const activate = () => {
@@ -1644,8 +1671,11 @@ const VCButtonWidget: React.FC<{
             s.setShows([...s.shows.filter((sh: any) => sh.id !== showData.id), showData]);
             // Mark active immediately so toggle stop works before React processes the event
             (window as any).__lm_perfPlayActive = true;
-            // Trigger playback via custom event (picked up by VirtualConsolePanel useEffect)
-            window.dispatchEvent(new CustomEvent('lm-perf-play-show', { detail: showData }));
+            // Pass the show via a window ref (NO structured clone — the show can
+            // embed multi-MB audio base64 and CustomEvent detail would deep-copy
+            // it synchronously, freezing the renderer for seconds).
+            (window as any).__lm_perfPlayShow = showData;
+            window.dispatchEvent(new Event('lm-perf-play-show'));
           } else {
             // .lmproject format - load into QuickShow
             useAppStore.getState().setMode?.('quick');
@@ -1928,9 +1958,9 @@ const VCButtonWidget: React.FC<{
     sceneFadeRef.current = null;
     // Stop audioAutoScript playback
     if (autoAudioRef.current) {
-      autoAudioRef.current.pause();
-      autoAudioRef.current.currentTime = 0;
       cancelAnimationFrame(autoRafRef.current);
+      const h = autoAudioRef.current as any;
+      if (typeof h.stop === 'function') h.stop();
       autoAudioRef.current = null;
       vcZeroAllUniverses();
     }

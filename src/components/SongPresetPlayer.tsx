@@ -15,6 +15,7 @@ import { loadFixtureDefinitions } from '../hooks/dmx-cues';
 import { useDmxPlayback } from '../hooks/dmx-playback';
 import { genCues } from '../views/QuickShowView';
 import { dmxBridge } from '../utils/dmx-bridge';
+import { decodeAudioUrl } from '../utils/audio-cache';
 
 /**
  * Resolve the playback clock for one frame.
@@ -171,18 +172,16 @@ export const SongPresetPlayer: React.FC<{
     };
 
     // Async audio: decode base64 → AudioBuffer → start source node
-    // This avoids the multi-second latency of new Audio(dataUrl) which
-    // blocks until the entire base64 blob is decoded by the browser.
+    // Uses the shared cache: if the widget preloaded this URL at mount,
+    // playback starts with ~zero latency. Otherwise the first click pays
+    // the decode cost once, and every later play is instant.
     if (preset.audioFileBase64) {
       (async () => {
         try {
           audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-          const resp = await fetch(preset.audioFileBase64);
-          const ab = await resp.arrayBuffer();
-          const buffer = await audioCtx.decodeAudioData(ab);
-          if (cancelled || audioCtx.state === 'closed') return;
           if (audioCtx.state === 'suspended') await audioCtx.resume();
-          if (cancelled) return;
+          const buffer = await decodeAudioUrl(preset.audioFileBase64);
+          if (!buffer || cancelled || audioCtx.state === 'closed') return;
           audioSrc = audioCtx.createBufferSource();
           audioSrc.buffer = buffer;
           audioSrc.connect(audioCtx.destination);
