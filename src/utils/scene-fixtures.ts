@@ -17,6 +17,12 @@
 
 import type { PatchedFixture, SavedScene } from '../stores/showStore';
 
+/** Normalize a user-typed folder name: trim + collapse inner whitespace.
+ *  " front  lights " → "front lights". Empty/whitespace-only → "". */
+export function normalizeFolderName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ');
+}
+
 /** True when the scene has at least one channel address inside the fixture's DMX range. */
 export function sceneTouchesFixture(scene: Pick<SavedScene, 'channels'>, pf: PatchedFixture): boolean {
   const end = pf.startAddress + pf.channelCount;

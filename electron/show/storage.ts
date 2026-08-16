@@ -22,6 +22,7 @@ export interface ShowScene {
   fadeIn: number;     // ms
   fadeOut: number;    // ms
   notes?: string;
+  folder?: string;    // optional user classification folder (derived, no entity)
 }
 
 export interface ShowChaser {

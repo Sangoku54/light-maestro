@@ -8,6 +8,7 @@
 import { create } from 'zustand';
 import type { MtcMarker } from '../engine/mtc-markers';
 import type { DmxCue } from '../hooks/dmx-cues';
+import { normalizeFolderName } from '../utils/scene-fixtures';
 
 // ─── Types ─────────────────────────────────────────────────
 
@@ -61,6 +62,10 @@ export interface SavedScene {
   fadeOut: number;  // ms
   duration: number; // ms (0 = infinite/hold)
   createdAt: string;
+  /** Optional user-defined classification folder (e.g. "front", "strobe").
+   *  Free string, normalized (trim + collapsed spaces) on write.
+   *  Old files without this field load as "uncategorized". */
+  folder?: string;
 }
 
 // ─── Show Manager Types ──────────────────────────────────
@@ -259,11 +264,15 @@ interface ShowState {
   // Scenes
   scenes: SavedScene[];
   createScene: (name: string) => string;
-  updateScene: (id: string, updates: Partial<Pick<SavedScene, 'name' | 'channels' | 'fadeIn' | 'fadeOut' | 'duration'>>) => void;
+  updateScene: (id: string, updates: Partial<Pick<SavedScene, 'name' | 'channels' | 'fadeIn' | 'fadeOut' | 'duration' | 'folder'>>) => void;
   deleteScene: (id: string) => void;
   getScene: (id: string) => SavedScene | undefined;
   setScenes: (scenes: SavedScene[]) => void;
   getSceneCount: () => number;
+
+  // Scenes — folder classification helpers (derived folders, no entity)
+  renameFolder: (oldName: string, newName: string) => void;
+  clearFolder: (name: string) => void;
 
   // Chasers
   chasers: SavedChaser[];
@@ -651,6 +660,34 @@ export const useShowStore = create<ShowState>((set, get) => ({
     set((state) => ({
       scenes: state.scenes.map((s) =>
         s.id === id ? { ...s, ...updates } : s
+      ),
+    }));
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+  },
+
+  // Rename a derived folder: updates every scene carrying it (trimmed).
+  // Empty newName = clearFolder semantics (scenes become uncategorized).
+  renameFolder: (oldName, newName) => {
+    const from = normalizeFolderName(oldName);
+    const to = normalizeFolderName(newName);
+    if (!from) return;
+    set((state) => ({
+      scenes: state.scenes.map((s) => {
+        const cur = normalizeFolderName(s.folder || '');
+        if (!cur || cur !== from) return s;
+        return { ...s, folder: to || undefined };
+      }),
+    }));
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+  },
+
+  // Unassign every scene in a folder (never deletes scenes).
+  clearFolder: (name) => {
+    const from = normalizeFolderName(name);
+    if (!from) return;
+    set((state) => ({
+      scenes: state.scenes.map((s) =>
+        normalizeFolderName(s.folder || '') === from ? { ...s, folder: undefined } : s
       ),
     }));
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }

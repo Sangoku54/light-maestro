@@ -490,7 +490,14 @@
       "unassigned": "Sans projecteur ({{count}})",
       "noScenesForFixture": "Aucune scène pour ce projecteur",
       "touches": "Touche : {{list}}",
-      "fixtureCount": "{{count}} proj."
+      "fixtureCount": "{{count}} proj.",
+      "folders": "Dossiers",
+      "uncategorized": "Non classé ({{count}})",
+      "folderPlaceholder": "Dossier (optionnel)",
+      "folder": "Dossier",
+      "noScenesInFolder": "Aucune scène dans ce dossier",
+      "renameFolder": "Renommer le dossier",
+      "clearFolder": "Retirer du dossier"
     }
   },
   "perform": {

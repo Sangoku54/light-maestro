@@ -490,7 +490,14 @@
       "unassigned": "Unassigned ({{count}})",
       "noScenesForFixture": "No scenes for this fixture",
       "touches": "Touches: {{list}}",
-      "fixtureCount": "{{count}} fx"
+      "fixtureCount": "{{count}} fx",
+      "folders": "Folders",
+      "uncategorized": "Uncategorized ({{count}})",
+      "folderPlaceholder": "Folder (optional)",
+      "folder": "Folder",
+      "noScenesInFolder": "No scenes in this folder",
+      "renameFolder": "Rename folder",
+      "clearFolder": "Remove from folder"
     }
   },
   "perform": {

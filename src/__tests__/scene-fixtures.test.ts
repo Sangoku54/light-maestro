@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PatchedFixture, SavedScene } from '../stores/showStore';
-import { buildSceneFixtureIndex, sceneTouchesFixture, scenesWithoutFixture } from '../utils/scene-fixtures';
+import { buildSceneFixtureIndex, normalizeFolderName, sceneTouchesFixture, scenesWithoutFixture } from '../utils/scene-fixtures';
 
 const fx = (id: string, name: string, startAddress: number, channelCount: number, universeId = 'u1'): PatchedFixture => ({
   id,
@@ -25,6 +25,16 @@ const scene = (id: string, channels: Record<number, number>): SavedScene => ({
   fadeOut: 1000,
   duration: 5000,
   createdAt: '2026-01-01T00:00:00.000Z',
+});
+
+describe('normalizeFolderName', () => {
+  it('trims leading/trailing whitespace and collapses inner spaces', () => {
+    expect(normalizeFolderName('  front  lights ')).toBe('front lights');
+    expect(normalizeFolderName('front')).toBe('front');
+    expect(normalizeFolderName('  ')).toBe('');
+    expect(normalizeFolderName('')).toBe('');
+    expect(normalizeFolderName('front   lights')).toBe('front lights');
+  });
 });
 
 describe('sceneTouchesFixture', () => {
