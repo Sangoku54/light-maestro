@@ -1,0 +1,68 @@
+/**
+ * Scene ↔ Fixture mapping helpers (DesignView scene filtering).
+ *
+ * The predicate here MUST stay identical to the playback engine:
+ * - dispatchChannelsByFixture (src/utils/dmx-helpers.ts): a scene value
+ *   is sent to every fixture whose [startAddress, startAddress+channelCount)
+ *   range contains the address — across ALL universes (scene addresses are
+ *   per-universe 1..512 with no universe id, so the same address lights up
+ *   fixtures on every universe that contains it).
+ * - computeChaserTrackOverrides (src/hooks/dmx-playback.ts) uses the exact
+ *   same range predicate over every scene.channels key, value irrelevant.
+ *
+ * So "scene touches fixture" = ∃ address in scene.channels such that
+ * fixture.startAddress <= addr < fixture.startAddress + fixture.channelCount.
+ * Value is irrelevant (a 0 is legitimate data, e.g. closed shutter).
+ */
+
+import type { PatchedFixture, SavedScene } from '../stores/showStore';
+
+/** True when the scene has at least one channel address inside the fixture's DMX range. */
+export function sceneTouchesFixture(scene: Pick<SavedScene, 'channels'>, pf: PatchedFixture): boolean {
+  const end = pf.startAddress + pf.channelCount;
+  for (const addrStr of Object.keys(scene.channels)) {
+    const a = Number(addrStr);
+    if (a >= pf.startAddress && a < end) return true;
+  }
+  return false;
+}
+
+/**
+ * Build a two-way index in a single pass over all scenes × all fixtures.
+ * - byFixture: fixtureId -> scene ids that touch it
+ * - byScene:   sceneId   -> fixture ids the scene touches
+ *
+ * O(total scene channel entries × fixtures) worst case but typically
+ * O(scenes × fixtures × small), memoized in the UI on [scenes, fixtures].
+ */
+export function buildSceneFixtureIndex(
+  scenes: SavedScene[],
+  fixtures: PatchedFixture[],
+): { byFixture: Map<string, string[]>; byScene: Map<string, string[]> } {
+  const byFixture = new Map<string, string[]>();
+  const byScene = new Map<string, string[]>();
+
+  for (const scene of scenes) {
+    for (const pf of fixtures) {
+      if (sceneTouchesFixture(scene, pf)) {
+        const fList = byFixture.get(pf.id);
+        if (fList) fList.push(scene.id);
+        else byFixture.set(pf.id, [scene.id]);
+
+        const sList = byScene.get(scene.id);
+        if (sList) sList.push(pf.id);
+        else byScene.set(scene.id, [pf.id]);
+      }
+    }
+  }
+
+  return { byFixture, byScene };
+}
+
+/** Scenes that do not touch ANY patched fixture range (created pre-patch, out-of-range or empty). */
+export function scenesWithoutFixture(
+  scenes: SavedScene[],
+  byScene: Map<string, string[]>,
+): SavedScene[] {
+  return scenes.filter((s) => !byScene.has(s.id));
+}

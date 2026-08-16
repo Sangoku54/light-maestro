@@ -484,6 +484,13 @@
         "defaultFadeIn": "Fondu par Défaut",
         "dmxRefreshRate": "Taux de Rafraîchissement DMX"
       }
+    },
+    "scenes": {
+      "allScenes": "Toutes les scènes ({{count}})",
+      "unassigned": "Sans projecteur ({{count}})",
+      "noScenesForFixture": "Aucune scène pour ce projecteur",
+      "touches": "Touche : {{list}}",
+      "fixtureCount": "{{count}} proj."
     }
   },
   "perform": {

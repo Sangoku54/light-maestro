@@ -484,6 +484,13 @@
         "defaultFadeIn": "Default Fade In",
         "dmxRefreshRate": "DMX Refresh Rate"
       }
+    },
+    "scenes": {
+      "allScenes": "All scenes ({{count}})",
+      "unassigned": "Unassigned ({{count}})",
+      "noScenesForFixture": "No scenes for this fixture",
+      "touches": "Touches: {{list}}",
+      "fixtureCount": "{{count}} fx"
     }
   },
   "perform": {

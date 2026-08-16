@@ -14,6 +14,7 @@ import { sendChannelsToHardware, sendToUniverse, sendFixtureOn, sendFixtureOff, 
 import { dmxBridge } from '../utils/dmx-bridge';
 import { fixtureTestState } from '../utils/fixture-test-state';
 import { useRgbMatrixStore } from '../stores/rgbmatrixStore';
+import { buildSceneFixtureIndex, scenesWithoutFixture, sceneTouchesFixture } from '../utils/scene-fixtures';
 
 /**
  * Design View — QLC+ Full Editor
@@ -284,10 +285,50 @@ function analyzeFixtureChannels(
 }
 
 const SceneList: React.FC = () => {
+  const { t } = useTranslation();
   const scenes = useShowStore((s) => s.scenes);
+  const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const universes = useShowStore((s) => s.universes);
   const createScene = useShowStore((s) => s.createScene);
   const deleteScene = useShowStore((s) => s.deleteScene);
   const setDesignSidebarTab = useAppStore((s) => s.setDesignSidebarTab);
+
+  // Scene classification: computed fixture filter + name search (no persisted state)
+  const [fixtureFilter, setFixtureFilter] = useState(''); // '' = all, 'unassigned', or fixtureId
+  const [sceneSearch, setSceneSearch] = useState('');
+
+  // Two-way scene ↔ fixture index, rebuilt in one pass when patch or scenes change.
+  // Predicate identical to the playback engine (dmx-helpers / dmx-playback):
+  // ∃ channel address inside [startAddress, startAddress+channelCount), value ignored.
+  const { byFixture, byScene } = useMemo(
+    () => buildSceneFixtureIndex(scenes, patchedFixtures),
+    [scenes, patchedFixtures],
+  );
+  const unassignedIds = useMemo(() => new Set(scenesWithoutFixture(scenes, byScene).map((s) => s.id)), [scenes, byScene]);
+
+  // Fixtures sorted by universe name then start address for the <select>
+  const sortedFixtures = useMemo(() => {
+    const uniName = new Map(universes.map((u) => [u.id, u.name]));
+    return [...patchedFixtures].sort((a, b) => {
+      const ua = uniName.get(a.universeId) || '';
+      const ub = uniName.get(b.universeId) || '';
+      if (ua !== ub) return ua.localeCompare(ub);
+      return a.startAddress - b.startAddress;
+    });
+  }, [patchedFixtures, universes]);
+
+  const filteredScenes = useMemo(() => {
+    const q = sceneSearch.trim().toLowerCase();
+    return scenes.filter((s) => {
+      if (fixtureFilter === 'unassigned') {
+        if (!unassignedIds.has(s.id)) return false;
+      } else if (fixtureFilter) {
+        if (!(byFixture.get(fixtureFilter) || []).includes(s.id)) return false;
+      }
+      if (q && !s.name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [scenes, fixtureFilter, sceneSearch, byFixture, unassignedIds]);
 
   const [ctxMenu, setCtxMenu] = useState<{ visible: boolean; x: number; y: number; sceneId: string; sceneName: string }>(
     { visible: false, x: 0, y: 0, sceneId: '', sceneName: '' }
@@ -320,12 +361,55 @@ const SceneList: React.FC = () => {
     );
   }
 
+  const showEmptyFixture = fixtureFilter && fixtureFilter !== 'unassigned' && filteredScenes.length === 0;
+
   return (
     <>
+      {/* Fixture filter + name search (computed, no persisted state) */}
+      <div className="space-y-1.5 mb-2">
+        <select
+          value={fixtureFilter}
+          onChange={(e) => setFixtureFilter(e.target.value)}
+          className="w-full px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded-md text-xs text-gray-300 outline-none focus:border-purple-500/50"
+        >
+          <option value="">{t('design.scenes.allScenes', { count: scenes.length })}</option>
+          {sortedFixtures.map((pf) => {
+            const uniName = universes.find((u) => u.id === pf.universeId)?.name;
+            const count = (byFixture.get(pf.id) || []).length;
+            return (
+              <option key={pf.id} value={pf.id}>
+                {uniName ? `${uniName} · ` : ''}{pf.name} @{pf.startAddress} ({count})
+              </option>
+            );
+          })}
+          {unassignedIds.size > 0 && (
+            <option value="unassigned">{t('design.scenes.unassigned', { count: unassignedIds.size })}</option>
+          )}
+        </select>
+        <div className="relative">
+          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-600" />
+          <input
+            type="text"
+            value={sceneSearch}
+            onChange={(e) => setSceneSearch(e.target.value)}
+            placeholder={t('design.searchScenes')}
+            className="w-full pl-7 pr-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded-md text-xs text-gray-300 outline-none focus:border-purple-500/50"
+          />
+        </div>
+      </div>
+
+      {filteredScenes.length === 0 ? (
+        <div className="text-xs text-gray-600 text-center py-8">
+          {showEmptyFixture
+            ? t('design.scenes.noScenesForFixture')
+            : t('design.noScenesMatch', { query: sceneSearch })}
+        </div>
+      ) : (
       <div className="space-y-1">
-        {scenes.map((scene) => {
+        {filteredScenes.map((scene) => {
           const activeChannels = Object.entries(scene.channels).filter(([, v]) => v > 0);
           const isSelected = selectedSceneId === scene.id;
+          const touchedFixtures = byScene.get(scene.id) || [];
           return (
             <div
               key={scene.id}
@@ -345,6 +429,11 @@ const SceneList: React.FC = () => {
                     {activeChannels.length} ch · {scene.duration > 0 ? `${(scene.duration / 1000).toFixed(1)}s` : '∞'}
                   </div>
                 </div>
+                {touchedFixtures.length > 1 && (
+                  <span className="text-[8px] px-1 py-0.5 rounded bg-gray-800 text-gray-400 shrink-0">
+                    {t('design.scenes.fixtureCount', { count: touchedFixtures.length })}
+                  </span>
+                )}
                 <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                   <button
                     onClick={(e) => { e.stopPropagation(); setConfirmDelete(scene.id); }}
@@ -372,6 +461,7 @@ const SceneList: React.FC = () => {
           );
         })}
       </div>
+      )}
 
       {/* Context menu */}
       {ctxMenu.visible && (
@@ -426,6 +516,7 @@ const SceneList: React.FC = () => {
 };
 
 const SceneEditor: React.FC = () => {
+  const { t } = useTranslation();
   const scenes = useShowStore((s) => s.scenes);
   const updateScene = useShowStore((s) => s.updateScene);
   const createScene = useShowStore((s) => s.createScene);
@@ -657,6 +748,22 @@ const SceneEditor: React.FC = () => {
         />
         <span className="text-[10px] text-gray-600">{activeChannelCount} ch active</span>
       </div>
+
+      {/* Touched fixtures (read-only, same index as the SceneList filter) */}
+      {scene && (
+        <div className="text-[10px] text-gray-500">
+          {(() => {
+            const touched = patchedFixtures.filter((pf) => sceneTouchesFixture(scene, pf));
+            if (touched.length === 0) return t('design.scenes.unassigned', { count: 0 });
+            const list = touched
+              .slice()
+              .sort((a, b) => a.startAddress - b.startAddress)
+              .map((pf) => pf.name)
+              .join(', ');
+            return t('design.scenes.touches', { list: `${list} (${touched.length})` });
+          })()}
+        </div>
+      )}
 
       {/* Timing params */}
       <div className="flex gap-4">
