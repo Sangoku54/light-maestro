@@ -526,6 +526,22 @@ export function useDmxPlayback(options: {
       const c=cuesRef.current;
       const analysis=analysisRef.current;
       if(!analysis||c.length===0){rafRef.current=requestAnimationFrame(tick);return;}
+      // Re-arm the engine if the watchdog stopped/blacked it out mid-session
+      // (checked ~every 2s at 60fps). The engine's start() now lifts
+      // fail-safe blackouts, so output resumes without an app restart.
+      (tick as any)._engineRecheck = ((tick as any)._engineRecheck ?? 119) + 1;
+      if((tick as any)._engineRecheck >= 120){
+        (tick as any)._engineRecheck = 0;
+        (async()=>{
+          try{
+            const a=(window as any).lightMaestro?.dmx;
+            if(!a)return;
+            if(!(await a.isRunning().catch(()=>false))){
+              await a.start().catch(()=>{});
+            }
+          }catch{/* best effort */}
+        })();
+      }
       // Latency meter: this cycle reads audio-derived state (audio clock,
       // section/energy from analysis) — mark the start of the audio→DMX cycle.
       recordAudioTick();

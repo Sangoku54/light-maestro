@@ -122,6 +122,12 @@ export class DMXEngine extends EventEmitter {
   private _startingPromise: Promise<void> | null = null;
 
   async start(): Promise<void> {
+    // An explicit start must lift any fail-safe blackout: the watchdog may
+    // have blacked the engine out during a slow renderer startup, and a
+    // later playback start would otherwise write into a blacked-out engine
+    // (setChannels returns early while blackoutState is true) — "no DMX at
+    // all" until the app restarts.
+    this.restore();
     if (this.worker && this.workerReady) return;
     if (this._startingPromise) return this._startingPromise;
 

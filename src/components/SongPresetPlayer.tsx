@@ -175,12 +175,15 @@ export const SongPresetPlayer: React.FC<{
     // Uses the shared cache: if the widget preloaded this URL at mount,
     // playback starts with ~zero latency. Otherwise the first click pays
     // the decode cost once, and every later play is instant.
-    if (preset.audioFileBase64) {
+    // Older .lmpreset files store the audio under audioDataBase64;
+    // accept both spellings.
+    const audioUrl = preset.audioFileBase64 || (preset as any).audioDataBase64;
+    if (audioUrl) {
       (async () => {
         try {
           audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
           if (audioCtx.state === 'suspended') await audioCtx.resume();
-          const buffer = await decodeAudioUrl(preset.audioFileBase64);
+          const buffer = await decodeAudioUrl(audioUrl);
           if (!buffer || cancelled || audioCtx.state === 'closed') return;
           audioSrc = audioCtx.createBufferSource();
           audioSrc.buffer = buffer;

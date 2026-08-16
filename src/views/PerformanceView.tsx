@@ -1501,7 +1501,7 @@ const VCButtonWidget: React.FC<{
     if (config.actionType !== 'playSong') return;
     const sp = songPresets.find((p) => p.id === config.songId)
       || (config.songName ? songPresets.find((p) => p.name === config.songName) : undefined);
-    if (sp?.audioFileBase64) preloadAudioUrl(sp.audioFileBase64);
+    if (sp) preloadAudioUrl(sp.audioFileBase64 || (sp as any).audioDataBase64);
   }, [config.actionType, config.songId, config.songName, songPresets]);
 
   // ─── audioAutoScript playback helper ──────────────────
@@ -1535,6 +1535,18 @@ const VCButtonWidget: React.FC<{
     let startTime = 0;
     let firstFrameDone = false;
     const firedCues = new Set<string>();
+    // Ensure the DMX engine is running (and any fail-safe blackout lifted)
+    // before the first frame — writing into a stopped/blacked engine outputs
+    // nothing.
+    (async () => {
+      try {
+        const api = (window as any).lightMaestro?.dmx;
+        if (api) {
+          const running = await api.isRunning().catch(() => false);
+          if (!running) await api.start().catch(() => {});
+        }
+      } catch {}
+    })();
     const fireAutoDmx = () => {
       const elapsed = (performance.now() - startTime) / 1000;
       // Blackout all universes to 0 on first frame
