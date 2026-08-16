@@ -290,6 +290,7 @@ const SceneList: React.FC = () => {
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
   const universes = useShowStore((s) => s.universes);
   const createScene = useShowStore((s) => s.createScene);
+  const updateScene = useShowStore((s) => s.updateScene);
   const deleteScene = useShowStore((s) => s.deleteScene);
   const sceneFolders = useShowStore((s) => s.sceneFolders);
   const createFolder = useShowStore((s) => s.createFolder);
@@ -303,6 +304,9 @@ const SceneList: React.FC = () => {
   // | `folder:<name>` (user folder, prefixed to avoid colliding with fixture ids) | fixtureId
   const [sceneFilter, setSceneFilter] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
+  // Scene to auto-move into a folder created from the context menu
+  // ("Nouveau dossier…" → create → scene lands in it directly).
+  const [pendingMoveSceneId, setPendingMoveSceneId] = useState<string | null>(null);
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
   const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<string | null>(null);
   const [sceneSearch, setSceneSearch] = useState('');
@@ -370,9 +374,20 @@ const SceneList: React.FC = () => {
   useEffect(() => {
     if (!ctxMenu.visible) return;
     const dismiss = () => setCtxMenu((c) => ({ ...c, visible: false }));
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') dismiss();
+    };
     window.addEventListener('click', dismiss);
-    return () => window.removeEventListener('click', dismiss);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', dismiss);
+      window.removeEventListener('keydown', onKey);
+    };
   }, [ctxMenu.visible]);
+
+  // Scene targeted by the context menu (for the “move to folder” section).
+  const ctxScene = ctxMenu.visible ? scenes.find((s) => s.id === ctxMenu.sceneId) : null;
+  const ctxSceneFolder = normalizeFolderName(ctxScene?.folder || '');
 
   const handleCreate = () => {
     const id = createScene('New Scene');
@@ -397,9 +412,13 @@ const SceneList: React.FC = () => {
               if (e.key === 'Enter') {
                 const n = createFolder((e.target as HTMLInputElement).value);
                 if (n) setSceneFilter(`folder:${n}`);
+                setPendingMoveSceneId(null);
                 setCreatingFolder(false);
               }
-              if (e.key === 'Escape') setCreatingFolder(false);
+              if (e.key === 'Escape') {
+                setPendingMoveSceneId(null);
+                setCreatingFolder(false);
+              }
             }}
             className="w-full px-2 py-1.5 bg-gray-800/50 border border-purple-500/50 rounded-md text-xs text-gray-300 outline-none"
           />
@@ -434,16 +453,30 @@ const SceneList: React.FC = () => {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   const n = createFolder((e.target as HTMLInputElement).value);
-                  if (n) setSceneFilter(`folder:${n}`);
+                  if (n) {
+                    setSceneFilter(`folder:${n}`);
+                    // Created from the context menu → move the target scene in.
+                    if (pendingMoveSceneId) updateScene(pendingMoveSceneId, { folder: n });
+                  }
+                  setPendingMoveSceneId(null);
                   setCreatingFolder(false);
                 }
-                if (e.key === 'Escape') setCreatingFolder(false);
+                if (e.key === 'Escape') {
+                  setPendingMoveSceneId(null);
+                  setCreatingFolder(false);
+                }
               }}
-              onBlur={() => setCreatingFolder(false)}
+              onBlur={() => {
+                setPendingMoveSceneId(null);
+                setCreatingFolder(false);
+              }}
               className="flex-1 px-2 py-1.5 bg-gray-800/50 border border-purple-500/50 rounded-md text-xs text-gray-300 outline-none"
             />
             <button
-              onClick={() => setCreatingFolder(false)}
+              onClick={() => {
+                setPendingMoveSceneId(null);
+                setCreatingFolder(false);
+              }}
               className="p-1.5 text-gray-500 hover:text-gray-300"
               title={t('design.scenes.cancel')}
             >
@@ -594,8 +627,16 @@ const SceneList: React.FC = () => {
               onClick={() => setSelectedSceneId(scene.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
-                setCtxMenu({ visible: true, x: e.clientX, y: e.clientY, sceneId: scene.id, sceneName: scene.name });
+                setCtxMenu({
+                  visible: true,
+                  // Clamp so the menu never opens off-screen (bottom/right edge).
+                  x: Math.min(e.clientX, window.innerWidth - 210),
+                  y: Math.min(e.clientY, window.innerHeight - 280),
+                  sceneId: scene.id,
+                  sceneName: scene.name,
+                });
               }}
+              title={t('design.scenes.contextMenuHint')}
               className={`px-2 py-1.5 rounded-md cursor-pointer group transition-colors ${
                 isSelected ? 'bg-purple-600/15 border border-purple-500/20' : 'hover:bg-gray-800/30'
               }`}
@@ -607,6 +648,11 @@ const SceneList: React.FC = () => {
                     {activeChannels.length} ch · {scene.duration > 0 ? `${(scene.duration / 1000).toFixed(1)}s` : '∞'}
                   </div>
                 </div>
+                {normalizeFolderName(scene.folder || '') && (
+                  <span className="text-[8px] px-1 py-0.5 rounded bg-gray-800/80 text-purple-300/80 shrink-0 max-w-[100px] truncate" title={t('design.scenes.folder')}>
+                    📁 {normalizeFolderName(scene.folder || '')}
+                  </span>
+                )}
                 {touchedFixtures.length > 1 && (
                   <span className="text-[8px] px-1 py-0.5 rounded bg-gray-800 text-gray-400 shrink-0">
                     {t('design.scenes.fixtureCount', { count: touchedFixtures.length })}
@@ -616,7 +662,7 @@ const SceneList: React.FC = () => {
                   <button
                     onClick={(e) => { e.stopPropagation(); setConfirmDelete(scene.id); }}
                     className="p-1 text-gray-500 hover:text-red-400"
-                    title="Delete scene"
+                    title={t('design.scenes.deleteScene')}
                   >
                     <Trash2 size={12} />
                   </button>
@@ -644,13 +690,49 @@ const SceneList: React.FC = () => {
       {/* Context menu */}
       {ctxMenu.visible && (
         <div
-          className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
+          className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[190px] max-h-[80vh] overflow-y-auto"
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider">
+          <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider truncate">
             {ctxMenu.sceneName}
           </div>
+          <div className="px-3 py-1 text-[10px] text-gray-600">{t('design.scenes.moveToFolder')}</div>
+          {folderOptions.map((fo) => (
+            <button
+              key={fo.value}
+              onClick={() => {
+                updateScene(ctxMenu.sceneId, { folder: fo.name });
+                setCtxMenu((c) => ({ ...c, visible: false }));
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-200 transition-colors flex items-center gap-2"
+            >
+              <span className="truncate flex-1">📁 {fo.name}</span>
+              {ctxSceneFolder === fo.name && <Check size={12} className="text-purple-300 shrink-0" />}
+            </button>
+          ))}
+          <button
+            onClick={() => {
+              setCtxMenu((c) => ({ ...c, visible: false }));
+              setPendingMoveSceneId(ctxMenu.sceneId);
+              setCreatingFolder(true);
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:text-purple-200 hover:bg-purple-600/20 transition-colors flex items-center gap-2"
+          >
+            <FolderPlus size={12} className="shrink-0" /> {t('design.scenes.newFolderOption')}
+          </button>
+          {ctxSceneFolder && (
+            <button
+              onClick={() => {
+                updateScene(ctxMenu.sceneId, { folder: undefined });
+                setCtxMenu((c) => ({ ...c, visible: false }));
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:text-yellow-200 hover:bg-yellow-600/15 transition-colors"
+            >
+              {t('design.scenes.noFolderOption')}
+            </button>
+          )}
+          <div className="my-1 border-t border-gray-800" />
           <button
             onClick={() => {
               setConfirmDelete(ctxMenu.sceneId);
@@ -658,7 +740,7 @@ const SceneList: React.FC = () => {
             }}
             className="w-full text-left px-3 py-1.5 text-xs text-red-300 hover:bg-red-600/20 hover:text-red-200 transition-colors flex items-center gap-2"
           >
-            <Trash2 size={12} /> Delete Scene
+            <Trash2 size={12} /> {t('design.scenes.deleteScene')}
           </button>
         </div>
       )}
@@ -667,13 +749,13 @@ const SceneList: React.FC = () => {
       {confirmDelete && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setConfirmDelete(null)}>
           <div className="bg-[#12121a] border border-gray-700 rounded-xl p-5 shadow-2xl w-80" onClick={(e) => e.stopPropagation()}>
-            <h4 className="text-sm font-bold text-white mb-2">Delete Scene?</h4>
+            <h4 className="text-sm font-bold text-white mb-2">{t('design.scenes.deleteSceneTitle')}</h4>
             <p className="text-xs text-gray-400 mb-4">
-              This will permanently delete this scene. This cannot be undone.
+              {t('design.scenes.deleteSceneBody')}
             </p>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setConfirmDelete(null)} className="px-3 py-1.5 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300 hover:bg-gray-700/50">
-                Cancel
+                {t('design.scenes.cancel')}
               </button>
               <button
                 onClick={() => {
@@ -683,7 +765,7 @@ const SceneList: React.FC = () => {
                 }}
                 className="px-3 py-1.5 bg-red-600/20 border border-red-500/30 rounded-lg text-xs text-red-300 hover:bg-red-600/30"
               >
-                Delete
+                {t('design.scenes.confirm')}
               </button>
             </div>
           </div>
@@ -772,6 +854,14 @@ const SceneEditor: React.FC = () => {
       sendChannelsToHardwareAndStore(zeros, patchedFixtures, universes, 'design-test', 2000).catch(() => {});
     }
   }, [scene?.id]);
+
+  // Keep the folder field in sync when the scene's folder changes from
+  // elsewhere (e.g. the scene list context menu) — without touching the DMX
+  // channels (the big [scene?.id] effect above pushes channels too).
+  useEffect(() => {
+    setEditFolder(normalizeFolderName(scene?.folder || ''));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scene?.folder]);
 
   // Load fixture definitions for all patched fixtures
   useEffect(() => {

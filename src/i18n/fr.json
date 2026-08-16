@@ -503,7 +503,14 @@
       "deleteFolder": "Supprimer le dossier",
       "confirmDeleteFolder": "Supprimer « {{name}} » ? Les scènes restent (non classées).",
       "confirm": "Supprimer",
-      "cancel": "Annuler"
+      "cancel": "Annuler",
+      "moveToFolder": "Déplacer vers le dossier",
+      "noFolderOption": "Non classé (retirer du dossier)",
+      "newFolderOption": "Nouveau dossier…",
+      "contextMenuHint": "Clic droit : déplacer dans un dossier",
+      "deleteScene": "Supprimer la scène",
+      "deleteSceneTitle": "Supprimer la scène ?",
+      "deleteSceneBody": "Cette action supprime définitivement la scène. Impossible de l’annuler."
     }
   },
   "perform": {

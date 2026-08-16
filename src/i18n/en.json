@@ -503,7 +503,14 @@
       "deleteFolder": "Delete folder",
       "confirmDeleteFolder": "Delete \"{{name}}\"? Scenes stay (uncategorized).",
       "confirm": "Delete",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "moveToFolder": "Move to folder",
+      "noFolderOption": "Uncategorized (remove from folder)",
+      "newFolderOption": "New folder…",
+      "contextMenuHint": "Right-click: move to a folder",
+      "deleteScene": "Delete scene",
+      "deleteSceneTitle": "Delete scene?",
+      "deleteSceneBody": "This will permanently delete this scene. This cannot be undone."
     }
   },
   "perform": {
