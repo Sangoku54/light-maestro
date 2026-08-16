@@ -23,6 +23,22 @@ export function normalizeFolderName(name: string): string {
   return name.trim().replace(/\s+/g, ' ');
 }
 
+/** Union of declared folders (sceneFolders entities) and folders derived from
+ *  scene.folder, normalized, deduped (case-sensitive), sorted A→Z.
+ *  Declared-but-empty folders are preserved (they are real entities). */
+export function collectFolderNames(declared: string[], scenes: SavedScene[]): string[] {
+  const set = new Set<string>();
+  for (const f of declared) {
+    const n = normalizeFolderName(f);
+    if (n) set.add(n);
+  }
+  for (const s of scenes) {
+    const n = normalizeFolderName(s.folder || '');
+    if (n) set.add(n);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
 /** True when the scene has at least one channel address inside the fixture's DMX range. */
 export function sceneTouchesFixture(scene: Pick<SavedScene, 'channels'>, pf: PatchedFixture): boolean {
   const end = pf.startAddress + pf.channelCount;

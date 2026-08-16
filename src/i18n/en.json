@@ -497,7 +497,13 @@
       "folder": "Folder",
       "noScenesInFolder": "No scenes in this folder",
       "renameFolder": "Rename folder",
-      "clearFolder": "Remove from folder"
+      "clearFolder": "Remove from folder",
+      "createFolder": "New folder",
+      "folderNamePlaceholder": "Folder name",
+      "deleteFolder": "Delete folder",
+      "confirmDeleteFolder": "Delete \"{{name}}\"? Scenes stay (uncategorized).",
+      "confirm": "Delete",
+      "cancel": "Cancel"
     }
   },
   "perform": {

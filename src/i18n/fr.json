@@ -497,7 +497,13 @@
       "folder": "Dossier",
       "noScenesInFolder": "Aucune scène dans ce dossier",
       "renameFolder": "Renommer le dossier",
-      "clearFolder": "Retirer du dossier"
+      "clearFolder": "Retirer du dossier",
+      "createFolder": "Nouveau dossier",
+      "folderNamePlaceholder": "Nom du dossier",
+      "deleteFolder": "Supprimer le dossier",
+      "confirmDeleteFolder": "Supprimer « {{name}} » ? Les scènes restent (non classées).",
+      "confirm": "Supprimer",
+      "cancel": "Annuler"
     }
   },
   "perform": {

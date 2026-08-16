@@ -907,6 +907,7 @@ export const ShowManager: React.FC = () => {
                   audioFileBase64: selectedShow.audioFileBase64,
                   audioFileName: selectedShow.audioFileName,
                   scenes: useShowStore.getState().scenes,
+                  sceneFolders: useShowStore.getState().sceneFolders,
                   chasers: useShowStore.getState().chasers,
                   cueLists: useShowStore.getState().cueLists,
                   effects: useShowStore.getState().effects,
@@ -951,6 +952,7 @@ export const ShowManager: React.FC = () => {
               // from the show file. Without this, a loaded show plays
               // nothing: tracks reference chasers that are never loaded.
               if (Array.isArray(show.scenes) && show.scenes.length > 0) state.setScenes(show.scenes);
+              if (Array.isArray(show.sceneFolders)) state.setSceneFolders(show.sceneFolders);
               if (Array.isArray(show.chasers) && show.chasers.length > 0) state.setChasers(show.chasers);
               if (Array.isArray(show.cueLists)) state.setCueLists(show.cueLists);
               if (Array.isArray(show.effects)) state.setEffects(show.effects.map((e: any) => ({ ...e, fixtureIds: e.fixtureIds || e.fixtures || [] })));

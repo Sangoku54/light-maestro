@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { generateAllThumbnails, getVariantsForCategory, type ThumbnailVariant } from '../utils/fixtureThumbnails';
 import { useTranslation } from 'react-i18next';
-import { Plus, Play, Pause, Square, Trash2, GripVertical, Search, X, Edit2, Check, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Zap, Save } from 'lucide-react';
+import { Plus, Play, Pause, Square, Trash2, GripVertical, Search, X, Edit2, Check, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Zap, Save, FolderPlus } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { useShowStore, getFixtureColor, type PatchedFixture, type FixtureGroup, type SavedScene, type SavedChaser, type ChaserStep, type SavedCueList, type CueListCue, type ShowUniverse } from '../stores/showStore';
 import { ShowManager } from './ShowManager';
@@ -14,7 +14,7 @@ import { sendChannelsToHardware, sendToUniverse, sendFixtureOn, sendFixtureOff, 
 import { dmxBridge } from '../utils/dmx-bridge';
 import { fixtureTestState } from '../utils/fixture-test-state';
 import { useRgbMatrixStore } from '../stores/rgbmatrixStore';
-import { buildSceneFixtureIndex, normalizeFolderName, scenesWithoutFixture, sceneTouchesFixture } from '../utils/scene-fixtures';
+import { buildSceneFixtureIndex, collectFolderNames, normalizeFolderName, scenesWithoutFixture, sceneTouchesFixture } from '../utils/scene-fixtures';
 
 /**
  * Design View — QLC+ Full Editor
@@ -291,15 +291,20 @@ const SceneList: React.FC = () => {
   const universes = useShowStore((s) => s.universes);
   const createScene = useShowStore((s) => s.createScene);
   const deleteScene = useShowStore((s) => s.deleteScene);
+  const sceneFolders = useShowStore((s) => s.sceneFolders);
+  const createFolder = useShowStore((s) => s.createFolder);
   const renameFolder = useShowStore((s) => s.renameFolder);
   const clearFolder = useShowStore((s) => s.clearFolder);
+  const deleteFolder = useShowStore((s) => s.deleteFolder);
   const setDesignSidebarTab = useAppStore((s) => s.setDesignSidebarTab);
 
-  // Scene classification: computed fixture filter + free user folders + name search
+  // Scene classification: computed fixture filter + user folders + name search
   // Filter values: '' = all | 'unassigned' (no fixture) | 'uncategorized' (no folder)
   // | `folder:<name>` (user folder, prefixed to avoid colliding with fixture ids) | fixtureId
   const [sceneFilter, setSceneFilter] = useState('');
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
+  const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<string | null>(null);
   const [sceneSearch, setSceneSearch] = useState('');
 
   // Two-way scene ↔ fixture index, rebuilt in one pass when patch or scenes change.
@@ -311,18 +316,17 @@ const SceneList: React.FC = () => {
   );
   const unassignedIds = useMemo(() => new Set(scenesWithoutFixture(scenes, byScene).map((s) => s.id)), [scenes, byScene]);
 
-  // User folders are derived from scene.folder (no entity): A→Z with live counts.
+  // User folders = declared entities ∪ folders derived from scene.folder:
+  // A→Z with live counts (declared-but-empty folders show count 0).
   const folderOptions = useMemo(() => {
+    const names = collectFolderNames(sceneFolders, scenes);
     const m = new Map<string, number>();
     for (const s of scenes) {
       const n = normalizeFolderName(s.folder || '');
-      if (!n) continue;
-      m.set(n, (m.get(n) || 0) + 1);
+      if (n) m.set(n, (m.get(n) || 0) + 1);
     }
-    return [...m.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([name, count]) => ({ value: `folder:${name}`, name, count }));
-  }, [scenes]);
+    return names.map((name) => ({ value: `folder:${name}`, name, count: m.get(name) || 0 }));
+  }, [sceneFolders, scenes]);
   const uncategorizedCount = useMemo(
     () => scenes.filter((s) => !normalizeFolderName(s.folder || '')).length,
     [scenes],
@@ -380,10 +384,37 @@ const SceneList: React.FC = () => {
     (window as any).__lm_selectedSceneId = selectedSceneId;
   }, [selectedSceneId]);
 
-  if (scenes.length === 0) {
+  if (scenes.length === 0 && sceneFolders.length === 0) {
+    // Empty project: the filter bar is skipped, but folder creation must
+    // still be reachable (declared folders are entities, even with 0 scenes).
+    if (creatingFolder) {
+      return (
+        <div className="px-2 py-1.5">
+          <input
+            autoFocus
+            placeholder={t('design.scenes.folderNamePlaceholder')}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const n = createFolder((e.target as HTMLInputElement).value);
+                if (n) setSceneFilter(`folder:${n}`);
+                setCreatingFolder(false);
+              }
+              if (e.key === 'Escape') setCreatingFolder(false);
+            }}
+            className="w-full px-2 py-1.5 bg-gray-800/50 border border-purple-500/50 rounded-md text-xs text-gray-300 outline-none"
+          />
+        </div>
+      );
+    }
     return (
-      <div className="text-xs text-gray-600 text-center py-8">
-        No scenes yet. Click "New Scene" to create one.
+      <div className="text-xs text-gray-600 text-center py-8 space-y-2">
+        <div>No scenes yet. Click "New Scene" to create one.</div>
+        <button
+          onClick={() => setCreatingFolder(true)}
+          className="mx-auto flex items-center gap-1 px-2 py-1 rounded-md bg-gray-800/50 border border-gray-700 text-gray-400 hover:text-purple-300 hover:border-purple-500/50 transition-colors"
+        >
+          <FolderPlus size={12} /> {t('design.scenes.createFolder')}
+        </button>
       </div>
     );
   }
@@ -393,52 +424,109 @@ const SceneList: React.FC = () => {
 
   return (
     <>
-      {/* Folder/fixture filter + name search (computed, no persisted state) */}
+      {/* Folder/fixture filter + folder creation + name search (computed) */}
       <div className="space-y-1.5 mb-2">
-        <select
-          value={sceneFilter}
-          onChange={(e) => setSceneFilter(e.target.value)}
-          className="w-full px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded-md text-xs text-gray-300 outline-none focus:border-purple-500/50"
-        >
-          <option value="">{t('design.scenes.allScenes', { count: scenes.length })}</option>
-          {folderOptions.length > 0 && (
-            <optgroup label={t('design.scenes.folders')}>
-              {folderOptions.map((fo) => (
-                <option key={fo.value} value={fo.value}>📁 {fo.name} ({fo.count})</option>
-              ))}
-              {uncategorizedCount > 0 && (
-                <option value="uncategorized">{t('design.scenes.uncategorized', { count: uncategorizedCount })}</option>
+        {creatingFolder ? (
+          <div className="flex items-center gap-1">
+            <input
+              autoFocus
+              placeholder={t('design.scenes.folderNamePlaceholder')}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const n = createFolder((e.target as HTMLInputElement).value);
+                  if (n) setSceneFilter(`folder:${n}`);
+                  setCreatingFolder(false);
+                }
+                if (e.key === 'Escape') setCreatingFolder(false);
+              }}
+              onBlur={() => setCreatingFolder(false)}
+              className="flex-1 px-2 py-1.5 bg-gray-800/50 border border-purple-500/50 rounded-md text-xs text-gray-300 outline-none"
+            />
+            <button
+              onClick={() => setCreatingFolder(false)}
+              className="p-1.5 text-gray-500 hover:text-gray-300"
+              title={t('design.scenes.cancel')}
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1">
+            <select
+              value={sceneFilter}
+              onChange={(e) => setSceneFilter(e.target.value)}
+              className="flex-1 min-w-0 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded-md text-xs text-gray-300 outline-none focus:border-purple-500/50"
+            >
+              <option value="">{t('design.scenes.allScenes', { count: scenes.length })}</option>
+              {folderOptions.length > 0 && (
+                <optgroup label={t('design.scenes.folders')}>
+                  {folderOptions.map((fo) => (
+                    <option key={fo.value} value={fo.value}>📁 {fo.name} ({fo.count})</option>
+                  ))}
+                  {uncategorizedCount > 0 && (
+                    <option value="uncategorized">{t('design.scenes.uncategorized', { count: uncategorizedCount })}</option>
+                  )}
+                </optgroup>
               )}
-            </optgroup>
-          )}
-          {(sortedFixtures.length > 0 || unassignedIds.size > 0) && (
-            <optgroup label={t('design.patchedFixtures')}>
-              {sortedFixtures.map((pf) => {
-                const uniName = universes.find((u) => u.id === pf.universeId)?.name;
-                const count = (byFixture.get(pf.id) || []).length;
-                return (
-                  <option key={pf.id} value={pf.id}>
-                    {uniName ? `${uniName} · ` : ''}{pf.name} @{pf.startAddress} ({count})
-                  </option>
-                );
-              })}
-              {unassignedIds.size > 0 && (
-                <option value="unassigned">{t('design.scenes.unassigned', { count: unassignedIds.size })}</option>
+              {(sortedFixtures.length > 0 || unassignedIds.size > 0) && (
+                <optgroup label={t('design.patchedFixtures')}>
+                  {sortedFixtures.map((pf) => {
+                    const uniName = universes.find((u) => u.id === pf.universeId)?.name;
+                    const count = (byFixture.get(pf.id) || []).length;
+                    return (
+                      <option key={pf.id} value={pf.id}>
+                        {uniName ? `${uniName} · ` : ''}{pf.name} @{pf.startAddress} ({count})
+                      </option>
+                    );
+                  })}
+                  {unassignedIds.size > 0 && (
+                    <option value="unassigned">{t('design.scenes.unassigned', { count: unassignedIds.size })}</option>
+                  )}
+                </optgroup>
               )}
-            </optgroup>
-          )}
-        </select>
-        {/* Active folder toolbar: rename (all scenes in the folder) / clear */}
+            </select>
+            <button
+              onClick={() => setCreatingFolder(true)}
+              title={t('design.scenes.createFolder')}
+              className="p-1.5 rounded-md bg-gray-800/50 border border-gray-700 text-gray-400 hover:text-purple-300 hover:border-purple-500/50 transition-colors shrink-0"
+            >
+              <FolderPlus size={12} />
+            </button>
+          </div>
+        )}
+        {/* Active folder toolbar: rename (all scenes in the folder) / unassign / delete */}
         {activeFolderName !== null && (
           <div className="flex items-center gap-1">
-            {renamingFolder === activeFolderName ? (
+            {confirmDeleteFolder === activeFolderName ? (
+              <>
+                <span className="text-[10px] text-red-300 truncate flex-1">
+                  {t('design.scenes.confirmDeleteFolder', { name: activeFolderName })}
+                </span>
+                <button
+                  onClick={() => { deleteFolder(activeFolderName); setSceneFilter(''); setConfirmDeleteFolder(null); }}
+                  className="px-1.5 py-0.5 rounded bg-red-600/20 text-red-300 text-[10px] hover:bg-red-600/40"
+                >
+                  {t('design.scenes.confirm')}
+                </button>
+                <button
+                  onClick={() => setConfirmDeleteFolder(null)}
+                  className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 text-[10px] hover:bg-gray-700"
+                >
+                  {t('design.scenes.cancel')}
+                </button>
+              </>
+            ) : renamingFolder === activeFolderName ? (
               <input
                 autoFocus
                 defaultValue={activeFolderName}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     const v = normalizeFolderName((e.target as HTMLInputElement).value);
-                    if (v && v !== activeFolderName) renameFolder(activeFolderName, v);
+                    if (v && v !== activeFolderName) {
+                      renameFolder(activeFolderName, v);
+                      // Keep the filter on the folder under its new name.
+                      setSceneFilter(`folder:${v}`);
+                    }
                     setRenamingFolder(null);
                   }
                   if (e.key === 'Escape') setRenamingFolder(null);
@@ -459,9 +547,16 @@ const SceneList: React.FC = () => {
                 <button
                   onClick={() => { clearFolder(activeFolderName); setSceneFilter(''); }}
                   title={t('design.scenes.clearFolder')}
-                  className="p-1 text-gray-500 hover:text-red-400"
+                  className="p-1 text-gray-500 hover:text-yellow-300"
                 >
                   <X size={11} />
+                </button>
+                <button
+                  onClick={() => setConfirmDeleteFolder(activeFolderName)}
+                  title={t('design.scenes.deleteFolder')}
+                  className="p-1 text-gray-500 hover:text-red-400"
+                >
+                  <Trash2 size={11} />
                 </button>
               </>
             )}
@@ -626,16 +721,10 @@ const SceneEditor: React.FC = () => {
   }, [selectedSceneId]);
 
   const scene = scenes.find((s) => s.id === selectedSceneId) || null;
+  const sceneFolders = useShowStore((s) => s.sceneFolders);
 
-  // Existing folder names for the datalist suggestions (deduped, A→Z)
-  const folderSuggestions = useMemo(() => {
-    const set = new Set<string>();
-    for (const s of scenes) {
-      const n = normalizeFolderName(s.folder || '');
-      if (n) set.add(n);
-    }
-    return [...set].sort((a, b) => a.localeCompare(b));
-  }, [scenes]);
+  // Existing folder names for the datalist suggestions (declared ∪ derived, A→Z)
+  const folderSuggestions = useMemo(() => collectFolderNames(sceneFolders, scenes), [sceneFolders, scenes]);
 
   // Local editing state
   const [editName, setEditName] = useState('');

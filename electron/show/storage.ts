@@ -149,6 +149,9 @@ export interface ShowData {
 
   // Creative content
   scenes: ShowScene[];
+  /** Explicit user-created scene folders (entities). Optional — legacy files
+   *  without the field fall back to the folders derived from scene.folder. */
+  sceneFolders?: string[];
   chasers: ShowChaser[];
   cueLists: ShowCueList[];
   rgbMatrices: ShowRGBMatrix[];
@@ -233,6 +236,11 @@ export class ShowStorage {
   }
 
   // ─── Index (SQLite for fast search in large shows) ───────
+  // NOTE: folder/sceneFolders are NOT indexed (classification is a renderer
+  // concern, re-derived from scene.folder on load). An exported/imported
+  // .lmscene carries each scene's `folder` string (raw JSON round-trip) but
+  // never the declared sceneFolders list — imported scenes keep their folder
+  // as a derived one, which the UI's declared ∪ derived union still shows.
 
   private indexShow(show: ShowData): void {
     try {

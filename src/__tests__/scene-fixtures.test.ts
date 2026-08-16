@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PatchedFixture, SavedScene } from '../stores/showStore';
-import { buildSceneFixtureIndex, normalizeFolderName, sceneTouchesFixture, scenesWithoutFixture } from '../utils/scene-fixtures';
+import { buildSceneFixtureIndex, collectFolderNames, normalizeFolderName, sceneTouchesFixture, scenesWithoutFixture } from '../utils/scene-fixtures';
 
 const fx = (id: string, name: string, startAddress: number, channelCount: number, universeId = 'u1'): PatchedFixture => ({
   id,
@@ -34,6 +34,22 @@ describe('normalizeFolderName', () => {
     expect(normalizeFolderName('  ')).toBe('');
     expect(normalizeFolderName('')).toBe('');
     expect(normalizeFolderName('front   lights')).toBe('front lights');
+  });
+});
+
+describe('collectFolderNames', () => {
+  it('unions declared folders with derived ones, deduped and sorted', () => {
+    const scenes: SavedScene[] = [
+      { id: 'a', name: 'A', channels: {}, fadeIn: 0, fadeOut: 0, duration: 0, createdAt: '', folder: 'front' },
+      { id: 'b', name: 'B', channels: {}, fadeIn: 0, fadeOut: 0, duration: 0, createdAt: '', folder: '  back  ' },
+      { id: 'c', name: 'C', channels: {}, fadeIn: 0, fadeOut: 0, duration: 0, createdAt: '' },
+    ];
+    expect(collectFolderNames(['front', 'strobe', '  '], scenes)).toEqual(['back', 'front', 'strobe']);
+  });
+
+  it('keeps declared-but-empty folders (real entities)', () => {
+    const scenes: SavedScene[] = [];
+    expect(collectFolderNames(['empty folder'], scenes)).toEqual(['empty folder']);
   });
 });
 

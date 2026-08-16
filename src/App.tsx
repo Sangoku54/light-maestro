@@ -92,6 +92,7 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
         fixturePositions: showState.fixturePositions,
         fixtureGroups: showState.fixtureGroups,
         scenes: showState.scenes,
+        sceneFolders: showState.sceneFolders,
         chasers: showState.chasers,
         effects: showState.effects,
         cueLists: showState.cueLists,
@@ -250,6 +251,7 @@ const App: React.FC = () => {
       ss.setFixturePositions({});
       ss.setFixtureGroups([]);
       ss.setScenes([]);
+      ss.setSceneFolders([]);
       ss.setChasers([]);
       ss.setEffects([]);
       ss.setCueLists([]);
@@ -280,6 +282,9 @@ const App: React.FC = () => {
           if (data.showStore.fixturePositions) ss.setFixturePositions(data.showStore.fixturePositions);
           if (data.showStore.fixtureGroups) ss.setFixtureGroups(data.showStore.fixtureGroups);
           if (data.showStore.scenes) ss.setScenes(data.showStore.scenes);
+          // Unconditional: a project without the field must not leak folders
+          // from a previously opened project (sceneFolders is a plain list).
+          ss.setSceneFolders(data.showStore.sceneFolders || []);
           if (data.showStore.chasers) ss.setChasers(data.showStore.chasers);
           if (data.showStore.effects) ss.setEffects(data.showStore.effects);
           if (data.showStore.cueLists) ss.setCueLists(data.showStore.cueLists);

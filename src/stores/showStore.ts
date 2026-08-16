@@ -263,16 +263,27 @@ interface ShowState {
 
   // Scenes
   scenes: SavedScene[];
+  /** Explicit user-created folder names (entities). Scenes reference them via
+   *  SavedScene.folder. Folders derived from scenes (legacy/imported) stay
+   *  visible through the union in the UI even when not listed here. */
+  sceneFolders: string[];
   createScene: (name: string) => string;
   updateScene: (id: string, updates: Partial<Pick<SavedScene, 'name' | 'channels' | 'fadeIn' | 'fadeOut' | 'duration' | 'folder'>>) => void;
   deleteScene: (id: string) => void;
   getScene: (id: string) => SavedScene | undefined;
   setScenes: (scenes: SavedScene[]) => void;
+  setSceneFolders: (folders: string[]) => void;
   getSceneCount: () => number;
 
-  // Scenes — folder classification helpers (derived folders, no entity)
+  // Scenes — folder classification (declared folders + derived ones)
+  /** Create an explicit folder. Returns the normalized name or null if empty/duplicate. */
+  createFolder: (name: string) => string | null;
+  /** Rename a folder: updates the declared list AND every scene carrying it. */
   renameFolder: (oldName: string, newName: string) => void;
+  /** Unassign every scene in a folder (never deletes scenes, folder stays). */
   clearFolder: (name: string) => void;
+  /** Delete a declared folder: removes it from the list and unassigns its scenes. */
+  deleteFolder: (name: string) => void;
 
   // Chasers
   chasers: SavedChaser[];
@@ -639,6 +650,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   // ── Scenes ──
   scenes: [],
+  sceneFolders: [],
 
   createScene: (name) => {
     const id = generateSceneId();
@@ -665,23 +677,41 @@ export const useShowStore = create<ShowState>((set, get) => ({
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
   },
 
-  // Rename a derived folder: updates every scene carrying it (trimmed).
-  // Empty newName = clearFolder semantics (scenes become uncategorized).
+  // Create an explicit folder. Returns the normalized name (or null when
+  // empty / already declared — case-sensitive, no silent case-folding).
+  createFolder: (name) => {
+    const n = normalizeFolderName(name);
+    if (!n) return null;
+    const exists = get().sceneFolders.some((f) => f === n);
+    if (exists) return null;
+    set((state) => ({ sceneFolders: [...state.sceneFolders, n] }));
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    return n;
+  },
+
+  // Rename a folder: updates the declared list AND every scene carrying it.
+  // Empty newName = clearFolder semantics (scenes become uncategorized, the
+  // declared folder entity stays — same contract as clearFolder).
   renameFolder: (oldName, newName) => {
     const from = normalizeFolderName(oldName);
     const to = normalizeFolderName(newName);
-    if (!from) return;
+    if (!from || from === to) return;
     set((state) => ({
       scenes: state.scenes.map((s) => {
         const cur = normalizeFolderName(s.folder || '');
         if (!cur || cur !== from) return s;
         return { ...s, folder: to || undefined };
       }),
+      sceneFolders: !to
+        ? state.sceneFolders // folder entity stays (clearFolder semantics)
+        : state.sceneFolders.includes(to)
+          ? state.sceneFolders.filter((f) => f !== from)
+          : [...state.sceneFolders.filter((f) => f !== from), to],
     }));
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
   },
 
-  // Unassign every scene in a folder (never deletes scenes).
+  // Unassign every scene in a folder (never deletes scenes, folder stays).
   clearFolder: (name) => {
     const from = normalizeFolderName(name);
     if (!from) return;
@@ -689,6 +719,19 @@ export const useShowStore = create<ShowState>((set, get) => ({
       scenes: state.scenes.map((s) =>
         normalizeFolderName(s.folder || '') === from ? { ...s, folder: undefined } : s
       ),
+    }));
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+  },
+
+  // Delete a declared folder: removes it from the list + unassigns its scenes.
+  deleteFolder: (name) => {
+    const from = normalizeFolderName(name);
+    if (!from) return;
+    set((state) => ({
+      scenes: state.scenes.map((s) =>
+        normalizeFolderName(s.folder || '') === from ? { ...s, folder: undefined } : s
+      ),
+      sceneFolders: state.sceneFolders.filter((f) => f !== from),
     }));
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
   },
@@ -706,6 +749,11 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   setScenes: (scenes) => {
     set({ scenes });
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+  },
+
+  setSceneFolders: (folders) => {
+    set({ sceneFolders: folders.map((f) => normalizeFolderName(f)).filter(Boolean) });
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
   },
 
