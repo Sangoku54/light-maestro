@@ -896,18 +896,40 @@ export const ShowManager: React.FC = () => {
             onClick={async () => {
               if (!selectedShow) return;
               try {
+                // Build the FULL show payload: the ShowData (tracks) plus all
+                // store data the playback engine needs (scenes, chasers, effects,
+                // patched fixtures, universes...). The VC loadShow widget restores
+                // everything from this payload — a tracks-only save leaves the
+                // widget empty because chasers/scenes can't be resolved.
+                const p = {
+                  id: selectedShow.id,
+                  name: selectedShow.name,
+                  duration: selectedShow.duration,
+                  tracks: selectedShow.tracks,
+                  audioFileBase64: selectedShow.audioFileBase64,
+                  audioFileName: selectedShow.audioFileName,
+                  scenes: useShowStore.getState().scenes,
+                  chasers: useShowStore.getState().chasers,
+                  cueLists: useShowStore.getState().cueLists,
+                  effects: useShowStore.getState().effects,
+                  patchedFixtures: useShowStore.getState().patchedFixtures,
+                  universes: useShowStore.getState().universes,
+                  fixtureGroups: useShowStore.getState().fixtureGroups,
+                  fixturePositions: useShowStore.getState().fixturePositions,
+                  format: 'lightmaestro/show',
+                };
                 // Save via system file dialog
                 const saved = await window.lightMaestro.dialog.saveFile(
                   [{ name: 'Light Maestro Show', extensions: ['lmshow'] }],
                   `${selectedShow.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.lmshow`,
-                  JSON.stringify(selectedShow, null, 2)
+                  JSON.stringify(p, null, 2)
                 );
                 if (saved) {
                   // dialog:saveFile returns { filePath, name } — normalize to a string path
                   const savedPath = typeof saved === 'string' ? saved : (saved as { filePath?: string }).filePath;
                   console.log('Show saved to', savedPath);
                   // Also save via the show storage for recent list
-                  try { await window.lightMaestro.show.save(selectedShow, savedPath); } catch {} 
+                  try { await window.lightMaestro.show.save(p, savedPath); } catch {} 
                 }
               } catch (err) { console.error('Save failed', err); }
             }}
@@ -925,6 +947,19 @@ export const ShowManager: React.FC = () => {
               const state = useShowStore.getState();
               const others = state.shows.filter((s: any) => s.id !== show.id);
               useShowStore.setState({ shows: [...others, show] });
+              // Inject show content into the GLOBAL store so the playback
+              // engines (ShowManager + VC loadShow widget) can resolve
+              // chaser/scene/efx resourceIds from currentState, not just
+              // from the show file. Without this, a loaded show plays
+              // nothing: tracks reference chasers that are never loaded.
+              if (Array.isArray(show.scenes) && show.scenes.length > 0) state.setScenes(show.scenes);
+              if (Array.isArray(show.chasers) && show.chasers.length > 0) state.setChasers(show.chasers);
+              if (Array.isArray(show.cueLists)) state.setCueLists(show.cueLists);
+              if (Array.isArray(show.effects)) state.setEffects(show.effects.map((e: any) => ({ ...e, fixtureIds: e.fixtureIds || e.fixtures || [] })));
+              if (Array.isArray(show.patchedFixtures)) state.setPatchedFixtures(show.patchedFixtures);
+              if (Array.isArray(show.universes)) state.setShowUniverses(show.universes);
+              if (Array.isArray(show.fixtureGroups) || Array.isArray(show.groups)) state.setFixtureGroups(show.fixtureGroups || show.groups);
+              if (show.fixturePositions) state.setFixturePositions(show.fixturePositions);
               setSelectedShowId(show.id);
             }}
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-gray-800/30 text-gray-400 hover:bg-gray-700/40 transition-colors"
