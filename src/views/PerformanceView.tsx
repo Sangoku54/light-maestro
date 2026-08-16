@@ -343,9 +343,18 @@ const VirtualConsolePanel: React.FC = () => {
             const audioOffsetSec = Math.max(0, elapsed) / 1000;
             getAudioBuffer(item.audioFileBase64).then((buffer) => {
               if (!showPlaybackRef.current) return;
+              // Lazy-init the AudioContext: it was never created before, so
+              // show audio never played while the lights (scene/chaser/efx
+              // branches) did — "lights on, no audio".
+              if (!audioCtx) {
+                try {
+                  audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+                  showPlaybackRef.current.audioCtx = audioCtx;
+                } catch { return; }
+              }
               const ctx = audioCtx;
               if (!ctx || ctx.state === 'closed') return;
-              if (ctx.state === 'suspended') ctx.resume();
+              if (ctx.state === 'suspended') void ctx.resume();
               const source = ctx.createBufferSource();
               source.buffer = buffer;
               source.connect(ctx.destination);
