@@ -264,11 +264,11 @@ export class ShowStorage {
       );
 
       const tx = this.db.transaction(() => {
-        for (const scene of show.scenes) {
-          insertScene.run(scene.id, show.id, scene.name, Object.keys(scene.channels).length);
+        for (const scene of show.scenes || []) {
+          insertScene.run(scene.id, show.id, scene.name, Object.keys(scene.channels || {}).length);
         }
-        for (const chaser of show.chasers) {
-          insertChaser.run(chaser.id, show.id, chaser.name, chaser.steps.length);
+        for (const chaser of show.chasers || []) {
+          insertChaser.run(chaser.id, show.id, chaser.name, (chaser.steps || []).length);
         }
       });
 
