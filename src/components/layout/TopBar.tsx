@@ -2,12 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AppMode, useAppStore } from '../../stores/appStore';
 import { UpdateNotification } from './update-notification';
+import logoIcon from '../../../assets/logo/icon.svg';
 import {
   Zap,       // Quick
   PenTool,   // Design
   Play,      // Perform
   Power,
-  Sun,
   Download,
   CheckCircle,
   Loader,
@@ -44,9 +44,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
     <header className="h-12 bg-[#0d0d14] border-b border-gray-800 flex items-center px-3 gap-2 select-none drag-region relative">
       {/* Logo */}
       <div className="flex items-center gap-2 mr-2 ml-2 no-drag">
-        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center">
-          <Sun size={16} className="text-white" />
-        </div>
+        <img src={logoIcon} alt="Light Maestro" className="w-7 h-7" />
         <span className="font-semibold text-white text-sm tracking-wide">{t('app.title')}</span>
       </div>
 
