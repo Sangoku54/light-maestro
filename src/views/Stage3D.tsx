@@ -31,13 +31,13 @@ import {
 } from '../hooks/dmx-cues';
 import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X, LayoutGrid, Music, Zap, List, Search, Crosshair } from 'lucide-react';
 import { DEFAULT_POSITIONS, DEFAULT_ROSTER, MUSICIAN_KINDS, MUSICIAN_LABELS, isRosterEmpty, normalizeRoster, rosterTotal, type MusicianKind, type MusicianRoster } from '../utils/musicians';
-import clavierImg from '../assets/musicians/clavier.svg';
-import chanteuseImg from '../assets/musicians/chanteuse.svg';
-import chanteurImg from '../assets/musicians/chanteur.svg';
-import batteurImg from '../assets/musicians/batteur.svg';
-import bassisteImg from '../assets/musicians/bassiste.svg';
-import guitaristeImg from '../assets/musicians/guitariste.svg';
-import cuivreImg from '../assets/musicians/cuivre.svg';
+import clavierImg from '../assets/musicians/clavier.png';
+import chanteuseImg from '../assets/musicians/chanteuse.png';
+import chanteurImg from '../assets/musicians/chanteur.png';
+import batteurImg from '../assets/musicians/batteur.png';
+import bassisteImg from '../assets/musicians/bassiste.png';
+import guitaristeImg from '../assets/musicians/guitariste.png';
+import cuivreImg from '../assets/musicians/cuivre.png';
 import { sendFixtureOn, sendFixtureOff } from '../utils/dmx-helpers';
 import { fixtureTestState } from '../utils/fixture-test-state';
 
