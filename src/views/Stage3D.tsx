@@ -53,16 +53,6 @@ const MAX_TRAIL_POINTS = 80;
 const TRAIL_ADD_INTERVAL = 100; // ms between trail samples
 const GRID_SIZE = 1; // 1m grid squares
 
-// Seeded PRNG for deterministic crowd layout
-function mulberry32(a: number) {
-  return () => {
-    a |= 0; a = a + 0x6D2B79F5 | 0;
-    let t = Math.imul(a ^ a >>> 15, 1 | a);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
-}
-
 // ─── Virtual musicians (free-form roster + SVG silhouette textures) ──
 
 const MUSICIAN_IMAGES: Record<MusicianKind, string> = {
@@ -801,7 +791,7 @@ export const Stage3D: React.FC<{
     scene.add(hemiLight);
 
     // ── Floor ──────────────────────────────────────
-    // Floor plane (ground level, extended for crowd pit)
+    // Floor plane (ground level, extended under the audience camera)
     const floorGeo = new THREE.PlaneGeometry(STAGE_WIDTH + 8, STAGE_DEPTH + 18);
     const floorMat = new THREE.MeshStandardMaterial({
       color: 0x1a1a2e,
@@ -978,146 +968,6 @@ export const Stage3D: React.FC<{
       scene.add(pole);
       trussBeamsRef.current.poles.push(pole);
     }
-
-        // Crowd in the pit (canvas-drawn black silhouettes)
-    const crowdGroup = new THREE.Group();
-    crowdGroup.name = 'crowd';
-
-    // Canvas-generated fallback person texture (used if the image fails to load)
-    const createPersonTexture = (height: number, colorShift: number) => {
-      const scale = 4; // canvas resolution multiplier
-      const w = Math.round(48 * scale);
-      const h = Math.round(height * 64 * scale);
-      const c = document.createElement('canvas');
-      c.width = w;
-      c.height = h;
-      const ctx = c.getContext('2d')!;
-
-      const cx = w / 2;
-      const bodyTop = h * 0.18;
-      const bodyBot = h * 0.62;
-      const legBot = h * 0.98;
-      const bodyW = w * 0.32;
-      const legW = w * 0.12;
-
-      // Base silhouette color - pure black (colorShift kept for API compat)
-      const r = 0;
-      const g = 0;
-      const b = 0;
-
-      // Legs
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
-      ctx.beginPath();
-      // Left leg
-      ctx.moveTo(cx - bodyW * 0.55, bodyBot);
-      ctx.lineTo(cx - legW, legBot);
-      ctx.lineTo(cx - 1, legBot);
-      ctx.lineTo(cx - bodyW * 0.15, bodyBot);
-      ctx.fill();
-      // Right leg
-      ctx.beginPath();
-      ctx.moveTo(cx + bodyW * 0.15, bodyBot);
-      ctx.lineTo(cx + 1, legBot);
-      ctx.lineTo(cx + legW, legBot);
-      ctx.lineTo(cx + bodyW * 0.55, bodyBot);
-      ctx.fill();
-
-      // Torso (rounded rectangle)
-      const torsoR = bodyW * 0.3;
-      ctx.beginPath();
-      ctx.moveTo(cx - bodyW * 0.5 + torsoR, bodyTop);
-      ctx.lineTo(cx + bodyW * 0.5 - torsoR, bodyTop);
-      ctx.quadraticCurveTo(cx + bodyW * 0.5, bodyTop, cx + bodyW * 0.5, bodyTop + torsoR);
-      ctx.lineTo(cx + bodyW * 0.5, bodyBot - torsoR);
-      ctx.quadraticCurveTo(cx + bodyW * 0.5, bodyBot, cx + bodyW * 0.5 - torsoR, bodyBot);
-      ctx.lineTo(cx - bodyW * 0.5 + torsoR, bodyBot);
-      ctx.quadraticCurveTo(cx - bodyW * 0.5, bodyBot, cx - bodyW * 0.5, bodyBot - torsoR);
-      ctx.lineTo(cx - bodyW * 0.5, bodyTop + torsoR);
-      ctx.quadraticCurveTo(cx - bodyW * 0.5, bodyTop, cx - bodyW * 0.5 + torsoR, bodyTop);
-      ctx.fill();
-
-      // Arms — hanging down along the body
-      const shoulderY = bodyTop + bodyW * 0.2;
-      const armLen = bodyW * 0.95;
-      const armThick = legW * 0.9;
-      ctx.lineWidth = armThick;
-      ctx.strokeStyle = `rgb(${r},${g},${b})`;
-      ctx.lineCap = 'round';
-      // Left arm
-      ctx.beginPath();
-      ctx.moveTo(cx - bodyW * 0.44, shoulderY);
-      ctx.lineTo(cx - bodyW * 0.5, shoulderY + armLen);
-      ctx.stroke();
-      // Right arm
-      ctx.beginPath();
-      ctx.moveTo(cx + bodyW * 0.44, shoulderY);
-      ctx.lineTo(cx + bodyW * 0.5, shoulderY + armLen);
-      ctx.stroke();
-      ctx.lineWidth = 1;
-
-      // Head
-      const headR = bodyW * 0.38;
-      const headCY = bodyTop - headR * 0.3;
-      ctx.beginPath();
-      ctx.arc(cx, headCY, headR, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Warm backlight rim (stage glow)
-      const grad = ctx.createRadialGradient(cx, bodyTop - headR, bodyW * 0.1, cx, bodyTop + bodyW * 0.5, bodyW * 1.5);
-      grad.addColorStop(0, `rgba(${Math.round(60+colorShift)},${Math.round(50+colorShift*0.5)},${Math.round(40)},0.15)`);
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, w, h);
-
-      return new THREE.CanvasTexture(c);
-    };
-
-    // 4 fallback person variations: height + arm pose + color shift
-    const crowdTextures = [
-      createPersonTexture(1.0, 0),    // standard
-      createPersonTexture(0.92, 6),   // shorter
-      createPersonTexture(1.08, -4),  // taller
-      createPersonTexture(0.96, 3),   // mid
-    ];
-
-    const crowdZStart = -(STAGE_DEPTH / 2) - 0.3;
-    const crowdZEnd = crowdZStart - 6.5;
-    const crowdXMin = -(STAGE_WIDTH / 2) + 0.4;
-    const crowdXMax = (STAGE_WIDTH / 2) - 0.4;
-    const crowdCount = 30; // requested: ~30 people in the pit
-
-    const crowdRng = mulberry32(42); // deterministic seed for stable layout
-
-    const crowdSprites: THREE.Sprite[] = [];
-    for (let i = 0; i < crowdCount; i++) {
-      const texIdx = i % crowdTextures.length;
-      const tex = crowdTextures[texIdx];
-      const mat = new THREE.SpriteMaterial({
-        map: tex,
-        transparent: true,
-        depthWrite: true,
-        depthTest: true,
-      });
-      const sprite = new THREE.Sprite(mat);
-
-      // Full random placement - real crowds cluster naturally
-      const x = crowdXMin + crowdRng() * (crowdXMax - crowdXMin);
-      const z = crowdZStart + crowdRng() * (crowdZEnd - crowdZStart);
-      // Person height ~1.65m (sprite scale in meters)
-      const personH = 1.55 + crowdRng() * 0.25;
-      sprite.userData.personH = personH;
-      const aspect = crowdTextures[texIdx].image
-        ? (crowdTextures[texIdx].image as HTMLCanvasElement).height / (crowdTextures[texIdx].image as HTMLCanvasElement).width
-        : 2;
-      sprite.scale.set(personH / aspect, personH, 1);
-      sprite.position.set(x, personH / 2, z);
-
-      crowdGroup.add(sprite);
-      crowdSprites.push(sprite);
-    }
-
-
-    scene.add(crowdGroup);
 
     // ── Smoke/Haze particles ───────────────────────
     const particleCount = 300;
@@ -1465,6 +1315,7 @@ export const Stage3D: React.FC<{
           blending: THREE.AdditiveBlending,
         });
         const cone = new THREE.Mesh(coneGeo, coneMat);
+        cone.raycast = () => {}; // beam is visual only — never a pick target
         f3d.mountMode = pos.mountMode || 'top';
         f3d.beamAngle = pos.beamAngle ?? 0.15;
         // Cone starts at origin (lens) and extends down in local space
@@ -1481,6 +1332,7 @@ export const Stage3D: React.FC<{
           eh.lightTarget.add(ehLight);
           eh.pointLight = ehLight;
           const ehCone = new THREE.Mesh(coneGeo, coneMat.clone());
+          ehCone.raycast = () => {}; // beam is visual only — never a pick target
           ehCone.position.set(0, -coneHeight / 2, 0);
           ehCone.visible = showBeams;
           eh.lightTarget.add(ehCone);
