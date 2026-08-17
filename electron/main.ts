@@ -102,7 +102,7 @@ function ensureBuilt(): void {
 }
 
 // ─── Splash timing & background renderer build ─────────────
-const MIN_SPLASH_MS = 5000;
+const MIN_SPLASH_MS = 8000;
 let splashShownAt = 0;
 
 function sleepMs(ms: number): Promise<void> {
