@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateAutoLoops, materializeAutoLoops, refreshAutoLoops, AUTO_LOOP_FOLDER, type AutoLoop, type AutoLoopStoreFacade } from '../engine/auto-loops';
+import { generateAutoLoops, generateLoopLibrary, materializeAutoLoops, refreshAutoLoops, AUTO_LOOP_FOLDER, type AutoLoop, type AutoLoopStoreFacade } from '../engine/auto-loops';
 import type { PatchedFixture, SavedScene, SavedChaser } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureChannel } from '../hooks/dmx-cues';
 
@@ -253,5 +253,45 @@ describe('materializeAutoLoops / refreshAutoLoops', () => {
 
     expect(state.scenes.some((s) => s.id === manualScene)).toBe(true);
     expect(state.chasers.some((c) => c.id === manualChaser)).toBe(true);
+  });
+});
+
+// ─── Loop library (LoopAuto-style variety) ────────────────────────────────
+
+describe('generateLoopLibrary', () => {
+  const allDefs = defsOf(rgbWash, mover, par);
+  const fixtures = [
+    pf({ id: 'f1', fixtureDefId: 'wash-rgb', tier: 'primary', startAddress: 1 }),
+    pf({ id: 'f2', fixtureDefId: 'mover-rgb', tier: 'primary', startAddress: 9 }),
+    pf({ id: 'f3', fixtureDefId: 'par-dim', tier: 'primary', startAddress: 21 }),
+  ];
+
+  it('returns a varied catalog (many kinds, count-bounded)', () => {
+    const lib = generateLoopLibrary(fixtures, allDefs, { count: 32 });
+    expect(lib.length).toBeGreaterThan(10);
+    expect(lib.length).toBeLessThanOrEqual(32);
+    const kinds = new Set(lib.map((l) => l.kind));
+    // With RGB wash + mover + dimmer PAR, we expect chases, movements and pulses.
+    expect(kinds.has('color-chase')).toBe(true);
+    expect(kinds.has('movement')).toBe(true);
+    expect(kinds.has('dimmer-pulse')).toBe(true);
+    // Names vary across the library (palette / pattern / tier markers).
+    expect(new Set(lib.map((l) => l.name)).size).toBeGreaterThan(5);
+  });
+
+  it('is deterministic for the same seed and varies with the seed', () => {
+    const a = generateLoopLibrary(fixtures, allDefs, { count: 32, seed: 7 });
+    const b = generateLoopLibrary(fixtures, allDefs, { count: 32, seed: 7 });
+    const c = generateLoopLibrary(fixtures, allDefs, { count: 32, seed: 99 });
+    expect(a.map((l) => l.id)).toEqual(b.map((l) => l.id));
+    expect(a.map((l) => l.id)).not.toEqual(c.map((l) => l.id));
+  });
+
+  it('skips disabled fixtures and empty tiers', () => {
+    const onlyWash = [pf({ id: 'f1', fixtureDefId: 'wash-rgb', tier: 'primary', startAddress: 1 })];
+    const lib = generateLoopLibrary(onlyWash, defsOf(rgbWash), { count: 64 });
+    // Only color chases for an RGB-only wash (no movers/dimmers/shutters).
+    expect(lib.every((l) => l.kind === 'color-chase')).toBe(true);
+    expect(lib.every((l) => l.fixtureIds.length === 1)).toBe(true);
   });
 });

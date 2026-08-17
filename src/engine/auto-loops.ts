@@ -1,21 +1,22 @@
 // ─── Auto Loops — automatic looping patterns for patched fixtures ───────────
 //
-// Generates loop definitions (color chases, movement circles, dimmer pulses)
-// from the show's patched fixtures, grouped by tier (primary → secondary →
-// tertiary → other). Pure logic, no side effects: re-running it with a changed
-// patch list naturally regenerates the loops, so "fixtures à venir" are picked
-// up automatically as soon as they are patched.
+// Two layers:
+//  1. generateAutoLoops() — one loop per kind per tier (color chase, movement,
+//     dimmer pulse). Small, predictable, used as the building block.
+//  2. generateLoopLibrary() — a rich, seeded "near-infinite" catalog of loop
+//     variations (named palettes × movement patterns × speeds), inspired by
+//     SoundSwitch's LoopAuto. Re-run with a different seed → a different set.
 //
 // A loop is a sequence of DMX frames (absolute address → value). Each frame is
 // a self-contained lighting state; the frames repeat (forward/backward/bounce)
-// at `speedBpm`. This shape maps directly onto the existing chaser/scene model
-// (a chaser step references a scene, a scene is a DMX channel map).
+// at `speedBpm`. materializeAutoLoops() turns loops into playable scenes +
+// chasers (the existing chaser engine plays them unchanged).
 
 import type { PatchedFixture, FixtureTier, SavedScene, SavedChaser } from '../stores/showStore';
 import type { DmxFixtureDefinition } from '../hooks/dmx-cues';
 import { analyzeChannels, type ChannelAnalysis } from './dmx-channel';
 
-export type AutoLoopKind = 'color-chase' | 'movement' | 'dimmer-pulse';
+export type AutoLoopKind = 'color-chase' | 'movement' | 'dimmer-pulse' | 'strobe';
 
 export interface AutoLoopStep {
   /** Absolute DMX address → value (0-255) for this loop's fixtures. */
@@ -45,6 +46,13 @@ export interface AutoLoopOptions {
   movementRadius?: number;
 }
 
+export interface LoopLibraryOptions {
+  /** How many loops to return. Default 32. */
+  count?: number;
+  /** Seed for reproducible variety. Change it to get a new set. Default 0. */
+  seed?: number;
+}
+
 const TIER_ORDER: FixtureTier[] = ['primary', 'secondary', 'tertiary', 'other'];
 
 /** Default chase palette — violet family + ivory, matched to the app theme. */
@@ -56,6 +64,55 @@ const CHASE_COLORS: ReadonlyArray<readonly [number, number, number]> = [
 ];
 
 const DMX_CENTER = 128;
+
+/** Seeded PRNG (mulberry32) — deterministic variety, reshuffle via seed. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+interface NamedPalette {
+  name: string;
+  colors: readonly (readonly [number, number, number])[];
+}
+
+/** Curated palettes for the loop library. */
+const PALETTES: NamedPalette[] = [
+  { name: 'violet', colors: [[168, 85, 247], [139, 92, 246], [192, 132, 252], [237, 232, 220]] },
+  { name: 'rainbow', colors: [[255, 60, 60], [255, 180, 0], [60, 220, 90], [60, 140, 255]] },
+  { name: 'warm', colors: [[255, 120, 40], [255, 200, 80], [255, 80, 60], [240, 240, 200]] },
+  { name: 'cool', colors: [[40, 140, 255], [80, 220, 220], [120, 80, 255], [220, 240, 255]] },
+  { name: 'party', colors: [[255, 60, 120], [0, 220, 255], [255, 220, 0], [160, 60, 255]] },
+  { name: 'white', colors: [[255, 255, 255], [220, 220, 235], [180, 180, 200], [140, 140, 160]] },
+];
+
+interface MovementPattern {
+  name: string;
+  at: (t: number, r: number) => [number, number]; // t ∈ [0,1) → [pan, tilt]
+}
+
+/** Movement shapes for the loop library (and generateAutoLoops default). */
+const MOVEMENT_PATTERNS: MovementPattern[] = [
+  { name: 'circle', at: (t, r) => [DMX_CENTER + r * Math.cos(2 * Math.PI * t), DMX_CENTER + r * Math.sin(2 * Math.PI * t)] },
+  {
+    name: 'square',
+    at: (t, r) => {
+      const c = Math.cos(2 * Math.PI * t);
+      const s = Math.sin(2 * Math.PI * t);
+      const m = Math.max(Math.abs(c), Math.abs(s)) || 1;
+      return [DMX_CENTER + r * (c / m), DMX_CENTER + r * (s / m)];
+    },
+  },
+  { name: 'figure8', at: (t, r) => [DMX_CENTER + r * Math.sin(2 * Math.PI * t), DMX_CENTER + r * Math.sin(4 * Math.PI * t)] },
+  { name: 'zigzag', at: (t, r) => [DMX_CENTER + r * Math.sin(4 * Math.PI * t), DMX_CENTER + r * (2 * t - 1)] },
+  { name: 'sweep', at: (t, r) => [DMX_CENTER + r * Math.sin(2 * Math.PI * t), DMX_CENTER] },
+];
 
 interface AnalyzedFixture {
   pf: PatchedFixture;
@@ -75,6 +132,8 @@ function buildColorChase(
   fixtures: AnalyzedFixture[],
   colors: ReadonlyArray<readonly [number, number, number]>,
   speedBpm: number,
+  variant?: string,
+  direction: AutoLoop['direction'] = 'forward',
 ): AutoLoop {
   const steps: AutoLoopStep[] = colors.map((_, stepIdx) => {
     const frame: Record<number, number> = {};
@@ -89,21 +148,20 @@ function buildColorChase(
         if (seg.w !== null) put(frame, absAddr(pf, seg.w), 0);
       }
       if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), 255);
-      // Open the shutter so the color is actually visible.
       if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), 255);
     }
     return { channels: frame };
   });
 
   return {
-    id: `auto-cc-${tier}`,
-    name: `Color chase · ${tier}`,
+    id: variant ? `auto-cc-${tier}-${variant}` : `auto-cc-${tier}`,
+    name: variant ? `Chase · ${variant} · ${tier}` : `Color chase · ${tier}`,
     tier,
     kind: 'color-chase',
     fixtureIds: fixtures.map((f) => f.pf.id),
     steps,
     speedBpm,
-    direction: 'forward',
+    direction,
   };
 }
 
@@ -113,13 +171,13 @@ function buildMovementLoop(
   movementSteps: number,
   radius: number,
   speedBpm: number,
+  pattern: MovementPattern = MOVEMENT_PATTERNS[0],
+  direction: AutoLoop['direction'] = 'forward',
 ): AutoLoop {
   const amp = Math.max(0, Math.min(128, radius));
   const steps: AutoLoopStep[] = [];
   for (let step = 0; step < movementSteps; step++) {
-    const angle = (step / movementSteps) * Math.PI * 2;
-    const pan = DMX_CENTER + amp * Math.cos(angle);
-    const tilt = DMX_CENTER + amp * Math.sin(angle);
+    const [pan, tilt] = pattern.at(step / movementSteps, amp);
     const frame: Record<number, number> = {};
     for (const { pf, analysis } of fixtures) {
       for (const off of analysis.panOffsets) put(frame, absAddr(pf, off), pan);
@@ -131,14 +189,14 @@ function buildMovementLoop(
   }
 
   return {
-    id: `auto-mv-${tier}`,
-    name: `Movement · ${tier}`,
+    id: `auto-mv-${tier}-${pattern.name}`,
+    name: `Movement · ${pattern.name} · ${tier}`,
     tier,
     kind: 'movement',
     fixtureIds: fixtures.map((f) => f.pf.id),
     steps,
     speedBpm,
-    direction: 'forward',
+    direction,
   };
 }
 
@@ -172,14 +230,51 @@ function buildDimmerPulse(
   };
 }
 
+function buildStrobeLoop(
+  tier: FixtureTier,
+  fixtures: AnalyzedFixture[],
+  speedBpm: number,
+): AutoLoop {
+  // Hard on/off via the shutter channel; full intensity on the "on" frames.
+  const steps: AutoLoopStep[] = [0, 1].map((on) => {
+    const frame: Record<number, number> = {};
+    for (const { pf, analysis } of fixtures) {
+      if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), on ? 255 : 0);
+      if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), on ? 255 : 0);
+    }
+    return { channels: frame };
+  });
+
+  return {
+    id: `auto-st-${tier}`,
+    name: `Strobe · ${tier}`,
+    tier,
+    kind: 'strobe',
+    fixtureIds: fixtures.map((f) => f.pf.id),
+    steps,
+    speedBpm,
+    direction: 'forward',
+  };
+}
+
+function analyzeTiers(
+  patchedFixtures: PatchedFixture[],
+  defs: Map<string, DmxFixtureDefinition>,
+): Map<FixtureTier, AnalyzedFixture[]> {
+  const byTier = new Map<FixtureTier, AnalyzedFixture[]>();
+  for (const pf of patchedFixtures) {
+    if (pf.enabled === false) continue;
+    const list = byTier.get(pf.tier) ?? [];
+    list.push({ pf, analysis: analyzeChannels(pf, defs.get(pf.fixtureDefId)) });
+    byTier.set(pf.tier, list);
+  }
+  return byTier;
+}
+
 /**
- * Generate automatic loops for the patched fixtures, grouped by tier.
- *
- * Disabled fixtures (`enabled === false`) are skipped. For each non-empty tier
- * up to three loops are produced: a color chase (RGB fixtures), a movement
- * circle (pan/tilt fixtures) and a dimmer pulse (intensity-only fixtures).
- * Fixtures with both RGB and pan/tilt appear in both the color chase and the
- * movement loop.
+ * Generate one loop per kind per tier for the patched fixtures. Disabled
+ * fixtures (`enabled === false`) are skipped. This is the small predictable
+ * building block; see generateLoopLibrary() for the rich variety catalog.
  */
 export function generateAutoLoops(
   patchedFixtures: PatchedFixture[],
@@ -191,16 +286,12 @@ export function generateAutoLoops(
   const movementSteps = Math.max(3, opts.movementSteps ?? 8);
   const movementRadius = opts.movementRadius ?? 64;
 
-  const active = patchedFixtures.filter((f) => f.enabled !== false);
+  const byTier = analyzeTiers(patchedFixtures, defs);
   const loops: AutoLoop[] = [];
 
   for (const tier of TIER_ORDER) {
-    const fixtures: AnalyzedFixture[] = [];
-    for (const pf of active) {
-      if (pf.tier !== tier) continue;
-      fixtures.push({ pf, analysis: analyzeChannels(pf, defs.get(pf.fixtureDefId)) });
-    }
-    if (fixtures.length === 0) continue;
+    const fixtures = byTier.get(tier);
+    if (!fixtures || fixtures.length === 0) continue;
 
     const rgb = fixtures.filter((f) => f.analysis.rgbSegments.length > 0);
     const movers = fixtures.filter(
@@ -214,18 +305,110 @@ export function generateAutoLoops(
         f.analysis.tiltOffsets.length === 0,
     );
 
-    if (rgb.length > 0) {
-      loops.push(buildColorChase(tier, rgb, CHASE_COLORS.slice(0, chaseSteps), speedBpm));
-    }
-    if (movers.length > 0) {
-      loops.push(buildMovementLoop(tier, movers, movementSteps, movementRadius, speedBpm));
-    }
-    if (dimmers.length > 0) {
-      loops.push(buildDimmerPulse(tier, dimmers, speedBpm));
-    }
+    if (rgb.length > 0) loops.push(buildColorChase(tier, rgb, CHASE_COLORS.slice(0, chaseSteps), speedBpm));
+    if (movers.length > 0) loops.push(buildMovementLoop(tier, movers, movementSteps, movementRadius, speedBpm));
+    if (dimmers.length > 0) loops.push(buildDimmerPulse(tier, dimmers, speedBpm));
   }
 
   return loops;
+}
+
+function shuffleInPlace<T>(arr: T[], rng: () => number): void {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+/**
+ * Rich loop library: a seeded sample from the full variation space for the
+ * patched fixtures — curated palettes × movement patterns × speeds ×
+ * directions × radii × tiers. Every available kind appears at least once per
+ * tier (guaranteed coverage), then the rest are drawn randomly, so bumping the
+ * seed yields a genuinely fresh set (the "near-infinite" LoopAuto feel).
+ */
+export function generateLoopLibrary(
+  patchedFixtures: PatchedFixture[],
+  defs: Map<string, DmxFixtureDefinition>,
+  opts: LoopLibraryOptions = {},
+): AutoLoop[] {
+  const count = Math.max(1, opts.count ?? 36);
+  const rng = mulberry32(opts.seed ?? 0);
+
+  const byTier = analyzeTiers(patchedFixtures, defs);
+  const tiers = TIER_ORDER.filter((t) => (byTier.get(t)?.length ?? 0) > 0);
+  if (tiers.length === 0) return [];
+
+  const speeds = [80, 90, 100, 110, 120, 135, 150, 170];
+  const directions: AutoLoop['direction'][] = ['forward', 'backward', 'bounce'];
+
+  interface Cap {
+    rgb: AnalyzedFixture[];
+    movers: AnalyzedFixture[];
+    dimmers: AnalyzedFixture[];
+    shutters: AnalyzedFixture[];
+    kinds: AutoLoopKind[];
+  }
+  const caps = new Map<FixtureTier, Cap>();
+  for (const tier of tiers) {
+    const fixtures = byTier.get(tier)!;
+    const rgb = fixtures.filter((f) => f.analysis.rgbSegments.length > 0);
+    const movers = fixtures.filter(
+      (f) => f.analysis.panOffsets.length > 0 || f.analysis.tiltOffsets.length > 0,
+    );
+    const dimmers = fixtures.filter(
+      (f) =>
+        f.analysis.intensityOffset !== null &&
+        f.analysis.rgbSegments.length === 0 &&
+        f.analysis.panOffsets.length === 0 &&
+        f.analysis.tiltOffsets.length === 0,
+    );
+    const shutters = fixtures.filter((f) => f.analysis.shutterOffset !== null);
+    const kinds: AutoLoopKind[] = [];
+    if (rgb.length > 0) kinds.push('color-chase');
+    if (movers.length > 0) kinds.push('movement');
+    if (dimmers.length > 0) kinds.push('dimmer-pulse');
+    if (shutters.length > 0) kinds.push('strobe');
+    caps.set(tier, { rgb, movers, dimmers, shutters, kinds });
+  }
+
+  const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(rng() * arr.length)];
+
+  const build = (tier: FixtureTier, cap: Cap, kind: AutoLoopKind): AutoLoop => {
+    const speed = pick(speeds);
+    const direction = pick(directions);
+    switch (kind) {
+      case 'color-chase': {
+        const pal = pick(PALETTES);
+        return buildColorChase(tier, cap.rgb, pal.colors, speed, pal.name, direction);
+      }
+      case 'movement': {
+        const pattern = pick(MOVEMENT_PATTERNS);
+        const radius = 36 + Math.floor(rng() * 81); // 36..116
+        return buildMovementLoop(tier, cap.movers, 8, radius, speed, pattern, direction);
+      }
+      case 'dimmer-pulse':
+        return buildDimmerPulse(tier, cap.dimmers, speed);
+      case 'strobe':
+        return buildStrobeLoop(tier, cap.shutters, speed);
+    }
+  };
+
+  const loops: AutoLoop[] = [];
+  // Baseline — one of each available kind per tier (guaranteed coverage).
+  for (const tier of tiers) {
+    const cap = caps.get(tier)!;
+    for (const kind of cap.kinds) loops.push(build(tier, cap, kind));
+  }
+  // Fill the rest with random (tier, kind) samples.
+  while (loops.length < count) {
+    const tier = pick(tiers);
+    const cap = caps.get(tier)!;
+    loops.push(build(tier, cap, pick(cap.kinds)));
+  }
+
+  shuffleInPlace(loops, rng);
+  return loops.slice(0, count);
 }
 
 // ─── Materialization — turn loops into playable scenes + chasers ───────────

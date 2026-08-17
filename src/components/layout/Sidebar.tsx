@@ -15,6 +15,7 @@ import {
   Eye,
   Wifi,
   Timer,
+  Sparkles,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -135,6 +136,7 @@ function getSidebarItems(mode: AppMode, t: (key: string) => string): SidebarItem
       return [
         { key: 'autoscript', label: t('sidebar.autoScript'), icon: <Mic size={16} /> },
         { key: 'colors', label: t('sidebar.colorPresets'), icon: <Palette size={16} /> },
+        { key: 'loops', label: t('sidebar.autoLoops') || 'Loops auto', icon: <Sparkles size={16} /> },
       ];
 
     case 'design':
