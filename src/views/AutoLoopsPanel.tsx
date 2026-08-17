@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { RefreshCw, Sparkles, Play, Square, Palette, Move, Sun, Zap } from 'lucide-react';
 import { useShowStore } from '../stores/showStore';
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from '../hooks/dmx-cues';
-import { generateLoopLibrary, materializeAutoLoops, type AutoLoop, type AutoLoopKind } from '../engine/auto-loops';
+import { generateLoopLibrary, materializeAutoLoops, purgeAutoLoops, type AutoLoop, type AutoLoopKind } from '../engine/auto-loops';
 import { midiPlayChaser, midiStopChaser } from '../engine/midi-actions';
 
 const KIND_META: Record<AutoLoopKind, { icon: React.ReactNode; label: string; accent: string }> = {
@@ -34,10 +34,10 @@ export const AutoLoopsPanel: React.FC = () => {
   const [seed, setSeed] = useState(0);
   const [playingId, setPlayingId] = useState<string | null>(null);
 
-  // Cache one chaser per loop (avoid re-materializing on every re-click).
-  const chaserByLoopIdRef = useRef<Map<string, string>>(new Map());
+  // Chaser ids currently playing (exclusive playback — one loop at a time).
+  const launchedRef = useRef<Set<string>>(new Set());
 
-  // Stable patch signature — invalidates the cache when the patch changes.
+  // Stable patch signature — invalidates playback when the patch changes.
   const patchKey = useMemo(
     () =>
       patchedFixtures
@@ -66,11 +66,29 @@ export const AutoLoopsPanel: React.FC = () => {
     };
   }, [patchedFixtures]);
 
-  // Invalidate cached chasers + stop playback when the patch changes.
-  useEffect(() => {
-    chaserByLoopIdRef.current.clear();
+  const stopAll = useCallback(() => {
+    for (const id of launchedRef.current) midiStopChaser(id);
+    launchedRef.current.clear();
     setPlayingId(null);
-  }, [patchKey]);
+  }, []);
+
+  const purgeStore = useCallback(() => {
+    purgeAutoLoops(useShowStore.getState());
+  }, []);
+
+  // On patch change: stop playback and purge stale materialized loops.
+  useEffect(() => {
+    stopAll();
+    purgeStore();
+  }, [patchKey, stopAll, purgeStore]);
+
+  // On unmount: stop any playing loop and clean up the transient chaser.
+  useEffect(() => {
+    return () => {
+      stopAll();
+      purgeStore();
+    };
+  }, [stopAll, purgeStore]);
 
   const library = useMemo<AutoLoop[]>(() => {
     if (patchedFixtures.length === 0 || fixtureDefs.size === 0) return [];
@@ -78,27 +96,25 @@ export const AutoLoopsPanel: React.FC = () => {
   }, [patchedFixtures, fixtureDefs, seed]);
 
   const handleToggle = (loop: AutoLoop) => {
-    const cached = chaserByLoopIdRef.current.get(loop.id);
-    if (cached && playingId === loop.id) {
-      midiStopChaser(cached);
-      setPlayingId(null);
+    // Exclusive playback: stop + purge the previous loop before starting a new one.
+    if (playingId === loop.id) {
+      stopAll();
+      purgeStore();
       return;
     }
-    let chaserId = cached;
-    if (!chaserId) {
-      const store = useShowStore.getState();
-      const [id] = materializeAutoLoops([loop], store);
-      if (!id) return;
-      chaserId = id;
-      chaserByLoopIdRef.current.set(loop.id, id);
-    }
+    stopAll();
+    purgeStore();
+    const store = useShowStore.getState();
+    const [chaserId] = materializeAutoLoops([loop], store);
+    if (!chaserId) return;
+    launchedRef.current.add(chaserId);
     midiPlayChaser(chaserId);
     setPlayingId(loop.id);
   };
 
   const handleRegenerate = () => {
-    chaserByLoopIdRef.current.clear();
-    setPlayingId(null);
+    stopAll();
+    purgeStore();
     setSeed((s) => (s + 1) % 100000);
   };
 
@@ -156,7 +172,7 @@ export const AutoLoopsPanel: React.FC = () => {
                   <div className="flex items-center gap-2 text-[10px] text-gray-500">
                     <span>{meta.label}</span>
                     <span>·</span>
-                    <span>{loop.speedBpm} BPM</span>
+                    <span>{loop.speedBpm}</span>
                     <span>{DIR_LABEL[loop.direction]}</span>
                   </div>
                 </div>

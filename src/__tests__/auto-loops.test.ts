@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateAutoLoops, generateLoopLibrary, materializeAutoLoops, refreshAutoLoops, AUTO_LOOP_FOLDER, type AutoLoop, type AutoLoopStoreFacade } from '../engine/auto-loops';
+import { generateAutoLoops, generateLoopLibrary, materializeAutoLoops, refreshAutoLoops, purgeAutoLoops, AUTO_LOOP_FOLDER, type AutoLoop, type AutoLoopStoreFacade } from '../engine/auto-loops';
 import type { PatchedFixture, SavedScene, SavedChaser } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureChannel } from '../hooks/dmx-cues';
 
@@ -254,6 +254,29 @@ describe('materializeAutoLoops / refreshAutoLoops', () => {
     expect(state.scenes.some((s) => s.id === manualScene)).toBe(true);
     expect(state.chasers.some((c) => c.id === manualChaser)).toBe(true);
   });
+
+  it('purgeAutoLoops removes auto scenes + chasers but keeps manual ones', () => {
+    const { store, state } = makeStore();
+    const manualScene = store.createScene('Manuel');
+    store.updateScene(manualScene, { channels: { 1: 255 } });
+    const manualChaser = store.createChaser('Chaser manuel');
+    store.updateChaser(manualChaser, { steps: [{ sceneId: manualScene, fadeIn: 0, hold: 500, fadeOut: 0 }] });
+
+    const loop = generateAutoLoops(
+      [pf({ id: 'f1', fixtureDefId: 'wash-rgb', tier: 'primary', startAddress: 1 })],
+      defsOf(rgbWash),
+    )[0];
+    const chaserIds = materializeAutoLoops([loop], store);
+    expect(chaserIds.length).toBe(1);
+    expect(state.scenes.some((s) => s.folder === AUTO_LOOP_FOLDER)).toBe(true);
+
+    purgeAutoLoops(store);
+
+    expect(state.scenes.filter((s) => s.folder === AUTO_LOOP_FOLDER).length).toBe(0);
+    expect(state.chasers.filter((c) => c.name.startsWith('Auto ·')).length).toBe(0);
+    expect(state.scenes.some((s) => s.id === manualScene)).toBe(true);
+    expect(state.chasers.some((c) => c.id === manualChaser)).toBe(true);
+  });
 });
 
 // ─── Loop library (LoopAuto-style variety) ────────────────────────────────
@@ -293,5 +316,16 @@ describe('generateLoopLibrary', () => {
     // Only color chases for an RGB-only wash (no movers/dimmers/shutters).
     expect(lib.every((l) => l.kind === 'color-chase')).toBe(true);
     expect(lib.every((l) => l.fixtureIds.length === 1)).toBe(true);
+  });
+
+  it('produces unique ids even when the same palette repeats across loops', () => {
+    const onlyWash = [
+      pf({ id: 'f1', fixtureDefId: 'wash-rgb', tier: 'primary', startAddress: 1 }),
+      pf({ id: 'f2', fixtureDefId: 'wash-rgb', tier: 'secondary', startAddress: 9 }),
+      pf({ id: 'f3', fixtureDefId: 'wash-rgb', tier: 'tertiary', startAddress: 17 }),
+    ];
+    const lib = generateLoopLibrary(onlyWash, defsOf(rgbWash), { count: 36, seed: 3 });
+    const ids = lib.map((l) => l.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

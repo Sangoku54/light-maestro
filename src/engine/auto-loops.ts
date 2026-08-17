@@ -374,37 +374,56 @@ export function generateLoopLibrary(
 
   const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(rng() * arr.length)];
 
-  const build = (tier: FixtureTier, cap: Cap, kind: AutoLoopKind): AutoLoop => {
+  let seq = 0;
+  const build = (tier: FixtureTier, cap: Cap, kind: AutoLoopKind): AutoLoop | undefined => {
     const speed = pick(speeds);
     const direction = pick(directions);
+    let loop: AutoLoop;
     switch (kind) {
       case 'color-chase': {
         const pal = pick(PALETTES);
-        return buildColorChase(tier, cap.rgb, pal.colors, speed, pal.name, direction);
+        loop = buildColorChase(tier, cap.rgb, pal.colors, speed, pal.name, direction);
+        break;
       }
       case 'movement': {
         const pattern = pick(MOVEMENT_PATTERNS);
         const radius = 36 + Math.floor(rng() * 81); // 36..116
-        return buildMovementLoop(tier, cap.movers, 8, radius, speed, pattern, direction);
+        loop = buildMovementLoop(tier, cap.movers, 8, radius, speed, pattern, direction);
+        break;
       }
       case 'dimmer-pulse':
-        return buildDimmerPulse(tier, cap.dimmers, speed);
+        loop = buildDimmerPulse(tier, cap.dimmers, speed);
+        break;
       case 'strobe':
-        return buildStrobeLoop(tier, cap.shutters, speed);
+        loop = buildStrobeLoop(tier, cap.shutters, speed);
+        break;
+      default:
+        return undefined;
     }
+    // Unique id per loop — palette/pattern alone collide across speeds/radii.
+    loop.id = `${loop.id}-${seq++}`;
+    return loop;
   };
 
+  // Keep only tiers with at least one usable capability (a tier with fixtures
+  // but no recognized channels — e.g. a missing def — is skipped).
+  const activeTiers = tiers.filter((t) => (caps.get(t)?.kinds.length ?? 0) > 0);
+  if (activeTiers.length === 0) return [];
+
   const loops: AutoLoop[] = [];
+  const push = (loop: AutoLoop | undefined) => {
+    if (loop) loops.push(loop);
+  };
   // Baseline — one of each available kind per tier (guaranteed coverage).
-  for (const tier of tiers) {
+  for (const tier of activeTiers) {
     const cap = caps.get(tier)!;
-    for (const kind of cap.kinds) loops.push(build(tier, cap, kind));
+    for (const kind of cap.kinds) push(build(tier, cap, kind));
   }
   // Fill the rest with random (tier, kind) samples.
   while (loops.length < count) {
-    const tier = pick(tiers);
+    const tier = pick(activeTiers);
     const cap = caps.get(tier)!;
-    loops.push(build(tier, cap, pick(cap.kinds)));
+    push(build(tier, cap, pick(cap.kinds)));
   }
 
   shuffleInPlace(loops, rng);
@@ -472,8 +491,26 @@ export function materializeAutoLoops(loops: AutoLoop[], store: AutoLoopStoreFaca
 }
 
 /**
- * Full refresh: delete previously generated auto loops (scenes in
- * AUTO_LOOP_FOLDER and the chasers referencing them), regenerate the loops
+ * Delete previously generated auto loops: scenes in AUTO_LOOP_FOLDER and the
+ * chasers referencing them. Idempotent — safe to call before regenerating or
+ * when the patch changes.
+ */
+export function purgeAutoLoops(store: AutoLoopStoreFacade): void {
+  const autoSceneIds = new Set(
+    store.scenes.filter((s) => s.folder === AUTO_LOOP_FOLDER).map((s) => s.id),
+  );
+  for (const chaser of store.chasers) {
+    if (chaser.steps.some((st) => autoSceneIds.has(st.sceneId))) {
+      store.deleteChaser(chaser.id);
+    }
+  }
+  for (const sceneId of autoSceneIds) {
+    store.deleteScene(sceneId);
+  }
+}
+
+/**
+ * Full refresh: purge previously generated auto loops, regenerate the loops
  * from the current patch and materialize them. Pure orchestration — safe to
  * call on every patch change (idempotent cleanup).
  */
@@ -483,20 +520,7 @@ export function refreshAutoLoops(
   defs: Map<string, DmxFixtureDefinition>,
   opts: AutoLoopOptions = {},
 ): { loops: AutoLoop[]; chaserIds: string[] } {
-  const autoSceneIds = new Set(
-    store.scenes.filter((s) => s.folder === AUTO_LOOP_FOLDER).map((s) => s.id),
-  );
-
-  // Delete chasers whose steps reference an auto-generated scene.
-  for (const chaser of store.chasers) {
-    if (chaser.steps.some((st) => autoSceneIds.has(st.sceneId))) {
-      store.deleteChaser(chaser.id);
-    }
-  }
-  for (const sceneId of autoSceneIds) {
-    store.deleteScene(sceneId);
-  }
-
+  purgeAutoLoops(store);
   const loops = generateAutoLoops(patchedFixtures, defs, opts);
   const chaserIds = materializeAutoLoops(loops, store);
   return { loops, chaserIds };
