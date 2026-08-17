@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, crashRepo
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import { autoUpdater } from 'electron-updater';
 import { RemoteServer, type RemoteStateSnapshot } from './remote/server';
 import { OscServer } from './osc/server';
@@ -101,6 +101,38 @@ function ensureBuilt(): void {
   }
 }
 
+// ─── Splash timing & background renderer build ─────────────
+const MIN_SPLASH_MS = 5000;
+let splashShownAt = 0;
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Rebuild the renderer in the background, AFTER the splash is shown, so the
+// splash appears instantly on launch instead of waiting for `vite build`.
+// Only the standalone launcher (.vbs/.bat) sets LIGHT_MAESTRO_LAUNCH=1; dev
+// (`npm run dev`) has its own Vite dev server and packaged apps ship pre-built.
+function buildRendererAsync(): Promise<void> {
+  return new Promise((resolve) => {
+    if (app.isPackaged || process.env.LIGHT_MAESTRO_LAUNCH !== '1') {
+      resolve();
+      return;
+    }
+    const projectRoot = path.join(__dirname, '../..');
+    const child = spawn('npx', ['vite', 'build'], {
+      cwd: projectRoot,
+      stdio: 'inherit',
+      shell: true,
+    });
+    child.on('exit', () => resolve());
+    child.on('error', (err) => {
+      console.error('Renderer rebuild failed:', err);
+      resolve();
+    });
+  });
+}
+
 let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -117,6 +149,7 @@ const oscServer = new OscServer();
 
 // ─── Splash screen (animated loading window) ────────────────
 function createSplashWindow() {
+  splashShownAt = Date.now();
   splashWindow = new BrowserWindow({
     width: 520,
     height: 360,
@@ -206,7 +239,7 @@ function createWindow() {
   // Load strategy:
   //   1. Try Vite dev server (localhost:5173) — used by `npm run dev`
   //   2. Fall back to pre-built dist/renderer — used by .vbs/.bat launchers
-  if (isDev) {
+  if (isDev && process.env.LIGHT_MAESTRO_LAUNCH !== '1') {
     const viteUrl = 'http://localhost:5173';
     const fallbackPath = path.join(__dirname, '../renderer/index.html');
     const tryVite = (attempt: number) => {
@@ -790,6 +823,11 @@ ipcMain.handle('app:read-crash-log', async (_event, filename: string) => crashLo
 
 app.whenReady().then(async () => {
   createSplashWindow();
+  // Rebuild the renderer in the background (standalone launch flow only), then
+  // enforce a minimum splash display time before revealing the main window.
+  await buildRendererAsync();
+  const splashElapsed = Date.now() - splashShownAt;
+  if (splashElapsed < MIN_SPLASH_MS) await sleepMs(MIN_SPLASH_MS - splashElapsed);
   createWindow();
   createTray();
   setupAutoUpdater();
