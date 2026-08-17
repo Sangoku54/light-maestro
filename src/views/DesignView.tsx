@@ -1223,7 +1223,18 @@ const SceneEditor: React.FC = () => {
       </div>
       {/* Live 3D preview of the programmed scene */}
       <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-[540px] h-full">
-        <Stage3D bandConfig={bandConfig} stageScene={stageScene} onBandConfigChange={setBandConfig} onStageSceneChange={setStageScene} />
+        <Stage3D
+          bandConfig={bandConfig}
+          stageScene={stageScene}
+          onBandConfigChange={(cfg) => {
+            setBandConfig(cfg);
+            if (scene) updateScene(scene.id, { bandConfig: cfg });
+          }}
+          onStageSceneChange={(cfg) => {
+            setStageScene(cfg);
+            if (scene) updateScene(scene.id, { stageScene: cfg });
+          }}
+        />
       </div>
     </div>
   );
