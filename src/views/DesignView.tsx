@@ -3,7 +3,7 @@ import { generateAllThumbnails, getVariantsForCategory, type ThumbnailVariant } 
 import { useTranslation } from 'react-i18next';
 import { Plus, Play, Pause, Square, Trash2, GripVertical, Search, X, Edit2, Check, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Zap, Save, FolderPlus } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
-import { useShowStore, getFixtureColor, type PatchedFixture, type FixtureGroup, type SavedScene, type SavedChaser, type ChaserStep, type SavedCueList, type CueListCue, type ShowUniverse } from '../stores/showStore';
+import { useShowStore, getFixtureColor, type PatchedFixture, type FixtureGroup, type SavedScene, type SavedChaser, type ChaserStep, type SavedCueList, type CueListCue, type ShowUniverse, type BandConfig, type StageScene } from '../stores/showStore';
 import { ShowManager } from './ShowManager';
 import { Stage2DEditor } from './Stage2DEditor';
 import { Stage3D } from './Stage3D';
@@ -903,6 +903,8 @@ const SceneEditor: React.FC = () => {
   const [expandedFixtures, setExpandedFixtures] = useState<Set<string>>(new Set());
   const [fixtureAnalyses, setFixtureAnalyses] = useState<Map<string, AnalyzedFixtureChannels>>(new Map());
   const [testActive, setTestActive] = useState(false);
+  const [bandConfig, setBandConfig] = useState<BandConfig>('quintet');
+  const [stageScene, setStageScene] = useState<StageScene>('rear-front');
   const dmxPushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestChannelsRef = useRef<Record<number, number>>({});
 
@@ -916,6 +918,8 @@ const SceneEditor: React.FC = () => {
       setEditFadeIn(scene.fadeIn);
       setEditFadeOut(scene.fadeOut);
       setEditDuration(scene.duration);
+      setBandConfig(scene.bandConfig ?? 'quintet');
+      setStageScene(scene.stageScene ?? 'rear-front');
       setEditChannels({ ...scene.channels });
       latestChannelsRef.current = { ...scene.channels };
       // Push scene channels to DMX engine immediately
@@ -928,6 +932,8 @@ const SceneEditor: React.FC = () => {
       setEditFadeIn(1000);
       setEditFadeOut(1000);
       setEditDuration(5000);
+      setBandConfig('quintet');
+      setStageScene('rear-front');
       setEditChannels({});
       latestChannelsRef.current = {};
       // Blackout — clear entire DMX universe. Transient (2 s): the zeros
@@ -1007,6 +1013,8 @@ const SceneEditor: React.FC = () => {
         fadeIn: editFadeIn,
         fadeOut: editFadeOut,
         duration: editDuration,
+        bandConfig,
+        stageScene,
       });
       setSelectedSceneId(newId);
       (window as any).__lm_selectedSceneId = newId;
@@ -1017,6 +1025,8 @@ const SceneEditor: React.FC = () => {
         fadeIn: editFadeIn,
         fadeOut: editFadeOut,
         duration: editDuration,
+        bandConfig,
+        stageScene,
       });
     }
   };
@@ -1213,7 +1223,7 @@ const SceneEditor: React.FC = () => {
       </div>
       {/* Live 3D preview of the programmed scene */}
       <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-[540px] h-full">
-        <Stage3D />
+        <Stage3D bandConfig={bandConfig} stageScene={stageScene} onBandConfigChange={setBandConfig} onStageSceneChange={setStageScene} />
       </div>
     </div>
   );

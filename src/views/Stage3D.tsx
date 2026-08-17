@@ -19,7 +19,7 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { useShowStore, type PatchedFixture, type FixturePos } from '../stores/showStore';
+import { useShowStore, type PatchedFixture, type FixturePos, type BandConfig, type StageScene } from '../stores/showStore';
 import { analyzeFixtureChannels, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
 import { useAppStore } from '../stores/appStore';
 import {
@@ -64,7 +64,6 @@ function mulberry32(a: number) {
 // ─── Virtual musicians (config presets + image textures) ──
 
 type MusicianKind = 'vocal' | 'chanteuse' | 'guitar' | 'bass' | 'keys' | 'drums';
-type BandConfig = 'none' | 'solo' | 'solo-chanteuse' | 'duo' | 'trio' | 'quartet' | 'quintet' | 'sextet';
 
 interface MusicianDef {
   id: string;
@@ -295,7 +294,13 @@ interface Fixture3D {
 
 // ─── Component ────────────────────────────────────────────────
 
-export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabledFixtures }) => {
+export const Stage3D: React.FC<{
+  disabledFixtures?: Set<string>;
+  bandConfig?: BandConfig;
+  stageScene?: StageScene;
+  onBandConfigChange?: (cfg: BandConfig) => void;
+  onStageSceneChange?: (cfg: StageScene) => void;
+}> = ({ disabledFixtures, bandConfig: bandConfigProp, stageScene: stageSceneProp, onBandConfigChange, onStageSceneChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const disabledRef = useRef<Set<string>>(new Set());
   disabledRef.current = disabledFixtures ?? new Set();
@@ -317,7 +322,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
   const [showBeams, setShowBeams] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [showSmoke, setShowSmoke] = useState(true);
-  const [bandConfig, setBandConfig] = useState<BandConfig>('quintet');
+  const [bandConfigInternal, setBandConfigInternal] = useState<BandConfig>('quintet');
   const musicianPositionsRef = useRef<Record<string, { x: number; z: number }>>(buildPositions('quintet'));
   const dragMusicianRef = useRef<string | null>(null);
   const [fixtureDefsReady, setFixtureDefsReady] = useState(false);
@@ -325,8 +330,24 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
   const lastDmxFrameRef = useRef(performance.now());
 
   // ── Stage scene config ────────────────────────────
-  type StageScene = 'rear' | 'rear-front' | 'full';
-  const [stageScene, setStageScene] = useState<StageScene>('rear-front');
+  const [stageSceneInternal, setStageSceneInternal] = useState<StageScene>('rear-front');
+
+  // Controlled stage config (host supplies props) vs internal default
+  const bandConfig = bandConfigProp ?? bandConfigInternal;
+  const stageScene = stageSceneProp ?? stageSceneInternal;
+  const handleBandConfigChange = (cfg: BandConfig) => {
+    setBandConfigInternal(cfg);
+    onBandConfigChange?.(cfg);
+  };
+  const handleStageSceneChange = (cfg: StageScene) => {
+    setStageSceneInternal(cfg);
+    onStageSceneChange?.(cfg);
+  };
+
+  // Reset musician positions whenever the band preset changes (manual or via prop)
+  useEffect(() => {
+    musicianPositionsRef.current = bandConfig === 'none' ? {} : buildPositions(bandConfig);
+  }, [bandConfig]);
   const trussBeamsRef = useRef<{ back: THREE.Object3D | null; front: THREE.Object3D | null; left: THREE.Object3D | null; right: THREE.Object3D | null; poles: THREE.Object3D[] }>({ back: null, front: null, left: null, right: null, poles: [] });
   const [selectedFixtureId, setSelectedFixtureId] = useState<string | null>(null);
   const [showFixtureList, setShowFixtureList] = useState(false);
@@ -2105,7 +2126,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
           <LayoutGrid size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
           <select
             value={stageScene}
-            onChange={e => setStageScene(e.target.value as StageScene)}
+            onChange={e => handleStageSceneChange(e.target.value as StageScene)}
             className="bg-gray-800/40 text-gray-300 text-[10px] pl-7 pr-2 py-1 rounded border border-gray-700/40 appearance-none cursor-pointer hover:border-gray-600/60 focus:outline-none focus:border-purple-500/50"
             title="Configuration de scène"
           >
@@ -2155,7 +2176,7 @@ export const Stage3D: React.FC<{ disabledFixtures?: Set<string> }> = ({ disabled
             onChange={e => {
               const cfg = e.target.value as BandConfig;
               musicianPositionsRef.current = cfg === 'none' ? {} : buildPositions(cfg);
-              setBandConfig(cfg);
+              handleBandConfigChange(cfg);
             }}
             className="bg-gray-800/40 text-gray-300 text-[10px] pl-7 pr-2 py-1 rounded border border-gray-700/40 appearance-none cursor-pointer hover:border-gray-600/60 focus:outline-none focus:border-purple-500/50"
           >
