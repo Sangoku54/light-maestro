@@ -328,4 +328,16 @@ describe('generateLoopLibrary', () => {
     const ids = lib.map((l) => l.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
+
+  it('varies the actual step patterns, not just speed (no near-duplicates)', () => {
+    const onlyWash = [pf({ id: 'f1', fixtureDefId: 'wash-rgb', tier: 'primary', startAddress: 1 })];
+    const lib = generateLoopLibrary(onlyWash, defsOf(rgbWash), { count: 24, seed: 5 });
+    expect(lib.length).toBe(24);
+    // Every loop is a color-chase here; before the variety fix they all shared
+    // the same rotating sequence per palette → a tiny set of distinct frames.
+    const sigs = new Set(lib.map((l) => JSON.stringify(l.steps.map((s) => s.channels))));
+    expect(sigs.size).toBeGreaterThan(8);
+    // Names also vary (palette × mode), not just tier.
+    expect(new Set(lib.map((l) => l.name)).size).toBeGreaterThan(4);
+  });
 });

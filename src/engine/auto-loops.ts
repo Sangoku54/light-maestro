@@ -127,35 +127,85 @@ function put(frame: Record<number, number>, addr: number, value: number): void {
   frame[addr] = Math.max(0, Math.min(255, Math.round(value)));
 }
 
+type RGB = readonly [number, number, number];
+
+/** Pick one element using the PRNG (deterministic per seed). */
+function pickFrom<T>(arr: readonly T[], rng: () => number): T {
+  return arr[Math.floor(rng() * arr.length)];
+}
+
+/** Return a shuffled copy (Fisher-Yates), deterministic per seed. */
+function shuffled<T>(arr: readonly T[], rng: () => number): T[] {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/** Write an RGB color into every RGB segment of a fixture, zeroing the white. */
+function writeColor(frame: Record<number, number>, pf: PatchedFixture, analysis: ChannelAnalysis, c: RGB): void {
+  for (const seg of analysis.rgbSegments) {
+    put(frame, absAddr(pf, seg.r), c[0]);
+    put(frame, absAddr(pf, seg.g), c[1]);
+    put(frame, absAddr(pf, seg.b), c[2]);
+    if (seg.w !== null) put(frame, absAddr(pf, seg.w), 0);
+  }
+}
+
+/** Full intensity + open shutter (self-contained "on" state). */
+function writeFullOn(frame: Record<number, number>, pf: PatchedFixture, analysis: ChannelAnalysis): void {
+  if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), 255);
+  if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), 255);
+}
+
+type ChaseMode = 'rotate' | 'wave' | 'alternate';
+
+interface BuildOptions {
+  /** Palette label (only used for the name/id in the library). */
+  variant?: string;
+  direction?: AutoLoop['direction'];
+  /** Per-loop PRNG — when set, the loop varies its color order/mode/rotation. */
+  rng?: () => number;
+}
+
 function buildColorChase(
   tier: FixtureTier,
   fixtures: AnalyzedFixture[],
-  colors: ReadonlyArray<readonly [number, number, number]>,
+  colors: ReadonlyArray<RGB>,
   speedBpm: number,
-  variant?: string,
-  direction: AutoLoop['direction'] = 'forward',
+  opts: BuildOptions = {},
 ): AutoLoop {
-  const steps: AutoLoopStep[] = colors.map((_, stepIdx) => {
+  const { variant, direction = 'forward', rng } = opts;
+  // Library path (rng present): shuffle the color order + pick a chase mode +
+  // a rotation offset, so two loops sharing a palette still differ. The
+  // deterministic path (no rng) keeps the classic rotating chase.
+  const ordered = rng ? shuffled(colors, rng) : colors.slice();
+  const n = Math.max(1, ordered.length);
+  const mode: ChaseMode = rng ? pickFrom(['rotate', 'wave', 'alternate'], rng) : 'rotate';
+  const rot = rng ? Math.floor(rng() * n) : 0;
+  const stepCount = rng ? 3 + Math.floor(rng() * Math.min(4, n)) : n;
+
+  const steps: AutoLoopStep[] = [];
+  for (let s = 0; s < stepCount; s++) {
     const frame: Record<number, number> = {};
     for (let i = 0; i < fixtures.length; i++) {
       const { pf, analysis } = fixtures[i];
-      // Rotating chase: fixture i shows color (i + stepIdx) % colors.length.
-      const c = colors[(i + stepIdx) % colors.length];
-      for (const seg of analysis.rgbSegments) {
-        put(frame, absAddr(pf, seg.r), c[0]);
-        put(frame, absAddr(pf, seg.g), c[1]);
-        put(frame, absAddr(pf, seg.b), c[2]);
-        if (seg.w !== null) put(frame, absAddr(pf, seg.w), 0);
-      }
-      if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), 255);
-      if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), 255);
+      let idx: number;
+      if (mode === 'wave') idx = (s + rot) % n;
+      else if (mode === 'alternate') idx = ((i % 2) + (s % 2) + rot) % n;
+      else idx = (i + s + rot) % n;
+      writeColor(frame, pf, analysis, ordered[idx]);
+      writeFullOn(frame, pf, analysis);
     }
-    return { channels: frame };
-  });
+    steps.push({ channels: frame });
+  }
 
+  const name = variant ? `Chase · ${variant} · ${mode} · ${tier}` : `Color chase · ${tier}`;
   return {
-    id: variant ? `auto-cc-${tier}-${variant}` : `auto-cc-${tier}`,
-    name: variant ? `Chase · ${variant} · ${tier}` : `Color chase · ${tier}`,
+    id: variant ? `auto-cc-${tier}-${variant}-${mode}` : `auto-cc-${tier}`,
+    name,
     tier,
     kind: 'color-chase',
     fixtureIds: fixtures.map((f) => f.pf.id),
@@ -165,23 +215,36 @@ function buildColorChase(
   };
 }
 
+interface MovementOptions {
+  pattern?: MovementPattern;
+  direction?: AutoLoop['direction'];
+  /** Per-loop PRNG — varies center, phase and step count. */
+  rng?: () => number;
+}
+
 function buildMovementLoop(
   tier: FixtureTier,
   fixtures: AnalyzedFixture[],
   movementSteps: number,
   radius: number,
   speedBpm: number,
-  pattern: MovementPattern = MOVEMENT_PATTERNS[0],
-  direction: AutoLoop['direction'] = 'forward',
+  opts: MovementOptions = {},
 ): AutoLoop {
+  const { pattern = MOVEMENT_PATTERNS[0], direction = 'forward', rng } = opts;
   const amp = Math.max(0, Math.min(128, radius));
+  // Center jitter (library only) — moves the whole pattern around the stage.
+  const cx = rng ? DMX_CENTER + Math.round((rng() - 0.5) * 28) : DMX_CENTER;
+  const cy = rng ? DMX_CENTER + Math.round((rng() - 0.5) * 28) : DMX_CENTER;
+  const phase = rng ? rng() : 0;
+  const stepCount = rng ? 6 + Math.floor(rng() * 7) : movementSteps; // 6..12
   const steps: AutoLoopStep[] = [];
-  for (let step = 0; step < movementSteps; step++) {
-    const [pan, tilt] = pattern.at(step / movementSteps, amp);
+  for (let step = 0; step < stepCount; step++) {
+    const t = (step / stepCount + phase) % 1;
+    const [pan, tilt] = pattern.at(t, amp);
     const frame: Record<number, number> = {};
     for (const { pf, analysis } of fixtures) {
-      for (const off of analysis.panOffsets) put(frame, absAddr(pf, off), pan);
-      for (const off of analysis.tiltOffsets) put(frame, absAddr(pf, off), tilt);
+      for (const off of analysis.panOffsets) put(frame, absAddr(pf, off), cx + (pan - DMX_CENTER));
+      for (const off of analysis.tiltOffsets) put(frame, absAddr(pf, off), cy + (tilt - DMX_CENTER));
       if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), 255);
       if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), 255);
     }
@@ -200,27 +263,37 @@ function buildMovementLoop(
   };
 }
 
+type PulseWaveform = 'sine' | 'square' | 'saw';
+
 function buildDimmerPulse(
   tier: FixtureTier,
   fixtures: AnalyzedFixture[],
   speedBpm: number,
+  opts: { rng?: () => number } = {},
 ): AutoLoop {
-  // Smooth sine pulse: 8 steps from 0 → 255 → 0.
-  const pulseSteps = 8;
+  const rng = opts.rng;
+  const waveform: PulseWaveform = rng ? pickFrom(['sine', 'square', 'saw'], rng) : 'sine';
+  const stepCount = rng ? 8 + Math.floor(rng() * 9) : 8; // 8..16
+  const valueAt = (t: number): number => {
+    if (waveform === 'square') return t < 0.5 ? 255 : 0;
+    if (waveform === 'saw') return Math.round(255 * t);
+    return Math.round(255 * (0.5 + 0.5 * Math.sin(t * Math.PI * 2 - Math.PI / 2)));
+  };
   const steps: AutoLoopStep[] = [];
-  for (let step = 0; step < pulseSteps; step++) {
-    const t = step / pulseSteps;
-    const v = Math.round(255 * (0.5 + 0.5 * Math.sin(t * Math.PI * 2 - Math.PI / 2)));
+  for (let step = 0; step < stepCount; step++) {
     const frame: Record<number, number> = {};
-    for (const { pf, analysis } of fixtures) {
-      if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), v);
+    for (let i = 0; i < fixtures.length; i++) {
+      const { pf, analysis } = fixtures[i];
+      // Stagger each fixture's pulse phase (library only) → a "wave" across rig.
+      const t = rng ? (step / stepCount + i / Math.max(1, fixtures.length)) % 1 : step / stepCount;
+      if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), valueAt(t));
     }
     steps.push({ channels: frame });
   }
 
   return {
     id: `auto-dp-${tier}`,
-    name: `Dimmer pulse · ${tier}`,
+    name: rng ? `Pulse · ${waveform} · ${tier}` : `Dimmer pulse · ${tier}`,
     tier,
     kind: 'dimmer-pulse',
     fixtureIds: fixtures.map((f) => f.pf.id),
@@ -234,9 +307,18 @@ function buildStrobeLoop(
   tier: FixtureTier,
   fixtures: AnalyzedFixture[],
   speedBpm: number,
+  opts: { rng?: () => number } = {},
 ): AutoLoop {
-  // Hard on/off via the shutter channel; full intensity on the "on" frames.
-  const steps: AutoLoopStep[] = [0, 1].map((on) => {
+  const rng = opts.rng;
+  // single / double / triple flash patterns (on/off frames).
+  const pattern = rng ? pickFrom(['single', 'double', 'triple'], rng) : 'single';
+  const onOff: number[] =
+    pattern === 'double'
+      ? [1, 0, 1, 0, 0, 0]
+      : pattern === 'triple'
+        ? [1, 0, 1, 0, 1, 0, 0, 0, 0, 0]
+        : [1, 0];
+  const steps: AutoLoopStep[] = onOff.map((on) => {
     const frame: Record<number, number> = {};
     for (const { pf, analysis } of fixtures) {
       if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), on ? 255 : 0);
@@ -247,7 +329,7 @@ function buildStrobeLoop(
 
   return {
     id: `auto-st-${tier}`,
-    name: `Strobe · ${tier}`,
+    name: rng ? `Strobe · ${pattern} · ${tier}` : `Strobe · ${tier}`,
     tier,
     kind: 'strobe',
     fixtureIds: fixtures.map((f) => f.pf.id),
@@ -382,20 +464,20 @@ export function generateLoopLibrary(
     switch (kind) {
       case 'color-chase': {
         const pal = pick(PALETTES);
-        loop = buildColorChase(tier, cap.rgb, pal.colors, speed, pal.name, direction);
+        loop = buildColorChase(tier, cap.rgb, pal.colors, speed, { variant: pal.name, direction, rng });
         break;
       }
       case 'movement': {
         const pattern = pick(MOVEMENT_PATTERNS);
         const radius = 36 + Math.floor(rng() * 81); // 36..116
-        loop = buildMovementLoop(tier, cap.movers, 8, radius, speed, pattern, direction);
+        loop = buildMovementLoop(tier, cap.movers, 8, radius, speed, { pattern, direction, rng });
         break;
       }
       case 'dimmer-pulse':
-        loop = buildDimmerPulse(tier, cap.dimmers, speed);
+        loop = buildDimmerPulse(tier, cap.dimmers, speed, { rng });
         break;
       case 'strobe':
-        loop = buildStrobeLoop(tier, cap.shutters, speed);
+        loop = buildStrobeLoop(tier, cap.shutters, speed, { rng });
         break;
       default:
         return undefined;
