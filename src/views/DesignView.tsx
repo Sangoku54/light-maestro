@@ -698,7 +698,7 @@ const SceneList: React.FC = () => {
             <div
               key={scene.id}
               draggable
-              onClick={() => setSelectedSceneId(scene.id)}
+              onClick={() => setSelectedSceneId(isSelected ? null : scene.id)}
               onDragStart={(e) => {
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', scene.id);
