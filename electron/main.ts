@@ -102,6 +102,7 @@ function ensureBuilt(): void {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let splashWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 const dmxEngine = new DMXEngine();
@@ -113,6 +114,44 @@ void midiManager.loadMapping();
 const audioAnalyzer = new AudioAnalyzer();
 const remoteServer = new RemoteServer();
 const oscServer = new OscServer();
+
+// ─── Splash screen (animated loading window) ────────────────
+function createSplashWindow() {
+  splashWindow = new BrowserWindow({
+    width: 520,
+    height: 360,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    center: true,
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  const splashPath = app.isPackaged
+    ? path.join(__dirname, '../renderer/splash.html')
+    : path.join(__dirname, '../../public/splash.html');
+  splashWindow.loadFile(splashPath);
+  splashWindow.once('ready-to-show', () => {
+    if (splashWindow && !splashWindow.isDestroyed()) splashWindow.show();
+  });
+}
+
+function closeSplash() {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.close();
+  }
+  splashWindow = null;
+}
 
 function createWindow() {
   const isDev = !app.isPackaged;
@@ -137,9 +176,28 @@ function createWindow() {
   remoteServer.setMainWindow(mainWindow);
   oscServer.setMainWindow(mainWindow);
 
-  // Maximize at launch
-  mainWindow.maximize();
-  mainWindow.show();
+  // Show the main window once its first frame is painted, keeping the
+  // animated splash visible until then (with a minimum display time so the
+  // intro animation is actually seen, plus a safety fallback in case the
+  // renderer never signals ready).
+  const showMain = () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.maximize();
+      mainWindow.show();
+    }
+  };
+  let mainRevealed = false;
+  const revealMain = () => {
+    if (mainRevealed) return;
+    mainRevealed = true;
+    closeSplash();
+    showMain();
+  };
+  mainWindow.once('ready-to-show', () => {
+    setTimeout(revealMain, splashWindow ? 500 : 0);
+  });
+  mainWindow.webContents.on('did-fail-load', () => revealMain());
+  setTimeout(revealMain, 15_000);
 
   // Open DevTools after page loads (calling before load causes them to be hidden)
   const openDev = () => { try { mainWindow?.webContents.openDevTools({ mode: 'bottom' }); } catch {} };
@@ -731,6 +789,7 @@ ipcMain.handle('app:get-crash-logs', async () => crashLogger.listLogs());
 ipcMain.handle('app:read-crash-log', async (_event, filename: string) => crashLogger.readLog(filename));
 
 app.whenReady().then(async () => {
+  createSplashWindow();
   createWindow();
   createTray();
   setupAutoUpdater();

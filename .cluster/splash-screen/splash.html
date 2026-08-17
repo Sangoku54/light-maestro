@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Light Maestro</title>
+<style>
+  /* ============================================================
+     Light Maestro — Splash Screen
+     100% self-contained: no external CSS/JS/fonts, no network.
+     Target: Electron frameless window 520×360, transparent bg.
+     ============================================================ */
+
+  :root {
+    --bg: #0a0a0f;
+    --panel: #12121a;
+    --border: #1f1f2e;
+    --violet: #a855f7;
+    --violet-light: #c084fc;
+    --ivory: #ede8dc;
+    --white: #ffffff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+  }
+
+  /* ---------- Ambient violet glow (behind the card) ---------- */
+  .ambient {
+    position: fixed;
+    inset: -25%;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(
+      circle at 50% 42%,
+      rgba(168, 85, 247, 0.22) 0%,
+      rgba(168, 85, 247, 0.07) 38%,
+      rgba(168, 85, 247, 0) 68%
+    );
+    animation: ambientPulse 3.6s ease-in-out infinite;
+    will-change: opacity, transform;
+  }
+
+  @keyframes ambientPulse {
+    0%, 100% { opacity: 0.65; transform: scale(1); }
+    50%      { opacity: 1.00; transform: scale(1.07); }
+  }
+
+  /* ---------- Rounded card ---------- */
+  .splash-card {
+    position: relative;
+    z-index: 1;
+    width: 470px;
+    height: 340px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 26px 34px 24px;
+    background: linear-gradient(160deg, #12121a 0%, #0a0a0f 100%);
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    overflow: hidden;
+    box-shadow:
+      0 12px 44px rgba(0, 0, 0, 0.55),
+      0 0 70px rgba(168, 85, 247, 0.10),
+      inset 0 0 0 1px rgba(168, 85, 247, 0.05);
+  }
+
+  /* soft violet wash behind the logo, clipped by the rounded card */
+  .splash-card::before {
+    content: '';
+    position: absolute;
+    top: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 300px;
+    height: 240px;
+    background: radial-gradient(
+      circle at 50% 30%,
+      rgba(168, 85, 247, 0.12) 0%,
+      rgba(168, 85, 247, 0) 68%
+    );
+    pointer-events: none;
+  }
+
+  /* ---------- Logo ---------- */
+  .logo-wrap {
+    position: relative;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 2px;
+  }
+  .logo-wrap svg {
+    width: 180px;
+    height: 180px;
+    display: block;
+    overflow: visible;
+  }
+
+  .logo-svg {
+    animation: logoIn 0.25s ease-out both;
+  }
+  @keyframes logoIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  /* Baton — draw-on from base (180.5,363.7) toward tip (300,240).
+     Path length ≈ 172 → dash 190 (absorbs round cap) → offset 190→0. */
+  .baton-core,
+  .baton-body {
+    stroke-dasharray: 190;
+    stroke-dashoffset: 190;
+  }
+  .baton-core { animation: drawTo 0.35s ease-out 0s both; }
+  .baton-body { animation: drawTo 0.35s ease-out 0.04s both; }
+
+  .baton-glow {
+    opacity: 0;
+    animation: glowFade 0.5s ease-out 0.06s both;
+  }
+  @keyframes glowFade {
+    from { opacity: 0; }
+    to   { opacity: 0.10; }
+  }
+
+  @keyframes drawTo {
+    to { stroke-dashoffset: 0; }
+  }
+
+  /* Beams — fan out from the tip (300,240).
+     transform-box: view-box so the origin is expressed in viewBox units. */
+  .beam {
+    transform-box: view-box;
+    transform-origin: 300px 240px;
+    opacity: 0;
+    animation: beamFan 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+    will-change: transform, opacity;
+  }
+  .beam-0 { --rot: -6deg; animation-delay: 0.30s; }
+  .beam-1 { --rot: -3deg; animation-delay: 0.36s; }
+  .beam-2 { --rot:  0deg; animation-delay: 0.42s; }
+  .beam-3 { --rot:  3deg; animation-delay: 0.48s; }
+  .beam-4 { --rot:  6deg; animation-delay: 0.54s; }
+
+  @keyframes beamFan {
+    from { opacity: 0; transform: scale(0.12) rotate(var(--rot, 0deg)); }
+    to   { opacity: 1; transform: scale(1) rotate(0deg); }
+  }
+
+  /* Central white beam — draw-on. Length ≈ 200 → dash 220. */
+  .central {
+    stroke-dasharray: 220;
+    stroke-dashoffset: 220;
+    animation: drawTo 0.3s ease-out 0.72s both;
+  }
+
+  /* Sunburst (core circle + 8 rays) — gentle pop. */
+  .sunburst {
+    transform-box: view-box;
+    transform-origin: 300px 240px;
+    opacity: 0;
+    animation: pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.92s both;
+    will-change: transform, opacity;
+  }
+  @keyframes pop {
+    from { opacity: 0; transform: scale(0); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  /* Halo (r=58) — fade in, then slow continuous pulse. */
+  .halo-wrap {
+    opacity: 0;
+    animation: haloIn 0.6s ease-out 0.85s both;
+  }
+  .halo {
+    transform-box: view-box;
+    transform-origin: 300px 240px;
+    animation: haloPulse 2.6s ease-in-out 1.0s infinite;
+    will-change: transform, opacity;
+  }
+  @keyframes haloIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes haloPulse {
+    0%, 100% { transform: scale(1);    opacity: 0.6; }
+    50%      { transform: scale(1.15); opacity: 1; }
+  }
+
+  /* ---------- Wordmark ---------- */
+  .wordmark {
+    position: relative;
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    margin-top: 10px;
+  }
+  .word-light,
+  .word-maestro {
+    font-weight: 700;
+    text-transform: uppercase;
+    text-align: center;
+    letter-spacing: 0.35em;
+    padding-left: 0.35em; /* compensate trailing letter-space for true centering */
+    opacity: 0;
+    white-space: nowrap;
+  }
+  .word-light {
+    color: #f3f4f6;
+    font-size: 26px;
+    line-height: 1.15;
+    animation: trackingIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) 1.35s both;
+  }
+  .word-maestro {
+    color: #9ca3af;
+    font-size: 24px;
+    line-height: 1.15;
+    animation: trackingIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) 1.45s both;
+  }
+  @keyframes trackingIn {
+    from { opacity: 0; letter-spacing: 0.5em; }
+    to   { opacity: 1; letter-spacing: 0.35em; }
+  }
+
+  /* ---------- Progress bar (indeterminate) ---------- */
+  .progress {
+    position: relative;
+    flex: 0 0 auto;
+    margin-top: auto;
+    width: 70%;
+    opacity: 0;
+    animation: fadeIn 0.5s ease-out 1.6s both;
+  }
+  .progress-track {
+    position: relative;
+    width: 100%;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--border);
+    overflow: hidden;
+  }
+  .progress-thumb {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 30%;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #8b5cf6 0%, #c084fc 100%);
+    box-shadow: 0 0 8px rgba(192, 132, 252, 0.55);
+    animation: slide 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+    will-change: transform;
+  }
+  @keyframes slide {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(333%); }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+  <div class="ambient"></div>
+
+  <div class="splash-card">
+    <div class="logo-wrap">
+      <!-- ===== Light Maestro logo v5 (inlined, geometry & colors preserved) ===== -->
+      <svg class="logo-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+        <defs>
+          <linearGradient id="fan0" gradientUnits="userSpaceOnUse" x1="300" y1="240" x2="334.93" y2="75.67">
+            <stop offset="0%" stop-color="#a855f7" stop-opacity="0.9"/>
+            <stop offset="100%" stop-color="#a855f7" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="fan1" gradientUnits="userSpaceOnUse" x1="300" y1="240" x2="431.99" y2="103.33">
+            <stop offset="0%" stop-color="#c084fc" stop-opacity="0.95"/>
+            <stop offset="100%" stop-color="#c084fc" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="fan2" gradientUnits="userSpaceOnUse" x1="300" y1="240" x2="463.01" y2="199.36">
+            <stop offset="0%" stop-color="#a855f7" stop-opacity="0.9"/>
+            <stop offset="100%" stop-color="#a855f7" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="thin0" gradientUnits="userSpaceOnUse" x1="300" y1="240" x2="364.79" y2="118.15">
+            <stop offset="0%" stop-color="#c084fc" stop-opacity="0.55"/>
+            <stop offset="100%" stop-color="#c084fc" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="thin1" gradientUnits="userSpaceOnUse" x1="300" y1="240" x2="419.51" y2="171.00">
+            <stop offset="0%" stop-color="#c084fc" stop-opacity="0.55"/>
+            <stop offset="100%" stop-color="#c084fc" stop-opacity="0"/>
+          </linearGradient>
+          <radialGradient id="tipglow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="rgba(255,255,255,0.55)"/>
+            <stop offset="40%" stop-color="rgba(255,255,255,0.20)"/>
+            <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+          </radialGradient>
+        </defs>
+
+        <!-- 5 purple beams -->
+        <g class="beam beam-0"><path d="M300,240 L311.72,72.41 L357.46,82.13 Z" fill="url(#fan0)"/></g>
+        <g class="beam beam-1"><path d="M300,240 L408.98,84.36 L451.74,125.66 Z" fill="url(#fan1)"/></g>
+        <g class="beam beam-2"><path d="M300,240 L455.77,177.07 L467.08,222.44 Z" fill="url(#fan2)"/></g>
+        <g class="beam beam-3"><path d="M300,240 L358.32,114.93 L371.08,121.71 Z" fill="url(#thin0)"/></g>
+        <g class="beam beam-4"><path d="M300,240 L415.74,164.84 L422.96,177.35 Z" fill="url(#thin1)"/></g>
+
+        <!-- central white beam -->
+        <line class="central" x1="300" y1="240" x2="438.93" y2="96.13" stroke="#ffffff" stroke-width="4" stroke-linecap="round" opacity="0.8"/>
+
+        <!-- halo -->
+        <g class="halo-wrap">
+          <circle class="halo" cx="300" cy="240" r="58.0" fill="url(#tipglow)"/>
+        </g>
+
+        <!-- baton (glow → body → core) -->
+        <line class="baton-glow" x1="180.5" y1="363.7" x2="300.0" y2="240.0" stroke="rgba(255,255,255,0.10)" stroke-width="26" stroke-linecap="round"/>
+        <line class="baton-body" x1="180.5" y1="363.7" x2="300.0" y2="240.0" stroke="#ede8dc" stroke-width="13" stroke-linecap="round" opacity="0.72"/>
+        <line class="baton-core" x1="180.5" y1="363.7" x2="300.0" y2="240.0" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.95"/>
+
+        <!-- sunburst -->
+        <g class="sunburst">
+          <circle cx="300" cy="240" r="7.5" fill="#ffffff"/>
+          <g stroke="#ffffff" stroke-width="2" stroke-linecap="round" opacity="0.9"><line x1="311.0" y1="240.0" x2="318.0" y2="240.0"/><line x1="307.8" y1="247.8" x2="312.7" y2="252.7"/><line x1="300.0" y1="251.0" x2="300.0" y2="258.0"/><line x1="292.2" y1="247.8" x2="287.3" y2="252.7"/><line x1="289.0" y1="240.0" x2="282.0" y2="240.0"/><line x1="292.2" y1="232.2" x2="287.3" y2="227.3"/><line x1="300.0" y1="229.0" x2="300.0" y2="222.0"/><line x1="307.8" y1="232.2" x2="312.7" y2="227.3"/></g>
+        </g>
+      </svg>
+    </div>
+
+    <div class="wordmark">
+      <div class="word-light">Light</div>
+      <div class="word-maestro">Maestro</div>
+    </div>
+
+    <div class="progress">
+      <div class="progress-track">
+        <div class="progress-thumb"></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
