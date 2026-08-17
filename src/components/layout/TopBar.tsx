@@ -41,7 +41,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
   };
 
   return (
-    <header className="h-12 bg-[#0d0d14] border-b border-gray-800 flex items-center px-3 gap-2 select-none drag-region relative">
+    <header className="h-12 bg-[#0d0d14] border-b border-gray-800 flex items-center pl-3 pr-[150px] gap-2 select-none drag-region relative">
       {/* Logo */}
       <div className="flex items-center gap-2 mr-2 ml-2 no-drag">
         <img src={logoIcon} alt="Light Maestro" className="w-7 h-7" />

@@ -199,6 +199,15 @@ function createWindow() {
     minHeight: 700,
     title: 'Light Maestro',
     backgroundColor: '#0a0a0f',
+    // Frameless title bar with native window controls (min/max/close) kept
+    // as an overlay: no white Windows title bar, but the window can still be
+    // closed/minimized/maximized and dragged via the TopBar's drag-region.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#0d0d14',
+      symbolColor: '#cbd5e1',
+      height: 48,
+    },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
