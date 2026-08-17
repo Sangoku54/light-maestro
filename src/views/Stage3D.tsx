@@ -19,7 +19,7 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { useShowStore, type PatchedFixture, type FixturePos, type BandConfig, type StageScene } from '../stores/showStore';
+import { useShowStore, type PatchedFixture, type FixturePos, type StageScene } from '../stores/showStore';
 import { analyzeFixtureChannels, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
 import { useAppStore } from '../stores/appStore';
 import {
@@ -30,12 +30,14 @@ import {
   type DmxFixtureCapability,
 } from '../hooks/dmx-cues';
 import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X, LayoutGrid, Music, Zap, List, Search, Crosshair } from 'lucide-react';
-import clavierImg from '../assets/musicians/clavier.png';
-import chanteuseImg from '../assets/musicians/chanteuse.png';
-import chanteurImg from '../assets/musicians/chanteur.png';
-import batteurImg from '../assets/musicians/batteur.png';
-import bassisteImg from '../assets/musicians/bassiste.jpg';
-import guitaristeImg from '../assets/musicians/guitariste.png';
+import { DEFAULT_POSITIONS, DEFAULT_ROSTER, MUSICIAN_KINDS, MUSICIAN_LABELS, isRosterEmpty, normalizeRoster, rosterTotal, type MusicianKind, type MusicianRoster } from '../utils/musicians';
+import clavierImg from '../assets/musicians/clavier.svg';
+import chanteuseImg from '../assets/musicians/chanteuse.svg';
+import chanteurImg from '../assets/musicians/chanteur.svg';
+import batteurImg from '../assets/musicians/batteur.svg';
+import bassisteImg from '../assets/musicians/bassiste.svg';
+import guitaristeImg from '../assets/musicians/guitariste.svg';
+import cuivreImg from '../assets/musicians/cuivre.svg';
 import { sendFixtureOn, sendFixtureOff } from '../utils/dmx-helpers';
 import { fixtureTestState } from '../utils/fixture-test-state';
 
@@ -61,58 +63,51 @@ function mulberry32(a: number) {
   };
 }
 
-// ─── Virtual musicians (config presets + image textures) ──
-
-type MusicianKind = 'vocal' | 'chanteuse' | 'guitar' | 'bass' | 'keys' | 'drums';
-
-interface MusicianDef {
-  id: string;
-  kind: MusicianKind;
-  x: number; // 0..1 left → right
-  z: number; // 0..1 front → back
-}
+// ─── Virtual musicians (free-form roster + SVG silhouette textures) ──
 
 const MUSICIAN_IMAGES: Record<MusicianKind, string> = {
-  vocal: chanteurImg,
+  chanteur: chanteurImg,
   chanteuse: chanteuseImg,
-  guitar: guitaristeImg,
-  bass: bassisteImg,
-  keys: clavierImg,
-  drums: batteurImg,
+  guitariste: guitaristeImg,
+  bassiste: bassisteImg,
+  clavier: clavierImg,
+  batteur: batteurImg,
+  cuivre: cuivreImg,
 };
 
 const MUSICIAN_HEIGHTS: Record<MusicianKind, number> = {
-  vocal: 1.75,
+  chanteur: 1.75,
   chanteuse: 1.7,
-  guitar: 1.75,
-  bass: 1.75,
-  keys: 1.65,
-  drums: 1.6,
+  guitariste: 1.75,
+  bassiste: 1.75,
+  clavier: 1.65,
+  batteur: 1.6,
+  cuivre: 1.7,
 };
 
 // Beam cone length (m) — portée du faisceau (divisée par 2)
 const BEAM_LENGTH = 12.5;
 
-const VOCAL: MusicianDef = { id: 'vocal', kind: 'vocal', x: 0.50, z: 0.09 };
-const CHANTEUSE: MusicianDef = { id: 'chanteuse', kind: 'chanteuse', x: 0.68, z: 0.10 };
-const GUITAR: MusicianDef = { id: 'guitar', kind: 'guitar', x: 0.34, z: 0.60 };
-const BASS: MusicianDef = { id: 'bass', kind: 'bass', x: 0.66, z: 0.60 };
-const DRUMS: MusicianDef = { id: 'drums', kind: 'drums', x: 0.50, z: 0.85 };
-const KEYS: MusicianDef = { id: 'keys', kind: 'keys', x: 0.24, z: 0.875 };
+// Horizontal spacing between two instances of the same kind (fraction of stage).
+const MUSICIAN_SPREAD = 0.16;
 
-const BAND_PRESETS: Record<Exclude<BandConfig, 'none'>, MusicianDef[]> = {
-  solo: [VOCAL],
-  'solo-chanteuse': [CHANTEUSE],
-  duo: [VOCAL, GUITAR],
-  trio: [VOCAL, GUITAR, DRUMS],
-  quartet: [VOCAL, GUITAR, BASS, DRUMS],
-  quintet: [VOCAL, GUITAR, BASS, DRUMS, KEYS],
-  sextet: [VOCAL, CHANTEUSE, GUITAR, BASS, DRUMS, KEYS],
-};
+function clamp01(v: number): number {
+  return Math.min(1, Math.max(0, v));
+}
 
-function buildPositions(cfg: Exclude<BandConfig, 'none'>): Record<string, { x: number; z: number }> {
+// Build per-instance positions (id `${kind}-${i}`) from a roster, spreading
+// multiple members of the same kind horizontally around the default x.
+function buildRosterPositions(roster: MusicianRoster): Record<string, { x: number; z: number }> {
   const map: Record<string, { x: number; z: number }> = {};
-  for (const p of BAND_PRESETS[cfg]) map[p.id] = { x: p.x, z: p.z };
+  for (const kind of MUSICIAN_KINDS) {
+    const count = roster[kind] ?? 0;
+    if (count <= 0) continue;
+    const base = DEFAULT_POSITIONS[kind];
+    for (let i = 0; i < count; i++) {
+      const offset = (i - (count - 1) / 2) * MUSICIAN_SPREAD;
+      map[`${kind}-${i}`] = { x: clamp01(base.x + offset), z: base.z };
+    }
+  }
   return map;
 }
 
@@ -215,11 +210,20 @@ async function loadCutoutTexture(url: string): Promise<THREE.CanvasTexture> {
   const pad = 2;
   const cw = maxX - minX + 1 + pad * 2;
   const ch = maxY - minY + 1 + pad * 2;
+
+  // White halo: draw the dark silhouette onto a padded canvas with a soft
+  // white glow so the figure reads clearly against the near-black stage.
+  const glow = 18; // px of halo around the figure
   const out = document.createElement('canvas');
-  out.width = cw;
-  out.height = ch;
+  out.width = cw + glow * 2;
+  out.height = ch + glow * 2;
   const octx = out.getContext('2d')!;
-  octx.drawImage(c, minX - pad, minY - pad, cw, ch, 0, 0, cw, ch);
+  octx.shadowColor = 'rgba(255,255,255,0.85)';
+  octx.shadowBlur = glow;
+  octx.drawImage(c, minX - pad, minY - pad, cw, ch, glow, glow, cw, ch);
+  // Second pass strengthens the core without widening the halo further.
+  octx.drawImage(c, minX - pad, minY - pad, cw, ch, glow, glow, cw, ch);
+  octx.shadowBlur = 0;
   return new THREE.CanvasTexture(out);
 }
 
@@ -296,11 +300,11 @@ interface Fixture3D {
 
 export const Stage3D: React.FC<{
   disabledFixtures?: Set<string>;
-  bandConfig?: BandConfig;
+  musicians?: MusicianRoster;
   stageScene?: StageScene;
-  onBandConfigChange?: (cfg: BandConfig) => void;
+  onMusiciansChange?: (roster: MusicianRoster) => void;
   onStageSceneChange?: (cfg: StageScene) => void;
-}> = ({ disabledFixtures, bandConfig: bandConfigProp, stageScene: stageSceneProp, onBandConfigChange, onStageSceneChange }) => {
+}> = ({ disabledFixtures, musicians: musiciansProp, stageScene: stageSceneProp, onMusiciansChange, onStageSceneChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const disabledRef = useRef<Set<string>>(new Set());
   disabledRef.current = disabledFixtures ?? new Set();
@@ -322,8 +326,8 @@ export const Stage3D: React.FC<{
   const [showBeams, setShowBeams] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [showSmoke, setShowSmoke] = useState(true);
-  const [bandConfigInternal, setBandConfigInternal] = useState<BandConfig>('quintet');
-  const musicianPositionsRef = useRef<Record<string, { x: number; z: number }>>(buildPositions('quintet'));
+  const [musiciansInternal, setMusiciansInternal] = useState<MusicianRoster>(DEFAULT_ROSTER);
+  const musicianPositionsRef = useRef<Record<string, { x: number; z: number }>>(buildRosterPositions(DEFAULT_ROSTER));
   const dragMusicianRef = useRef<string | null>(null);
   const [fixtureDefsReady, setFixtureDefsReady] = useState(false);
   const [lightOn, setLightOn] = useState(false);
@@ -333,25 +337,29 @@ export const Stage3D: React.FC<{
   const [stageSceneInternal, setStageSceneInternal] = useState<StageScene>('rear-front');
 
   // Controlled stage config (host supplies props) vs internal default
-  const bandConfig = bandConfigProp ?? bandConfigInternal;
+  const musicians = musiciansProp ?? musiciansInternal;
   const stageScene = stageSceneProp ?? stageSceneInternal;
-  const handleBandConfigChange = (cfg: BandConfig) => {
-    setBandConfigInternal(cfg);
-    onBandConfigChange?.(cfg);
+  const handleMusiciansChange = (roster: MusicianRoster) => {
+    const next = normalizeRoster(roster);
+    setMusiciansInternal(next);
+    onMusiciansChange?.(next);
   };
   const handleStageSceneChange = (cfg: StageScene) => {
     setStageSceneInternal(cfg);
     onStageSceneChange?.(cfg);
   };
 
-  // Reset musician positions whenever the band preset changes (manual or via prop)
+  // Reset musician positions whenever the roster changes (manual or via prop)
   useEffect(() => {
-    musicianPositionsRef.current = bandConfig === 'none' ? {} : buildPositions(bandConfig);
-  }, [bandConfig]);
+    musicianPositionsRef.current = buildRosterPositions(musicians);
+  }, [musicians]);
   const trussBeamsRef = useRef<{ back: THREE.Object3D | null; front: THREE.Object3D | null; left: THREE.Object3D | null; right: THREE.Object3D | null; poles: THREE.Object3D[] }>({ back: null, front: null, left: null, right: null, poles: [] });
   const [selectedFixtureId, setSelectedFixtureId] = useState<string | null>(null);
   const [showFixtureList, setShowFixtureList] = useState(false);
   const [fixtureSearch, setFixtureSearch] = useState('');
+  const [musiciansMenuOpen, setMusiciansMenuOpen] = useState(false);
+  const musiciansBtnRef = useRef<HTMLButtonElement>(null);
+  const [musiciansMenuPos, setMusiciansMenuPos] = useState<{ top: number; left: number } | null>(null);
   const stageDims = useShowStore((s) => s.stageDims);
   const setStageDims = useShowStore((s) => s.setStageDims);
   // ── Resizable stage dimensions (width × depth, meters) ──
@@ -1257,44 +1265,49 @@ export const Stage3D: React.FC<{
     musiciansRef.current = [];
     musiciansGroupRef.current = null;
 
-    if (bandConfig === 'none') return;
+    if (isRosterEmpty(musicians)) return;
 
     const group = new THREE.Group();
     group.name = 'musicians';
     musiciansGroupRef.current = group;
 
     const dims = stageDimsRef.current;
-    const defs = BAND_PRESETS[bandConfig];
     const refs: { sprite: THREE.Sprite; phase: number; baseY: number }[] = [];
 
-    defs.forEach((m, i) => {
-      const mat = new THREE.SpriteMaterial({ transparent: true, depthWrite: true, depthTest: true });
-      mat.visible = false; // hidden until the image texture loads
-      const sprite = new THREE.Sprite(mat);
-      sprite.userData.musicianId = m.id;
-      const personH = MUSICIAN_HEIGHTS[m.kind];
-      sprite.scale.set(personH, personH, 1); // placeholder; aspect set on load
-      const baseY = STAGE_HEIGHT + personH / 2;
-      const pos = musicianPositionsRef.current[m.id] ?? { x: m.x, z: m.z };
-      sprite.position.set((pos.x - 0.5) * dims.width, baseY, (pos.z - 0.5) * dims.depth);
-      group.add(sprite);
-      refs.push({ sprite, phase: i * 1.3, baseY });
+    let i = 0;
+    for (const kind of MUSICIAN_KINDS) {
+      const count = musicians[kind] ?? 0;
+      for (let j = 0; j < count; j++) {
+        const id = `${kind}-${j}`;
+        const mat = new THREE.SpriteMaterial({ transparent: true, depthWrite: true, depthTest: true });
+        mat.visible = false; // hidden until the image texture loads
+        const sprite = new THREE.Sprite(mat);
+        sprite.userData.musicianId = id;
+        const personH = MUSICIAN_HEIGHTS[kind];
+        sprite.scale.set(personH, personH, 1); // placeholder; aspect set on load
+        const baseY = STAGE_HEIGHT + personH / 2;
+        const pos = musicianPositionsRef.current[id] ?? DEFAULT_POSITIONS[kind];
+        sprite.position.set((pos.x - 0.5) * dims.width, baseY, (pos.z - 0.5) * dims.depth);
+        group.add(sprite);
+        refs.push({ sprite, phase: i * 1.3, baseY });
 
-      loadMusicianTexture(m.kind)
-        .then(tex => {
-          mat.map = tex;
-          mat.needsUpdate = true;
-          mat.visible = true;
-          const img = tex.image as HTMLCanvasElement;
-          const aspect = img.height / img.width;
-          sprite.scale.set(personH / aspect, personH, 1);
-        })
-        .catch(() => {});
-    });
+        loadMusicianTexture(kind)
+          .then(tex => {
+            mat.map = tex;
+            mat.needsUpdate = true;
+            mat.visible = true;
+            const img = tex.image as HTMLCanvasElement;
+            const aspect = img.height / img.width;
+            sprite.scale.set(personH / aspect, personH, 1);
+          })
+          .catch(() => {});
+        i++;
+      }
+    }
 
     musiciansRef.current = refs;
     scene.add(group);
-  }, [bandConfig, stageDims]);
+  }, [musicians, stageDims]);
 
   // ── Virtual musicians: drag to reposition on stage ──
   useEffect(() => {
@@ -2171,25 +2184,77 @@ export const Stage3D: React.FC<{
 
         <div className="relative flex items-center" title="Configuration des musiciens sur scène (glissez-les pour les déplacer)">
           <Music size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
-          <select
-            value={bandConfig}
-            onChange={e => {
-              const cfg = e.target.value as BandConfig;
-              musicianPositionsRef.current = cfg === 'none' ? {} : buildPositions(cfg);
-              handleBandConfigChange(cfg);
+          <button
+            ref={musiciansBtnRef}
+            onClick={() => {
+              if (!musiciansMenuOpen && musiciansBtnRef.current) {
+                const r = musiciansBtnRef.current.getBoundingClientRect();
+                setMusiciansMenuPos({
+                  top: Math.min(r.bottom + 6, window.innerHeight - 340),
+                  left: Math.max(8, Math.min(r.left, window.innerWidth - 272)),
+                });
+              }
+              setMusiciansMenuOpen(v => !v);
             }}
-            className="bg-gray-800/40 text-gray-300 text-[10px] pl-7 pr-2 py-1 rounded border border-gray-700/40 appearance-none cursor-pointer hover:border-gray-600/60 focus:outline-none focus:border-purple-500/50"
+            className="bg-gray-800/40 text-gray-300 text-[10px] pl-7 pr-2 py-1 rounded border border-gray-700/40 cursor-pointer hover:border-gray-600/60 focus:outline-none focus:border-purple-500/50 whitespace-nowrap"
           >
-            <option value="none" className="bg-[#0d0d14]">Aucun musicien</option>
-            <option value="solo" className="bg-[#0d0d14]">Solo (chanteur)</option>
-            <option value="solo-chanteuse" className="bg-[#0d0d14]">Solo (chanteuse)</option>
-            <option value="duo" className="bg-[#0d0d14]">Duo (chant + guitare)</option>
-            <option value="trio" className="bg-[#0d0d14]">Trio (chant, guitare, batterie)</option>
-            <option value="quartet" className="bg-[#0d0d14]">Quatuor (chant, guitare, basse, batterie)</option>
-            <option value="quintet" className="bg-[#0d0d14]">Quintette (complet)</option>
-            <option value="sextet" className="bg-[#0d0d14]">Sextet (chant + chanteuse + complet)</option>
-          </select>
+            {rosterTotal(musicians) > 0 ? `Musiciens · ${rosterTotal(musicians)}` : 'Musiciens'}
+          </button>
         </div>
+
+        {musiciansMenuOpen && musiciansMenuPos && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setMusiciansMenuOpen(false)} />
+            <div
+              className="fixed z-50 w-64 rounded-lg border border-gray-700/60 bg-[#0d0d14] shadow-xl shadow-black/60 p-2"
+              style={{ top: musiciansMenuPos.top, left: musiciansMenuPos.left }}
+            >
+              <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
+                <span className="text-[10px] font-medium text-gray-300">Musiciens sur scène</span>
+                <button
+                  onClick={() => handleMusiciansChange({})}
+                  className="text-[9px] text-gray-500 hover:text-purple-300"
+                  title="Retirer tous les musiciens"
+                >
+                  Tout retirer
+                </button>
+              </div>
+              {MUSICIAN_KINDS.map(kind => {
+                const count = musicians[kind] ?? 0;
+                const checked = count > 0;
+                return (
+                  <div key={kind} className="flex items-center gap-2 px-1 py-1 rounded hover:bg-gray-800/30">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => handleMusiciansChange({ ...musicians, [kind]: checked ? 0 : 1 })}
+                      className="accent-purple-500 w-3 h-3 cursor-pointer shrink-0"
+                    />
+                    <span className={`flex-1 text-[10px] ${checked ? 'text-gray-200' : 'text-gray-500'}`}>
+                      {MUSICIAN_LABELS[kind]}
+                    </span>
+                    <button
+                      onClick={() => handleMusiciansChange({ ...musicians, [kind]: Math.max(0, count - 1) })}
+                      disabled={count <= 0}
+                      className="w-5 h-5 rounded bg-gray-800/60 text-gray-300 text-[11px] leading-none hover:bg-gray-700/60 disabled:opacity-30"
+                      aria-label={`Réduire ${MUSICIAN_LABELS[kind]}`}
+                    >
+                      −
+                    </button>
+                    <span className="w-5 text-center text-[10px] text-gray-200 tabular-nums">{count}</span>
+                    <button
+                      onClick={() => handleMusiciansChange({ ...musicians, [kind]: Math.min(8, count + 1) })}
+                      className="w-5 h-5 rounded bg-gray-800/60 text-gray-300 text-[11px] leading-none hover:bg-gray-700/60"
+                      aria-label={`Augmenter ${MUSICIAN_LABELS[kind]}`}
+                    >
+                      +
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
 
         <button
           onClick={() => setShowFixtureList(v => !v)}

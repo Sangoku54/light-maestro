@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import type { MtcMarker } from '../engine/mtc-markers';
 import type { DmxCue } from '../hooks/dmx-cues';
 import { normalizeFolderName } from '../utils/scene-fixtures';
+import type { MusicianRoster } from '../utils/musicians';
 
 // ─── Types ─────────────────────────────────────────────────
 
@@ -55,6 +56,8 @@ export interface FixtureGroup {
 // ─── Scene Types ───────────────────────────────────────────
 
 // ─── Stage 3D configuration (persisted per scene, shared with Stage3D) ───
+// @deprecated — replaced by `musicians` (free-form roster). Kept only so scenes
+// saved before the roster feature can still be read and migrated.
 export type BandConfig = 'none' | 'solo' | 'solo-chanteuse' | 'duo' | 'trio' | 'quartet' | 'quintet' | 'sextet';
 export type StageScene = 'rear' | 'rear-front' | 'full';
 
@@ -70,8 +73,11 @@ export interface SavedScene {
    *  Free string, normalized (trim + collapsed spaces) on write.
    *  Old files without this field load as "uncategorized". */
   folder?: string;
-  /** 3D stage configuration (musician preset + truss layout). */
+  /** @deprecated — old fixed band preset, superseded by `musicians`. */
   bandConfig?: BandConfig;
+  /** Free-form musician roster (kind → count) shown on the 3D stage. */
+  musicians?: MusicianRoster;
+  /** Truss layout. */
   stageScene?: StageScene;
 }
 
@@ -275,7 +281,7 @@ interface ShowState {
    *  visible through the union in the UI even when not listed here. */
   sceneFolders: string[];
   createScene: (name: string) => string;
-  updateScene: (id: string, updates: Partial<Pick<SavedScene, 'name' | 'channels' | 'fadeIn' | 'fadeOut' | 'duration' | 'folder' | 'bandConfig' | 'stageScene'>>) => void;
+  updateScene: (id: string, updates: Partial<Pick<SavedScene, 'name' | 'channels' | 'fadeIn' | 'fadeOut' | 'duration' | 'folder' | 'musicians' | 'stageScene'>>) => void;
   deleteScene: (id: string) => void;
   getScene: (id: string) => SavedScene | undefined;
   setScenes: (scenes: SavedScene[]) => void;

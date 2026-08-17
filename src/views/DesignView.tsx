@@ -3,7 +3,8 @@ import { generateAllThumbnails, getVariantsForCategory, type ThumbnailVariant } 
 import { useTranslation } from 'react-i18next';
 import { Plus, Play, Pause, Square, Trash2, GripVertical, Search, X, Edit2, Check, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Zap, Save, FolderPlus } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
-import { useShowStore, getFixtureColor, type PatchedFixture, type FixtureGroup, type SavedScene, type SavedChaser, type ChaserStep, type SavedCueList, type CueListCue, type ShowUniverse, type BandConfig, type StageScene } from '../stores/showStore';
+import { useShowStore, getFixtureColor, type PatchedFixture, type FixtureGroup, type SavedScene, type SavedChaser, type ChaserStep, type SavedCueList, type CueListCue, type ShowUniverse, type StageScene } from '../stores/showStore';
+import { normalizeRoster, rosterFromBandConfig, type MusicianRoster } from '../utils/musicians';
 import { ShowManager } from './ShowManager';
 import { Stage2DEditor } from './Stage2DEditor';
 import { Stage3D } from './Stage3D';
@@ -903,7 +904,7 @@ const SceneEditor: React.FC = () => {
   const [expandedFixtures, setExpandedFixtures] = useState<Set<string>>(new Set());
   const [fixtureAnalyses, setFixtureAnalyses] = useState<Map<string, AnalyzedFixtureChannels>>(new Map());
   const [testActive, setTestActive] = useState(false);
-  const [bandConfig, setBandConfig] = useState<BandConfig>('quintet');
+  const [musicians, setMusicians] = useState<MusicianRoster>({});
   const [stageScene, setStageScene] = useState<StageScene>('rear-front');
   const dmxPushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestChannelsRef = useRef<Record<number, number>>({});
@@ -918,7 +919,7 @@ const SceneEditor: React.FC = () => {
       setEditFadeIn(scene.fadeIn);
       setEditFadeOut(scene.fadeOut);
       setEditDuration(scene.duration);
-      setBandConfig(scene.bandConfig ?? 'quintet');
+      setMusicians(normalizeRoster(scene.musicians ?? rosterFromBandConfig(scene.bandConfig)));
       setStageScene(scene.stageScene ?? 'rear-front');
       setEditChannels({ ...scene.channels });
       latestChannelsRef.current = { ...scene.channels };
@@ -932,7 +933,7 @@ const SceneEditor: React.FC = () => {
       setEditFadeIn(1000);
       setEditFadeOut(1000);
       setEditDuration(5000);
-      setBandConfig('quintet');
+      setMusicians({});
       setStageScene('rear-front');
       setEditChannels({});
       latestChannelsRef.current = {};
@@ -1013,7 +1014,7 @@ const SceneEditor: React.FC = () => {
         fadeIn: editFadeIn,
         fadeOut: editFadeOut,
         duration: editDuration,
-        bandConfig,
+        musicians,
         stageScene,
       });
       setSelectedSceneId(newId);
@@ -1025,7 +1026,7 @@ const SceneEditor: React.FC = () => {
         fadeIn: editFadeIn,
         fadeOut: editFadeOut,
         duration: editDuration,
-        bandConfig,
+        musicians,
         stageScene,
       });
     }
@@ -1224,11 +1225,11 @@ const SceneEditor: React.FC = () => {
       {/* Live 3D preview of the programmed scene */}
       <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-[540px] h-full">
         <Stage3D
-          bandConfig={bandConfig}
+          musicians={musicians}
           stageScene={stageScene}
-          onBandConfigChange={(cfg) => {
-            setBandConfig(cfg);
-            if (scene) updateScene(scene.id, { bandConfig: cfg });
+          onMusiciansChange={(roster) => {
+            setMusicians(roster);
+            if (scene) updateScene(scene.id, { musicians: roster });
           }}
           onStageSceneChange={(cfg) => {
             setStageScene(cfg);
