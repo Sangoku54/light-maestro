@@ -75,8 +75,9 @@ const MUSICIAN_HEIGHTS: Record<MusicianKind, number> = {
   cuivre: 1.7,
 };
 
-// Beam cone length (m) — portée du faisceau (divisée par 2)
-const BEAM_LENGTH = 12.5;
+// Beam cone length (m) — petit cône de lumière : s'arrête à la scène depuis la poutre (TRUSS_HEIGHT),
+// au lieu de l'ancien 12.5 m qui traversait le sol et descendait ~9 m sous la scène.
+const BEAM_LENGTH = 3.0;
 
 // Horizontal spacing between two instances of the same kind (fraction of stage).
 const MUSICIAN_SPREAD = 0.16;
