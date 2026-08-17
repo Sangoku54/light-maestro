@@ -822,6 +822,10 @@ ipcMain.handle('app:get-crash-logs', async () => crashLogger.listLogs());
 ipcMain.handle('app:read-crash-log', async (_event, filename: string) => crashLogger.readLog(filename));
 
 app.whenReady().then(async () => {
+  // Remove the default Electron menu bar (File/Edit/View/Window/Help) —
+  // the app is fully custom UI; editing shortcuts (Ctrl+C/V/X/A/Z) still
+  // work natively in text fields via Chromium.
+  Menu.setApplicationMenu(null);
   createSplashWindow();
   // Rebuild the renderer in the background (standalone launch flow only), then
   // enforce a minimum splash display time before revealing the main window.
