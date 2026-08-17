@@ -11,7 +11,7 @@
 // at `speedBpm`. This shape maps directly onto the existing chaser/scene model
 // (a chaser step references a scene, a scene is a DMX channel map).
 
-import type { PatchedFixture, FixtureTier } from '../stores/showStore';
+import type { PatchedFixture, FixtureTier, SavedScene, SavedChaser } from '../stores/showStore';
 import type { DmxFixtureDefinition } from '../hooks/dmx-cues';
 import { analyzeChannels, type ChannelAnalysis } from './dmx-channel';
 
@@ -226,4 +226,95 @@ export function generateAutoLoops(
   }
 
   return loops;
+}
+
+// ─── Materialization — turn loops into playable scenes + chasers ───────────
+//
+// The generated loops are materialized as regular chasers: one scene per step
+// (DMX channel map) and one chaser whose steps reference those scenes. The
+// existing chaser engine (midi-actions / playback) plays them without any
+// change. Scenes are tagged with a dedicated folder so they can be cleaned up
+// and regenerated when the patch changes.
+
+export const AUTO_LOOP_FOLDER = 'auto-loops';
+
+/** Minimal slice of the show store needed to materialize/refresh loops. */
+export interface AutoLoopStoreFacade {
+  scenes: SavedScene[];
+  chasers: SavedChaser[];
+  createScene: (name: string) => string;
+  updateScene: (
+    id: string,
+    updates: Partial<Pick<SavedScene, 'name' | 'channels' | 'fadeIn' | 'fadeOut' | 'duration' | 'folder'>>,
+  ) => void;
+  deleteScene: (id: string) => void;
+  createChaser: (name: string) => string;
+  updateChaser: (
+    id: string,
+    updates: Partial<Pick<SavedChaser, 'name' | 'steps' | 'direction' | 'speed'>>,
+  ) => void;
+  deleteChaser: (id: string) => void;
+}
+
+/**
+ * Create one scene per loop step (tagged with AUTO_LOOP_FOLDER) and one chaser
+ * referencing them. Returns the created chaser ids.
+ */
+export function materializeAutoLoops(loops: AutoLoop[], store: AutoLoopStoreFacade): string[] {
+  const chaserIds: string[] = [];
+  for (const loop of loops) {
+    const holdMs = Math.max(50, Math.round(60000 / loop.speedBpm));
+    const sceneIds = loop.steps.map((step, i) => {
+      const sceneId = store.createScene(`${loop.name} ${i + 1}`);
+      store.updateScene(sceneId, {
+        name: `${loop.name} ${i + 1}`,
+        channels: step.channels,
+        fadeIn: 0,
+        fadeOut: 0,
+        duration: holdMs,
+        folder: AUTO_LOOP_FOLDER,
+      });
+      return sceneId;
+    });
+    const chaserId = store.createChaser(`Auto · ${loop.name}`);
+    store.updateChaser(chaserId, {
+      name: `Auto · ${loop.name}`,
+      steps: sceneIds.map((sceneId) => ({ sceneId, fadeIn: 0, hold: holdMs, fadeOut: 0 })),
+      speed: loop.speedBpm,
+      direction: loop.direction,
+    });
+    chaserIds.push(chaserId);
+  }
+  return chaserIds;
+}
+
+/**
+ * Full refresh: delete previously generated auto loops (scenes in
+ * AUTO_LOOP_FOLDER and the chasers referencing them), regenerate the loops
+ * from the current patch and materialize them. Pure orchestration — safe to
+ * call on every patch change (idempotent cleanup).
+ */
+export function refreshAutoLoops(
+  store: AutoLoopStoreFacade,
+  patchedFixtures: PatchedFixture[],
+  defs: Map<string, DmxFixtureDefinition>,
+  opts: AutoLoopOptions = {},
+): { loops: AutoLoop[]; chaserIds: string[] } {
+  const autoSceneIds = new Set(
+    store.scenes.filter((s) => s.folder === AUTO_LOOP_FOLDER).map((s) => s.id),
+  );
+
+  // Delete chasers whose steps reference an auto-generated scene.
+  for (const chaser of store.chasers) {
+    if (chaser.steps.some((st) => autoSceneIds.has(st.sceneId))) {
+      store.deleteChaser(chaser.id);
+    }
+  }
+  for (const sceneId of autoSceneIds) {
+    store.deleteScene(sceneId);
+  }
+
+  const loops = generateAutoLoops(patchedFixtures, defs, opts);
+  const chaserIds = materializeAutoLoops(loops, store);
+  return { loops, chaserIds };
 }

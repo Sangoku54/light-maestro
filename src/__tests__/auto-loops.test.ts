@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { generateAutoLoops, type AutoLoop } from '../engine/auto-loops';
-import type { PatchedFixture } from '../stores/showStore';
+import { generateAutoLoops, materializeAutoLoops, refreshAutoLoops, AUTO_LOOP_FOLDER, type AutoLoop, type AutoLoopStoreFacade } from '../engine/auto-loops';
+import type { PatchedFixture, SavedScene, SavedChaser } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureChannel } from '../hooks/dmx-cues';
 
 const ch = (name: string, type: DmxFixtureChannel['type'], offset: number): DmxFixtureChannel => ({
@@ -163,5 +163,95 @@ describe('generateAutoLoops', () => {
     const tiers = loops.map((l) => l.tier).sort();
     expect(tiers).toEqual(['primary', 'secondary']);
     expect(loops.every((l) => l.kind === 'color-chase')).toBe(true);
+  });
+});
+
+// ─── Materialization / refresh ──────────────────────────────────────────────
+
+function makeStore(): { store: AutoLoopStoreFacade; state: { scenes: SavedScene[]; chasers: SavedChaser[] } } {
+  const state: { scenes: SavedScene[]; chasers: SavedChaser[] } = { scenes: [], chasers: [] };
+  let sceneN = 0;
+  let chaserN = 0;
+  const store: AutoLoopStoreFacade = {
+    get scenes() {
+      return state.scenes;
+    },
+    get chasers() {
+      return state.chasers;
+    },
+    createScene: (name) => {
+      const id = `s${++sceneN}`;
+      state.scenes.push({ id, name, channels: {}, fadeIn: 1000, fadeOut: 1000, duration: 5000, createdAt: '' });
+      return id;
+    },
+    updateScene: (id, updates) => {
+      const s = state.scenes.find((x) => x.id === id);
+      if (s) Object.assign(s, updates);
+    },
+    deleteScene: (id) => {
+      state.scenes = state.scenes.filter((x) => x.id !== id);
+    },
+    createChaser: (name) => {
+      const id = `c${++chaserN}`;
+      state.chasers.push({ id, name, steps: [], direction: 'forward', speed: 120 });
+      return id;
+    },
+    updateChaser: (id, updates) => {
+      const c = state.chasers.find((x) => x.id === id);
+      if (c) Object.assign(c, updates);
+    },
+    deleteChaser: (id) => {
+      state.chasers = state.chasers.filter((x) => x.id !== id);
+    },
+  };
+  return { store, state };
+}
+
+describe('materializeAutoLoops / refreshAutoLoops', () => {
+  it('materializes loops into scenes (tagged) + chasers', () => {
+    const { store, state } = makeStore();
+    const fixtures = [pf({ id: 'f1', fixtureDefId: 'wash-rgb', tier: 'primary', startAddress: 1 })];
+    const { loops, chaserIds } = refreshAutoLoops(store, fixtures, defsOf(rgbWash));
+
+    expect(loops.length).toBe(1);
+    expect(chaserIds.length).toBe(1);
+    expect(state.chasers.length).toBe(1);
+    expect(state.chasers[0].name).toBe('Auto · Color chase · primary');
+    expect(state.chasers[0].steps.length).toBe(loops[0].steps.length);
+    // Every scene is tagged with the auto-loop folder.
+    expect(state.scenes.every((s) => s.folder === AUTO_LOOP_FOLDER)).toBe(true);
+    // Chaser steps reference the tagged scenes.
+    const sceneIds = new Set(state.scenes.map((s) => s.id));
+    expect(state.chasers[0].steps.every((st) => sceneIds.has(st.sceneId))).toBe(true);
+  });
+
+  it('refresh is idempotent — re-running replaces, never duplicates', () => {
+    const { store, state } = makeStore();
+    const fixtures = [pf({ id: 'f1', fixtureDefId: 'wash-rgb', tier: 'primary', startAddress: 1 })];
+
+    refreshAutoLoops(store, fixtures, defsOf(rgbWash));
+    const scenesAfterFirst = state.scenes.length;
+    const chasersAfterFirst = state.chasers.length;
+
+    refreshAutoLoops(store, fixtures, defsOf(rgbWash));
+
+    // Same counts after a second refresh (old auto scenes/chasers were removed first).
+    expect(state.scenes.length).toBe(scenesAfterFirst);
+    expect(state.chasers.length).toBe(chasersAfterFirst);
+    expect(state.scenes.every((s) => s.folder === AUTO_LOOP_FOLDER)).toBe(true);
+  });
+
+  it('refresh leaves manual scenes/chasers untouched', () => {
+    const { store, state } = makeStore();
+    // A manual scene + chaser referencing it.
+    const manualScene = store.createScene('Manuel');
+    store.updateScene(manualScene, { channels: { 1: 255 } });
+    const manualChaser = store.createChaser('Chaser manuel');
+    store.updateChaser(manualChaser, { steps: [{ sceneId: manualScene, fadeIn: 0, hold: 500, fadeOut: 0 }] });
+
+    refreshAutoLoops(store, [pf({ id: 'f1', fixtureDefId: 'wash-rgb', tier: 'primary', startAddress: 1 })], defsOf(rgbWash));
+
+    expect(state.scenes.some((s) => s.id === manualScene)).toBe(true);
+    expect(state.chasers.some((c) => c.id === manualChaser)).toBe(true);
   });
 });

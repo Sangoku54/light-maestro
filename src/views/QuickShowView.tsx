@@ -11,6 +11,7 @@ import { computeFixtureTrackOverrides, computeEfxOverrides, type FixtureTrack } 
 import { loadFixtureDefinitions, clearFixtureDefCache, type DmxCue, type DmxFixtureDefinition } from '../hooks/dmx-cues';
 import { useDmxPlayback, computeDmxForCue, computeColorTrackColors, type ColorTrackRef, type DimmerTrackRef, computeDimmerTrackOverrides, computeStrobeTrackOverrides, computeChaserTrackOverrides, type ChaserTrackRef } from '../hooks/dmx-playback';
 import { analyzeChannels } from '../engine/fixture-analyzer';
+import { refreshAutoLoops } from '../engine/auto-loops';
 import { Stage3D } from './Stage3D';
 import TrackTimeline from './TrackTimeline';
 import type { EfxTrack, EfxTrackEntry, ColorTrack, ColorTrackEntry, StrobeTrack, StrobeTrackEntry, DimmerTrack, DimmerTrackEntry, ChaserTrack, ChaserTrackEntry } from './TrackTimeline';
@@ -1690,6 +1691,41 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const tapRef = useRef<number[]>([]);
   const [fixtureDefs, setFixtureDefs] = useState<Map<string, DmxFixtureDefinition>>(new Map());
   const firedRef = useRef<Set<string>>(new Set());
+  const [autoLoopCount, setAutoLoopCount] = useState<number | null>(null);
+  const autoLoopsActiveRef = useRef(false);
+
+  // Signature stable du patch : l'effet d'auto-régénération ne se déclenche
+  // que sur un vrai changement (id/tier/enabled/def/adresse).
+  const patchedKey = useMemo(
+    () =>
+      patchedFixtures
+        .map((f) => `${f.id}|${f.tier}|${f.enabled === false ? 0 : 1}|${f.fixtureDefId}|${f.startAddress}`)
+        .join(';'),
+    [patchedFixtures],
+  );
+
+  /* ─── Auto loops — générer des loops pour les fixtures patchées ─── */
+  const doGenerateAutoLoops = () => {
+    const store = useShowStore.getState();
+    if (patchedFixtures.length > 0 && fixtureDefs.size === 0) return; // defs pas encore chargées
+    const { loops } = refreshAutoLoops(store, patchedFixtures, fixtureDefs);
+    setAutoLoopCount(loops.length);
+    window.setTimeout(() => setAutoLoopCount(null), 4000);
+  };
+
+  const handleGenerateAutoLoops = () => {
+    autoLoopsActiveRef.current = true;
+    doGenerateAutoLoops();
+  };
+
+  // Auto-régénération : après une première génération (opt-in), tout changement
+  // de patch ou de définitions régénère les loops — les fixtures « à venir »
+  // sont prises en compte automatiquement.
+  useEffect(() => {
+    if (!autoLoopsActiveRef.current) return;
+    doGenerateAutoLoops();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patchedKey, fixtureDefs]);
 
   /* ─── Undo/redo ──────────────────────────────────── */
   const undoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[]; chaserTracks: ChaserTrack[]; disabledFixtures: Set<string> }[]>([]);
@@ -3139,6 +3175,20 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           className="p-1 rounded text-gray-400 hover:text-purple-400 transition-colors"
         >
           <RefreshCw className="w-3.5 h-3.5" />
+        </button>
+
+        {/* Auto loops — génère des loops pour les fixtures patchées */}
+        <button
+          title={t('generateAutoLoops') || 'Générer les loops auto (chasers pour les fixtures patchées)'}
+          onClick={handleGenerateAutoLoops}
+          className="relative p-1 rounded text-gray-400 hover:text-purple-400 transition-colors"
+        >
+          <Repeat className="w-3.5 h-3.5" />
+          {autoLoopCount !== null && (
+            <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-[9px] font-bold rounded-full min-w-[14px] h-[14px] px-0.5 flex items-center justify-center">
+              {autoLoopCount}
+            </span>
+          )}
         </button>
 
         <div className="h-5 border-l border-gray-700 mx-1" />
