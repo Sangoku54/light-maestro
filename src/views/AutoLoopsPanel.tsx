@@ -168,6 +168,8 @@ export const AutoLoopsPanel: React.FC = () => {
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; loopId: string } | null>(null);
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  // temporary diagnostic readout (visible in the UI, no DevTools needed)
+  const [diag, setDiag] = useState<string>('');
   // filters
   const [ambFilter, setAmbFilter] = useState<string | null>(null);
   const [themeFilter, setThemeFilter] = useState<string | null>(null);
@@ -230,9 +232,33 @@ export const AutoLoopsPanel: React.FC = () => {
   const playLoop = (loop: AmbianceLoop) => {
     if (playingId === loop.id) { stopPlay(); return; }
     stopPlay();
+    // Ensure the DMX engine is running before the first frame (mirrors
+    // PerformanceView's _startAutoLoop).
+    try {
+      const api = (window as any).lightMaestro?.dmx;
+      if (api) {
+        api.isRunning().then((running: boolean) => { if (!running) api.start().catch(() => {}); }).catch(() => {});
+      }
+    } catch {}
     const universeIds = universes.map((u) => u.id);
+    if (fixtureDefs.size === 0) {
+      console.warn('[auto-loops] fixtureDefs EMPTY at play — analyzeFixture will find no channels (safety-net only)');
+    }
     const dmxCues = computeLoopDmxCues(loop, patchedFixtures, fixtureDefs, universeIds);
-    if (dmxCues.length === 0) return;
+    if (dmxCues.length === 0) {
+      console.warn('[auto-loops] NO DMX cues for', loop.theme, loop.ambiance, loop.bpm, '| patchedFixtures:', patchedFixtures.length, '| defs:', fixtureDefs.size);
+      return;
+    }
+    const diagMsg = `[auto-loops] ${loop.theme}/${loop.ambiance} ${loop.bpm}bpm | uni0=${dmxCues[0]?.universe} | cue0=${JSON.stringify(dmxCues[0]?.channelValues)} | ${patchedFixtures.map((f) => {
+      const def = fixtureDefs.get(f.fixtureDefId);
+      const chans = def?.modes?.[f.modeIndex ?? 0]?.channels ?? [];
+      const colour = chans.filter((c) => c.type === 'Colour').length;
+      const pan = chans.some((c) => c.type === 'Pan');
+      const tilt = chans.some((c) => c.type === 'Tilt');
+      return `${f.model}[c${colour}${pan ? ',p' : ''}${tilt ? ',t' : ''}]`;
+    }).join(' ')}`;
+    console.log(diagMsg);
+    setDiag(diagMsg);
     const duration = loop.duration;
     let fired = new Set<string>();
     passStartRef.current = performance.now();
@@ -324,6 +350,13 @@ export const AutoLoopsPanel: React.FC = () => {
           <span className="text-[10px] text-gray-500 bg-gray-800 rounded-full px-2 py-0.5">{loops.length}</span>
         </div>
       </div>
+
+      {/* Diagnostic (temporaire) : montre ce qui est réellement joué */}
+      {diag && (
+        <div className="px-3 py-1.5 border-b border-gray-800 bg-amber-500/5 shrink-0">
+          <p className="text-[10px] font-mono text-amber-300/90 break-all leading-snug">{diag}</p>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b border-gray-800 shrink-0">

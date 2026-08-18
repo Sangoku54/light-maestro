@@ -597,6 +597,7 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
     const def = fixtureDefs.get(pf.fixtureDefId);
     const fa = analyzeFixture(pf, def);
     fa.universeIndex = universeOrder.indexOf(pf.universeId);
+    if (fa.universeIndex < 0) fa.universeIndex = 0; // matches dmx-playback.ts fallback
     return fa;
   });
 
