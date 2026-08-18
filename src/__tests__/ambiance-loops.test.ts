@@ -141,6 +141,7 @@ describe('regenerateLoopAtBpm', () => {
     });
     const faster = regenerateLoopAtBpm(loop, 160);
     expect(faster.bpm).toBe(160);
+    expect(faster.id).toBe(loop.id); // selection must survive a BPM change
     expect(faster.theme).toBe('chase');
     expect(faster.ambiance).toBe('dark');
     expect(faster.duration).toBeLessThan(loop.duration);
@@ -164,6 +165,7 @@ describe('regenerateLoop (seed variation)', () => {
     });
     const rolled = regenerateLoop(loop, 3);
     expect(rolled.seed).toBe(3);
+    expect(rolled.id).toBe(loop.id); // selection must survive regeneration
     expect(rolled.theme).toBe(loop.theme);
     expect(rolled.ambiance).toBe(loop.ambiance);
     expect(rolled.bpm).toBe(loop.bpm);

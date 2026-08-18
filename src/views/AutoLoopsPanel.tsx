@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Play, Square, Save, Trash2, Check, Plus, X, RefreshCw } from 'lucide-react';
+import { Sparkles, Play, Square, Save, Trash2, Check, Plus, X, RefreshCw, Pencil } from 'lucide-react';
 import { useShowStore } from '../stores/showStore';
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from '../hooks/dmx-cues';
 import {
@@ -165,6 +165,9 @@ export const AutoLoopsPanel: React.FC = () => {
   const [bpmOverrides, setBpmOverrides] = useState<Record<string, number>>({});
   const [seedOverrides, setSeedOverrides] = useState<Record<string, number>>({});
   const [nameOverrides, setNameOverrides] = useState<Record<string, string>>({});
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; loopId: string } | null>(null);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
   // filters
   const [ambFilter, setAmbFilter] = useState<string | null>(null);
   const [themeFilter, setThemeFilter] = useState<string | null>(null);
@@ -356,10 +359,11 @@ export const AutoLoopsPanel: React.FC = () => {
             const active = selected?.id === loop.id;
             return (
               <button key={loop.id} onClick={() => selectLoop(loop)}
+                onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, loopId: loop.id }); }}
                 className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-left transition-colors ${active ? 'border-purple-500/40 bg-purple-600/15 text-gray-100' : 'border-gray-800 bg-gray-900/40 text-gray-300 hover:border-gray-700 hover:bg-gray-900/70'}`}>
                 <span className="text-sm leading-none shrink-0">{AMBIANCE_ICON[loop.ambiance] ?? '✨'}</span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-xs font-medium truncate">{getThemeProfile(loop.theme).labelFr} · {profile.labelFr}</span>
+                  <span className="block text-xs font-medium truncate">{nameOverrides[loop.id] ?? `${getThemeProfile(loop.theme).labelFr} · ${profile.labelFr}`}</span>
                   <span className="block text-[10px] text-gray-500 truncate">{loop.bpm} BPM · {loop.measures} mes.</span>
                 </span>
                 <span className="flex shrink-0 -space-x-1">
@@ -633,6 +637,41 @@ export const AutoLoopsPanel: React.FC = () => {
                   <span>🎬</span>{c.name}
                 </button>
               ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Rename loop context menu */}
+      {ctxMenu && (
+        <ContextMenu pos={{ x: ctxMenu.x, y: ctxMenu.y }} title="Boucle" onClose={() => setCtxMenu(null)}>
+          <button onClick={() => {
+            const l = loops.find((x) => x.id === ctxMenu.loopId);
+            setRenameId(ctxMenu.loopId);
+            setRenameDraft(nameOverrides[ctxMenu.loopId] ?? l?.name ?? '');
+            setCtxMenu(null);
+          }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2">
+            <Pencil className="w-3 h-3" /> Renommer
+          </button>
+        </ContextMenu>
+      )}
+
+      {/* Rename modal */}
+      {renameId && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setRenameId(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+            <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[360px] pointer-events-auto">
+              <div className="text-sm font-semibold text-gray-200 mb-3">Renommer la boucle</div>
+              <input autoFocus value={renameDraft} onChange={(e) => setRenameDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && renameDraft.trim()) { setNameOverrides((prev) => ({ ...prev, [renameId]: renameDraft.trim() })); setRenameId(null); } if (e.key === 'Escape') setRenameId(null); }}
+                className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none" />
+              <div className="flex justify-end gap-2 mt-4">
+                <button onClick={() => setRenameId(null)} className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
+                <button onClick={() => { if (renameDraft.trim()) setNameOverrides((prev) => ({ ...prev, [renameId]: renameDraft.trim() })); setRenameId(null); }}
+                  disabled={!renameDraft.trim()} className="px-4 py-1.5 rounded-lg text-xs font-medium text-white bg-purple-600 hover:bg-purple-500 disabled:opacity-40">OK</button>
+              </div>
             </div>
           </div>
         </>

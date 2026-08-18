@@ -334,7 +334,13 @@ export function regenerateLoopAtBpm(loop: AmbianceLoop, bpm: number): AmbianceLo
   const profile = getAmbianceProfile(loop.ambiance);
   const theme = THEMES.find((t) => t.id === loop.theme) ?? THEMES[0];
   const fixtureCount = loop.fixtureCount;
-  return buildLoop(profile, theme, Math.max(40, Math.min(240, Math.round(bpm))), fixtureCount, { seed: loop.seed });
+  // Preserve the original id so the UI selection survives a BPM change.
+  // Otherwise the regenerated loop gets a new id (theme+ambiance+newBPM) and
+  // the panel's `selected = loops.find(id)` falls back to loops[0].
+  return {
+    ...buildLoop(profile, theme, Math.max(40, Math.min(240, Math.round(bpm))), fixtureCount, { seed: loop.seed }),
+    id: loop.id,
+  };
 }
 
 /**
@@ -344,7 +350,8 @@ export function regenerateLoopAtBpm(loop: AmbianceLoop, bpm: number): AmbianceLo
 export function regenerateLoop(loop: AmbianceLoop, seed: number): AmbianceLoop {
   const profile = getAmbianceProfile(loop.ambiance);
   const theme = THEMES.find((t) => t.id === loop.theme) ?? THEMES[0];
-  return buildLoop(profile, theme, loop.bpm, loop.fixtureCount, { seed });
+  // Preserve the original id so the UI selection survives regeneration.
+  return { ...buildLoop(profile, theme, loop.bpm, loop.fixtureCount, { seed }), id: loop.id };
 }
 
 // ─── DMX computation (fixture-aware) ────────────────────────
