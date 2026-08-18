@@ -17,6 +17,7 @@
 import type { PatchedFixture, FixtureTier } from '../stores/showStore';
 import { useShowStore, type FixtureGroup } from '../stores/showStore';
 import { analyzeFixture, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
+import { applyHueShift, TIER_HUE } from '../engine/dmx-color';
 
 // ─── Inline fixture definition types (mirrors electron/fixtures/library.ts) ──
 
@@ -687,20 +688,15 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
           }
         }
 
-        // -- 2. Colour - section-stable palette rotation (SoundSwitch-style) --
-        // SoundSwitch-style: color rotates slowly WITHIN section, not per-cue
-        const sectionColorShift = Math.floor(cueIndex / 8) % Math.max(1, cue.colors.length);
-        // Tier-aware color offset: each tier gets a different palette position
-        const tierColorOffset = pf.tier === 'secondary' ? Math.floor(cue.colors.length / 3)
-          : pf.tier === 'tertiary' ? Math.floor(cue.colors.length * 2 / 3)
-          : 0;
-        const tierColorIdx = (getTierColorIndex(pf.tier, sectionColorShift + tierColorOffset, cue.colors.length)) % cue.colors.length;
-        const paletteColor = cue.colors.length > 0
-          ? cue.colors[tierColorIdx]
-          : undefined;
+        // -- 2. Colour — single source of truth = the cue's own colour, i.e.
+        //    exactly what the timeline renders as the cue block. Mirrors
+        //    dmx-playback.ts so played colours always match the block colours.
+        const paletteColor = (cue as any).forcedColor || cue.color || cue.colors?.[0] || undefined;
 
         if (fa.rgbOffsets && paletteColor) {
           let [r, g, b] = hexToRgb(paletteColor);
+          // Per-tier hue shift — matches the timeline's cue block colour
+          [r, g, b] = applyHueShift([r, g, b], TIER_HUE[pf.tier]);
           // Apply color temperature shift
           if (cue.colorTemp) {
             [r, g, b] = applyColorTemp([r, g, b], cue.colorTemp);
