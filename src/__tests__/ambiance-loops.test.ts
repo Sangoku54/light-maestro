@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   generateAmbianceLoops,
   regenerateLoopAtBpm,
+  regenerateLoop,
   computeLoopDmxCues,
   AMBIANCE_PROFILES,
   THEMES,
@@ -81,9 +82,20 @@ describe('generateAmbianceLoops (catalog)', () => {
         expect(cue.time).toBeLessThan(loop.duration);
         if (i > 0) expect(cue.time).toBeGreaterThan(loop.cues[i - 1].time);
         expect(cue.colors.length).toBeGreaterThan(0);
-        expect(cue.color).toBe(cue.colors[0]);
+        expect(cue.colors).toContain(cue.color);
       }
     }
+  });
+
+  it('cue colour rotates through the palette (matches computeDmxCues shift)', () => {
+    const [loop] = generateAmbianceLoops([fixture()], {
+      themes: ['chase'], ambiances: ['energetic'], tempoMultipliers: [1.0],
+    });
+    const len = loop.cues[0].colors.length;
+    // First 8 cues share the first palette colour; the 9th advances.
+    expect(loop.cues[0].color).toBe(loop.cues[0].colors[0]);
+    expect(loop.cues[7].color).toBe(loop.cues[0].colors[0]);
+    expect(loop.cues[8].color).toBe(loop.cues[0].colors[1 % len]);
   });
 
   it('themes produce distinct movement/strobe signatures', () => {
@@ -132,6 +144,7 @@ describe('regenerateLoopAtBpm', () => {
     expect(faster.ambiance).toBe('dark');
     expect(faster.duration).toBeLessThan(loop.duration);
     expect(faster.cues.length).toBeGreaterThan(0);
+    expect(faster.seed).toBe(loop.seed);
   });
 
   it('clamps out-of-range BPM', () => {
@@ -140,6 +153,43 @@ describe('regenerateLoopAtBpm', () => {
     });
     expect(regenerateLoopAtBpm(loop, 9999).bpm).toBe(240);
     expect(regenerateLoopAtBpm(loop, 1).bpm).toBe(40);
+  });
+});
+
+describe('regenerateLoop (seed variation)', () => {
+  it('rebuilds with a new seed, same theme/ambiance/bpm', () => {
+    const [loop] = generateAmbianceLoops([fixture()], {
+      themes: ['chase'], ambiances: ['dark'], tempoMultipliers: [1.0],
+    });
+    const rolled = regenerateLoop(loop, 3);
+    expect(rolled.seed).toBe(3);
+    expect(rolled.theme).toBe(loop.theme);
+    expect(rolled.ambiance).toBe(loop.ambiance);
+    expect(rolled.bpm).toBe(loop.bpm);
+    expect(rolled.duration).toBeCloseTo(loop.duration, 6);
+  });
+
+  it('different seeds produce different leading palette colours', () => {
+    const [loop] = generateAmbianceLoops([fixture()], {
+      themes: ['chase'], ambiances: ['energetic'], tempoMultipliers: [1.0],
+    });
+    const a = regenerateLoop(loop, 0);
+    const b = regenerateLoop(loop, 1);
+    expect(a.cues[0].color).not.toBe(b.cues[0].color);
+  });
+
+  it('keeps cue.color aligned with the DMX palette rotation for any seed', () => {
+    const [loop] = generateAmbianceLoops([fixture()], {
+      themes: ['chase'], ambiances: ['energetic'], tempoMultipliers: [1.0],
+    });
+    for (const seed of [0, 1, 2, 5]) {
+      const rolled = regenerateLoop(loop, seed);
+      const len = rolled.cues[0].colors.length;
+      rolled.cues.forEach((cue, i) => {
+        const expectedIdx = Math.floor(i / 8) % len;
+        expect(cue.color).toBe(cue.colors[expectedIdx]);
+      });
+    }
   });
 });
 

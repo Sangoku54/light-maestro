@@ -75,6 +75,7 @@ export interface AmbianceLoop {
   sections: TrackSection[];
   cues: AmbianceCue[];
   fixtureCount: number;
+  seed: number;         // variation seed (palette rotation offset)
 }
 
 export const MEASURES_PER_LOOP = 16;
@@ -204,9 +205,10 @@ function buildLoop(
   theme: ThemeProfile,
   bpm: number,
   fixtureCount: number,
-  opts: { beatDivision?: number },
+  opts: { beatDivision?: number; seed?: number },
 ): AmbianceLoop {
   const beatDivision = opts.beatDivision ?? 4;
+  const seed = opts.seed ?? 0;
   const measureSec = (60 / bpm) * BEATS_PER_MEASURE;
   const duration = MEASURES_PER_LOOP * measureSec;
   const interval = (60 / bpm) * (4 / beatDivision);
@@ -227,7 +229,16 @@ function buildLoop(
   }
 
   // One cue per beat subdivision across the 16 measures.
+  // The seed rotates the WHOLE palette (both what the timeline shows via
+  // `color` and what computeDmxCues actually plays via `colors`), so a
+  // regenerated loop keeps timeline ↔ DMX in sync for every seed.
   const cues: AmbianceCue[] = [];
+  const paletteLen = Math.max(1, profile.palette.length);
+  const paletteStart = ((seed % paletteLen) + paletteLen) % paletteLen;
+  const rotatedPalette = paletteStart === 0
+    ? profile.palette
+    : [...profile.palette.slice(paletteStart), ...profile.palette.slice(0, paletteStart)];
+  let cueIndex = 0;
   for (let time = 0; time < duration - interval * 0.5; time += interval) {
     const section = findSection(sections, time);
     const type = section?.type ?? 'verse';
@@ -241,18 +252,20 @@ function buildLoop(
       theme.strobeMode === 'all' ? true
       : theme.strobeMode === 'none' ? false
       : sectionStrobe;
+    const paletteIdx = Math.floor(cueIndex / 8) % paletteLen;
     cues.push({
       time: Math.round(time * 1000) / 1000,
       section: type,
       intensity,
-      color: profile.palette[0],
-      colors: profile.palette,
+      color: rotatedPalette[paletteIdx],
+      colors: rotatedPalette,
       strobe,
       movement,
       effect: type,
       energy: intensityToEnergy(intensity),
       dimmerPulseOnBeat: theme.dimmerPulse,
     });
+    cueIndex++;
   }
 
   return {
@@ -266,11 +279,14 @@ function buildLoop(
     sections,
     cues,
     fixtureCount,
+    seed,
   };
 }
 
 export interface GenerateOptions {
   beatDivision?: number;
+  /** Variation seed — rotates the palette start offset (0 = default). */
+  seed?: number;
   /** Restrict to these theme ids. Defaults to all. */
   themes?: string[];
   /** Restrict to these ambiances. Defaults to all. */
@@ -289,6 +305,7 @@ export function generateAmbianceLoops(
   opts: GenerateOptions = {},
 ): AmbianceLoop[] {
   const beatDivision = opts.beatDivision ?? 4;
+  const seed = opts.seed ?? 0;
   const tempoMultipliers = opts.tempoMultipliers ?? [0.8, 1.0, 1.25];
   const fixtureCount = patchedFixtures.filter((f) => f.enabled !== false).length;
 
@@ -302,7 +319,7 @@ export function generateAmbianceLoops(
     for (const theme of themes) {
       for (const mult of tempoMultipliers) {
         const bpm = Math.max(40, Math.min(240, Math.round(profile.bpm * mult)));
-        loops.push(buildLoop(profile, theme, bpm, fixtureCount, { beatDivision }));
+        loops.push(buildLoop(profile, theme, bpm, fixtureCount, { beatDivision, seed }));
       }
     }
   }
@@ -317,7 +334,17 @@ export function regenerateLoopAtBpm(loop: AmbianceLoop, bpm: number): AmbianceLo
   const profile = getAmbianceProfile(loop.ambiance);
   const theme = THEMES.find((t) => t.id === loop.theme) ?? THEMES[0];
   const fixtureCount = loop.fixtureCount;
-  return buildLoop(profile, theme, Math.max(40, Math.min(240, Math.round(bpm))), fixtureCount, {});
+  return buildLoop(profile, theme, Math.max(40, Math.min(240, Math.round(bpm))), fixtureCount, { seed: loop.seed });
+}
+
+/**
+ * Rebuild a loop with a new variation seed (same theme + ambiance + BPM, new
+ * palette rotation). Used by the "régénérer" button in the UI.
+ */
+export function regenerateLoop(loop: AmbianceLoop, seed: number): AmbianceLoop {
+  const profile = getAmbianceProfile(loop.ambiance);
+  const theme = THEMES.find((t) => t.id === loop.theme) ?? THEMES[0];
+  return buildLoop(profile, theme, loop.bpm, loop.fixtureCount, { seed });
 }
 
 // ─── DMX computation (fixture-aware) ────────────────────────

@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Play, Square, Save, Trash2, Check, Plus, X } from 'lucide-react';
+import { Sparkles, Play, Square, Save, Trash2, Check, Plus, X, RefreshCw } from 'lucide-react';
 import { useShowStore } from '../stores/showStore';
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from '../hooks/dmx-cues';
 import {
   generateAmbianceLoops,
   regenerateLoopAtBpm,
+  regenerateLoop,
   computeLoopDmxCues,
   getAmbianceProfile,
   getThemeProfile,
@@ -162,6 +163,8 @@ export const AutoLoopsPanel: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(0);
   const [savedFlash, setSavedFlash] = useState<string | null>(null);
   const [bpmOverrides, setBpmOverrides] = useState<Record<string, number>>({});
+  const [seedOverrides, setSeedOverrides] = useState<Record<string, number>>({});
+  const [nameOverrides, setNameOverrides] = useState<Record<string, string>>({});
   // filters
   const [ambFilter, setAmbFilter] = useState<string | null>(null);
   const [themeFilter, setThemeFilter] = useState<string | null>(null);
@@ -180,7 +183,12 @@ export const AutoLoopsPanel: React.FC = () => {
 
   const loops = useMemo<AmbianceLoop[]>(() => {
     const base = generateAmbianceLoops(patchedFixtures);
-    const overridden = base.map((l) => (bpmOverrides[l.id] ? regenerateLoopAtBpm(l, bpmOverrides[l.id]) : l));
+    const overridden = base.map((l) => {
+      let cur = l;
+      if (seedOverrides[l.id] !== undefined) cur = regenerateLoop(cur, seedOverrides[l.id]);
+      if (bpmOverrides[l.id] !== undefined) cur = regenerateLoopAtBpm(cur, bpmOverrides[l.id]);
+      return cur;
+    });
     return overridden.filter((l) => {
       if (ambFilter && l.ambiance !== ambFilter) return false;
       if (themeFilter && l.theme !== themeFilter) return false;
@@ -193,9 +201,10 @@ export const AutoLoopsPanel: React.FC = () => {
       }
       return true;
     });
-  }, [patchedFixtures, bpmOverrides, ambFilter, themeFilter, tempoFilter]);
+  }, [patchedFixtures, bpmOverrides, seedOverrides, ambFilter, themeFilter, tempoFilter]);
 
   const selected = loops.find((l) => l.id === selectedId) ?? loops[0] ?? null;
+  const selectedName = selected ? (nameOverrides[selected.id] ?? selected.name) : '';
 
   const track = useTimelineTracks(selected?.duration ?? 32);
 
@@ -258,10 +267,27 @@ export const AutoLoopsPanel: React.FC = () => {
     stopPlay();
   };
 
+  const handleRename = (name: string) => {
+    if (!selected) return;
+    setNameOverrides((prev) => {
+      const next = { ...prev };
+      if (name.trim() === '') delete next[selected.id];
+      else next[selected.id] = name;
+      return next;
+    });
+  };
+
+  const handleRegenerate = () => {
+    if (!selected) return;
+    stopPlay();
+    const baseSeed = seedOverrides[selected.id] ?? selected.seed ?? 0;
+    setSeedOverrides((prev) => ({ ...prev, [selected.id]: baseSeed + 1 }));
+  };
+
   const handleSave = () => {
     if (!selected) return;
     addAutoLoop({
-      name: selected.name,
+      name: selectedName,
       ambiance: selected.ambiance,
       bpm: selected.bpm,
       measures: selected.measures,
@@ -352,8 +378,13 @@ export const AutoLoopsPanel: React.FC = () => {
           {selected && (
             <>
               <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-gray-800 shrink-0">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-gray-200 truncate">{selected.name}</div>
+                <div className="min-w-0 flex-1">
+                  <input
+                    value={selectedName}
+                    onChange={(e) => handleRename(e.target.value)}
+                    title="Renommer la boucle"
+                    className="w-full bg-transparent border border-transparent hover:border-gray-700 focus:border-purple-500/50 rounded px-1.5 py-0.5 text-sm font-medium text-gray-200 outline-none truncate"
+                  />
                   <div className="text-[10px] text-gray-500">
                     {selected.fixtureCount} fixtures · {selected.cues.length} cues · {selected.duration.toFixed(1)}s
                   </div>
@@ -367,6 +398,11 @@ export const AutoLoopsPanel: React.FC = () => {
                     className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${playingId === selected.id ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-200 hover:bg-purple-600/30 hover:text-purple-200'}`}>
                     {playingId === selected.id ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                     {playingId === selected.id ? 'Arrêter' : 'Jouer'}
+                  </button>
+                  <button onClick={handleRegenerate}
+                    title="Régénérer (nouvelle variation)"
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium bg-gray-800 text-gray-200 hover:bg-purple-600/30 hover:text-purple-200">
+                    <RefreshCw className="w-3.5 h-3.5" />
                   </button>
                   <button onClick={handleSave}
                     className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${savedFlash === selected.id ? 'bg-green-600/20 text-green-300' : 'bg-purple-600/20 text-purple-300 hover:bg-purple-600/30'}`}>
