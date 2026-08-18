@@ -63,7 +63,7 @@ export const AutoLoopsPanel: React.FC = () => {
   const quickTab = useAppStore((s) => s.quickSidebarTab);
 
   const [fixtureDefs, setFixtureDefs] = useState<Map<string, DmxFixtureDefinition>>(new Map());
-  const [themeName, setThemeName] = useState<string>(THEME_LOOP_PRESETS[0]?.name ?? 'Violet');
+  const [themeName, setThemeName] = useState<string>(THEME_LOOP_PRESETS[0]?.name ?? 'Neon');
   const [playing, setPlaying] = useState(false);
   const [cueIdx, setCueIdx] = useState(0);
 

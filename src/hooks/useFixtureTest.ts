@@ -280,6 +280,10 @@ export function useFixtureTest() {
     return () => {
       stoppedRef.current = true;
       cancelAnimationFrame(rafRef.current);
+      // Release any lingering LTP contribution so a mid-test navigation
+      // (the COLOUR step writes RGB channels) can't freeze the output
+      // and mask lower-priority playback sources.
+      dmxBridge.release('fixture-test');
     };
   }, []);
 

@@ -30,12 +30,20 @@ export interface ThemeLoopSpec {
   amplitude?: number;
 }
 
-/** Ready-to-use fixed themes for the single-loop test. */
+/**
+ * Ready-to-use fixed themes for the single-loop test.
+ *
+ * Each palette uses 4 fully-saturated, well-separated hues (ΔE76 pairwise
+ * ≥ 79, vs 10–36 for the previous monochromatic ramps) so consecutive cue
+ * blocks — and the colours actually played on fixtures — are clearly
+ * distinct. The previous themes were single-hue ramps (e.g. Forest had
+ * ΔHue 0–3°), which made the loop look like "always the same colour".
+ */
 export const THEME_LOOP_PRESETS: ThemeLoopSpec[] = [
-  { name: 'Violet', palette: ['#a855f7', '#8b5cf6', '#c084fc', '#ede8dc'], movement: 'sweep' },
-  { name: 'Ocean', palette: ['#1e3a8a', '#0ea5e9', '#22d3ee', '#e0f2fe'], movement: 'wave' },
-  { name: 'Ember', palette: ['#7f1d1d', '#ea580c', '#f59e0b', '#fef3c7'], movement: 'pulse' },
-  { name: 'Forest', palette: ['#14532d', '#16a34a', '#4ade80', '#dcfce7'], movement: 'circle' },
+  { name: 'Neon', palette: ['#ff0055', '#00e5ff', '#7cff00', '#8b00ff'], movement: 'sweep' },
+  { name: 'Rave', palette: ['#ff1a1a', '#1aff1a', '#1a1aff', '#ffcc00'], movement: 'wave' },
+  { name: 'Arctic', palette: ['#ff0055', '#00ffcc', '#ffaa00', '#4400ff'], movement: 'pulse' },
+  { name: 'Magma', palette: ['#ff3c00', '#ffd400', '#00ffcc', '#9b30ff'], movement: 'circle' },
 ];
 
 /**
