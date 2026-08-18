@@ -241,9 +241,12 @@ function createWindow() {
   mainWindow.webContents.on('did-fail-load', () => revealMain());
   setTimeout(revealMain, 15_000);
 
-  // Open DevTools after page loads (calling before load causes them to be hidden)
-  const openDev = () => { try { mainWindow?.webContents.openDevTools({ mode: 'bottom' }); } catch {} };
-  mainWindow.webContents.on('did-finish-load', openDev);
+  // Open DevTools after page loads (calling before load causes them to be hidden).
+  // Dev-only: a packaged build must never auto-open DevTools.
+  if (isDev) {
+    const openDev = () => { try { mainWindow?.webContents.openDevTools({ mode: 'bottom' }); } catch {} };
+    mainWindow.webContents.on('did-finish-load', openDev);
+  }
 
   // Load strategy:
   //   1. Try Vite dev server (localhost:5173) — used by `npm run dev`
@@ -771,6 +774,16 @@ function sendUpdateStatus(status: UpdateStatus): void {
 function setupAutoUpdater(): void {
   if (!app.isPackaged) {
     console.log('[autoUpdater] Dev mode — auto-update disabled');
+    return;
+  }
+
+  // Only enable auto-update when a real update channel is configured.
+  // electron-builder writes app-update.yml next to the app only when a publish
+  // provider is active; without it, checkForUpdatesAndNotify() would 404
+  // against the (absent) GitHub release feed.
+  const hasUpdateChannel = fs.existsSync(path.join(process.resourcesPath, 'app-update.yml'));
+  if (!hasUpdateChannel) {
+    console.log('[autoUpdater] No update channel (app-update.yml absent) — auto-update disabled');
     return;
   }
 

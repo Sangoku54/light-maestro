@@ -77,12 +77,6 @@
       "node_modules/@serialport/**",
       "resources/**/*"
     ],
-    "publish": {
-      "provider": "github",
-      "owner": "vitte",
-      "repo": "light-maestro",
-      "releaseType": "release"
-    },
     "win": {
       "target": [
         {
