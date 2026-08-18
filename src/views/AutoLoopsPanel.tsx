@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next';
 import { Sparkles, Play, Square, Save, Trash2, Check, Plus, X, RefreshCw, Pencil } from 'lucide-react';
 import { useShowStore } from '../stores/showStore';
+import { useAppStore } from '../stores/appStore';
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from '../hooks/dmx-cues';
 import {
   generateAmbianceLoops,
@@ -52,6 +53,7 @@ function zeroAllUniverses() {
       if (seen.has(uniNum)) continue;
       seen.add(uniNum);
       try { dmxBridge.writeTransient('vc', uniNum, z); } catch {}
+      try { useAppStore.getState().setUniverseData(uniNum, z); } catch {}
     }
   } catch {}
 }
@@ -233,6 +235,10 @@ export const AutoLoopsPanel: React.FC = () => {
   const playLoop = async (loop: AmbianceLoop) => {
     if (playingId === loop.id) { stopPlay(); return; }
     stopPlay();
+    // Reprendre le contrôle LTP des sources plus prioritaires (Simple Desk 100,
+    // fixture test 90) pour que le 'vc' (80) de la boucle ne soit pas épinglé.
+    try { dmxBridge.release('simple-desk'); } catch {}
+    try { dmxBridge.release('fixture-test'); } catch {}
     // Ensure the DMX engine is running before the first frame (mirrors
     // PerformanceView's _startAutoLoop).
     try {
@@ -297,6 +303,7 @@ export const AutoLoopsPanel: React.FC = () => {
         if (elapsed >= cue.time && Object.keys(cue.channelValues || {}).length > 0) {
           fired.add(key);
           try { dmxBridge.write('vc', cue.universe, cue.channelValues); } catch {}
+          try { useAppStore.getState().setUniverseData(cue.universe, cue.channelValues); } catch {}
         }
       }
       rafRef.current = requestAnimationFrame(fire);
