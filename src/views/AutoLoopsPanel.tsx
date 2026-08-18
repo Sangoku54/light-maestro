@@ -120,8 +120,11 @@ export const AutoLoopsPanel: React.FC = () => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = 0;
+      // Only darken if a loop was actually running — an unrelated mount /
+      // patch-change stop must NOT blackout the hardware (LTP vc=80 would
+      // override the HTP QuickShow output for ~2 s).
+      zeroAllUniverses();
     }
-    zeroAllUniverses();
     frameIdxRef.current = 0;
     setCueIdx(0);
     setPlaying(false);
@@ -246,7 +249,7 @@ export const AutoLoopsPanel: React.FC = () => {
         {/* Cue blocks (the "timeline") — colour shown == colour played */}
         <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-3">
           <div className="text-[10px] text-gray-500 mb-2 uppercase tracking-wide">
-            Blocs de cues · la couleur du bloc = la couleur jouée
+            Blocs de cues · palette du thème (teinte par tier appliquée comme dans la timeline)
           </div>
           <div className="flex gap-1 overflow-x-auto pb-1">
             {cues.map((c, i) => (
