@@ -10,6 +10,7 @@ import {
   BEATS_PER_MEASURE,
 } from '../engine/ambiance-loops';
 import type { PatchedFixture } from '../stores/showStore';
+import { paletteColorForTier } from '../hooks/dmx-cues';
 
 function fixture(partial: Partial<PatchedFixture> = {}): PatchedFixture {
   return {
@@ -197,5 +198,34 @@ describe('computeLoopDmxCues', () => {
   it('returns [] for empty fixtures', () => {
     const [loop] = generateAmbianceLoops([]);
     expect(computeLoopDmxCues(loop, [], new Map(), [])).toEqual([]);
+  });
+});
+
+describe('paletteColorForTier (timeline ↔ DMX consistency)', () => {
+  const palette = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
+
+  it('primary rotates through the full palette every 8 cues', () => {
+    expect(paletteColorForTier(palette, 'primary', 0)).toBe('#ff0000');
+    expect(paletteColorForTier(palette, 'primary', 7)).toBe('#ff0000');
+    expect(paletteColorForTier(palette, 'primary', 8)).toBe('#00ff00');
+    expect(paletteColorForTier(palette, 'primary', 16)).toBe('#0000ff');
+  });
+
+  it('secondary alternates between the first two palette colours (binary, SoundSwitch-style)', () => {
+    const seen = new Set([
+      paletteColorForTier(palette, 'secondary', 0),
+      paletteColorForTier(palette, 'secondary', 8),
+      paletteColorForTier(palette, 'secondary', 16),
+    ]);
+    expect([...seen].sort()).toEqual(['#00ff00', '#ff0000']);
+  });
+
+  it('tertiary stays on the first palette colour', () => {
+    expect(paletteColorForTier(palette, 'tertiary', 0)).toBe('#ff0000');
+    expect(paletteColorForTier(palette, 'tertiary', 40)).toBe('#ff0000');
+  });
+
+  it('returns undefined for an empty palette', () => {
+    expect(paletteColorForTier([], 'primary', 0)).toBeUndefined();
   });
 });

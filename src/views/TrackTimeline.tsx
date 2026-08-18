@@ -13,6 +13,7 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import type { TrackSection } from '../hooks/audio-analysis';
 import type { DmxCue } from '../hooks/dmx-cues';
+import { paletteColorForTier } from '../hooks/dmx-cues';
 import type { PatchedFixture } from '../stores/showStore';
 import type { FixtureTrack, ColorBlock, DimmerBlock, StrobeBlock, MovementBlock } from '../hooks/fixture-tracks';
 import { resolveTrackTargets, createFixtureTrack } from '../hooks/fixture-tracks';
@@ -2192,7 +2193,8 @@ if (editBlock) { setEditBlock(null); return; }
 
         const iH = intensityToBarHeight(cue.intensity);
         const barY = trackY + (TRACK_HEIGHT - iH) / 2;
-        const sc = hueShiftHex(cue.color, tierDeg);
+        const cueIdx = cues.indexOf(cue);
+        const sc = paletteColorForTier(cue.colors, fixture.tier, cueIdx) ?? cue.color;
 
         // Glow
         ctx.save();
@@ -2241,7 +2243,7 @@ if (editBlock) { setEditBlock(null); return; }
           const totalDotsW = cue.colors.length * (dotR * 2 + 2) - 2;
           let dotX = cx - totalDotsW / 2 + dotR;
           for (const cc of cue.colors) {
-            const sc2 = hueShiftHex(cc, tierDeg);
+            const sc2 = cc;
             ctx.fillStyle = sc2;
             ctx.beginPath();
             ctx.arc(dotX, dotY, dotR, 0, Math.PI * 2);

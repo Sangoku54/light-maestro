@@ -519,6 +519,28 @@ function getTierColorIndex(tier: FixtureTier, paletteIndex: number, paletteLengt
   }
 }
 
+/**
+ * The exact palette colour `computeDmxCues` plays for a fixture of a given tier
+ * at a given cue index. Exported so the timeline renders the SAME colour the
+ * DMX actually outputs (instead of a hue-shifted approximation). This is the
+ * single source of truth for the section-stable palette rotation.
+ */
+export function paletteColorForTier(
+  colors: string[],
+  tier: FixtureTier,
+  cueIndex: number,
+): string | undefined {
+  if (colors.length === 0) return undefined;
+  const len = colors.length;
+  const sectionColorShift = Math.floor(cueIndex / 8) % len;
+  const tierColorOffset =
+    tier === 'secondary' ? Math.floor(len / 3)
+    : tier === 'tertiary' ? Math.floor(len * 2 / 3)
+    : 0;
+  const idx = (getTierColorIndex(tier, sectionColorShift + tierColorOffset, len)) % len;
+  return colors[idx];
+}
+
 // ─── Options ───────────────────────────────────────────────────
 
 export interface ComputeDmxCuesOptions {
@@ -688,16 +710,9 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
         }
 
         // -- 2. Colour - section-stable palette rotation (SoundSwitch-style) --
-        // SoundSwitch-style: color rotates slowly WITHIN section, not per-cue
-        const sectionColorShift = Math.floor(cueIndex / 8) % Math.max(1, cue.colors.length);
-        // Tier-aware color offset: each tier gets a different palette position
-        const tierColorOffset = pf.tier === 'secondary' ? Math.floor(cue.colors.length / 3)
-          : pf.tier === 'tertiary' ? Math.floor(cue.colors.length * 2 / 3)
-          : 0;
-        const tierColorIdx = (getTierColorIndex(pf.tier, sectionColorShift + tierColorOffset, cue.colors.length)) % cue.colors.length;
-        const paletteColor = cue.colors.length > 0
-          ? cue.colors[tierColorIdx]
-          : undefined;
+        // Single source of truth shared with TrackTimeline so the rendered
+        // block colour matches the colour actually played on the hardware.
+        const paletteColor = paletteColorForTier(cue.colors, pf.tier, cueIndex);
 
         if (fa.rgbOffsets && paletteColor) {
           let [r, g, b] = hexToRgb(paletteColor);
