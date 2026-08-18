@@ -32,6 +32,28 @@ const COLOR_PRESETS = ['#ff0000', '#00ff00', '#0000ff', '#ffffff', '#ffff00', '#
 const STROBE_SPEEDS = [2, 4, 6, 8, 10, 15, 20, 25];
 const DIMMER_VALUES = [10, 25, 50, 75, 100];
 
+/**
+ * Write zeros to every patched universe (transiently) so the hardware actually
+ * goes dark. Mirrors PerformanceView's vcZeroAllUniverses: a persistent LTP
+ * zero block would keep the show dark forever, so we write transiently — the
+ * source is released after 2 s.
+ */
+function zeroAllUniverses() {
+  try {
+    const s = useShowStore.getState();
+    const uniIds = s.universes.map((u) => String(u.id));
+    const z: Record<number, number> = {};
+    for (let i = 1; i <= 512; i++) z[i] = 0;
+    const seen = new Set<number>();
+    for (const pf of s.patchedFixtures) {
+      const uniNum = uniIds.indexOf(pf.universeId) >= 0 ? uniIds.indexOf(pf.universeId) : 0;
+      if (seen.has(uniNum)) continue;
+      seen.add(uniNum);
+      try { dmxBridge.writeTransient('vc', uniNum, z); } catch {}
+    }
+  } catch {}
+}
+
 // ─── Small UI helpers ───────────────────────────────────────
 
 function TargetButtons(props: {
@@ -182,10 +204,10 @@ export const AutoLoopsPanel: React.FC = () => {
     rafRef.current = 0;
     setPlayingId(null);
     setCurrentTime(0);
-    dmxBridge.release('vc');
+    zeroAllUniverses();
   }, []);
 
-  useEffect(() => () => { cancelAnimationFrame(rafRef.current); dmxBridge.release('vc'); }, []);
+  useEffect(() => () => { cancelAnimationFrame(rafRef.current); zeroAllUniverses(); }, []);
 
   const selectLoop = useCallback((loop: AmbianceLoop) => {
     stopPlay();
@@ -201,17 +223,14 @@ export const AutoLoopsPanel: React.FC = () => {
     if (dmxCues.length === 0) return;
     const duration = loop.duration;
     let fired = new Set<string>();
-    let first = true;
     passStartRef.current = performance.now();
     setCurrentTime(0);
     const fire = () => {
-      if (first) { first = false; dmxBridge.release('vc'); }
       let elapsed = (performance.now() - passStartRef.current) / 1000;
       if (elapsed >= duration) {
         passStartRef.current = performance.now();
         fired = new Set();
         elapsed = 0;
-        dmxBridge.release('vc');
       }
       setCurrentTime(elapsed);
       for (const cue of dmxCues) {
