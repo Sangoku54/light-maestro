@@ -389,6 +389,15 @@ const App: React.FC = () => {
       dmxBridge.release('design-efx');
       dmxBridge.release('fixture-onoff');
     }
+    // Leaving Perform releases the control-panel sources that otherwise hold
+    // RGB channels via LTP (simple-desk 100, fixture-test 90, vc 80) and mask
+    // the HTP playback engine (quickshow 40) — the "same colour keeps playing"
+    // bug (Simple Desk fader moved once, then the timeline never takes over).
+    if (newMode !== 'perform') {
+      dmxBridge.release('simple-desk');
+      dmxBridge.release('fixture-test');
+      dmxBridge.release('vc');
+    }
     setMode(newMode);
   }, [setMode]);
 

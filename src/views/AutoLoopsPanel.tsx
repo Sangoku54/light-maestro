@@ -59,6 +59,8 @@ export const AutoLoopsPanel: React.FC = () => {
   const { t } = useTranslation();
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
   const universes = useShowStore((s) => s.universes);
+  const mode = useAppStore((s) => s.mode);
+  const quickTab = useAppStore((s) => s.quickSidebarTab);
 
   const [fixtureDefs, setFixtureDefs] = useState<Map<string, DmxFixtureDefinition>>(new Map());
   const [themeName, setThemeName] = useState<string>(THEME_LOOP_PRESETS[0]?.name ?? 'Violet');
@@ -159,6 +161,26 @@ export const AutoLoopsPanel: React.FC = () => {
     stop();
     purgeAutoLoops(useShowStore.getState());
   }, [patchKey, stop]);
+
+  // The views stay mounted and are only hidden via `display:none`
+  // (QuickShowView switches tabs without unmounting, App switches modes the
+  // same way). So the loop's setInterval would keep writing 'vc' (LTP 80)
+  // forever and mask the timeline playback ('quickshow', HTP 40) — the
+  // "toujours la même couleur" bug. Stop + release 'vc' as soon as this
+  // panel is no longer the visible one (no blackout: the timeline must be
+  // able to take over immediately).
+  const visible = mode === 'quick' && quickTab === 'loops';
+  useEffect(() => {
+    if (visible) return;
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = 0;
+      frameIdxRef.current = 0;
+      setCueIdx(0);
+      setPlaying(false);
+      try { dmxBridge.release('vc'); } catch {}
+    }
+  }, [visible]);
 
   // On unmount: stop and clean up.
   useEffect(() => {
