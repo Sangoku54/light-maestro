@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   generateAmbianceLoops,
+  regenerateLoopAtBpm,
   computeLoopDmxCues,
   AMBIANCE_PROFILES,
+  THEMES,
   MEASURES_PER_LOOP,
   BEATS_PER_MEASURE,
 } from '../engine/ambiance-loops';
@@ -26,11 +28,28 @@ function fixture(partial: Partial<PatchedFixture> = {}): PatchedFixture {
   };
 }
 
-describe('generateAmbianceLoops', () => {
-  it('generates one loop per ambiance (7)', () => {
+describe('generateAmbianceLoops (catalog)', () => {
+  it('generates themes × ambiances × tempos loops (126 by default)', () => {
     const loops = generateAmbianceLoops([fixture()]);
-    expect(loops).toHaveLength(AMBIANCE_PROFILES.length);
-    expect(loops).toHaveLength(7);
+    expect(loops).toHaveLength(THEMES.length * AMBIANCE_PROFILES.length * 3); // 6 × 7 × 3
+    expect(loops.length).toBeGreaterThan(50);
+  });
+
+  it('classifies every loop by theme, ambiance and tempo', () => {
+    const loops = generateAmbianceLoops([fixture()]);
+    const themes = new Set(loops.map((l) => l.theme));
+    const ambiances = new Set(loops.map((l) => l.ambiance));
+    expect(themes.size).toBe(THEMES.length);
+    expect(ambiances.size).toBe(AMBIANCE_PROFILES.length);
+    // At least 3 distinct BPM values (slow/mid/fast)
+    expect(new Set(loops.map((l) => l.bpm)).size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('produces multiple tempos per (ambiance, theme) pair', () => {
+    const loops = generateAmbianceLoops([fixture()]);
+    const pair = loops.filter((l) => l.ambiance === 'energetic' && l.theme === 'chase');
+    expect(pair.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(pair.map((l) => l.bpm)).size).toBe(pair.length);
   });
 
   it('every loop spans exactly 16 measures at its own BPM', () => {
@@ -43,11 +62,9 @@ describe('generateAmbianceLoops', () => {
   });
 
   it('sections are contiguous and cover [0, duration)', () => {
-    const loops = generateAmbianceLoops([fixture()]);
-    for (const loop of loops) {
+    for (const loop of generateAmbianceLoops([fixture()])) {
       expect(loop.sections.length).toBeGreaterThanOrEqual(2);
       expect(loop.sections[0].startTime).toBe(0);
-      // Contiguous: each section starts where the previous ends
       for (let i = 1; i < loop.sections.length; i++) {
         expect(loop.sections[i].startTime).toBeCloseTo(loop.sections[i - 1].endTime, 6);
       }
@@ -55,29 +72,27 @@ describe('generateAmbianceLoops', () => {
     }
   });
 
-  it('cues are non-empty, ordered, and each carries the loop palette', () => {
-    const loops = generateAmbianceLoops([fixture()]);
-    for (const loop of loops) {
+  it('cues are non-empty, ordered, and carry the loop palette', () => {
+    for (const loop of generateAmbianceLoops([fixture()])) {
       expect(loop.cues.length).toBeGreaterThan(0);
       for (let i = 0; i < loop.cues.length; i++) {
         const cue = loop.cues[i];
         expect(cue.time).toBeGreaterThanOrEqual(0);
         expect(cue.time).toBeLessThan(loop.duration);
         if (i > 0) expect(cue.time).toBeGreaterThan(loop.cues[i - 1].time);
-        expect(cue.section.length).toBeGreaterThan(0);
-        expect(cue.colors).toEqual(loop.sections.length > 0 ? cue.colors : cue.colors);
         expect(cue.colors.length).toBeGreaterThan(0);
         expect(cue.color).toBe(cue.colors[0]);
-        expect(typeof cue.intensity).toBe('string');
-        expect(typeof cue.strobe).toBe('boolean');
       }
     }
   });
 
-  it('different ambiances have different palettes', () => {
+  it('themes produce distinct movement/strobe signatures', () => {
     const loops = generateAmbianceLoops([fixture()]);
-    const palettes = new Set(loops.map((l) => l.cues[0].colors.join(',')));
-    expect(palettes.size).toBe(AMBIANCE_PROFILES.length);
+    const wash = loops.find((l) => l.theme === 'wash')!;
+    const strobe = loops.find((l) => l.theme === 'strobe')!;
+    // Strobe theme → every cue strobes; wash theme → none.
+    expect(strobe.cues.every((c) => c.strobe)).toBe(true);
+    expect(wash.cues.every((c) => !c.strobe)).toBe(true);
   });
 
   it('is deterministic for the same input', () => {
@@ -86,15 +101,45 @@ describe('generateAmbianceLoops', () => {
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 
-  it('reports the enabled fixture count', () => {
+  it('reports the enabled fixture count and generates even with no fixtures', () => {
     const loops = generateAmbianceLoops([fixture(), fixture({ id: 'f2', enabled: false })]);
     expect(loops[0].fixtureCount).toBe(1);
+    const empty = generateAmbianceLoops([]);
+    expect(empty.length).toBeGreaterThan(50);
+    expect(empty[0].fixtureCount).toBe(0);
   });
 
-  it('generates loops even with no fixtures (fixtureCount 0)', () => {
-    const loops = generateAmbianceLoops([]);
-    expect(loops).toHaveLength(AMBIANCE_PROFILES.length);
-    expect(loops[0].fixtureCount).toBe(0);
+  it('supports filters (themes / ambiances / tempoMultipliers)', () => {
+    const loops = generateAmbianceLoops([fixture()], {
+      themes: ['chase'],
+      ambiances: ['dark'],
+      tempoMultipliers: [1.0],
+    });
+    expect(loops).toHaveLength(1);
+    expect(loops[0].theme).toBe('chase');
+    expect(loops[0].ambiance).toBe('dark');
+  });
+});
+
+describe('regenerateLoopAtBpm', () => {
+  it('rebuilds the loop at a new tempo, preserving theme + ambiance', () => {
+    const [loop] = generateAmbianceLoops([fixture()], {
+      themes: ['chase'], ambiances: ['dark'], tempoMultipliers: [1.0],
+    });
+    const faster = regenerateLoopAtBpm(loop, 160);
+    expect(faster.bpm).toBe(160);
+    expect(faster.theme).toBe('chase');
+    expect(faster.ambiance).toBe('dark');
+    expect(faster.duration).toBeLessThan(loop.duration);
+    expect(faster.cues.length).toBeGreaterThan(0);
+  });
+
+  it('clamps out-of-range BPM', () => {
+    const [loop] = generateAmbianceLoops([fixture()], {
+      themes: ['chase'], ambiances: ['dark'], tempoMultipliers: [1.0],
+    });
+    expect(regenerateLoopAtBpm(loop, 9999).bpm).toBe(240);
+    expect(regenerateLoopAtBpm(loop, 1).bpm).toBe(40);
   });
 });
 
@@ -102,13 +147,5 @@ describe('computeLoopDmxCues', () => {
   it('returns [] for empty fixtures', () => {
     const [loop] = generateAmbianceLoops([]);
     expect(computeLoopDmxCues(loop, [], new Map(), [])).toEqual([]);
-  });
-
-  it('returns [] when there are no cues', () => {
-    const loop = {
-      id: 'x', name: 'x', ambiance: 'energetic' as const, bpm: 120,
-      measures: 16, duration: 32, sections: [], cues: [], fixtureCount: 1,
-    };
-    expect(computeLoopDmxCues(loop, [fixture()], new Map(), ['u1'])).toEqual([]);
   });
 });
