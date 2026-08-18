@@ -23,6 +23,7 @@ import TrackTimeline, {
   type ChaserTrackEntry,
 } from './TrackTimeline';
 import { dmxBridge } from '../utils/dmx-bridge';
+import { outputArbiter } from '../engine/output-arbiter';
 import { useTimelineTracks, type TrackTargetType } from '../hooks/useTimelineTracks';
 
 const AMBIANCE_ICON: Record<string, string> = {
@@ -258,7 +259,17 @@ export const AutoLoopsPanel: React.FC = () => {
     const lastCue = dmxCues[dmxCues.length - 1];
     const midCue = dmxCues[Math.floor(dmxCues.length / 2)];
     const cueDiff = (a: any, b: any) => JSON.stringify(a?.channelValues) !== JSON.stringify(b?.channelValues);
-    const diagMsg = `[auto-loops] ${loop.theme}/${loop.ambiance} ${loop.bpm}bpm | nCues=${dmxCues.length} | uni0=${dmxCues[0]?.universe} | t0=${dmxCues[0]?.time.toFixed(1)}s tLast=${lastCue?.time.toFixed(1)}s | move0→mid=${cueDiff(dmxCues[0], midCue) ? 'DIFF' : 'SAME'} mid→last=${cueDiff(midCue, lastCue) ? 'DIFF' : 'SAME'} | cue0=${JSON.stringify(dmxCues[0]?.channelValues)} | ${patchedFixtures.map((f) => {
+    // Diagnostique d'arbitrage : qui « tient » les fixtures au moment de Jouer ?
+    const uni0 = dmxCues[0]?.universe ?? 0;
+    const preBuf = outputArbiter.getBuffer(uni0);
+    const keyCh = [5, 6, 7, 8, 9]; // speed, dimmer, R, G, B de la 1re fixture
+    const pre = keyCh.map((k) => `${k}:${preBuf[k] ?? 0}`).join(',');
+    const srcIds = ['simple-desk', 'fixture-test', 'vc', 'design-efx', 'design-test', 'fixture-onoff', 'default', 'song-preset', 'quickshow', 'show-manager', 'rgb-matrix'];
+    const activeSrcs = srcIds.filter((s) => {
+      const v = outputArbiter.getSourceValues(s, uni0);
+      return v && Object.keys(v).length > 0;
+    });
+    const diagMsg = `[auto-loops] ${loop.theme}/${loop.ambiance} ${loop.bpm}bpm | nCues=${dmxCues.length} | uni0=${dmxCues[0]?.universe} | t0=${dmxCues[0]?.time.toFixed(1)}s tLast=${lastCue?.time.toFixed(1)}s | move0→mid=${cueDiff(dmxCues[0], midCue) ? 'DIFF' : 'SAME'} mid→last=${cueDiff(midCue, lastCue) ? 'DIFF' : 'SAME'} | preBuf[${pre}] | activeSrcs=[${activeSrcs.join(',') || 'none'}] | cue0=${JSON.stringify(dmxCues[0]?.channelValues)} | ${patchedFixtures.map((f) => {
       const def = defs.get(f.fixtureDefId);
       const chans = def?.modes?.[f.modeIndex ?? 0]?.channels ?? [];
       const colour = chans.filter((c) => c.type === 'Colour').length;
