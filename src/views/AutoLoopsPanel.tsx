@@ -255,7 +255,10 @@ export const AutoLoopsPanel: React.FC = () => {
       console.warn('[auto-loops] NO DMX cues for', loop.theme, loop.ambiance, loop.bpm, '| patchedFixtures:', patchedFixtures.length, '| defs:', fixtureDefs.size);
       return;
     }
-    const diagMsg = `[auto-loops] ${loop.theme}/${loop.ambiance} ${loop.bpm}bpm | uni0=${dmxCues[0]?.universe} | cue0=${JSON.stringify(dmxCues[0]?.channelValues)} | ${patchedFixtures.map((f) => {
+    const lastCue = dmxCues[dmxCues.length - 1];
+    const midCue = dmxCues[Math.floor(dmxCues.length / 2)];
+    const cueDiff = (a: any, b: any) => JSON.stringify(a?.channelValues) !== JSON.stringify(b?.channelValues);
+    const diagMsg = `[auto-loops] ${loop.theme}/${loop.ambiance} ${loop.bpm}bpm | nCues=${dmxCues.length} | uni0=${dmxCues[0]?.universe} | t0=${dmxCues[0]?.time.toFixed(1)}s tLast=${lastCue?.time.toFixed(1)}s | move0→mid=${cueDiff(dmxCues[0], midCue) ? 'DIFF' : 'SAME'} mid→last=${cueDiff(midCue, lastCue) ? 'DIFF' : 'SAME'} | cue0=${JSON.stringify(dmxCues[0]?.channelValues)} | ${patchedFixtures.map((f) => {
       const def = defs.get(f.fixtureDefId);
       const chans = def?.modes?.[f.modeIndex ?? 0]?.channels ?? [];
       const colour = chans.filter((c) => c.type === 'Colour').length;
