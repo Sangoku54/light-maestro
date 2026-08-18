@@ -229,7 +229,7 @@ export const AutoLoopsPanel: React.FC = () => {
     setSelectedId(loop.id);
   }, [stopPlay, track]);
 
-  const playLoop = (loop: AmbianceLoop) => {
+  const playLoop = async (loop: AmbianceLoop) => {
     if (playingId === loop.id) { stopPlay(); return; }
     stopPlay();
     // Ensure the DMX engine is running before the first frame (mirrors
@@ -241,16 +241,22 @@ export const AutoLoopsPanel: React.FC = () => {
       }
     } catch {}
     const universeIds = universes.map((u) => u.id);
-    if (fixtureDefs.size === 0) {
+    // Await the cached definition load so a « Jouer » right after opening the
+    // panel can't run against an empty def map (the useEffect may still be in
+    // flight). No-op when defs are already cached.
+    const defs = patchedFixtures.length > 0
+      ? await loadFixtureDefinitions([...new Set(patchedFixtures.map((f) => f.fixtureDefId))]).catch(() => new Map<string, DmxFixtureDefinition>())
+      : new Map<string, DmxFixtureDefinition>();
+    if (defs.size === 0) {
       console.warn('[auto-loops] fixtureDefs EMPTY at play — analyzeFixture will find no channels (safety-net only)');
     }
-    const dmxCues = computeLoopDmxCues(loop, patchedFixtures, fixtureDefs, universeIds);
+    const dmxCues = computeLoopDmxCues(loop, patchedFixtures, defs, universeIds);
     if (dmxCues.length === 0) {
       console.warn('[auto-loops] NO DMX cues for', loop.theme, loop.ambiance, loop.bpm, '| patchedFixtures:', patchedFixtures.length, '| defs:', fixtureDefs.size);
       return;
     }
     const diagMsg = `[auto-loops] ${loop.theme}/${loop.ambiance} ${loop.bpm}bpm | uni0=${dmxCues[0]?.universe} | cue0=${JSON.stringify(dmxCues[0]?.channelValues)} | ${patchedFixtures.map((f) => {
-      const def = fixtureDefs.get(f.fixtureDefId);
+      const def = defs.get(f.fixtureDefId);
       const chans = def?.modes?.[f.modeIndex ?? 0]?.channels ?? [];
       const colour = chans.filter((c) => c.type === 'Colour').length;
       const pan = chans.some((c) => c.type === 'Pan');
