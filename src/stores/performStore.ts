@@ -41,7 +41,8 @@ export type ButtonActionType =
   | 'dmxChannel'
   | 'loadShow'
   | 'playSong'
-  | 'audioAutoScript';
+  | 'audioAutoScript'
+  | 'autoLoop';
 
 export type SliderFunctionType =
   | 'channel'
@@ -61,6 +62,9 @@ export interface ConsoleWidgetConfig {
   cueListId?: string;
   songId?: string;
   songName?: string;
+  // Auto loop (ambiance loop)
+  autoLoopId?: string;
+  autoLoopName?: string;
   dmxUniverse?: number;
   dmxAddress?: number;
   dmxValue?: number;

@@ -1,50 +1,47 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { RefreshCw, Sparkles, Play, Square, Palette, Move, Sun, Zap } from 'lucide-react';
+import { Sparkles, Play, Square, Save, Trash2, Check } from 'lucide-react';
 import { useShowStore } from '../stores/showStore';
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from '../hooks/dmx-cues';
-import { generateLoopLibrary, materializeAutoLoops, purgeAutoLoops, type AutoLoop, type AutoLoopKind } from '../engine/auto-loops';
-import { midiPlayChaser, midiStopChaser } from '../engine/midi-actions';
+import {
+  generateAmbianceLoops,
+  computeLoopDmxCues,
+  getAmbianceProfile,
+  type AmbianceLoop,
+} from '../engine/ambiance-loops';
+import TrackTimeline from './TrackTimeline';
+import { dmxBridge } from '../utils/dmx-bridge';
 
-const KIND_META: Record<AutoLoopKind, { icon: React.ReactNode; label: string; accent: string }> = {
-  'color-chase': { icon: <Palette className="w-4 h-4" />, label: 'Chase couleur', accent: 'text-purple-400' },
-  movement: { icon: <Move className="w-4 h-4" />, label: 'Mouvement', accent: 'text-cyan-400' },
-  'dimmer-pulse': { icon: <Sun className="w-4 h-4" />, label: 'Pulsation', accent: 'text-amber-400' },
-  strobe: { icon: <Zap className="w-4 h-4" />, label: 'Strobe', accent: 'text-rose-400' },
+const AMBIANCE_ICON: Record<string, string> = {
+  energetic: '⚡',
+  dark: '🌑',
+  uplifting: '🌅',
+  dreamy: '🌙',
+  aggressive: '🔥',
+  groovy: '🕺',
+  epic: '🏔️',
 };
-
-const DIR_LABEL: Record<AutoLoop['direction'], string> = {
-  forward: '→',
-  backward: '←',
-  bounce: '↔',
-};
-
-/** How many loops to generate per batch. */
-const DEFAULT_COUNT = 36;
 
 /**
- * AutoLoopsPanel — the "LoopAuto"-style library. Generates a near-infinite,
- * seeded catalog of loop variations from the patched fixtures. Each card
- * materializes the loop into a playable chaser and starts it on click.
+ * AutoLoopsPanel — the ambiance-loop library. Generates 7 fixture-driven
+ * lighting loops (one per ambiance), each a 16-measure cue timeline classified
+ * by mood. Selecting a loop renders the same timeline visual as the autoscript
+ * (TrackTimeline) — without audio. Loops can be saved and recalled later from a
+ * Performance widget.
  */
 export const AutoLoopsPanel: React.FC = () => {
   const { t } = useTranslation();
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const universes = useShowStore((s) => s.universes);
+  const autoLoops = useShowStore((s) => s.autoLoops);
+  const addAutoLoop = useShowStore((s) => s.addAutoLoop);
+  const deleteAutoLoop = useShowStore((s) => s.deleteAutoLoop);
+
   const [fixtureDefs, setFixtureDefs] = useState<Map<string, DmxFixtureDefinition>>(new Map());
-  const [seed, setSeed] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
-
-  // Chaser ids currently playing (exclusive playback — one loop at a time).
-  const launchedRef = useRef<Set<string>>(new Set());
-
-  // Stable patch signature — invalidates playback when the patch changes.
-  const patchKey = useMemo(
-    () =>
-      patchedFixtures
-        .map((f) => `${f.id}|${f.tier}|${f.enabled === false ? 0 : 1}|${f.fixtureDefId}|${f.startAddress}`)
-        .join(';'),
-    [patchedFixtures],
-  );
+  const [savedFlash, setSavedFlash] = useState<string | null>(null);
+  const rafRef = useRef<number>(0);
 
   // Load fixture definitions for the patched fixtures.
   useEffect(() => {
@@ -66,56 +63,78 @@ export const AutoLoopsPanel: React.FC = () => {
     };
   }, [patchedFixtures]);
 
-  const stopAll = useCallback(() => {
-    for (const id of launchedRef.current) midiStopChaser(id);
-    launchedRef.current.clear();
+  const loops = useMemo<AmbianceLoop[]>(() => generateAmbianceLoops(patchedFixtures), [patchedFixtures]);
+  const selected = loops.find((l) => l.id === selectedId) ?? loops[0] ?? null;
+
+  const stopPlay = useCallback(() => {
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
     setPlayingId(null);
+    dmxBridge.release('vc');
   }, []);
 
-  const purgeStore = useCallback(() => {
-    purgeAutoLoops(useShowStore.getState());
-  }, []);
-
-  // On patch change: stop playback and purge stale materialized loops.
-  useEffect(() => {
-    stopAll();
-    purgeStore();
-  }, [patchKey, stopAll, purgeStore]);
-
-  // On unmount: stop any playing loop and clean up the transient chaser.
+  // Stop preview playback on unmount.
   useEffect(() => {
     return () => {
-      stopAll();
-      purgeStore();
+      cancelAnimationFrame(rafRef.current);
+      dmxBridge.release('vc');
     };
-  }, [stopAll, purgeStore]);
+  }, []);
 
-  const library = useMemo<AutoLoop[]>(() => {
-    if (patchedFixtures.length === 0 || fixtureDefs.size === 0) return [];
-    return generateLoopLibrary(patchedFixtures, fixtureDefs, { count: DEFAULT_COUNT, seed });
-  }, [patchedFixtures, fixtureDefs, seed]);
-
-  const handleToggle = (loop: AutoLoop) => {
-    // Exclusive playback: stop + purge the previous loop before starting a new one.
+  const playLoop = (loop: AmbianceLoop) => {
     if (playingId === loop.id) {
-      stopAll();
-      purgeStore();
+      stopPlay();
       return;
     }
-    stopAll();
-    purgeStore();
-    const store = useShowStore.getState();
-    const [chaserId] = materializeAutoLoops([loop], store);
-    if (!chaserId) return;
-    launchedRef.current.add(chaserId);
-    midiPlayChaser(chaserId);
+    stopPlay();
+    const universeIds = universes.map((u) => u.id);
+    const dmxCues = computeLoopDmxCues(loop, patchedFixtures, fixtureDefs, universeIds);
+    if (dmxCues.length === 0) return;
+    const duration = loop.duration;
+    let passStart = performance.now();
+    let fired = new Set<string>();
+    let first = true;
+    const fire = () => {
+      if (first) {
+        first = false;
+        dmxBridge.release('vc');
+      }
+      let elapsed = (performance.now() - passStart) / 1000;
+      if (elapsed >= duration) {
+        // Start a new pass (loop).
+        passStart = performance.now();
+        fired = new Set();
+        elapsed = 0;
+        dmxBridge.release('vc');
+      }
+      for (const cue of dmxCues) {
+        const key = `${cue.time.toFixed(2)}-${cue.universe}`;
+        if (fired.has(key)) continue;
+        if (elapsed >= cue.time && Object.keys(cue.channelValues || {}).length > 0) {
+          fired.add(key);
+          try { dmxBridge.write('vc', cue.universe, cue.channelValues); } catch {}
+        }
+      }
+      rafRef.current = requestAnimationFrame(fire);
+    };
+    fire();
     setPlayingId(loop.id);
   };
 
-  const handleRegenerate = () => {
-    stopAll();
-    purgeStore();
-    setSeed((s) => (s + 1) % 100000);
+  const handleSave = () => {
+    if (!selected) return;
+    const profile = getAmbianceProfile(selected.ambiance);
+    addAutoLoop({
+      name: `${profile.labelFr} · ${selected.bpm} BPM`,
+      ambiance: selected.ambiance,
+      bpm: selected.bpm,
+      measures: selected.measures,
+      duration: selected.duration,
+      sections: selected.sections,
+      cues: selected.cues,
+    });
+    setSavedFlash(selected.id);
+    window.setTimeout(() => setSavedFlash(null), 1500);
   };
 
   if (patchedFixtures.length === 0) {
@@ -125,7 +144,7 @@ export const AutoLoopsPanel: React.FC = () => {
           <Sparkles className="w-8 h-8 text-gray-600" />
           <p className="text-sm">Aucune fixture patchée.</p>
           <p className="text-xs text-gray-600">
-            Patch des fixtures dans l'onglet Setup pour générer des loops automatiques.
+            Patch des fixtures dans l'onglet Setup pour générer des boucles d'ambiance.
           </p>
         </div>
       </div>
@@ -138,64 +157,131 @@ export const AutoLoopsPanel: React.FC = () => {
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-purple-400" />
-          <h2 className="text-sm font-semibold text-gray-200">{t('sidebar.autoLoops') || 'Loops auto'}</h2>
-          <span className="text-[10px] text-gray-500 bg-gray-800 rounded-full px-2 py-0.5">
-            {library.length}
-          </span>
+          <h2 className="text-sm font-semibold text-gray-200">{t('sidebar.autoLoops') || 'Boucles d’ambiance'}</h2>
+          <span className="text-[10px] text-gray-500 bg-gray-800 rounded-full px-2 py-0.5">{loops.length}</span>
         </div>
-        <button
-          onClick={handleRegenerate}
-          title={t('regenerate') || 'Régénérer la bibliothèque'}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 text-xs font-medium transition-colors"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          Régénérer
-        </button>
       </div>
 
-      {/* Library grid */}
-      <div className="flex-1 overflow-y-auto p-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {library.map((loop) => {
-            const meta = KIND_META[loop.kind];
-            const active = playingId === loop.id;
+      <div className="flex-1 flex min-h-0">
+        {/* Ambiance list */}
+        <div className="w-48 shrink-0 overflow-y-auto border-r border-gray-800 p-2 space-y-1.5">
+          {loops.map((loop) => {
+            const profile = getAmbianceProfile(loop.ambiance);
+            const active = selected?.id === loop.id;
             return (
-              <div
+              <button
                 key={loop.id}
-                className="group flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-gray-800 bg-gray-900/40 hover:border-gray-700 hover:bg-gray-900/70 transition-colors"
+                onClick={() => {
+                  setSelectedId(loop.id);
+                  if (playingId) stopPlay();
+                }}
+                className={
+                  'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border text-left transition-colors ' +
+                  (active
+                    ? 'border-purple-500/40 bg-purple-600/15 text-gray-100'
+                    : 'border-gray-800 bg-gray-900/40 text-gray-300 hover:border-gray-700 hover:bg-gray-900/70')
+                }
               >
-                <div className={`shrink-0 ${meta.accent}`}>{meta.icon}</div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm text-gray-200 truncate" title={loop.name}>
-                    {loop.name}
-                  </div>
-                  <div className="flex items-center gap-2 text-[10px] text-gray-500">
-                    <span>{meta.label}</span>
-                    <span>·</span>
-                    <span>{loop.speedBpm}</span>
-                    <span>{DIR_LABEL[loop.direction]}</span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => handleToggle(loop)}
-                  className={
-                    'shrink-0 w-8 h-8 rounded-md flex items-center justify-center transition-colors ' +
-                    (active
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-gray-800 text-gray-300 hover:bg-purple-600/30 hover:text-purple-300')
-                  }
-                  title={active ? t('stop') || 'Arrêter' : t('play') || 'Jouer'}
-                >
-                  {active ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                </button>
-              </div>
+                <span className="text-base leading-none">{AMBIANCE_ICON[loop.ambiance] ?? '✨'}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs font-medium truncate">{profile.labelFr}</span>
+                  <span className="block text-[10px] text-gray-500 truncate">
+                    {loop.bpm} BPM · {loop.measures} mes.
+                  </span>
+                </span>
+                <span className="flex shrink-0 -space-x-1">
+                  {profile.palette.slice(0, 4).map((c, i) => (
+                    <span key={i} className="w-2.5 h-2.5 rounded-full border border-black/40" style={{ backgroundColor: c }} />
+                  ))}
+                </span>
+              </button>
             );
           })}
         </div>
-        <p className="text-[10px] text-gray-600 text-center mt-3 pb-2">
-          Cliquer une carte joue le loop sur les fixtures patchées · « Régénérer » produit un nouveau set
-        </p>
+
+        {/* Timeline + actions */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          {selected && (
+            <>
+              <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-gray-800 shrink-0">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-gray-200 truncate">
+                    {getAmbianceProfile(selected.ambiance).labelFr}
+                  </div>
+                  <div className="text-[10px] text-gray-500">
+                    {selected.bpm} BPM · 16 mesures virtuelles · {selected.cues.length} cues ·{' '}
+                    {selected.fixtureCount} fixtures
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={() => playLoop(selected)}
+                    className={
+                      'flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ' +
+                      (playingId === selected.id
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-gray-800 text-gray-200 hover:bg-purple-600/30 hover:text-purple-200')
+                    }
+                  >
+                    {playingId === selected.id ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                    {playingId === selected.id ? 'Arrêter' : 'Jouer'}
+                  </button>
+                  <button
+                    onClick={handleSave}
+                    className={
+                      'flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ' +
+                      (savedFlash === selected.id
+                        ? 'bg-green-600/20 text-green-300'
+                        : 'bg-purple-600/20 text-purple-300 hover:bg-purple-600/30')
+                    }
+                  >
+                    {savedFlash === selected.id ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+                    {savedFlash === selected.id ? 'Enregistré' : 'Enregistrer'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-auto px-3 py-2">
+                <TrackTimeline
+                  cues={selected.cues as any}
+                  duration={selected.duration}
+                  currentTime={0}
+                  onSeek={() => {}}
+                  sections={selected.sections}
+                  patchedFixtures={patchedFixtures}
+                  bpm={selected.bpm}
+                />
+              </div>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Saved loops */}
+      {autoLoops.length > 0 && (
+        <div className="shrink-0 border-t border-gray-800 px-3 py-2">
+          <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">
+            Boucles enregistrées ({autoLoops.length})
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {autoLoops.map((a) => (
+              <div
+                key={a.id}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-gray-800/60 border border-gray-700 text-xs text-gray-300"
+              >
+                <span className="truncate max-w-[160px]">{a.name}</span>
+                <button
+                  onClick={() => deleteAutoLoop(a.id)}
+                  title="Supprimer"
+                  className="text-gray-500 hover:text-rose-400 transition-colors"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

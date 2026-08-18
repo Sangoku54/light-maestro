@@ -195,6 +195,24 @@ export interface SavedCueList {
   currentCueIndex: number;
 }
 
+// ─── Auto Loop (ambiance loop) ───────────────────────────────
+// A fixture-driven, ambiance-classified lighting loop: 16 virtual measures of
+// logical cues (time/section/color/intensity/movement/strobe). Saved and
+// recalled from a Performance widget; DMX is computed on recall against the
+// current patch (see engine/ambiance-loops.ts).
+export interface SavedAutoLoop {
+  id: string;
+  name: string;
+  /** AtmosphereType value ('energetic' | 'dark' | …). */
+  ambiance: string;
+  bpm: number;
+  measures: number;
+  duration: number;
+  sections: any[];
+  cues: any[];
+  createdAt: string;
+}
+
 // ─── Helpers ───────────────────────────────────────────────
 
 function generateId(): string {
@@ -211,6 +229,10 @@ function generateChaserId(): string {
 
 function generateCueListId(): string {
   return `cl-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function generateAutoLoopId(): string {
+  return `aloop-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function generateEffectId(): string {
@@ -339,6 +361,13 @@ interface ShowState {
   removeSongPreset: (id: string) => void;
   updateSongPreset: (id: string, updates: Partial<SongPreset>) => void;
   setSongPresets: (presets: SongPreset[]) => void;
+
+  // Auto Loops (ambiance loops)
+  autoLoops: SavedAutoLoop[];
+  addAutoLoop: (loop: Omit<SavedAutoLoop, 'id' | 'createdAt'>) => string;
+  updateAutoLoop: (id: string, updates: Partial<SavedAutoLoop>) => void;
+  deleteAutoLoop: (id: string) => void;
+  setAutoLoops: (loops: SavedAutoLoop[]) => void;
 
   // MTC markers (lot #15) — cues sur timecode
   mtcMarkers: MtcMarker[];
@@ -896,6 +925,40 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   setEffects: (effects) => {
     set({ effects });
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+  },
+
+  // ── Auto Loops (ambiance loops) ──
+  autoLoops: [],
+
+  addAutoLoop: (loop) => {
+    const id = generateAutoLoopId();
+    const saved: SavedAutoLoop = {
+      ...loop,
+      id,
+      createdAt: new Date().toISOString(),
+    };
+    set((state) => ({ autoLoops: [...state.autoLoops, saved] }));
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    return id;
+  },
+
+  updateAutoLoop: (id, updates) => {
+    set((state) => ({
+      autoLoops: state.autoLoops.map((a) => (a.id === id ? { ...a, ...updates } : a)),
+    }));
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+  },
+
+  deleteAutoLoop: (id) => {
+    set((state) => ({
+      autoLoops: state.autoLoops.filter((a) => a.id !== id),
+    }));
+    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+  },
+
+  setAutoLoops: (loops) => {
+    set({ autoLoops: loops });
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
   },
 

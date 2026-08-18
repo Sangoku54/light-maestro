@@ -11,6 +11,7 @@ import { useAppStore } from '../stores/appStore';
 import { useShowStore, type SavedCueList, type CueListCue, type SongPreset } from '../stores/showStore';
 import { computeDmxCues, loadFixtureDefinitions, type CueInput, type DmxCue } from '../hooks/dmx-cues';
 import { computeDmxForCue } from '../hooks/dmx-playback';
+import { computeLoopDmxCues } from '../engine/ambiance-loops';
 import { SongPresetPlayer } from '../components/SongPresetPlayer';
 import { analyzeAudioBuffer, type TrackAnalysis } from '../hooks/audio-analysis';
 import { sendChannelsToHardware, sendToUniverse } from '../utils/dmx-helpers';
@@ -863,6 +864,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
   const chasers = useShowStore((s) => s.chasers);
   const songPresets = useShowStore((s) => s.songPresets);
   const storeShows = useShowStore((s) => s.shows);
+  const autoLoops = useShowStore((s) => s.autoLoops);
 
   const [config, setConfig] = useState({ ...widget.config });
   const [title, setTitle] = useState(widget.config.title || widget.type);
@@ -939,6 +941,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                   <option value="blackout">{t('perform.vc.blackoutWidget')}</option>
                   <option value="loadShow">♪ Play Show</option>
                   <option value="playSong">♪ Play Preset</option>
+                  <option value="autoLoop">⟳ Auto Loop</option>
                 </select>
               </div>
 
@@ -1084,6 +1087,25 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                   config={config}
                   onConfigChange={(updates) => setConfig({ ...config, ...updates })}
                 />
+              )}
+
+              {config.actionType === 'autoLoop' && (
+                <div>
+                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">Auto Loop</label>
+                  <select
+                    value={config.autoLoopId || ''}
+                    onChange={(e) => {
+                      const al = autoLoops.find((a) => a.id === e.target.value);
+                      setConfig({ ...config, autoLoopId: e.target.value, autoLoopName: al?.name });
+                    }}
+                    className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300"
+                  >
+                    <option value="">— Select Loop —</option>
+                    {autoLoops.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name} · {a.ambiance}</option>
+                    ))}
+                  </select>
+                </div>
               )}
 
               {config.actionType === 'chaser' && (
@@ -1482,11 +1504,13 @@ const VCButtonWidget: React.FC<{
   const scenes = useShowStore((s) => s.scenes);
   const chasers = useShowStore((s) => s.chasers);
   const songPresets = useShowStore((s) => s.songPresets);
+  const autoLoops = useShowStore((s) => s.autoLoops);
   const chaserTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chaserRunningRef = useRef(false);
   const sceneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sceneFadeRef = useRef<{ cancel: () => void } | null>(null);
   const autoAudioRef = useRef<HTMLAudioElement | null>(null);
+  const autoLoopRef = useRef<{ stop: () => void } | null>(null);
   const autoRafRef = useRef<number>(0);
   const regeneratingRef = useRef(false);
   const playIntentRef = useRef(false);
@@ -1508,6 +1532,12 @@ const VCButtonWidget: React.FC<{
     const sp = songPresets.find((p) => p.id === config.songId)
       || (config.songName ? songPresets.find((p) => p.name === config.songName) : undefined);
     return sp ? `♪ ${sp.name}` : (config.songName ? `♪ ${config.songName}` : '♪ Song');
+  };
+
+  const getAutoLoopLabel = () => {
+    if (config.actionType !== 'autoLoop' || !config.autoLoopId) return '⟳ Loop';
+    const al = autoLoops.find((a) => a.id === config.autoLoopId);
+    return al ? `⟳ ${al.name}` : (config.autoLoopName ? `⟳ ${config.autoLoopName}` : '⟳ Loop');
   };
 
   // Pre-decode the preset's audio while the widget is idle (before any
@@ -1610,6 +1640,66 @@ const VCButtonWidget: React.FC<{
         beginPlayback();
       }
     })();
+  };
+
+  // ─── autoLoop playback helper (no audio; loops on a virtual clock) ───
+  const _startAutoLoop = (cues: any[], duration: number) => {
+    if (!cues || cues.length === 0) {
+      console.warn('AutoLoop: no cues to play');
+      return;
+    }
+    autoLoopRef.current = {
+      stop: () => {
+        cancelAnimationFrame(autoRafRef.current);
+        autoLoopRef.current = null;
+        vcZeroAllUniverses();
+        setActive(false);
+      },
+    };
+    // Register with the global mutex: stop other audio, track this loop.
+    unregisterAudioRef.current = registerAudioPlayback(widget.id, () => {
+      cancelAnimationFrame(autoRafRef.current);
+      autoLoopRef.current = null;
+      vcZeroAllUniverses();
+      setActive(false);
+    });
+    // Ensure the DMX engine is running before the first frame.
+    (async () => {
+      try {
+        const api = (window as any).lightMaestro?.dmx;
+        if (api) {
+          const running = await api.isRunning().catch(() => false);
+          if (!running) await api.start().catch(() => {});
+        }
+      } catch {}
+    })();
+    let passStart = performance.now();
+    let firedKeys = new Set<string>();
+    let firstFrame = true;
+    const fireAutoLoop = () => {
+      if (firstFrame) {
+        firstFrame = false;
+        vcZeroAllUniverses();
+      }
+      let elapsed = (performance.now() - passStart) / 1000;
+      if (duration > 0 && elapsed >= duration) {
+        // Start a new pass (loop).
+        passStart = performance.now();
+        firedKeys = new Set();
+        elapsed = 0;
+        vcZeroAllUniverses();
+      }
+      for (const cue of cues) {
+        const key = `${cue.time.toFixed(2)}-${cue.universe}`;
+        if (firedKeys.has(key)) continue;
+        if (elapsed >= cue.time && Object.keys(cue.channelValues || {}).length > 0) {
+          firedKeys.add(key);
+          try { dmxBridge.write('vc', cue.universe, cue.channelValues); } catch {}
+        }
+      }
+      autoRafRef.current = requestAnimationFrame(fireAutoLoop);
+    };
+    fireAutoLoop();
   };
 
   const activate = () => {
@@ -1819,6 +1909,66 @@ const VCButtonWidget: React.FC<{
       return;
     }
 
+    if (config.actionType === 'autoLoop' && config.autoLoopId) {
+      // Toggle: stop if already looping.
+      if (autoLoopRef.current) {
+        if (unregisterAudioRef.current) { unregisterAudioRef.current(); unregisterAudioRef.current = null; }
+        autoLoopRef.current.stop();
+        autoLoopRef.current = null;
+        vcZeroAllUniverses();
+        setActive(false);
+        return;
+      }
+      const saved = autoLoops.find((a) => a.id === config.autoLoopId);
+      if (!saved) {
+        console.warn('AutoLoop: saved loop not found', config.autoLoopId);
+        setActive(false);
+        return;
+      }
+      (async () => {
+        try {
+          const fitState = useShowStore.getState();
+          if (!fitState.patchedFixtures?.length) {
+            console.warn('[VC] autoLoop: no patched fixtures');
+            setActive(false);
+            return;
+          }
+          // Ensure the DMX engine is running with the current universes.
+          const api = (window as any).lightMaestro?.dmx;
+          if (api) {
+            try {
+              const universes = fitState.universes;
+              if (universes.length > 0) {
+                await Promise.all(universes.map((u: any) => api.addUniverse({
+                  id: u.id, name: u.name, type: u.type, output: true, input: false,
+                  channels: u.channels, serialPort: (u as any).serialPort || '',
+                  artnetIP: (u as any).artnetIP ?? '', artnetSubnet: (u as any).artnetSubnet ?? 0,
+                  artnetUniverse: (u as any).artnetUniverse ?? 0,
+                  sacnUniverse: (u as any).sacnUniverse ?? 1, sacnPriority: (u as any).sacnPriority ?? 100,
+                }).catch(() => {})));
+                await api.start().catch(() => {});
+              }
+            } catch { /* silent */ }
+          }
+          const defs = await loadFixtureDefinitions(
+            fitState.patchedFixtures.map((f: any) => f.fixtureDefId)
+          );
+          const universeIds = fitState.universes.map((u: any) => u.id);
+          const dmxCues = computeLoopDmxCues(saved as any, fitState.patchedFixtures, defs, universeIds);
+          if (dmxCues.length === 0) {
+            console.warn('[VC] autoLoop: no DMX cues for this patch');
+            setActive(false);
+            return;
+          }
+          _startAutoLoop(dmxCues, (saved.duration || (dmxCues[dmxCues.length - 1]?.time ?? 0)) + 0.1);
+        } catch (err) {
+          console.error('[VC] autoLoop: failed', err);
+          setActive(false);
+        }
+      })();
+      return;
+    }
+
     if (config.actionType === 'blackout') {
       try { window.lightMaestro?.dmx?.blackout(); } catch { /* */ }
       return;
@@ -1992,6 +2142,13 @@ const VCButtonWidget: React.FC<{
       autoAudioRef.current = null;
       vcZeroAllUniverses();
     }
+    // Stop auto loop playback
+    if (autoLoopRef.current) {
+      cancelAnimationFrame(autoRafRef.current);
+      autoLoopRef.current.stop();
+      autoLoopRef.current = null;
+      vcZeroAllUniverses();
+    }
     // Stop playSong playback
     setSongPlayer(null);
     // Stop show playback (loadShow widget) — the toggle path: the 2nd
@@ -2075,6 +2232,7 @@ const VCButtonWidget: React.FC<{
             : config.actionType === 'audioAutoScript' ? (config.audioFileName ? `♪ ${config.audioFileName}` : '♪ Audio Auto') :
            config.actionType === 'loadShow' ? (config.showName || '📂 Load Show') :
            config.actionType === 'playSong' ? getSongLabel() :
+           config.actionType === 'autoLoop' ? getAutoLoopLabel() :
            config.actionType === 'blackout' ? t('perform.vc.blackoutLabel') :
            config.actionType === 'chaser' ? getChaserLabel() :
            scenes.find((s) => s.id === config.sceneId)?.name || 'Button'}

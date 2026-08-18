@@ -98,6 +98,7 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
         cueLists: showState.cueLists,
         shows: showState.shows,
         songPresets: showState.songPresets,
+        autoLoops: showState.autoLoops,
         mtcMarkers: showState.mtcMarkers,
       },
       vcWidgets: widgets,
@@ -257,6 +258,7 @@ const App: React.FC = () => {
       ss.setCueLists([]);
       ss.setShows([]);
       ss.setSongPresets([]);
+      ss.setAutoLoops([]);
       ss.setMtcMarkers([]);
       usePerformStore.getState().vcSetWidgets([]);
       // Also remove persisted show-store from disk
@@ -290,6 +292,7 @@ const App: React.FC = () => {
           if (data.showStore.cueLists) ss.setCueLists(data.showStore.cueLists);
           if (data.showStore.shows) ss.setShows(data.showStore.shows);
           if (data.showStore.songPresets) ss.setSongPresets(data.showStore.songPresets);
+          if (data.showStore.autoLoops) ss.setAutoLoops(data.showStore.autoLoops);
           if (data.showStore.mtcMarkers) ss.setMtcMarkers(data.showStore.mtcMarkers);
         }
         if (data.appStore) {
