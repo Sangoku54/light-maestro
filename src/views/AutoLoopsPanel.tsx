@@ -1,50 +1,72 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { RefreshCw, Sparkles, Play, Square, Palette, Move, Sun, Zap } from 'lucide-react';
+import { Sparkles, Play, Square, Palette } from 'lucide-react';
 import { useShowStore } from '../stores/showStore';
-import { loadFixtureDefinitions, type DmxFixtureDefinition } from '../hooks/dmx-cues';
-import { generateLoopLibrary, materializeAutoLoops, purgeAutoLoops, type AutoLoop, type AutoLoopKind } from '../engine/auto-loops';
-import { midiPlayChaser, midiStopChaser } from '../engine/midi-actions';
-
-const KIND_META: Record<AutoLoopKind, { icon: React.ReactNode; label: string; accent: string }> = {
-  'color-chase': { icon: <Palette className="w-4 h-4" />, label: 'Chase couleur', accent: 'text-purple-400' },
-  movement: { icon: <Move className="w-4 h-4" />, label: 'Mouvement', accent: 'text-cyan-400' },
-  'dimmer-pulse': { icon: <Sun className="w-4 h-4" />, label: 'Pulsation', accent: 'text-amber-400' },
-  strobe: { icon: <Zap className="w-4 h-4" />, label: 'Strobe', accent: 'text-rose-400' },
-};
-
-const DIR_LABEL: Record<AutoLoop['direction'], string> = {
-  forward: '→',
-  backward: '←',
-  bounce: '↔',
-};
-
-/** How many loops to generate per batch. */
-const DEFAULT_COUNT = 36;
+import { useAppStore } from '../stores/appStore';
+import {
+  loadFixtureDefinitions,
+  computeDmxCues,
+  type DmxFixtureDefinition,
+  type DmxCue,
+} from '../hooks/dmx-cues';
+import { generateThemeLoop, THEME_LOOP_PRESETS } from '../engine/theme-loop';
+import { purgeAutoLoops } from '../engine/auto-loops';
+import { dmxBridge } from '../utils/dmx-bridge';
 
 /**
- * AutoLoopsPanel — the "LoopAuto"-style library. Generates a near-infinite,
- * seeded catalog of loop variations from the patched fixtures. Each card
- * materializes the loop into a playable chaser and starts it on click.
+ * AutoLoopsPanel — « Boucle unique », à la façon de l'autoscript.
+ *
+ * Une SEULE boucle déterministe (thème fixe = palette + mouvement + bpm),
+ * sans analyse audio, sans ambiance, sans détection de tempo. La boucle est
+ * une séquence de cues (comme l'autoscript) : cue.color est la couleur du bloc,
+ * et computeDmxCues() joue exactement cette couleur. Les blocs affichés
+ * ci-dessous SONT la couleur jouée (source unique = cue.color).
  */
+
+/** Write one frame (all universes of one cue) to the bridge + 3D mirror. */
+function writeFrame(dmxs: DmxCue[]) {
+  for (const dc of dmxs) {
+    try {
+      dmxBridge.write('vc', dc.universe, dc.channelValues);
+    } catch {}
+    try {
+      useAppStore.getState().setUniverseData(dc.universe, dc.channelValues);
+    } catch {}
+  }
+}
+
+/** Darken every patched universe (transient zeros so hardware actually fades out). */
+function zeroAllUniverses() {
+  const s = useShowStore.getState();
+  const uniIds = s.universes.map((u) => String(u.id));
+  const z: Record<number, number> = {};
+  for (let i = 1; i <= 512; i++) z[i] = 0;
+  const seen = new Set<number>();
+  for (const pf of s.patchedFixtures) {
+    const uniNum = uniIds.includes(pf.universeId) ? uniIds.indexOf(pf.universeId) : 0;
+    if (seen.has(uniNum)) continue;
+    seen.add(uniNum);
+    try {
+      dmxBridge.writeTransient('vc', uniNum, z);
+    } catch {}
+    try {
+      useAppStore.getState().setUniverseData(uniNum, z);
+    } catch {}
+  }
+}
+
 export const AutoLoopsPanel: React.FC = () => {
   const { t } = useTranslation();
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const universes = useShowStore((s) => s.universes);
+
   const [fixtureDefs, setFixtureDefs] = useState<Map<string, DmxFixtureDefinition>>(new Map());
-  const [seed, setSeed] = useState(0);
-  const [playingId, setPlayingId] = useState<string | null>(null);
+  const [themeName, setThemeName] = useState<string>(THEME_LOOP_PRESETS[0]?.name ?? 'Violet');
+  const [playing, setPlaying] = useState(false);
+  const [cueIdx, setCueIdx] = useState(0);
 
-  // Chaser ids currently playing (exclusive playback — one loop at a time).
-  const launchedRef = useRef<Set<string>>(new Set());
-
-  // Stable patch signature — invalidates playback when the patch changes.
-  const patchKey = useMemo(
-    () =>
-      patchedFixtures
-        .map((f) => `${f.id}|${f.tier}|${f.enabled === false ? 0 : 1}|${f.fixtureDefId}|${f.startAddress}`)
-        .join(';'),
-    [patchedFixtures],
-  );
+  const intervalRef = useRef<number>(0);
+  const frameIdxRef = useRef(0);
 
   // Load fixture definitions for the patched fixtures.
   useEffect(() => {
@@ -53,8 +75,7 @@ export const AutoLoopsPanel: React.FC = () => {
       return;
     }
     let cancelled = false;
-    const ids = [...new Set(patchedFixtures.map((f) => f.fixtureDefId))];
-    loadFixtureDefinitions(ids)
+    loadFixtureDefinitions([...new Set(patchedFixtures.map((f) => f.fixtureDefId))])
       .then((defs) => {
         if (!cancelled) setFixtureDefs(defs);
       })
@@ -66,57 +87,83 @@ export const AutoLoopsPanel: React.FC = () => {
     };
   }, [patchedFixtures]);
 
-  const stopAll = useCallback(() => {
-    for (const id of launchedRef.current) midiStopChaser(id);
-    launchedRef.current.clear();
-    setPlayingId(null);
+  const theme = useMemo(
+    () => THEME_LOOP_PRESETS.find((p) => p.name === themeName) ?? THEME_LOOP_PRESETS[0],
+    [themeName],
+  );
+  const cues = useMemo(() => generateThemeLoop(theme), [theme]);
+  const universeIds = useMemo(() => universes.map((u) => String(u.id)), [universes]);
+
+  const dmxCues = useMemo(() => {
+    if (patchedFixtures.length === 0 || fixtureDefs.size === 0) return [];
+    return computeDmxCues({ cues, patchedFixtures, fixtureDefs, universeIds });
+  }, [cues, patchedFixtures, fixtureDefs, universeIds]);
+
+  // Group dmxCues into frames (one frame per cue; one entry per universe).
+  const frames = useMemo<DmxCue[][]>(() => {
+    const out: DmxCue[][] = [];
+    let cur: DmxCue[] = [];
+    let last = -1;
+    for (const dc of dmxCues) {
+      if (last !== -1 && Math.abs(dc.time - last) > 0.0001) {
+        out.push(cur);
+        cur = [];
+      }
+      cur.push(dc);
+      last = dc.time;
+    }
+    if (cur.length > 0) out.push(cur);
+    return out;
+  }, [dmxCues]);
+
+  const stop = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = 0;
+    }
+    zeroAllUniverses();
+    frameIdxRef.current = 0;
+    setCueIdx(0);
+    setPlaying(false);
   }, []);
 
-  const purgeStore = useCallback(() => {
-    purgeAutoLoops(useShowStore.getState());
-  }, []);
+  const play = useCallback(() => {
+    if (frames.length === 0) return;
+    stop();
+    frameIdxRef.current = 0;
+    writeFrame(frames[0]);
+    setCueIdx(0);
+    setPlaying(true);
+    const beatMs = Math.max(50, Math.round((60 / (theme.bpm ?? 120)) * 1000));
+    intervalRef.current = window.setInterval(() => {
+      const next = (frameIdxRef.current + 1) % frames.length;
+      frameIdxRef.current = next;
+      writeFrame(frames[next]);
+      setCueIdx(next);
+    }, beatMs);
+  }, [frames, theme, stop]);
 
-  // On patch change: stop playback and purge stale materialized loops.
+  const patchKey = useMemo(
+    () =>
+      patchedFixtures
+        .map((f) => `${f.id}|${f.universeId}|${f.startAddress}|${f.enabled === false ? 0 : 1}`)
+        .join(';'),
+    [patchedFixtures],
+  );
+
+  // Purge any stale auto-loop chasers left from the previous library + stop.
   useEffect(() => {
-    stopAll();
-    purgeStore();
-  }, [patchKey, stopAll, purgeStore]);
+    stop();
+    purgeAutoLoops(useShowStore.getState());
+  }, [patchKey, stop]);
 
-  // On unmount: stop any playing loop and clean up the transient chaser.
+  // On unmount: stop and clean up.
   useEffect(() => {
     return () => {
-      stopAll();
-      purgeStore();
+      stop();
+      purgeAutoLoops(useShowStore.getState());
     };
-  }, [stopAll, purgeStore]);
-
-  const library = useMemo<AutoLoop[]>(() => {
-    if (patchedFixtures.length === 0 || fixtureDefs.size === 0) return [];
-    return generateLoopLibrary(patchedFixtures, fixtureDefs, { count: DEFAULT_COUNT, seed });
-  }, [patchedFixtures, fixtureDefs, seed]);
-
-  const handleToggle = (loop: AutoLoop) => {
-    // Exclusive playback: stop + purge the previous loop before starting a new one.
-    if (playingId === loop.id) {
-      stopAll();
-      purgeStore();
-      return;
-    }
-    stopAll();
-    purgeStore();
-    const store = useShowStore.getState();
-    const [chaserId] = materializeAutoLoops([loop], store);
-    if (!chaserId) return;
-    launchedRef.current.add(chaserId);
-    midiPlayChaser(chaserId);
-    setPlayingId(loop.id);
-  };
-
-  const handleRegenerate = () => {
-    stopAll();
-    purgeStore();
-    setSeed((s) => (s + 1) % 100000);
-  };
+  }, [stop]);
 
   if (patchedFixtures.length === 0) {
     return (
@@ -125,12 +172,14 @@ export const AutoLoopsPanel: React.FC = () => {
           <Sparkles className="w-8 h-8 text-gray-600" />
           <p className="text-sm">Aucune fixture patchée.</p>
           <p className="text-xs text-gray-600">
-            Patch des fixtures dans l'onglet Setup pour générer des loops automatiques.
+            Patch des fixtures dans l'onglet Setup pour générer la boucle automatique.
           </p>
         </div>
       </div>
     );
   }
+
+  const beatMs = Math.max(50, Math.round((60 / (theme.bpm ?? 120)) * 1000));
 
   return (
     <div className="h-full flex flex-col">
@@ -138,62 +187,90 @@ export const AutoLoopsPanel: React.FC = () => {
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-purple-400" />
-          <h2 className="text-sm font-semibold text-gray-200">{t('sidebar.autoLoops') || 'Loops auto'}</h2>
-          <span className="text-[10px] text-gray-500 bg-gray-800 rounded-full px-2 py-0.5">
-            {library.length}
-          </span>
+          <h2 className="text-sm font-semibold text-gray-200">{t('sidebar.autoLoops') || 'Boucle unique'}</h2>
+          <span className="text-[10px] text-gray-500 bg-gray-800 rounded-full px-2 py-0.5">1</span>
         </div>
-        <button
-          onClick={handleRegenerate}
-          title={t('regenerate') || 'Régénérer la bibliothèque'}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 text-xs font-medium transition-colors"
+        <select
+          value={themeName}
+          onChange={(e) => {
+            stop();
+            setThemeName(e.target.value);
+          }}
+          className="bg-gray-800 border border-gray-700 rounded-md px-2 py-1 text-xs text-gray-200 outline-none"
         >
-          <RefreshCw className="w-3.5 h-3.5" />
-          Régénérer
-        </button>
+          {THEME_LOOP_PRESETS.map((p) => (
+            <option key={p.name} value={p.name}>
+              {p.name}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {/* Library grid */}
-      <div className="flex-1 overflow-y-auto p-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {library.map((loop) => {
-            const meta = KIND_META[loop.kind];
-            const active = playingId === loop.id;
-            return (
-              <div
-                key={loop.id}
-                className="group flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-gray-800 bg-gray-900/40 hover:border-gray-700 hover:bg-gray-900/70 transition-colors"
-              >
-                <div className={`shrink-0 ${meta.accent}`}>{meta.icon}</div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm text-gray-200 truncate" title={loop.name}>
-                    {loop.name}
-                  </div>
-                  <div className="flex items-center gap-2 text-[10px] text-gray-500">
-                    <span>{meta.label}</span>
-                    <span>·</span>
-                    <span>{loop.speedBpm}</span>
-                    <span>{DIR_LABEL[loop.direction]}</span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => handleToggle(loop)}
-                  className={
-                    'shrink-0 w-8 h-8 rounded-md flex items-center justify-center transition-colors ' +
-                    (active
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-gray-800 text-gray-300 hover:bg-purple-600/30 hover:text-purple-300')
-                  }
-                  title={active ? t('stop') || 'Arrêter' : t('play') || 'Jouer'}
-                >
-                  {active ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-            );
-          })}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {/* Loop card */}
+        <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Palette className="w-4 h-4 text-purple-400" />
+              <span className="text-sm text-gray-200 font-medium">{theme.name}</span>
+            </div>
+            <span className="text-[10px] text-gray-500">
+              {cues.length} cues · {theme.bpm ?? 120} BPM · sans audio
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 mb-3">
+            {theme.palette.map((c, i) => (
+              <span
+                key={i}
+                className="w-5 h-5 rounded-full border border-white/20"
+                style={{ backgroundColor: c }}
+                title={c}
+              />
+            ))}
+          </div>
+          <button
+            onClick={playing ? stop : play}
+            disabled={frames.length === 0}
+            className={
+              'w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ' +
+              (playing
+                ? 'bg-rose-600/20 text-rose-300 border border-rose-600/40'
+                : 'bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed')
+            }
+          >
+            {playing ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            {playing ? 'Arrêter' : 'Jouer la boucle'}
+          </button>
         </div>
-        <p className="text-[10px] text-gray-600 text-center mt-3 pb-2">
-          Cliquer une carte joue le loop sur les fixtures patchées · « Régénérer » produit un nouveau set
+
+        {/* Cue blocks (the "timeline") — colour shown == colour played */}
+        <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-3">
+          <div className="text-[10px] text-gray-500 mb-2 uppercase tracking-wide">
+            Blocs de cues · la couleur du bloc = la couleur jouée
+          </div>
+          <div className="flex gap-1 overflow-x-auto pb-1">
+            {cues.map((c, i) => (
+              <div
+                key={i}
+                className={
+                  'shrink-0 w-6 h-8 rounded-sm border transition-all ' +
+                  (i === cueIdx && playing ? 'ring-2 ring-white scale-110' : 'border-white/10')
+                }
+                style={{ backgroundColor: c.color }}
+                title={`#${i + 1} · ${c.color}`}
+              />
+            ))}
+          </div>
+          <div className="flex items-center justify-between text-[10px] text-gray-600 mt-2">
+            <span>
+              {playing ? `Cue ${cueIdx + 1}/${cues.length}` : 'En attente'}
+            </span>
+            <span>{beatMs} ms/cue</span>
+          </div>
+        </div>
+
+        <p className="text-[10px] text-gray-600 text-center pb-2">
+          Une seule boucle, thème fixe, sans audio · les couleurs jouées correspondent aux blocs ci-dessus
         </p>
       </div>
     </div>
