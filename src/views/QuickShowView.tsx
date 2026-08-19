@@ -3281,7 +3281,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       </div>
 
       {/* TrackTimeline */}
-      <div className="flex-1 px-3 py-2 overflow-auto">
+      <div className="flex-1 px-3 py-2 overflow-y-auto overflow-x-hidden">
         <TrackTimeline
           cues={cues as any}
           dmxCues={dmxCues}

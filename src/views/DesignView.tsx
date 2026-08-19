@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { generateAllThumbnails, getVariantsForCategory, type ThumbnailVariant } from '../utils/fixtureThumbnails';
 import { useTranslation } from 'react-i18next';
-import { Plus, Play, Pause, Square, Trash2, GripVertical, Search, X, Edit2, Check, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Zap, Save, FolderPlus } from 'lucide-react';
+import { Plus, Play, Pause, Square, Trash2, GripVertical, Search, X, Edit2, Check, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Zap, Save, FolderPlus, Maximize2 } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { useShowStore, getFixtureColor, type PatchedFixture, type FixtureGroup, type SavedScene, type SavedChaser, type ChaserStep, type SavedCueList, type CueListCue, type ShowUniverse, type StageScene } from '../stores/showStore';
 import { normalizeRoster, rosterFromBandConfig, type MusicianRoster } from '../utils/musicians';
@@ -906,6 +906,31 @@ const SceneEditor: React.FC = () => {
   const [testActive, setTestActive] = useState(false);
   const [musicians, setMusicians] = useState<MusicianRoster>({});
   const [stageScene, setStageScene] = useState<StageScene>('rear-front');
+  const [showFloating3D, setShowFloating3D] = useState(false);
+  const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
+  const [float3DSize, setFloat3DSize] = useState({ w: 960, h: 540 });
+  const float3DDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
+  const float3DResizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const handleFloat3DDragStart = useCallback((e: React.MouseEvent) => {
+    float3DDragRef.current = { startX: e.clientX, startY: e.clientY, startLeft: float3DPos.x, startTop: float3DPos.y };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DDragRef.current) return;
+      setFloat3DPos({ x: float3DDragRef.current.startLeft + ev.clientX - float3DDragRef.current.startX, y: float3DDragRef.current.startTop + ev.clientY - float3DDragRef.current.startY });
+    };
+    const onUp = () => { float3DDragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DPos]);
+  const handleFloat3DResizeStart = useCallback((e: React.MouseEvent) => {
+    float3DResizeRef.current = { startX: e.clientX, startY: e.clientY, startW: float3DSize.w, startH: float3DSize.h };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DResizeRef.current) return;
+      setFloat3DSize({ w: Math.max(320, float3DResizeRef.current.startW + ev.clientX - float3DResizeRef.current.startX), h: Math.max(200, float3DResizeRef.current.startH + ev.clientY - float3DResizeRef.current.startY) });
+    };
+    const onUp = () => { float3DResizeRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DSize]);
   const dmxPushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestChannelsRef = useRef<Record<number, number>>({});
 
@@ -1222,21 +1247,65 @@ const SceneEditor: React.FC = () => {
         </div>
       )}
       </div>
-      {/* Live 3D preview of the programmed scene */}
-      <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-0 h-full">
-        <Stage3D
-          musicians={musicians}
-          stageScene={stageScene}
-          onMusiciansChange={(roster) => {
-            setMusicians(roster);
-            if (scene) updateScene(scene.id, { musicians: roster });
-          }}
-          onStageSceneChange={(cfg) => {
-            setStageScene(cfg);
-            if (scene) updateScene(scene.id, { stageScene: cfg });
-          }}
-        />
-      </div>
+      {/* Live 3D preview of the programmed scene (detachable) */}
+      {!showFloating3D && (
+        <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-0 h-full relative">
+          <Stage3D
+            musicians={musicians}
+            stageScene={stageScene}
+            onMusiciansChange={(roster) => {
+              setMusicians(roster);
+              if (scene) updateScene(scene.id, { musicians: roster });
+            }}
+            onStageSceneChange={(cfg) => {
+              setStageScene(cfg);
+              if (scene) updateScene(scene.id, { stageScene: cfg });
+            }}
+          />
+          <button
+            onClick={() => setShowFloating3D(true)}
+            title="Détacher la vue 3D"
+            className="absolute bottom-2 right-2 z-10 flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white text-[11px] font-medium shadow-lg transition-all"
+          >
+            <Maximize2 size={12} /> Détacher
+          </button>
+        </div>
+      )}
+
+      {/* Floating 3D view (detached) */}
+      {showFloating3D && (
+        <div
+          className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col"
+          style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, overflow: 'hidden' }}
+        >
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
+            <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D View</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => { setFloat3DSize({ w: 640, h: 360 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
+              <button onClick={() => setShowFloating3D(false)} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 relative">
+            <Stage3D
+              musicians={musicians}
+              stageScene={stageScene}
+              onMusiciansChange={(roster) => {
+                setMusicians(roster);
+                if (scene) updateScene(scene.id, { musicians: roster });
+              }}
+              onStageSceneChange={(cfg) => {
+                setStageScene(cfg);
+                if (scene) updateScene(scene.id, { stageScene: cfg });
+              }}
+            />
+            <div
+              className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
+              onMouseDown={handleFloat3DResizeStart}
+              style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

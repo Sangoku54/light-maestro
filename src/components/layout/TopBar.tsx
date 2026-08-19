@@ -41,15 +41,13 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
   };
 
   return (
-    <header className="h-12 bg-[#0d0d14] border-b border-gray-800 flex items-center pl-3 pr-[150px] gap-2 select-none drag-region relative min-w-0">
-      {/* Logo */}
-      <div className="flex items-center gap-2 mr-2 ml-2 no-drag">
-        <img src={logoIcon} alt="Light Maestro" className="w-7 h-7" />
-        <span className="font-semibold text-white text-sm tracking-wide">{t('app.title')}</span>
-      </div>
-
-      {/* Project name + Style selector */}
+    <header className="h-12 bg-[#0d0d14] border-b border-gray-800 grid grid-cols-[1fr_auto_1fr] items-center pl-3 pr-[150px] gap-2 select-none drag-region min-w-0">
+      {/* Left zone: logo + project/preset/audio context */}
       <div className="flex items-center gap-2 no-drag min-w-0 overflow-hidden">
+        <div className="flex items-center gap-2">
+          <img src={logoIcon} alt="Light Maestro" className="w-7 h-7" />
+          <span className="font-semibold text-white text-sm tracking-wide">{t('app.title')}</span>
+        </div>
         {projectName && (
           <>
             <div className="w-px h-5 bg-gray-700" />
@@ -80,7 +78,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
       </div>
 
       {/* Mode Switcher — SoundSwitch-style clean tabs */}
-      <nav className="absolute left-1/2 -translate-x-1/2 flex items-center bg-[#12121a] rounded-lg p-0.5 no-drag">
+      <nav className="flex items-center bg-[#12121a] rounded-lg p-0.5 no-drag">
         {MODE_BUTTONS.map((btn) => (
           <button
             key={btn.mode}
@@ -102,8 +100,8 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
         ))}
       </nav>
 
-      <div className="flex-1" />
-
+      {/* Right zone: actions */}
+      <div className="flex items-center justify-end gap-2 no-drag min-w-0">
       {/* Open/Save */}
       <button
         onClick={() => (window as any).__lm_new?.()}
@@ -151,6 +149,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
       {/* Quick actions */}
       <div className="flex items-center gap-1 no-drag">
         <BlackoutButton />
+      </div>
       </div>
     </header>
   );
