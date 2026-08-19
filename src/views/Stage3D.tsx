@@ -1074,12 +1074,14 @@ export const Stage3D: React.FC<{
   // ── Handle container resize (floating window) ──
   useEffect(() => {
     const container = containerRef.current;
-    const camera = cameraRef.current;
-    const renderer = rendererRef.current;
-    if (!container || !camera || !renderer) return;
+    if (!container) return;
     const ro = new ResizeObserver(() => {
-      const W = container.clientWidth;
-      const H = container.clientHeight;
+      const el = containerRef.current;
+      const camera = cameraRef.current;
+      const renderer = rendererRef.current;
+      if (!el || !camera || !renderer) return;
+      const W = el.clientWidth;
+      const H = el.clientHeight;
       if (W === 0 || H === 0) return;
       camera.aspect = W / H;
       camera.updateProjectionMatrix();

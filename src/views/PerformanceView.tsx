@@ -880,7 +880,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[380px] max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[380px] max-w-[95vw] max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-3 border-b border-gray-800/50 flex items-center justify-between">
           <h3 className="text-sm font-bold text-white">{t('perform.vc.configureWidget')}</h3>
           <button onClick={onClose} className="text-gray-600 hover:text-gray-400">✕</button>
@@ -2630,7 +2630,7 @@ const SimpleDeskPanel: React.FC = () => {
         </div>
 
         {/* Detail Panel */}
-        <div className="w-52 bg-[#0d0d14] border-l border-gray-800/50 p-4 flex flex-col shrink-0">
+        <div className="w-44 xl:w-52 bg-[#0d0d14] border-l border-gray-800/50 p-4 flex flex-col shrink-0">
           {selectedChannel ? (
             <>
               <div className="text-center mb-4">
@@ -4083,7 +4083,7 @@ const CueListViewPanel: React.FC = () => {
                       {idx + 1}
                     </span>
                     <span
-                      className={`flex-1 text-sm truncate ${
+                      className={`flex-1 min-w-0 text-sm truncate ${
                         isCurrent ? 'text-purple-300 font-medium' : 'text-gray-400'
                       }`}
                     >
@@ -4400,7 +4400,7 @@ const MTCPanel: React.FC = () => {
                 <span className="font-mono text-xs text-gray-300 w-24 shrink-0">{fmtTc(tc.hours, tc.minutes, tc.seconds, tc.frames)}</span>
                 <span className="text-[9px] text-gray-600 w-14 shrink-0">{rateBadge(mk.rate)}</span>
                 <span className="flex-1 text-xs text-gray-400 truncate">{mk.name}</span>
-                <span className="text-[10px] text-gray-500 shrink-0">
+                <span className="text-[10px] text-gray-500 min-w-0 truncate max-w-[40%]">
                   {tgt.type === 'scene' ? t('perform.mtc.targets.scene') : t('perform.mtc.targets.chaser')}: {targetName}
                 </span>
                 <span className="text-[10px] text-gray-600 w-10 shrink-0">

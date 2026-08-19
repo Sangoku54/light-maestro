@@ -1834,6 +1834,21 @@ if (editBlock) { setEditBlock(null); return; }
     onSectionsChange?.([...sections].sort((a, b) => a.startTime - b.startTime));
   }, [sections, onSectionsChange]);
 
+  // ── Track container width so the canvas redraws on resize ──
+  const [containerWidth, setContainerWidth] = useState<number>(0);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const update = () => {
+      const w = container.getBoundingClientRect().width;
+      setContainerWidth((prev) => (Math.abs(prev - w) > 1 ? w : prev));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
+
   // ── Canvas draw ──────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -3079,6 +3094,7 @@ if (editBlock) { setEditBlock(null); return; }
     tieredLayout,
     bpm,
     totalHeight,
+    containerWidth,
     autoScriptData,
     getCuesForFixture,
     efxTracks,

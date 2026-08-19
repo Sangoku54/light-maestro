@@ -41,7 +41,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
   };
 
   return (
-    <header className="h-12 bg-[#0d0d14] border-b border-gray-800 flex items-center pl-3 pr-[150px] gap-2 select-none drag-region relative">
+    <header className="h-12 bg-[#0d0d14] border-b border-gray-800 flex items-center pl-3 pr-[150px] gap-2 select-none drag-region relative min-w-0">
       {/* Logo */}
       <div className="flex items-center gap-2 mr-2 ml-2 no-drag">
         <img src={logoIcon} alt="Light Maestro" className="w-7 h-7" />
@@ -49,13 +49,13 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
       </div>
 
       {/* Project name + Style selector */}
-      <div className="flex items-center gap-2 no-drag">
+      <div className="flex items-center gap-2 no-drag min-w-0 overflow-hidden">
         {projectName && (
           <>
             <div className="w-px h-5 bg-gray-700" />
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-700/20 border border-purple-600/20">
               <span className="text-[10px] text-purple-400/70 font-medium uppercase tracking-wider">Projet</span>
-              <span className="text-xs text-purple-200 font-semibold truncate max-w-[180px]">{projectName}</span>
+              <span className="text-xs text-purple-200 font-semibold truncate max-w-[26vw] md:max-w-[180px]">{projectName}</span>
             </div>
           </>
         )}
@@ -64,7 +64,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
             <div className="w-px h-5 bg-gray-700" />
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-700/15 border border-amber-600/15">
               <span className="text-[10px] text-amber-400/70 font-medium uppercase tracking-wider">Preset</span>
-              <span className="text-xs text-amber-200 font-semibold truncate max-w-[160px]">{presetName}</span>
+              <span className="text-xs text-amber-200 font-semibold truncate max-w-[22vw] md:max-w-[160px]">{presetName}</span>
             </div>
           </>
         )}
@@ -73,7 +73,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
               <div className="w-px h-5 bg-gray-700" />
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-700/15 border border-blue-600/15">
                 <Music size={11} className="text-blue-400" />
-                <span className="text-xs text-blue-200 font-semibold truncate max-w-[200px]">{audioFileName}</span>
+                <span className="text-xs text-blue-200 font-semibold truncate max-w-[28vw] md:max-w-[200px]">{audioFileName}</span>
               </div>
             </>
           )}
@@ -94,8 +94,8 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
             `}
           >
             {btn.icon}
-            <span className="hidden sm:inline">{t(btn.labelKey)}</span>
-            <kbd className="hidden lg:inline text-[10px] px-1 py-0.5 rounded bg-gray-800/50 text-gray-600 ml-0.5">
+            <span className="hidden md:inline">{t(btn.labelKey)}</span>
+            <kbd className="hidden xl:inline text-[10px] px-1 py-0.5 rounded bg-gray-800/50 text-gray-600 ml-0.5">
               {btn.shortcut}
             </kbd>
           </button>
@@ -111,7 +111,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
         title="Nouveau Projet"
       >
         <FilePlus size={12} />
-        <span className="hidden sm:inline">Nouveau</span>
+        <span className="hidden lg:inline">Nouveau</span>
       </button>
       <div className="w-px h-4 bg-gray-700" />
       <button
@@ -120,7 +120,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
         title="Ouvrir un projet (.lmproj)"
       >
         <FolderOpen size={12} />
-        <span className="hidden sm:inline">Ouvrir</span>
+        <span className="hidden lg:inline">Ouvrir</span>
       </button>
       <div className="w-px h-4 bg-gray-700" />
       <button
@@ -129,7 +129,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
         title="Enregistrer le projet (.lmproj)"
       >
         <Save size={12} />
-        <span className="hidden sm:inline">Enregistrer</span>
+        <span className="hidden lg:inline">Enregistrer</span>
       </button>
       <div className="w-px h-4 bg-gray-700" />
 
@@ -182,7 +182,7 @@ const BlackoutButton: React.FC = () => {
       `}
     >
       <Power size={14} />
-      <span className="hidden sm:inline">{t('topbar.blackout')}</span>
+      <span className="hidden lg:inline">{t('topbar.blackout')}</span>
     </button>
   );
 };

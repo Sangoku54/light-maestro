@@ -72,7 +72,7 @@ export const DesignView: React.FC = () => {
   return (
     <div className="h-full flex flex-col bg-[#0a0a0f]">
       {/* Sub-tab bar */}
-      <div className="px-4 pt-3 pb-0 flex items-center gap-1 border-b border-gray-800/50">
+      <div className="px-4 pt-3 pb-0 flex items-center gap-1 border-b border-gray-800/50 overflow-x-auto">
         {([
           { key: 'fixtures', label: t('design.tabs.fixtures') },
           { key: 'stage', label: 'Vue 2D' },
@@ -88,7 +88,7 @@ export const DesignView: React.FC = () => {
           <button
             key={tab.key}
             onClick={() => useAppStore.getState().setDesignSidebarTab(tab.key)}
-            className={cnEditorTab(activeTab === tab.key)}
+            className={`${cnEditorTab(activeTab === tab.key)} shrink-0`}
           >
             {tab.label}
           </button>
@@ -141,7 +141,7 @@ export const DesignView: React.FC = () => {
         </div>
 
         {/* Right: Editor Panel */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4 min-w-0">
           <EditorPanel mode={activeTab} onEditFixture={(f) => { setEditFixtureData(f); setShowFixtureEditor(true); }} />
         </div>
       </div>
@@ -1106,8 +1106,8 @@ const SceneEditor: React.FC = () => {
   }
 
   return (
-    <div className="flex gap-4 h-full min-h-[540px]">
-      <div className="flex-1 min-w-0 space-y-5">
+    <div className="flex gap-4 h-full min-h-0">
+      <div className="flex-1 min-w-0 space-y-5 overflow-y-auto">
       {/* Scene name */}
       <div className="flex items-center gap-3">
         <input
@@ -1223,7 +1223,7 @@ const SceneEditor: React.FC = () => {
       )}
       </div>
       {/* Live 3D preview of the programmed scene */}
-      <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-[540px] h-full">
+      <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-0 h-full">
         <Stage3D
           musicians={musicians}
           stageScene={stageScene}
@@ -4890,10 +4890,10 @@ const DmxAddressMap: React.FC<DmxAddressMapProps> = ({
           </span>
         </div>
       </div>
-      <div className="p-3 flex justify-center">
+      <div className="p-3 overflow-x-auto">
         <div
           ref={gridRef}
-          className="inline-flex flex-col relative"
+          className="w-max mx-auto flex flex-col relative"
           style={{ gap: CELL_GAP }}
         >
           {/* Column headers (every 2nd) */}
@@ -6909,7 +6909,7 @@ const FixtureEditorModal: React.FC<{ onClose: () => void; preloadedFixture?: any
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[680px] max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[680px] max-w-[95vw] max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="px-5 py-3 border-b border-gray-800/50 flex items-center justify-between">
           <h3 className="text-sm font-bold text-white">Fixture Editor</h3>

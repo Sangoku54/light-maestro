@@ -409,14 +409,14 @@ const App: React.FC = () => {
           <Sidebar mode={mode} collapsed={sidebarCollapsed} />
 
           {/* View Area — all views stay mounted, only one visible */}
-          <main className="flex-1 overflow-hidden">
-            <div style={{ display: mode === 'quick' ? 'flex' : 'none' }} className="h-full flex-col">
+          <main className="flex-1 overflow-hidden min-w-0">
+            <div style={{ display: mode === 'quick' ? 'flex' : 'none' }} className="h-full flex-col min-w-0 overflow-hidden">
               <QuickShowView audioFile={audioFile} />
             </div>
-            <div style={{ display: mode === 'design' ? 'flex' : 'none' }} className="h-full flex-col">
+            <div style={{ display: mode === 'design' ? 'flex' : 'none' }} className="h-full flex-col min-w-0 overflow-hidden">
               <DesignView />
             </div>
-            <div style={{ display: mode === 'perform' ? 'flex' : 'none' }} className="h-full flex-col">
+            <div style={{ display: mode === 'perform' ? 'flex' : 'none' }} className="h-full flex-col min-w-0 overflow-hidden">
               <PerformanceView />
             </div>
           </main>
@@ -524,9 +524,9 @@ const StatusBar: React.FC = () => {
   }, []);
 
   return (
-    <footer className="h-7 bg-[#0d0d14] border-t border-gray-800 flex items-center px-4 text-xs text-gray-500 gap-4 select-none">
+    <footer className="h-7 bg-[#0d0d14] border-t border-gray-800 flex items-center px-4 text-xs text-gray-500 gap-2 sm:gap-4 select-none">
       <div
-        className="flex items-center gap-1.5"
+        className="flex items-center gap-1.5 min-w-0 overflow-hidden"
         title={[
           ...(dmxStatus?.universes || []).map((u) =>
             `${u.name || u.id} · ${u.type}${
@@ -552,13 +552,14 @@ const StatusBar: React.FC = () => {
         </span>
         <span
           className={
-            latencyMs === null
+            'min-w-0 truncate ' +
+            (latencyMs === null
               ? 'text-gray-600'
               : latencyMs < 30
               ? 'text-green-400'
               : latencyMs < 80
               ? 'text-amber-400'
-              : 'text-red-400'
+              : 'text-red-400')
           }
           title="Latence pipeline renderer : lecture de l'état audio → trame DMX émise (IPC). N'inclut pas la latence matérielle (USB/ArtNet/sACN)."
         >
