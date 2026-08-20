@@ -33,8 +33,8 @@ function defaultCfg(overrides: Record<string, any> = {}) {
   return {
     musicStyle: 'techno',
     colorScheme: 'auto',
-    intensity: 'medium',
-    movement: 'auto',
+    intensity: 'dynamic',
+    movement: 'dynamic',
     beatDivision: 4,
     audioReactive: true,
     sectionAware: true,
@@ -268,6 +268,49 @@ describe('genCues', () => {
         expect(cue.movementAmplitude).toBeGreaterThanOrEqual(0);
         expect(cue.movementAmplitude).toBeLessThanOrEqual(128);
       }
+    }
+  });
+
+  // ── Intensity / Movement dropdown overrides (audio-reactive) ──
+
+  it('intensity dropdown forces the level on every cue (audio-reactive)', () => {
+    const sections = makeSections();
+    const analysis = makeAnalysis();
+    for (const level of ['very-low', 'low', 'medium', 'high', 'very-high']) {
+      const cues = genCues(sections, 128, 4, defaultCfg({ intensity: level }), [], 1, analysis);
+      for (const cue of cues) {
+        expect(cue.intensity).toBe(level);
+      }
+    }
+  });
+
+  it("intensity 'dynamic' stays audio-driven (RMS-based, not forced)", () => {
+    const sections = makeSections();
+    const analysis = makeAnalysis();
+    const cues = genCues(sections, 128, 4, defaultCfg({ intensity: 'dynamic' }), [], 1, analysis);
+    // constant RMS 0.5 → 'medium'; cues just before a drop get 'high' (anticipation) — never a forced arbitrary level
+    for (const cue of cues) {
+      expect(['medium', 'high']).toContain(cue.intensity);
+    }
+  });
+
+  it("movement 'smooth' never produces aggressive patterns", () => {
+    const sections = makeSections();
+    const analysis = makeAnalysis({ genre: JSON.stringify({ genre: 'dubstep' }), atmosphere: 'aggressive' });
+    const cues = genCues(sections, 128, 4, defaultCfg({ musicStyle: 'dubstep', movement: 'smooth' }), [], 1, analysis);
+    const aggressive = ['zigzag', 'heartbeat', 'bounce', 'diamond'];
+    for (const cue of cues) {
+      if (cue.movement) expect(aggressive).not.toContain(cue.movement);
+    }
+  });
+
+  it("movement 'sharp' never produces gentle patterns", () => {
+    const sections = makeSections();
+    const analysis = makeAnalysis();
+    const cues = genCues(sections, 128, 4, defaultCfg({ movement: 'sharp' }), [], 1, analysis);
+    const gentle = ['static', 'panOnly', 'wave', 'tiltOnly'];
+    for (const cue of cues) {
+      if (cue.movement) expect(gentle).not.toContain(cue.movement);
     }
   });
 });

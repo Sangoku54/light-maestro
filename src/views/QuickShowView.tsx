@@ -267,7 +267,7 @@ function getSectionProfile(section: string, cfg: any): {
     colors: sectionColors,
     color: sectionColors[0] || '#ff0064',
     strobe: cfg.sectionAware ? (baseStrobe[section] || false) : false,
-    movement: cfg.sectionAware ? (baseMovement[section] || 'sweep') : cfg.movement || 'sweep',
+    movement: cfg.sectionAware ? (baseMovement[section] || 'sweep') : (({ smooth: 'wave', sharp: 'zigzag', dynamic: 'sweep' } as Record<string, string>)[cfg.movement] || cfg.movement || 'sweep'),
     colorTemp: (baseColorTemp[section] || 'neutral') as 'warm' | 'neutral' | 'cool',
     strobeProbability: baseStrobe[section] ? 0.8 : 0.2,
     dimmerPulseOnBeat: section === 'drop' || section === 'chorus',
@@ -548,6 +548,15 @@ export function genCues(
         case 'uplifting':  pool = [...pool, 'circle', 'wave', 'sweep']; break;
       }
 
+      // Movement style bias (menu 'smooth'/'sharp'/'dynamic') — applied on top of genre/atmosphere
+      if (cfg.movement === 'smooth') {
+        pool = pool.filter(p => !['zigzag','heartbeat','bounce','diamond'].includes(p));
+        if (pool.length === 0) pool = ['wave','sweep','figure8','static'];
+      } else if (cfg.movement === 'sharp') {
+        pool = pool.filter(p => !['static','panOnly','wave','tiltOnly'].includes(p));
+        if (pool.length === 0) pool = ['zigzag','heartbeat','bounce','diamond'];
+      }
+
       // BPM bias: fast→more aggressive, slow→more gentle
       if (detectedGenre === 'dubstep' || detectedGenre === 'drum_and_bass' || bpm > 150) {
         if (!isDropAnticipation) pool = pool.filter(p => p !== 'static');
@@ -600,10 +609,12 @@ export function genCues(
         const beatIdx = getBeatIndex(t);
         const beatStrong = beatIdx >= 0 && analysis!.beatStrengths?.[beatIdx] === 'strong';
 
-        // Règle 1 : RMS → intensité réelle
+        // Règle 1 : RMS → intensité réelle (sauf si l'utilisateur force un niveau via le menu Intensité)
         const rms = feat?.rms ?? 0.5;
         let intensity: string;
-        if (rms > 0.75) intensity = 'very-high';
+        if (cfg.intensity && cfg.intensity !== 'dynamic') {
+          intensity = cfg.intensity; // niveau forcé (very-low…very-high) — 'dynamic' = piloté par l'audio
+        } else if (rms > 0.75) intensity = 'very-high';
         else if (rms > 0.50) intensity = 'high';
         else if (rms > 0.25) intensity = 'medium';
         else if (rms > 0.10) intensity = 'low';
@@ -695,7 +706,7 @@ export function genCues(
           time: t,
           section: section.type,
           effect: `${section.type} #${i + 1}`,
-          intensity: dropAnticipation ? 'high' : prevIntensity,
+          intensity: dropAnticipation && !(cfg.intensity && cfg.intensity !== 'dynamic') ? 'high' : prevIntensity,
           colors: sectionPal,
           color: prevColor,
           strobe: dropAnticipation ? false : strobe, // no strobe during anticipation
