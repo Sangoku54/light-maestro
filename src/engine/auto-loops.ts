@@ -55,13 +55,17 @@ export interface LoopLibraryOptions {
 
 const TIER_ORDER: FixtureTier[] = ['primary', 'secondary', 'tertiary', 'other'];
 
-/** Default chase palette — violet family + ivory, matched to the app theme. */
+/** Default chase palette — high-contrast hues (brand violet + cyan + amber + green).
+ *  Deliberately distinct: a chase of near-identical colors reads as "static". */
 const CHASE_COLORS: ReadonlyArray<readonly [number, number, number]> = [
-  [168, 85, 247],
-  [139, 92, 246],
-  [192, 132, 252],
-  [237, 232, 220],
+  [168, 85, 247], // violet (brand)
+  [0, 200, 255], // cyan
+  [255, 170, 40], // amber
+  [100, 240, 120], // green
 ];
+
+/** Fill color injected into movement/strobe loops so RGB movers emit visible light. */
+const VISIBLE_FILL: readonly [number, number, number] = [255, 255, 255];
 
 const DMX_CENTER = 128;
 
@@ -84,7 +88,7 @@ interface NamedPalette {
 
 /** Curated palettes for the loop library. */
 const PALETTES: NamedPalette[] = [
-  { name: 'violet', colors: [[168, 85, 247], [139, 92, 246], [192, 132, 252], [237, 232, 220]] },
+  { name: 'vivid', colors: [[168, 85, 247], [0, 200, 255], [255, 170, 40], [100, 240, 120]] },
   { name: 'rainbow', colors: [[255, 60, 60], [255, 180, 0], [60, 220, 90], [60, 140, 255]] },
   { name: 'warm', colors: [[255, 120, 40], [255, 200, 80], [255, 80, 60], [240, 240, 200]] },
   { name: 'cool', colors: [[40, 140, 255], [80, 220, 220], [120, 80, 255], [220, 240, 255]] },
@@ -127,6 +131,20 @@ function put(frame: Record<number, number>, addr: number, value: number): void {
   frame[addr] = Math.max(0, Math.min(255, Math.round(value)));
 }
 
+function putRgbSegments(
+  frame: Record<number, number>,
+  pf: PatchedFixture,
+  analysis: ChannelAnalysis,
+  c: readonly [number, number, number],
+): void {
+  for (const seg of analysis.rgbSegments) {
+    put(frame, absAddr(pf, seg.r), c[0]);
+    put(frame, absAddr(pf, seg.g), c[1]);
+    put(frame, absAddr(pf, seg.b), c[2]);
+    if (seg.w !== null) put(frame, absAddr(pf, seg.w), 0);
+  }
+}
+
 function buildColorChase(
   tier: FixtureTier,
   fixtures: AnalyzedFixture[],
@@ -141,12 +159,7 @@ function buildColorChase(
       const { pf, analysis } = fixtures[i];
       // Rotating chase: fixture i shows color (i + stepIdx) % colors.length.
       const c = colors[(i + stepIdx) % colors.length];
-      for (const seg of analysis.rgbSegments) {
-        put(frame, absAddr(pf, seg.r), c[0]);
-        put(frame, absAddr(pf, seg.g), c[1]);
-        put(frame, absAddr(pf, seg.b), c[2]);
-        if (seg.w !== null) put(frame, absAddr(pf, seg.w), 0);
-      }
+      putRgbSegments(frame, pf, analysis, c);
       if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), 255);
       if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), 255);
     }
@@ -182,6 +195,7 @@ function buildMovementLoop(
     for (const { pf, analysis } of fixtures) {
       for (const off of analysis.panOffsets) put(frame, absAddr(pf, off), pan);
       for (const off of analysis.tiltOffsets) put(frame, absAddr(pf, off), tilt);
+      if (analysis.rgbSegments.length > 0) putRgbSegments(frame, pf, analysis, VISIBLE_FILL);
       if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), 255);
       if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), 255);
     }
@@ -239,6 +253,7 @@ function buildStrobeLoop(
   const steps: AutoLoopStep[] = [0, 1].map((on) => {
     const frame: Record<number, number> = {};
     for (const { pf, analysis } of fixtures) {
+      if (on && analysis.rgbSegments.length > 0) putRgbSegments(frame, pf, analysis, VISIBLE_FILL);
       if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), on ? 255 : 0);
       if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), on ? 255 : 0);
     }

@@ -47,9 +47,22 @@ const mover = def('mover-rgb', [
 ]);
 // Dimmer-only PAR: Dimmer@0
 const par = def('par-dim', [ch('Dimmer', 'Intensity', 0)]);
+// Strobe with RGB: Shutter@0, Dimmer@1, R@2, G@3, B@4
+const strobeRgb = def('strobe-rgb', [
+  ch('Shutter', 'Shutter', 0),
+  ch('Dimmer', 'Intensity', 1),
+  ch('Red', 'Colour', 2),
+  ch('Green', 'Colour', 3),
+  ch('Blue', 'Colour', 4),
+]);
 
 function defsOf(...defs: DmxFixtureDefinition[]): Map<string, DmxFixtureDefinition> {
   return new Map(defs.map((d) => [d.id, d]));
+}
+
+/** Simple RGB Euclidean distance (proxy for perceptual ΔE). */
+function rgbDist(a: readonly [number, number, number], b: readonly [number, number, number]): number {
+  return Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2);
 }
 
 describe('generateAutoLoops', () => {
@@ -104,12 +117,15 @@ describe('generateAutoLoops', () => {
     ];
     const loops = generateAutoLoops(fixtures, defsOf(rgbWash), { chaseSteps: 4 });
     const cc = loops.find((l) => l.kind === 'color-chase')!;
-    // Step 0: f1 = color0, f2 = color1 (Red at addr startAddress + 1)
-    expect(cc.steps[0].channels[2]).toBe(168); // f1 R = color0.r
-    expect(cc.steps[0].channels[10]).toBe(139); // f2 R (addr 9+1) = color1.r
-    // Step 1: f1 = color1, f2 = color2
-    expect(cc.steps[1].channels[2]).toBe(139);
-    expect(cc.steps[1].channels[10]).toBe(192);
+    // f1's red channel across the 4 steps = the 4 palette reds, in order.
+    const f1Reds = cc.steps.map((s) => s.channels[2]); // f1 R = addr startAddress(1) + 1
+    const f2Reds = cc.steps.map((s) => s.channels[10]); // f2 R = addr 9 + 1
+    expect(new Set(f1Reds).size).toBe(4); // 4 distinct colors rotate through f1
+    // f2 is offset by one step: f2 step0 = f1 step1, etc.
+    expect(f2Reds[0]).toBe(f1Reds[1]);
+    expect(f2Reds[1]).toBe(f1Reds[2]);
+    expect(f2Reds[2]).toBe(f1Reds[3]);
+    expect(f2Reds[3]).toBe(f1Reds[0]);
   });
 
   it('keeps movement positions centered around 128', () => {
@@ -124,6 +140,34 @@ describe('generateAutoLoops', () => {
       expect(tilt).toBeGreaterThanOrEqual(64);
       expect(tilt).toBeLessThanOrEqual(192);
     }
+  });
+
+  it('writes a white fill on movement loops so RGB movers are visible', () => {
+    const fixtures = [pf({ id: 'f2', fixtureDefId: 'mover-rgb', tier: 'primary', startAddress: 9 })];
+    const loops = generateAutoLoops(fixtures, defsOf(mover), { movementSteps: 4 });
+    const mv = loops.find((l) => l.kind === 'movement')!;
+    for (const step of mv.steps) {
+      // mover-rgb: R@3 → addr 12, G@4 → 13, B@5 → 14.
+      expect(step.channels[12]).toBe(255);
+      expect(step.channels[13]).toBe(255);
+      expect(step.channels[14]).toBe(255);
+    }
+  });
+
+  it('default chase palette has high contrast (no near-identical steps)', () => {
+    const fixtures = [pf({ id: 'f1', fixtureDefId: 'wash-rgb', tier: 'primary', startAddress: 1 })];
+    const loops = generateAutoLoops(fixtures, defsOf(rgbWash), { chaseSteps: 4 });
+    const cc = loops.find((l) => l.kind === 'color-chase')!;
+    const colors = cc.steps.map(
+      (s) => [s.channels[2], s.channels[3], s.channels[4]] as const, // R,G,B at addr 2,3,4
+    );
+    let min = Infinity;
+    for (let i = 0; i < colors.length; i++) {
+      for (let j = i + 1; j < colors.length; j++) {
+        min = Math.min(min, rgbDist(colors[i], colors[j]));
+      }
+    }
+    expect(min).toBeGreaterThanOrEqual(50);
   });
 
   it('skips disabled fixtures', () => {
@@ -327,5 +371,20 @@ describe('generateLoopLibrary', () => {
     const lib = generateLoopLibrary(onlyWash, defsOf(rgbWash), { count: 36, seed: 3 });
     const ids = lib.map((l) => l.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('writes a white fill on strobe loops so RGB strobes are visible', () => {
+    const onlyStrobe = [pf({ id: 'f1', fixtureDefId: 'strobe-rgb', tier: 'primary', startAddress: 1 })];
+    const lib = generateLoopLibrary(onlyStrobe, defsOf(strobeRgb), { count: 16 });
+    const strobe = lib.find((l) => l.kind === 'strobe');
+    expect(strobe).toBeDefined();
+    // Step 0 = off, step 1 = on.
+    const off = strobe!.steps[0].channels;
+    const on = strobe!.steps[1].channels;
+    expect(on[3]).toBe(255); // R @ addr 3
+    expect(on[4]).toBe(255); // G @ addr 4
+    expect(on[5]).toBe(255); // B @ addr 5
+    expect(on[2]).toBe(255); // intensity @ addr 2
+    expect(off[2]).toBe(0); // intensity off
   });
 });
