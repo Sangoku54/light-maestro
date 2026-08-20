@@ -986,8 +986,9 @@ export function useDmxPlayback(options: {
                 case'zigzag':{const saw=((phase/Math.PI)%2)-1;px=saw*.8;py=Math.sin(phase)>0?.5:-.5;}break;case'diamond':{px=(((phase/Math.PI)%2)-1)*.8;py=((((phase+Math.PI/2)/Math.PI)%2)-1)*.8;}break;case'spiral':{const r=.3+.7*Math.abs(Math.sin(phase*.3));px=Math.sin(phase*2)*r;py=Math.cos(phase*2)*r;}break;case'heartbeat':{const hp=((phase/(Math.PI*2))%1);const hb=hp<.15?1:hp<.3?.6:0;px=hb*Math.sin(phase*3);py=hb*Math.cos(phase*3);}break;case'randomWalk':px=Math.sin(phase*.7)*.5+Math.sin(phase*1.3)*.3+Math.cos(phase*2.1)*.2;py=Math.cos(phase*.6)*.5+Math.sin(phase*1.7)*.3+Math.sin(phase*2.3)*.2;break;case'panOnly':px=Math.sin(phase);py=0;break;case'tiltOnly':px=0;py=Math.sin(phase);break;
       default:px=Math.sin(phase*.35)*.4;py=Math.cos(phase*.3+motorPhase)*.4;}
                 const pfl = panTiltLimits.perFixture?.[pf.id];
-                const panLimit = pfl?.pan ?? panTiltLimits.pan;
-                const tiltLimit = pfl?.tilt ?? panTiltLimits.tilt;
+                // Fixture-track movement blocks are user-authored (higher priority than autoscript): do not clamp them.
+                const panLimit = trackMovement ? 128 : (pfl?.pan ?? panTiltLimits.pan);
+                const tiltLimit = trackMovement ? 128 : (pfl?.tilt ?? panTiltLimits.tilt);
                 if(m<panCount){
                   const raw = Math.max(0,Math.min(255,Math.round(128+px*blendAmp)));
                   const fp = fixturePositions?.[pf.id];
