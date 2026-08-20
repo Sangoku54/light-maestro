@@ -18,6 +18,17 @@ import { analyzeChannels, type ChannelAnalysis } from './dmx-channel';
 
 export type AutoLoopKind = 'color-chase' | 'movement' | 'dimmer-pulse' | 'strobe';
 
+/** Libellés de catégorie (FR) — partagés entre le catalogue QuickShow et le picker widget. */
+export const LOOP_KIND_LABEL: Record<AutoLoopKind, string> = {
+  'color-chase': 'Couleur',
+  movement: 'Mouvement',
+  'dimmer-pulse': 'Ambiance',
+  strobe: 'Strobe',
+};
+
+/** Ordre d'affichage des catégories dans le catalogue. */
+export const LOOP_KIND_ORDER: AutoLoopKind[] = ['color-chase', 'movement', 'dimmer-pulse', 'strobe'];
+
 export interface AutoLoopStep {
   /** Absolute DMX address → value (0-255) for this loop's fixtures. */
   channels: Record<number, number>;
@@ -33,6 +44,28 @@ export interface AutoLoop {
   steps: AutoLoopStep[];
   speedBpm: number;
   direction: 'forward' | 'backward' | 'bounce';
+  /** Variante identitaire pour une recette portable. */
+  palette?: string; // nom de palette (color-chase)
+  pattern?: string; // nom de motif (movement)
+  radius?: number; // amplitude pan/tilt (movement), 0..128
+  chaseSteps?: number; // nb de couleurs (color-chase)
+}
+
+/**
+ * Recette portable d'une boucle — la spec minimale rejouable sur le patch
+ * courant, indépendamment des adresses DMX et des fixtures concrètes.
+ * C'est ce qui est stocké dans un widget Performance.
+ */
+export interface LoopRecipe {
+  kind: AutoLoopKind;
+  name: string;
+  tier: FixtureTier;
+  speedBpm: number;
+  direction: AutoLoop['direction'];
+  palette?: string;
+  pattern?: string;
+  radius?: number;
+  chaseSteps?: number;
 }
 
 export interface AutoLoopOptions {
@@ -175,6 +208,8 @@ function buildColorChase(
     steps,
     speedBpm,
     direction,
+    palette: variant,
+    chaseSteps: colors.length,
   };
 }
 
@@ -211,6 +246,8 @@ function buildMovementLoop(
     steps,
     speedBpm,
     direction,
+    pattern: pattern.name,
+    radius: amp,
   };
 }
 
@@ -539,4 +576,71 @@ export function refreshAutoLoops(
   const loops = generateAutoLoops(patchedFixtures, defs, opts);
   const chaserIds = materializeAutoLoops(loops, store);
   return { loops, chaserIds };
+}
+
+// ─── Recette portable — rejouer une boucle sur le patch courant ───────────
+
+/** Extrait la recette portable d'une boucle générée (permet de la rejouer). */
+export function loopToRecipe(loop: AutoLoop): LoopRecipe {
+  return {
+    kind: loop.kind,
+    name: loop.name,
+    tier: loop.tier,
+    speedBpm: loop.speedBpm,
+    direction: loop.direction,
+    palette: loop.palette,
+    pattern: loop.pattern,
+    radius: loop.radius,
+    chaseSteps: loop.chaseSteps,
+  };
+}
+
+/**
+ * Reconstruit une boucle depuis sa recette, contre le patch courant.
+ * Renvoie undefined si le tier n'a pas de fixtures capables du kind demandé
+ * (ex. pas de movers pour un mouvement).
+ */
+export function generateLoopFromRecipe(
+  recipe: LoopRecipe,
+  patchedFixtures: PatchedFixture[],
+  defs: Map<string, DmxFixtureDefinition>,
+): AutoLoop | undefined {
+  const byTier = analyzeTiers(patchedFixtures, defs);
+  const fixtures = byTier.get(recipe.tier);
+  if (!fixtures || fixtures.length === 0) return undefined;
+
+  const rgb = fixtures.filter((f) => f.analysis.rgbSegments.length > 0);
+  const movers = fixtures.filter(
+    (f) => f.analysis.panOffsets.length > 0 || f.analysis.tiltOffsets.length > 0,
+  );
+  const dimmers = fixtures.filter(
+    (f) =>
+      f.analysis.intensityOffset !== null &&
+      f.analysis.rgbSegments.length === 0 &&
+      f.analysis.panOffsets.length === 0 &&
+      f.analysis.tiltOffsets.length === 0,
+  );
+  const shutters = fixtures.filter((f) => f.analysis.shutterOffset !== null);
+
+  switch (recipe.kind) {
+    case 'color-chase': {
+      if (rgb.length === 0) return undefined;
+      const pal = PALETTES.find((p) => p.name === recipe.palette) ?? PALETTES[0];
+      const colors = pal.colors.slice(0, recipe.chaseSteps ?? pal.colors.length);
+      return buildColorChase(recipe.tier, rgb, colors, recipe.speedBpm, pal.name, recipe.direction);
+    }
+    case 'movement': {
+      if (movers.length === 0) return undefined;
+      const pattern = MOVEMENT_PATTERNS.find((p) => p.name === recipe.pattern) ?? MOVEMENT_PATTERNS[0];
+      return buildMovementLoop(recipe.tier, movers, 8, recipe.radius ?? 64, recipe.speedBpm, pattern, recipe.direction);
+    }
+    case 'dimmer-pulse':
+      if (dimmers.length === 0) return undefined;
+      return buildDimmerPulse(recipe.tier, dimmers, recipe.speedBpm);
+    case 'strobe':
+      if (shutters.length === 0) return undefined;
+      return buildStrobeLoop(recipe.tier, shutters, recipe.speedBpm);
+    default:
+      return undefined;
+  }
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateAutoLoops, generateLoopLibrary, materializeAutoLoops, refreshAutoLoops, purgeAutoLoops, AUTO_LOOP_FOLDER, type AutoLoop, type AutoLoopStoreFacade } from '../engine/auto-loops';
+import { generateAutoLoops, generateLoopLibrary, materializeAutoLoops, refreshAutoLoops, purgeAutoLoops, loopToRecipe, generateLoopFromRecipe, AUTO_LOOP_FOLDER, type AutoLoop, type AutoLoopStoreFacade } from '../engine/auto-loops';
 import type { PatchedFixture, SavedScene, SavedChaser } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureChannel } from '../hooks/dmx-cues';
 
@@ -386,5 +386,49 @@ describe('generateLoopLibrary', () => {
     expect(on[5]).toBe(255); // B @ addr 5
     expect(on[2]).toBe(255); // intensity @ addr 2
     expect(off[2]).toBe(0); // intensity off
+  });
+});
+
+// ─── Recette portable (widget Performance) ────────────────────────────────
+
+describe('loopToRecipe / generateLoopFromRecipe', () => {
+  it('round-trips a color-chase recipe to the same frames', () => {
+    const fixtures = [pf({ id: 'f1', fixtureDefId: 'wash-rgb', tier: 'primary', startAddress: 1 })];
+    const defs = defsOf(rgbWash);
+    const original = generateLoopLibrary(fixtures, defs, { count: 36, seed: 0 }).find((l) => l.kind === 'color-chase')!;
+    const recipe = loopToRecipe(original);
+    expect(recipe.kind).toBe('color-chase');
+    expect(recipe.palette).toBeTruthy();
+    expect(recipe.chaseSteps).toBe(original.chaseSteps);
+
+    const rebuilt = generateLoopFromRecipe(recipe, fixtures, defs)!;
+    expect(rebuilt).toBeDefined();
+    expect(rebuilt.name).toBe(original.name);
+    expect(rebuilt.tier).toBe(original.tier);
+    expect(rebuilt.speedBpm).toBe(original.speedBpm);
+    expect(rebuilt.direction).toBe(original.direction);
+    expect(rebuilt.steps.length).toBe(original.steps.length);
+    expect(rebuilt.steps[0].channels).toEqual(original.steps[0].channels);
+  });
+
+  it('round-trips a movement recipe (pattern + radius)', () => {
+    const fixtures = [pf({ id: 'f2', fixtureDefId: 'mover-rgb', tier: 'primary', startAddress: 9 })];
+    const defs = defsOf(mover);
+    const original = generateLoopLibrary(fixtures, defs, { count: 36, seed: 0 }).find((l) => l.kind === 'movement')!;
+    const recipe = loopToRecipe(original);
+    expect(recipe.pattern).toBeTruthy();
+
+    const rebuilt = generateLoopFromRecipe(recipe, fixtures, defs)!;
+    expect(rebuilt).toBeDefined();
+    expect(rebuilt.pattern).toBe(original.pattern);
+    expect(rebuilt.radius).toBe(original.radius);
+    expect(rebuilt.steps[0].channels).toEqual(original.steps[0].channels);
+  });
+
+  it('returns undefined when the tier has no capable fixtures for the kind', () => {
+    const fixtures = [pf({ id: 'f3', fixtureDefId: 'par-dim', tier: 'primary', startAddress: 21 })];
+    const defs = defsOf(par);
+    const recipe = { kind: 'movement' as const, name: 'x', tier: 'primary' as const, speedBpm: 120, direction: 'forward' as const };
+    expect(generateLoopFromRecipe(recipe, fixtures, defs)).toBeUndefined();
   });
 });

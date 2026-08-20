@@ -15,6 +15,8 @@ import { SongPresetPlayer } from '../components/SongPresetPlayer';
 import { analyzeAudioBuffer, type TrackAnalysis } from '../hooks/audio-analysis';
 import { sendChannelsToHardware, sendToUniverse } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
+import { startAutoLoop, stopAutoLoop, isAutoLoopActive, stopAllAutoLoops } from '../engine/auto-loop-player';
+import { generateLoopLibrary, loopToRecipe, LOOP_KIND_LABEL, LOOP_KIND_ORDER, type AutoLoop, type LoopRecipe } from '../engine/auto-loops';
 import { preloadAudioUrl, decodeAudioUrl } from '../utils/audio-cache';
 import { timecodeToMs, msToTimecode, isValidTimecode } from '../engine/mtc-markers';
 import { Stage3D } from './Stage3D';
@@ -856,6 +858,64 @@ const ContextMenuPopup: React.FC<{
 
 // ─── Widget Config Modal ───────────────────────────────────
 
+/**
+ * Picker de boucles auto pour la config d'un widget `autoLoop`.
+ * Génère le même catalogue (seed 0) que le panneau QuickShow et le présente
+ * groupé par catégorie, pour retrouver la boucle choisie en amont.
+ */
+const AutoLoopPicker: React.FC<{ selected?: LoopRecipe; onSelect: (r: LoopRecipe) => void }> = ({ selected, onSelect }) => {
+  const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const [loops, setLoops] = useState<AutoLoop[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!patchedFixtures.length) { setLoops([]); return; }
+    const ids = [...new Set(patchedFixtures.map((f) => f.fixtureDefId))];
+    loadFixtureDefinitions(ids)
+      .then((defs) => {
+        if (!cancelled) setLoops(generateLoopLibrary(patchedFixtures, defs, { count: 36, seed: 0 }));
+      })
+      .catch(() => { if (!cancelled) setLoops([]); });
+    return () => { cancelled = true; };
+  }, [patchedFixtures]);
+
+  const grouped: [AutoLoop['kind'], AutoLoop[]][] = LOOP_KIND_ORDER
+    .map((k) => [k, loops.filter((l) => l.kind === k)] as [AutoLoop['kind'], AutoLoop[]])
+    .filter(([, arr]) => arr.length > 0);
+
+  const selectedId = selected
+    ? loops.find((l) => l.kind === selected.kind && l.name === selected.name && l.tier === selected.tier)?.id ?? ''
+    : '';
+
+  return (
+    <div>
+      <label className="text-[10px] text-gray-500 uppercase tracking-wider">Boucle auto</label>
+      <select
+        value={selectedId}
+        onChange={(e) => {
+          const loop = loops.find((l) => l.id === e.target.value);
+          if (loop) onSelect(loopToRecipe(loop));
+        }}
+        className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300"
+      >
+        <option value="">— Choisir une boucle —</option>
+        {grouped.map(([kind, arr]) => (
+          <optgroup key={kind} label={LOOP_KIND_LABEL[kind]}>
+            {arr.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name} · {l.speedBpm} BPM {l.direction === 'forward' ? '→' : l.direction === 'backward' ? '←' : '↔'}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+      {loops.length === 0 && (
+        <p className="text-[9px] text-amber-400 mt-1">Patch des fixtures dans Setup pour générer des boucles.</p>
+      )}
+    </div>
+  );
+};
+
 const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }> = ({ widget, onClose }) => {
   const { t } = useTranslation();
   const vcUpdateWidget = usePerformStore((s) => s.vcUpdateWidget);
@@ -939,6 +999,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                   <option value="blackout">{t('perform.vc.blackoutWidget')}</option>
                   <option value="loadShow">♪ Play Show</option>
                   <option value="playSong">♪ Play Preset</option>
+                  <option value="autoLoop">🎛 Boucle auto</option>
                 </select>
               </div>
 
@@ -1097,6 +1158,13 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                     ))}
                   </select>
                 </div>
+              )}
+
+              {config.actionType === 'autoLoop' && (
+                <AutoLoopPicker
+                  selected={config.autoLoopRecipe}
+                  onSelect={(recipe) => setConfig({ ...config, autoLoopRecipe: recipe })}
+                />
               )}
 
               <div>
@@ -1968,6 +2036,13 @@ const VCButtonWidget: React.FC<{
       runStep();
       return;
     }
+
+    if (config.actionType === 'autoLoop' && config.autoLoopRecipe) {
+      // Le toggle/flash est géré par `active` (handleClick/handleMouseUp) :
+      // ici on démarre simplement ; `deactivate()` arrête la boucle.
+      startAutoLoop(widget.id, config.autoLoopRecipe).then(() => {});
+      return;
+    }
   };
 
   const deactivate = () => {
@@ -1992,6 +2067,10 @@ const VCButtonWidget: React.FC<{
       autoAudioRef.current = null;
       vcZeroAllUniverses();
     }
+    // Stop auto loop playback
+    if (config.actionType === 'autoLoop') {
+      stopAutoLoop(widget.id);
+    }
     // Stop playSong playback
     setSongPlayer(null);
     // Stop show playback (loadShow widget) — the toggle path: the 2nd
@@ -2013,6 +2092,11 @@ const VCButtonWidget: React.FC<{
     window.addEventListener('lm-perf-play-stopped', onStop);
     return () => window.removeEventListener('lm-perf-play-stopped', onStop);
   }, [config.actionType]);
+
+  // Stop the auto loop if the widget is deleted or unmounted.
+  useEffect(() => {
+    return () => { if (config.actionType === 'autoLoop') stopAutoLoop(widget.id); };
+  }, [config.actionType, widget.id]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (isFlash) {
@@ -2077,6 +2161,7 @@ const VCButtonWidget: React.FC<{
            config.actionType === 'playSong' ? getSongLabel() :
            config.actionType === 'blackout' ? t('perform.vc.blackoutLabel') :
            config.actionType === 'chaser' ? getChaserLabel() :
+           config.actionType === 'autoLoop' ? (config.autoLoopRecipe?.name || '🎛 Boucle auto') :
            scenes.find((s) => s.id === config.sceneId)?.name || 'Button'}
         </span>
       </button>

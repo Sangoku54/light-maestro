@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { MtcState } from '@electron/midi/mtc';
 import { dmxBridge } from '../utils/dmx-bridge';
+import type { LoopRecipe } from '../engine/auto-loops';
 
 /**
  * Resolve the DMX engine universe index (0-based) for a Simple Desk universe id.
@@ -41,7 +42,8 @@ export type ButtonActionType =
   | 'dmxChannel'
   | 'loadShow'
   | 'playSong'
-  | 'audioAutoScript';
+  | 'audioAutoScript'
+  | 'autoLoop';
 
 export type SliderFunctionType =
   | 'channel'
@@ -72,6 +74,8 @@ export interface ConsoleWidgetConfig {
   audioCues?: any[];
   audioDuration?: number;
   autoScriptConfig?: any;
+  // Auto loop (boucle du catalogue)
+  autoLoopRecipe?: LoopRecipe;
   // Style
   color?: string;
   label?: string;
