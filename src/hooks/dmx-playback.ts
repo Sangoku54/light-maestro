@@ -367,13 +367,14 @@ export function useDmxPlayback(options: {
   scenesRef?: React.MutableRefObject<Array<{ id: string; channels: Record<number, number> }>>; // Saved scenes (for chaser steps)
   disabledFixturesRef?: React.MutableRefObject<Set<string>>; // Disabled fixture IDs
   fixturePositionsRef?: React.MutableRefObject<Record<string, { x: number; y: number }>>; // For stage-aware pan/tilt
+  panTiltLimitsRef?: React.MutableRefObject<{ pan: number; tilt: number }>; // DMX half-amplitude limits for autoscript movement (128 = full)
   onVirtualDmx?: (universe: number, channelValues: Record<number, number>) => void; // Mirror for 3D view
   dryRunMode?: boolean; // Skip hardware DMX output, keep store/3D updates
   frozenRef?: React.MutableRefObject<boolean>; // Freeze: hold current DMX frame
   forceDropRef?: React.MutableRefObject<boolean>; // Force next tick to use drop parameters
   arbiterSource?: string; // Output-arbiter source id this engine writes as (default 'quickshow')
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,panTiltLimitsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource}=options;
   const arbSource = arbiterSource ?? 'quickshow';
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
@@ -561,6 +562,7 @@ export function useDmxPlayback(options: {
         return;
       }
       const fixturePositions = fixturePositionsRef?.current;
+      const panTiltLimits = panTiltLimitsRef?.current ?? { pan: 128, tilt: 128 };
 
       // ── Color track forced colors (compute early, used later in palette resolution) ──
       const ctRefData = colorTracksRef?.current || [];
@@ -986,12 +988,16 @@ export function useDmxPlayback(options: {
                 if(m<panCount){
                   const raw = Math.max(0,Math.min(255,Math.round(128+px*blendAmp)));
                   const fp = fixturePositions?.[pf.id];
-                  chVals[pf.startAddress+fa.panOffsets[m]] = fp ? clampPanToStage(raw, fp.x) : raw;
+                  let pv = fp ? clampPanToStage(raw, fp.x) : raw;
+                  pv = Math.max(128 - panTiltLimits.pan, Math.min(128 + panTiltLimits.pan, pv));
+                  chVals[pf.startAddress+fa.panOffsets[m]] = pv;
                 }
                 if(m<tiltCount){
                   const raw = Math.max(0,Math.min(255,Math.round(128+py*blendAmp)));
                   const fp = fixturePositions?.[pf.id];
-                  chVals[pf.startAddress+fa.tiltOffsets[m]] = fp ? clampTiltToStage(raw, fp.y) : raw;
+                  let tv = fp ? clampTiltToStage(raw, fp.y) : raw;
+                  tv = Math.max(128 - panTiltLimits.tilt, Math.min(128 + panTiltLimits.tilt, tv));
+                  chVals[pf.startAddress+fa.tiltOffsets[m]] = tv;
                 }}
               }else{for(const po of fa.panOffsets)chVals[pf.startAddress+po]=128;for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=128;}
             }

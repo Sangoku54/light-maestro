@@ -52,6 +52,8 @@ export interface QuickShowState {
   movement: 'smooth' | 'sharp' | 'dynamic';
   beatDivision: 1 | 2 | 4 | 8;
   strobeLimit: number;
+  panMaxDeg?: number; // pan sweep half-limit in degrees (0-270), default 270 = full
+  tiltMaxDeg?: number; // tilt sweep half-limit in degrees (0-90), default 90 = full
   sectionAware: boolean;
   audioFileName: string;
   customPalette: CustomPalette;
@@ -184,6 +186,8 @@ export const useAppStore = create<AppState>()(
         movement: 'dynamic',
         beatDivision: 2,
         strobeLimit: 10,
+        panMaxDeg: 270,
+        tiltMaxDeg: 90,
         sectionAware: true,
         audioReactive: true,
         customPalette: {

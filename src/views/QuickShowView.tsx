@@ -11,6 +11,7 @@ import { computeFixtureTrackOverrides, computeEfxOverrides, type FixtureTrack } 
 import { loadFixtureDefinitions, clearFixtureDefCache, type DmxCue, type DmxFixtureDefinition } from '../hooks/dmx-cues';
 import { useDmxPlayback, computeDmxForCue, computeColorTrackColors, type ColorTrackRef, type DimmerTrackRef, computeDimmerTrackOverrides, computeStrobeTrackOverrides, computeChaserTrackOverrides, type ChaserTrackRef } from '../hooks/dmx-playback';
 import { analyzeChannels } from '../engine/fixture-analyzer';
+import { halfDegToDmxOffset } from '../engine/dmx-movement';
 import { AutoLoopsPanel } from './AutoLoopsPanel';
 import { Stage3D } from './Stage3D';
 import TrackTimeline from './TrackTimeline';
@@ -1670,6 +1671,11 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   scenesRef.current = useShowStore.getState().scenes;
   const efxTracksRef = useRef<EfxTrack[]>([]);
   efxTracksRef.current = efxTracks;
+  const panTiltLimitsRef = useRef<{ pan: number; tilt: number }>({ pan: 128, tilt: 128 });
+  panTiltLimitsRef.current = {
+    pan: halfDegToDmxOffset(qs.panMaxDeg ?? 270, 'pan'),
+    tilt: halfDegToDmxOffset(qs.tiltMaxDeg ?? 90, 'tilt'),
+  };
   const effectsRef = useRef<any[]>([]);
   effectsRef.current = useShowStore.getState().effects;
   const fixtureDefsRef = useRef<Map<string, DmxFixtureDefinition>>(new Map());
@@ -2282,6 +2288,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     chasersRef,
     scenesRef,
     disabledFixturesRef: disabledFixturesRef as any,
+    panTiltLimitsRef,
     colorFadeMs: qs.colorFadeMs ?? 250,
     frozenRef: frozenRef as React.MutableRefObject<boolean>,
     forceDropRef: forceDropRef as React.MutableRefObject<boolean>,
@@ -3239,6 +3246,32 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             className="w-16"
           />
           <span className="text-[9px] text-gray-500 w-5">{qs.strobeLimit || 10}</span>
+        </div>
+
+        {/* Pan max / Tilt max — limite le balayage des têtes mobiles */}
+        <div className="flex items-center gap-1">
+          <span className="text-[9px] text-gray-600">Pan</span>
+          <input
+            type="range"
+            min={0}
+            max={270}
+            value={qs.panMaxDeg ?? 270}
+            onChange={e => setQs({ panMaxDeg: Number(e.target.value) })}
+            className="w-16"
+          />
+          <span className="text-[9px] text-gray-500 w-8">{qs.panMaxDeg ?? 270}°</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-[9px] text-gray-600">Tilt</span>
+          <input
+            type="range"
+            min={0}
+            max={90}
+            value={qs.tiltMaxDeg ?? 90}
+            onChange={e => setQs({ tiltMaxDeg: Number(e.target.value) })}
+            className="w-16"
+          />
+          <span className="text-[9px] text-gray-500 w-8">{qs.tiltMaxDeg ?? 90}°</span>
         </div>
       </div>
 

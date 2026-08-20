@@ -11,6 +11,14 @@ export function clampTiltToStage(tiltDmx: number, y: number): number {
   return 128 + Math.max(-Math.round(Math.max(0.2, y) * 128), Math.min(Math.round(Math.min(1, y + 0.3) * 128), d));
 }
 
+/** Convert a pan/tilt half-sweep in degrees to a DMX offset from center (128).
+ *  Pan full sweep = 270° each side, tilt full sweep = 90° each side (see Stage3D conversion). */
+export function halfDegToDmxOffset(deg: number, axis: 'pan' | 'tilt'): number {
+  const full = axis === 'pan' ? 270 : 90;
+  const dmx = Math.round((deg / full) * 128);
+  return Math.max(0, Math.min(128, dmx));
+}
+
 // Mapping: section → best suited movement patterns per fixture (ordered by energy)
 export const SMART_MOVEMENTS: Record<string, string[]> = {
   intro:   ['static', 'panOnly', 'tiltOnly', 'sweep', 'wave'],
