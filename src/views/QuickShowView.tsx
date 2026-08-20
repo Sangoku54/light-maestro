@@ -1671,13 +1671,32 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   scenesRef.current = useShowStore.getState().scenes;
   const efxTracksRef = useRef<EfxTrack[]>([]);
   efxTracksRef.current = efxTracks;
-  const panTiltLimitsRef = useRef<{ pan: number; tilt: number }>({ pan: 128, tilt: 128 });
+  const panTiltLimitsRef = useRef<{ pan: number; tilt: number; perFixture?: Record<string, { pan: number; tilt: number }> }>({ pan: 128, tilt: 128, perFixture: {} });
   panTiltLimitsRef.current = {
     pan: halfDegToDmxOffset(qs.panMaxDeg ?? 270, 'pan'),
     tilt: halfDegToDmxOffset(qs.tiltMaxDeg ?? 90, 'tilt'),
+    perFixture: Object.fromEntries(
+      patchedFixtures.map(pf => {
+        const degPan = qs.forcedPanMaxDeg?.[pf.id] ?? qs.panMaxDeg ?? 270;
+        const degTilt = qs.forcedTiltMaxDeg?.[pf.id] ?? qs.tiltMaxDeg ?? 90;
+        return [pf.id, { pan: halfDegToDmxOffset(degPan, 'pan'), tilt: halfDegToDmxOffset(degTilt, 'tilt') }];
+      }),
+    ),
   };
   const effectsRef = useRef<any[]>([]);
   effectsRef.current = useShowStore.getState().effects;
+
+  const setForcedPanMax = useCallback((fixtureId: string, deg: number | null) => {
+    const m = { ...(qs.forcedPanMaxDeg || {}) };
+    if (deg === null) delete m[fixtureId]; else m[fixtureId] = deg;
+    setQs({ forcedPanMaxDeg: m });
+  }, [qs.forcedPanMaxDeg, setQs]);
+  const setForcedTiltMax = useCallback((fixtureId: string, deg: number | null) => {
+    const m = { ...(qs.forcedTiltMaxDeg || {}) };
+    if (deg === null) delete m[fixtureId]; else m[fixtureId] = deg;
+    setQs({ forcedTiltMaxDeg: m });
+  }, [qs.forcedTiltMaxDeg, setQs]);
+
   const fixtureDefsRef = useRef<Map<string, DmxFixtureDefinition>>(new Map());
   const cuesRef = useRef<any[]>([]);
   const [efxContextMenu, setEfxContextMenu] = useState<{ trackId: string; time: number; x: number; y: number } | null>(null);
@@ -1710,6 +1729,17 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [tapBpm, setTapBpm] = useState(0);
   const tapRef = useRef<number[]>([]);
   const [fixtureDefs, setFixtureDefs] = useState<Map<string, DmxFixtureDefinition>>(new Map());
+
+  // Moving-head fixtures (those with pan/tilt channels) — for per-head limit overrides
+  const movingHeads = useMemo(() => {
+    return patchedFixtures.filter(pf => {
+      const def = fixtureDefs.get(pf.fixtureDefId);
+      if (!def) return false;
+      const fa = analyzeChannels(pf, def);
+      return (fa.panOffsets?.length || 0) > 0 || (fa.tiltOffsets?.length || 0) > 0;
+    });
+  }, [patchedFixtures, fixtureDefs]);
+
   const firedRef = useRef<Set<string>>(new Set());
 
   /* ─── Undo/redo ──────────────────────────────────── */
@@ -3298,6 +3328,39 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             </label>
           </div>
         </details>
+
+        {movingHeads.length > 0 && (
+          <div className="relative">
+            <details className="text-xs text-gray-500">
+              <summary className="cursor-pointer text-[10px] select-none">Limites par head ({movingHeads.length})</summary>
+              <div className="absolute z-30 left-0 top-full mt-1 bg-[#0d0d14] border border-gray-800 rounded p-2 shadow-2xl max-h-72 overflow-y-auto min-w-[250px]">
+                {movingHeads.map(pf => {
+                  const panDeg = qs.forcedPanMaxDeg?.[pf.id] ?? qs.panMaxDeg ?? 270;
+                  const tiltDeg = qs.forcedTiltMaxDeg?.[pf.id] ?? qs.tiltMaxDeg ?? 90;
+                  const hasOverride = qs.forcedPanMaxDeg?.[pf.id] !== undefined || qs.forcedTiltMaxDeg?.[pf.id] !== undefined;
+                  return (
+                    <div key={pf.id} className="flex items-center gap-2 py-1 border-b border-gray-800/40 last:border-0">
+                      <span className="text-[10px] text-gray-300 w-24 truncate" title={pf.name}>{pf.name || pf.id.slice(0, 6)}</span>
+                      <label className="flex items-center gap-1 text-[9px]">
+                        <span className="text-purple-400">P</span>
+                        <input type="range" min={0} max={270} value={panDeg} onChange={e => setForcedPanMax(pf.id, Number(e.target.value))} className="w-12" />
+                        <span className={qs.forcedPanMaxDeg?.[pf.id] !== undefined ? 'text-purple-300 w-7' : 'text-gray-600 w-7'}>{panDeg}°</span>
+                      </label>
+                      <label className="flex items-center gap-1 text-[9px]">
+                        <span className="text-blue-400">T</span>
+                        <input type="range" min={0} max={90} value={tiltDeg} onChange={e => setForcedTiltMax(pf.id, Number(e.target.value))} className="w-12" />
+                        <span className={qs.forcedTiltMaxDeg?.[pf.id] !== undefined ? 'text-blue-300 w-7' : 'text-gray-600 w-7'}>{tiltDeg}°</span>
+                      </label>
+                      {hasOverride && (
+                        <button className="text-[9px] text-gray-500 hover:text-red-400 px-1" title="Réinitialiser" onClick={() => { setForcedPanMax(pf.id, null); setForcedTiltMax(pf.id, null); }}>✕</button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
+          </div>
+        )}
 
         <div className="flex-1" />
 

@@ -54,6 +54,8 @@ export interface QuickShowState {
   strobeLimit: number;
   panMaxDeg?: number; // pan sweep half-limit in degrees (0-270), default 270 = full
   tiltMaxDeg?: number; // tilt sweep half-limit in degrees (0-90), default 90 = full
+  forcedPanMaxDeg?: Record<string, number>; // per-fixture pan half-limit override (key = fixture id)
+  forcedTiltMaxDeg?: Record<string, number>; // per-fixture tilt half-limit override (key = fixture id)
   sectionAware: boolean;
   audioFileName: string;
   customPalette: CustomPalette;
@@ -188,6 +190,8 @@ export const useAppStore = create<AppState>()(
         strobeLimit: 10,
         panMaxDeg: 270,
         tiltMaxDeg: 90,
+        forcedPanMaxDeg: {},
+        forcedTiltMaxDeg: {},
         sectionAware: true,
         audioReactive: true,
         customPalette: {
@@ -297,6 +301,8 @@ export const useAppStore = create<AppState>()(
                 forcedColors: incoming.forcedColors || {},
                 forcedDimmer: incoming.forcedDimmer || {},
                 forcedStrobe: incoming.forcedStrobe || {},
+                forcedPanMaxDeg: incoming.forcedPanMaxDeg || {},
+                forcedTiltMaxDeg: incoming.forcedTiltMaxDeg || {},
                 showColorTrack: incoming.showColorTrack ?? false,
                 showStrobeTrack: incoming.showStrobeTrack ?? false,
                 showDimmerTrack: incoming.showDimmerTrack ?? false,

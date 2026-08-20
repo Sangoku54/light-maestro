@@ -367,7 +367,7 @@ export function useDmxPlayback(options: {
   scenesRef?: React.MutableRefObject<Array<{ id: string; channels: Record<number, number> }>>; // Saved scenes (for chaser steps)
   disabledFixturesRef?: React.MutableRefObject<Set<string>>; // Disabled fixture IDs
   fixturePositionsRef?: React.MutableRefObject<Record<string, { x: number; y: number }>>; // For stage-aware pan/tilt
-  panTiltLimitsRef?: React.MutableRefObject<{ pan: number; tilt: number }>; // DMX half-amplitude limits for autoscript movement (128 = full)
+  panTiltLimitsRef?: React.MutableRefObject<{ pan: number; tilt: number; perFixture?: Record<string, { pan: number; tilt: number }> }>; // DMX half-amplitude limits for autoscript movement (128 = full)
   onVirtualDmx?: (universe: number, channelValues: Record<number, number>) => void; // Mirror for 3D view
   dryRunMode?: boolean; // Skip hardware DMX output, keep store/3D updates
   frozenRef?: React.MutableRefObject<boolean>; // Freeze: hold current DMX frame
@@ -985,18 +985,21 @@ export function useDmxPlayback(options: {
                 switch(movPattern){case'intro':px=Math.sin(phase*.1)*.3;py=Math.cos(phase*.08+motorPhase)*.3;break;case'verse':px=Math.sin(phase*.25)*.5;py=Math.cos(phase*.2+motorPhase)*.4;break;case'chorus':px=Math.sin(phase*.5)*.7;py=Math.cos(phase*.5+motorPhase)*.7;break;case'bridge':px=Math.sin(phase*.3)*.5;py=Math.sin(phase*.6+motorPhase)*.5;break;case'drop':px=Math.sin(phase*.8)*.9;py=Math.cos(phase*1.2+motorPhase)*.6;break;case'outro':px=Math.sin(phase*.15)*.2;py=Math.cos(phase*.12+motorPhase)*.2;break;case'sweep':px=Math.sin(phase*.35+motorPhase)*.7;py=Math.cos(phase*.3+motorPhase)*.5;break;case'circle':px=Math.sin(phase*.5+motorPhase)*.7;py=Math.cos(phase*.5+motorPhase)*.7;break;case'bounce':px=Math.sin(phase*.4+motorPhase)*.5;py=Math.abs(Math.sin(phase*.8+motorPhase))*.8;break;case'wave':px=Math.sin(phase*.6+motorPhase)*.5;py=Math.sin(phase*.35+motorPhase*1.5)*.5;break;case'figure8':px=Math.sin(phase*.4+motorPhase)*.6;py=Math.sin(phase*.8+motorPhase)*.5;break;case'static':px=Math.sin(phase*.05+motorPhase)*.1;py=Math.cos(phase*.05+motorPhase)*.1;break;
                 case'zigzag':{const saw=((phase/Math.PI)%2)-1;px=saw*.8;py=Math.sin(phase)>0?.5:-.5;}break;case'diamond':{px=(((phase/Math.PI)%2)-1)*.8;py=((((phase+Math.PI/2)/Math.PI)%2)-1)*.8;}break;case'spiral':{const r=.3+.7*Math.abs(Math.sin(phase*.3));px=Math.sin(phase*2)*r;py=Math.cos(phase*2)*r;}break;case'heartbeat':{const hp=((phase/(Math.PI*2))%1);const hb=hp<.15?1:hp<.3?.6:0;px=hb*Math.sin(phase*3);py=hb*Math.cos(phase*3);}break;case'randomWalk':px=Math.sin(phase*.7)*.5+Math.sin(phase*1.3)*.3+Math.cos(phase*2.1)*.2;py=Math.cos(phase*.6)*.5+Math.sin(phase*1.7)*.3+Math.sin(phase*2.3)*.2;break;case'panOnly':px=Math.sin(phase);py=0;break;case'tiltOnly':px=0;py=Math.sin(phase);break;
       default:px=Math.sin(phase*.35)*.4;py=Math.cos(phase*.3+motorPhase)*.4;}
+                const pfl = panTiltLimits.perFixture?.[pf.id];
+                const panLimit = pfl?.pan ?? panTiltLimits.pan;
+                const tiltLimit = pfl?.tilt ?? panTiltLimits.tilt;
                 if(m<panCount){
                   const raw = Math.max(0,Math.min(255,Math.round(128+px*blendAmp)));
                   const fp = fixturePositions?.[pf.id];
                   let pv = fp ? clampPanToStage(raw, fp.x) : raw;
-                  pv = Math.max(128 - panTiltLimits.pan, Math.min(128 + panTiltLimits.pan, pv));
+                  pv = Math.max(128 - panLimit, Math.min(128 + panLimit, pv));
                   chVals[pf.startAddress+fa.panOffsets[m]] = pv;
                 }
                 if(m<tiltCount){
                   const raw = Math.max(0,Math.min(255,Math.round(128+py*blendAmp)));
                   const fp = fixturePositions?.[pf.id];
                   let tv = fp ? clampTiltToStage(raw, fp.y) : raw;
-                  tv = Math.max(128 - panTiltLimits.tilt, Math.min(128 + panTiltLimits.tilt, tv));
+                  tv = Math.max(128 - tiltLimit, Math.min(128 + tiltLimit, tv));
                   chVals[pf.startAddress+fa.tiltOffsets[m]] = tv;
                 }}
               }else{for(const po of fa.panOffsets)chVals[pf.startAddress+po]=128;for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=128;}
