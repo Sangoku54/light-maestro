@@ -513,6 +513,7 @@ ipcMain.handle('fixtures:search', async (_, query: string) => fixtureLibrary.sea
 ipcMain.handle('fixtures:getDefinition', async (_, id: string) => fixtureLibrary.get(id));
 ipcMain.handle('fixtures:addCustom', async (_, def: any) => fixtureLibrary.addCustom(def));
 ipcMain.handle('fixtures:importQLC', async (_, filePath: string) => fixtureLibrary.importQLC(filePath));
+ipcMain.handle('fixtures:importGDTF', async (_, filePath: string) => fixtureLibrary.importGDTF(filePath));
 ipcMain.handle('fixtures:getAll', async () => fixtureLibrary.getAll());
 ipcMain.handle('fixtures:getBudgetList', async () => fixtureLibrary.getBudgetList());
 ipcMain.handle('fixtures:reloadLibrary', async () => {
@@ -742,6 +743,11 @@ ipcMain.handle('storage:set', async (_, key: string, data: any) => {
 });
 ipcMain.handle('storage:remove', async (_, key: string) => {
   try { const p = path.join(app.getPath('userData'), `${key}.json`); if (fs.existsSync(p)) fs.unlinkSync(p); return true; } catch { return false; }
+});
+// Existence d'une clé (blob audio externalisé déjà écrit — les saves suivants
+// ne réécrivent pas des dizaines de Mo inutilement).
+ipcMain.handle('storage:has', async (_, key: string) => {
+  try { const p = path.join(app.getPath('userData'), `${key}.json`); return fs.existsSync(p); } catch { return false; }
 });
 
 // ─── IPC Handlers: App Close Guard ──────────────────────────

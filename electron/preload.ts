@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     getDefinition: (id: string) => ipcRenderer.invoke('fixtures:getDefinition', id),
     addCustom: (def: any) => ipcRenderer.invoke('fixtures:addCustom', def),
     importQLC: (filePath: string) => ipcRenderer.invoke('fixtures:importQLC', filePath),
+    importGDTF: (filePath: string) => ipcRenderer.invoke('fixtures:importGDTF', filePath),
     getAll: () => ipcRenderer.invoke('fixtures:getAll'),
     getBudgetList: () => ipcRenderer.invoke('fixtures:getBudgetList'),
     reloadLibrary: () => ipcRenderer.invoke('fixtures:reloadLibrary'),
@@ -132,6 +133,7 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     get: (key: string) => ipcRenderer.invoke('storage:get', key),
     set: (key: string, data: any) => ipcRenderer.invoke('storage:set', key, data),
     remove: (key: string) => ipcRenderer.invoke('storage:remove', key),
+    has: (key: string) => ipcRenderer.invoke('storage:has', key),
   },
 
   // Watchdog (renderer heartbeat — fail-safe blackout in the main process)

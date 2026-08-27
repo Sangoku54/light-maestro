@@ -92,6 +92,7 @@ export interface ShowTrackItem {
   fadeOut: number;
   name: string;
   audioFileBase64?: string; // base64 data URL for audio tracks
+  audioRef?: string; // blob externalisé (userData/audio-<hash>.json) — sinon audio absent
 }
 
 export interface ShowTrack {
@@ -109,6 +110,7 @@ export interface ShowData {
   duration: number;
   tracks: ShowTrack[];
   audioFileBase64?: string;
+  audioRef?: string; // blob audio externalisé (userData/audio-<hash>.json)
   audioFileName?: string;
 }
 
@@ -172,7 +174,10 @@ export interface FixturePos {
 export interface SongPreset {
   id: string;
   name: string;
-  audioFileBase64: string;
+  /** Audio complet en base64. Absent si le blob est externalisé (audioRef) —
+   *  le playback DMX passe sur horloge virtuelle sans audio. */
+  audioFileBase64?: string;
+  audioRef?: string; // blob audio externalisé (userData/audio-<hash>.json)
   audioFileName: string;
   dmxCues: DmxCue[];
   quickShow: any;
@@ -185,6 +190,7 @@ export interface SongPreset {
   strobeTracks?: any[];
   dimmerTracks?: any[];
   chaserTracks?: any[];
+  disabledFixtures?: string[];
   createdAt: string;
 }
 

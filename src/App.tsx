@@ -18,6 +18,7 @@ import { useOscTriggers } from './hooks/osc-trigger';
 import { getLatencyMs } from './utils/latency-meter';
 import { dmxBridge } from './utils/dmx-bridge';
 import { collectCustomFixtureDefs, importCustomFixtureDefs } from './utils/custom-fixtures';
+import { externalizeProjectAudio, writeAudioBlobs, resolveProjectAudio, resolveWidgetAudio, audioKeyOf, type ExtractedBlob } from './utils/project-audio';
 import './styles/global.css';
 
 class ErrorBoundary extends React.Component<
@@ -71,22 +72,41 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     const { isDirty, dirtyAt, markDirty, markClean, ...persistable } = appState;
     // Strip showData from widget configs (large binary, stored separately in show store)
     // but preserve showId and showName so the show can be found in the store on load.
-    const widgets = perfState.vcWidgets.map(w => {
-      if (!w.config?.showData) return w;
-      const { showData, ...rest } = w.config;
-      return {
-        ...w,
-        config: {
-          ...rest,
-          showId: showData.id,
-          showName: showData.name,
-        },
-      };
-    });
+    // Strip showData (gros binaire, stocké séparément dans le show store) et
+    // externalise l'audio des widgets (ex. audioAutoScript : config.audioDataUrl
+    // = data URL complète) — sinon le plafond de string V8 est déplacé, pas
+    // supprimé.
+    const widgetBlobs: ExtractedBlob[] = [];
+    const widgets: any[] = [];
+    for (const w of perfState.vcWidgets) {
+      let out: any = w;
+      if (out.config?.showData) {
+        const { showData, ...rest } = out.config;
+        out = { ...out, config: { ...rest, showId: showData.id, showName: showData.name } };
+      }
+      if (typeof out.config?.audioDataUrl === 'string' && out.config.audioDataUrl.length >= 1024) {
+        try {
+          const key = await audioKeyOf(out.config.audioDataUrl);
+          widgetBlobs.push({ key, audioFileBase64: out.config.audioDataUrl });
+          out = { ...out, config: { ...out.config, audioDataUrl: undefined, audioRef: key } };
+        } catch { /* champ illisible → conservé tel quel */ }
+      }
+      widgets.push(out);
+    }
     // Embarquer les définitions des fixtures custom : elles vivent dans
     // userData/fixtures et ne sont pas packagées → sans ça, un projet ouvert
     // sur une machine vierge ne peut pas résoudre ses fixtures patchées.
     const customFixtures = await collectCustomFixtureDefs(showState.patchedFixtures);
+    // Externalise les blobs audio (songPresets ~55 Mo par chanson, shows,
+    // tracks) hors du JSON du projet : au-delà de la taille maximale de
+    // string de V8 (~536 Mo), JSON.stringify jette RangeError et la
+    // sauvegarde échoue silencieusement (plus de sauvegarde possible après
+    // ~8 presets paramétrés dans des widgets).
+    const storage = (window as any).lightMaestro?.storage;
+    const { presets: songPresetsOut, shows: showsOut, blobs } = await externalizeProjectAudio(
+      showState.songPresets ?? [],
+      showState.shows ?? [],
+    );
     const data = {
       schemaVersion: 1,
       appStore: persistable,
@@ -102,8 +122,8 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
         chasers: showState.chasers,
         effects: showState.effects,
         cueLists: showState.cueLists,
-        shows: showState.shows,
-        songPresets: showState.songPresets,
+        shows: showsOut,
+        songPresets: songPresetsOut,
         mtcMarkers: showState.mtcMarkers,
       },
       vcWidgets: widgets,
@@ -111,16 +131,27 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
       timestamp: new Date().toISOString(),
     };
 
+    const allBlobs = [...blobs, ...widgetBlobs];
+    const writeBlobs = async () => {
+      if (storage?.set && storage?.has) await writeAudioBlobs(allBlobs, storage);
+    };
+
     if (options.silent) {
       // No dialog: persist the full snapshot to the stable autosave slot.
       // NOTE: does NOT mark the project clean — only an explicit save (Ctrl+S /
       // Save & Quit) clears the dirty flag, so the quit save reminder stays active.
+      // Les blobs sont écrits AVANT le snapshot : le fichier autosave ne doit
+      // jamais référencer un blob pas encore sur disque.
+      await writeBlobs();
       const ok = await (window as any).lightMaestro?.storage?.set('autosave', data);
       return !!ok;
     }
 
     const json = JSON.stringify(data, null, 2);
     const saved = await (window as any).lightMaestro?.project?.save(json);
+    // Blobs écrits après le choix du chemin : si l'utilisateur annule, on ne
+    // stocke rien pour rien.
+    await writeBlobs();
     if (saved) {
       useAppStore.getState().markClean();
       // Set project name from save result (project:save resolves to the file path)
@@ -285,6 +316,24 @@ const App: React.FC = () => {
           useAppStore.getState().setProjectName(fileName || 'Sans titre');
         }
         const ss = useShowStore.getState();
+        // Résout les blobs audio externalisés (v2) AVANT l'hydratation des
+        // stores — les widgets sont montés ensuite et doivent trouver leurs
+        // shows/presets complets (résolution async awaitée avant vcSetWidgets).
+        const storageApi = (window as any).lightMaestro?.storage;
+        let resolvedShows: any[] = [];
+        let resolvedPresets: any[] = [];
+        if (storageApi?.get) {
+          try {
+            const r = await resolveProjectAudio(data.showStore?.songPresets ?? [], data.showStore?.shows ?? [], (k: string) => storageApi.get(k));
+            resolvedShows = r.shows;
+            resolvedPresets = r.presets;
+          } catch (e) { console.warn('Failed to resolve project audio blobs:', e); }
+        } else {
+          // Pas d'API storage (web/tests) : blobs non résolus — le playback
+          // DMX continue sur horloge virtuelle.
+          resolvedShows = data.showStore?.shows ?? [];
+          resolvedPresets = data.showStore?.songPresets ?? [];
+        }
         if (data.showStore) {
           if (data.showStore.patchedFixtures) ss.setPatchedFixtures(data.showStore.patchedFixtures);
           if (data.showStore.stageDims) ss.setStageDims(data.showStore.stageDims);
@@ -298,8 +347,10 @@ const App: React.FC = () => {
           if (data.showStore.chasers) ss.setChasers(data.showStore.chasers);
           if (data.showStore.effects) ss.setEffects(data.showStore.effects);
           if (data.showStore.cueLists) ss.setCueLists(data.showStore.cueLists);
-          if (data.showStore.shows) ss.setShows(data.showStore.shows);
-          if (data.showStore.songPresets) ss.setSongPresets(data.showStore.songPresets);
+          // Unconditional: un projet sans ces champs ne doit pas hériter des
+          // shows/presets du projet précédent (blobs audio inclus).
+          ss.setShows(resolvedShows);
+          ss.setSongPresets(resolvedPresets);
           if (data.showStore.mtcMarkers) ss.setMtcMarkers(data.showStore.mtcMarkers);
         }
         if (data.appStore) {
@@ -308,6 +359,9 @@ const App: React.FC = () => {
           useAppStore.setState(restAppStore);
         }
         // Restore virtual console widgets
+        if (data.vcWidgets && storageApi?.get) {
+          try { data.vcWidgets = await resolveWidgetAudio(data.vcWidgets, (k: string) => storageApi.get(k)); } catch { /* blob absent */ }
+        }
         if (data.vcWidgets) {
           usePerformStore.getState().vcSetWidgets(data.vcWidgets);
         } else {
