@@ -17,6 +17,7 @@ import { useMtcTriggers } from './hooks/mtc-trigger';
 import { useOscTriggers } from './hooks/osc-trigger';
 import { getLatencyMs } from './utils/latency-meter';
 import { dmxBridge } from './utils/dmx-bridge';
+import { collectCustomFixtureDefs, importCustomFixtureDefs } from './utils/custom-fixtures';
 import './styles/global.css';
 
 class ErrorBoundary extends React.Component<
@@ -67,7 +68,7 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     const showState = useShowStore.getState();
     const perfState = usePerformStore.getState();
     const appState = useAppStore.getState();
-    const { isDirty, markDirty, markClean, ...persistable } = appState;
+    const { isDirty, dirtyAt, markDirty, markClean, ...persistable } = appState;
     // Strip showData from widget configs (large binary, stored separately in show store)
     // but preserve showId and showName so the show can be found in the store on load.
     const widgets = perfState.vcWidgets.map(w => {
@@ -82,9 +83,14 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
         },
       };
     });
+    // Embarquer les définitions des fixtures custom : elles vivent dans
+    // userData/fixtures et ne sont pas packagées → sans ça, un projet ouvert
+    // sur une machine vierge ne peut pas résoudre ses fixtures patchées.
+    const customFixtures = await collectCustomFixtureDefs(showState.patchedFixtures);
     const data = {
       schemaVersion: 1,
       appStore: persistable,
+      customFixtures,
       showStore: {
         patchedFixtures: showState.patchedFixtures,
         stageDims: showState.stageDims,
@@ -106,9 +112,10 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     };
 
     if (options.silent) {
-      // No dialog: persist the full snapshot to the stable autosave slot
+      // No dialog: persist the full snapshot to the stable autosave slot.
+      // NOTE: does NOT mark the project clean — only an explicit save (Ctrl+S /
+      // Save & Quit) clears the dirty flag, so the quit save reminder stays active.
       const ok = await (window as any).lightMaestro?.storage?.set('autosave', data);
-      if (ok) useAppStore.getState().markClean();
       return !!ok;
     }
 
@@ -269,6 +276,9 @@ const App: React.FC = () => {
         const result = await window.lightMaestro?.project?.open();
         if (!result) return;
         const data = JSON.parse(result.content);
+        // Ré-importer les fixtures custom embarquées AVANT que les fixtures
+        // patchées ne tentent de résoudre leurs définitions (getDefinition).
+        await importCustomFixtureDefs(data.customFixtures);
         // Extract project name from file path
         if (result.filePath) {
           const fileName = result.filePath.split(/[/\\]/).pop()?.replace(/\.lmproj$/i, '') || '';
@@ -344,9 +354,14 @@ const App: React.FC = () => {
   // Silent: no dialog, no toast. Skipped while another save is in flight
   // (manual Ctrl+S with the dialog open, or a Save & Quit in progress).
   useEffect(() => {
-    const id = setInterval(() => {
-      if (!useAppStore.getState().isDirty) return; // nothing new since last save
-      saveProject({ silent: true });
+    let lastAutosaveAt = 0;
+    const id = setInterval(async () => {
+      const { isDirty, dirtyAt } = useAppStore.getState();
+      if (!isDirty) return; // nothing new since last explicit save
+      if (lastAutosaveAt >= dirtyAt) return; // snapshot already up to date
+      const snapshotAt = dirtyAt; // capture before the async save (micro-race guard)
+      const ok = await saveProject({ silent: true });
+      if (ok) lastAutosaveAt = snapshotAt;
     }, AUTOSAVE_INTERVAL_MS);
     return () => clearInterval(id);
   }, []);
@@ -428,7 +443,7 @@ const App: React.FC = () => {
         {/* ─── Close Guard Modal ──────────────────────────── */}
         {showCloseModal && (
           <div
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+            className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
             onClick={handleCancelClose}
           >
             <div

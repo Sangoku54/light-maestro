@@ -139,6 +139,7 @@ interface AppState {
 
   // Unsaved changes tracking (NOT persisted - resets on reload)
   isDirty: boolean;
+  dirtyAt: number;
   markDirty: () => void;
   markClean: () => void;
 
@@ -252,8 +253,9 @@ export const useAppStore = create<AppState>()(
       },
 
       isDirty: false,
-      markDirty: () => set({ isDirty: true }),
-      markClean: () => set({ isDirty: false }),
+      dirtyAt: 0,
+      markDirty: () => set({ isDirty: true, dirtyAt: Date.now() }),
+      markClean: () => set({ isDirty: false, dirtyAt: 0 }),
 
       projectName: '',
       setProjectName: (name) => set({ projectName: name }),
