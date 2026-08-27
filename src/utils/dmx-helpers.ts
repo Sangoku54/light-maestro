@@ -133,8 +133,13 @@ export function buildFixtureOnChannelValues(
       colorChannels.push({ offset: i, name: chName, caps: ch.capabilities });
       continue;
     }
+    // Un canal nommé « Strobe » n'est PAS un shutter : ne pas l'« ouvrir » à 255
+    // (sur un canal Strobe, 255 = strobe max permanent). Même logique que
+    // l'analyseur : les composites (« Shutter / Strobe », « Strobe Functions »,
+    // « Strobe Speed »…) restent des shutters.
+    const isPureStrobe = /\bstrobe\b/i.test(chName) && !/shutter|dimmer|function|multifunctional|pattern|speed|frequency|duration|density|intensity/i.test(chName);
     if (ch.type === 'Intensity' && intensityOffset === null) intensityOffset = i;
-    else if (ch.type === 'Shutter' && shutterOffset === null) shutterOffset = i;
+    else if (ch.type === 'Shutter' && !isPureStrobe && shutterOffset === null) shutterOffset = i;
   }
 
   if (intensityOffset !== null) out[base + intensityOffset] = 255;
@@ -157,6 +162,28 @@ export function buildFixtureOnChannelValues(
     const whiteCap = caps.find((cap) => /white/i.test(cap.name || ''));
     const cap = whiteCap || caps[0];
     out[base + colorChannels[0].offset] = cap ? Math.round((cap.min + cap.max) / 2) : 0;
+  }
+
+  // Lasers FX (ex. Galaxian 2 gates R/G, IODA « Program ») : allumer les
+  // beams et placer le mode sur une zone DMX pilotable (plus jamais « Laser
+  // off »/« NoFunction » au bouton Allumer).
+  const laser = channels.some(
+    (c) => /laser/i.test(c.name || '') || (c.capabilities ?? []).some((cap) => /laser/i.test(cap.name || '')),
+  );
+  if (laser) {
+    if (colorChannels.length === 2 && out[base + colorChannels[0].offset] === undefined) {
+      for (const c of colorChannels) out[base + c.offset] = 255; // gates ouvertes
+    }
+    const modeIdx = channels.findIndex(
+      (c) => /^(mode|mode\s*select|mode\s*selection|program|show\s*mode)$/i.test(c.name || '') && (c.capabilities?.length ?? 0) > 0,
+    );
+    if (modeIdx >= 0) {
+      const caps = channels[modeIdx].capabilities ?? [];
+      const cap = caps.find((c) => /dmx|dynamic|manual/i.test(c.name || ''))
+        ?? caps.find((c) => c.max >= 192)
+        ?? caps[0];
+      if (cap) out[base + modeIdx] = Math.round((cap.min + cap.max) / 2);
+    }
   }
 
   return out;

@@ -372,7 +372,11 @@ export const Stage3D: React.FC<{
   const fixturePositions = useShowStore((s) => s.fixturePositions);
   const setFixturePosition = useShowStore((s) => s.setFixturePosition);
   const initFixturePosition = useShowStore((s) => s.initFixturePosition);
-  const universes = useAppStore((s) => s.dmx.universes);
+  // Universes come from the showStore (the source of truth every DMX writer
+  // keys `channelData` by). `appStore.dmx.universes` is a stale default that
+  // is never synced — using it here broke the 3D mirror whenever showStore
+  // universes differed (multi-universe shows, renamed universes).
+  const universes = useShowStore((s) => s.universes);
 
   // ── Init fixture positions for new fixtures ────────────
   useEffect(() => {
@@ -495,16 +499,16 @@ export const Stage3D: React.FC<{
         headGroup.position.y = 0.34;
         headGroup.name = 'head';
 
-        // Tï¿½te moving_head : sphï¿½re (orientation-agnostic, 2x pour diagnostic visuel)
+        // Tï¿½te moving_head : sphï¿½re (orientation-agnostic, beam exits at bottom point)
         const headBody = new THREE.Mesh(
-          new THREE.SphereGeometry(0.16, 24, 16), headMat);
+          new THREE.SphereGeometry(0.08, 24, 16), headMat);
         headBody.position.set(0, 0, 0);
         headBody.castShadow = true;
         headGroup.add(headBody);
 
         // Light exit at bottom point of sphere (y = -radius)
         const lightExit = new THREE.Group();
-        lightExit.position.set(0, -0.16, 0);
+        lightExit.position.set(0, -0.08, 0);
         lightExit.name = 'lightExit';
         headGroup.add(lightExit);
 
@@ -565,7 +569,7 @@ export const Stage3D: React.FC<{
         group.add(faceRing);
 
         // Light face (flat disc)
-        const faceGeo = new THREE.CircleGeometry(0.20, 16);
+        const faceGeo = new THREE.CircleGeometry(0.10, 16);
         const face = new THREE.Mesh(faceGeo, new THREE.MeshStandardMaterial({
           color: 0x111111, roughness: 0.2, metalness: 0.1,
         }));
@@ -641,11 +645,12 @@ export const Stage3D: React.FC<{
         headGroup = new THREE.Group();
         headGroup.position.y = 0.30;
         headGroup.name = 'head';
-        const headBody = new THREE.Mesh(new THREE.SphereGeometry(0.16, 24, 16), headMatDef);
+        const headBody = new THREE.Mesh(new THREE.SphereGeometry(0.08, 24, 16), headMatDef);
         headBody.castShadow = true;
         headGroup.add(headBody);
         const lightExitDef = new THREE.Group();
-        lightExitDef.position.set(0, -0.32, 0);
+        // Light exit at bottom point of sphere (y = -radius)
+        lightExitDef.position.set(0, -0.08, 0);
         lightExitDef.name = 'lightExit';
         headGroup.add(lightExitDef);
         armGroup.add(headGroup);
@@ -697,11 +702,11 @@ export const Stage3D: React.FC<{
         const eh = new THREE.Group();
         eh.position.set(Math.cos(angle) * radius, 0.30, Math.sin(angle) * radius);
         eh.name = 'extraHead';
-        const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.11, 20, 14), extraMat);
+        const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.055, 20, 14), extraMat);
         sphere.castShadow = true;
         eh.add(sphere);
         const exit = new THREE.Group();
-        exit.position.set(0, -0.20, 0);
+        exit.position.set(0, -0.10, 0);
         exit.name = 'lightExit';
         eh.add(exit);
         armGroup.add(eh);
@@ -1343,7 +1348,7 @@ export const Stage3D: React.FC<{
         }
 
         // ── Floor spot (light circle on stage floor) ──
-        const spotRadius = 0.6;
+        const spotRadius = 0.3;
         const spotGeo = new THREE.CircleGeometry(spotRadius, 32);
         const spotMat = new THREE.MeshBasicMaterial({
           color: 0xffffff,
@@ -1361,7 +1366,7 @@ export const Stage3D: React.FC<{
         f3d.floorSpot = floorSpot;
 
         // ── Floor glow (larger soft outer ring) ──
-        const glowRadius = 1.2;
+        const glowRadius = 0.6;
         const glowGeo = new THREE.CircleGeometry(glowRadius, 32);
         const glowMat = new THREE.MeshBasicMaterial({
           color: 0xffffff,
@@ -1553,6 +1558,15 @@ export const Stage3D: React.FC<{
         const g = data[baseAddr + cm.rgbOffsets[1]] ?? 0;
         const b = data[baseAddr + cm.rgbOffsets[2]] ?? 0;
         intensity = Math.max(r, g, b);
+      } else if (cm.isLaser && cm.wheelOffset !== null) {
+        // Laser à roue (IODA…) : pas de dimmer — allumé dès que la roue porte
+        // une couleur (la lecture écrit toujours une valeur > 0).
+        const w = data[baseAddr + cm.wheelOffset] ?? 0;
+        intensity = w > 2 ? 255 : 0;
+      } else if (cm.isLaser && cm.laserModeOffset !== null) {
+        // Laser simple (mode DMX toujours > 0 en lecture) : allumé = mode écrit.
+        const m = data[baseAddr + cm.laserModeOffset] ?? 0;
+        intensity = m > 2 ? 255 : 0;
       }
 
       // --- Shutter / Strobe ---
@@ -1573,6 +1587,20 @@ export const Stage3D: React.FC<{
         } else if (shutterVal >= 64 && shutterVal <= 179) {
           // Standard strobe range with rate ramp
           strobeHz = Math.max(1, (shutterVal - 64) / 6);
+        }
+      }
+
+      // Canal Strobe dédié (strobeOffset) : 0 = pas de strobe, valeurs hautes =
+      // strobe (mêmes formules DMX que le shutter). Ne ferme JAMAIS la lumière
+      // (pas de shutterClosed : 0 = off, pas « closed »).
+      if (cm.strobeOffset !== null && cm.strobeOffset >= 0) {
+        const strobeVal = data[baseAddr + cm.strobeOffset] ?? 0;
+        if (strobeVal >= 180 && strobeVal < 255) {
+          strobeHz = Math.max(1, (strobeVal - 180) / 3);   // DMX strobe speed
+        } else if (strobeVal >= 64 && strobeVal <= 179) {
+          strobeHz = Math.max(1, (strobeVal - 64) / 6);    // strobe standard
+        } else if (strobeVal >= 8 && strobeVal < 64) {
+          strobeHz = Math.max(1, (strobeVal - 8) / 14);    // plage basse (bee-eye : 8+ = strobe)
         }
       }
 
@@ -1599,9 +1627,12 @@ export const Stage3D: React.FC<{
         color = wheelValueToColor(wheelVal, cm.wheelCaps);
       }
 
-      // --- Pan/Tilt (QLC+ model: arm=pan/Y, head=tilt/X) ---
-      const panVal = cm.panOffset !== null ? (data[baseAddr + cm.panOffset] ?? 128) : 128;
-      const tiltVal = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128) : 128;
+      // --- Pan/Tilt (QLC+ model: arm=pan/Y, head=tilt/X) — les lasers sans
+      // pan/tilt typés utilisent leurs axes scan X/Y (IODA…) en équivalent. ---
+      const panVal = cm.panOffset !== null ? (data[baseAddr + cm.panOffset] ?? 128)
+        : (cm.scanXOffset !== null ? (data[baseAddr + cm.scanXOffset] ?? 128) : 128);
+      const tiltVal = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128)
+        : (cm.scanYOffset !== null ? (data[baseAddr + cm.scanYOffset] ?? 128) : 128);
       dmxLastActivityRef.current = performance.now();
 
       // Rate-limited tracking: beam cannot turn faster than the real fixture motor
@@ -2228,8 +2259,8 @@ export const Stage3D: React.FC<{
                 const ox = e.clientX - panel.offsetLeft;
                 const oy = e.clientY - panel.offsetTop;
                 const onMove = (ev: MouseEvent) => {
-                  panel.style.left = (ev.clientX - ox) + 'px';
-                  panel.style.top = (ev.clientY - oy) + 'px';
+                  panel.style.left = Math.max(0, Math.min(ev.clientX - ox, window.innerWidth - 120)) + 'px';
+                  panel.style.top = Math.max(0, Math.min(ev.clientY - oy, window.innerHeight - 40)) + 'px';
                   panel.style.right = 'auto';
                 };
                 const onUp = () => {

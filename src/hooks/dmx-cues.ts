@@ -16,7 +16,7 @@
 
 import type { PatchedFixture, FixtureTier } from '../stores/showStore';
 import { useShowStore, type FixtureGroup } from '../stores/showStore';
-import { analyzeFixture, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
+import { analyzeFixture, type FixtureChannelAnalysis, capMid, pickLaserModeCap, laserGateValue } from '../engine/fixture-analyzer';
 
 // ─── Inline fixture definition types (mirrors electron/fixtures/library.ts) ──
 
@@ -37,6 +37,7 @@ export interface DmxFixtureChannel {
     | 'Colour'
     | 'Gobo'
     | 'Shutter'
+    | 'Strobe'
     | 'Speed'
     | 'Prism'
     | 'Effect'
@@ -246,26 +247,26 @@ function computeMovement(
       break;
     }
     case 'zigzag': {
-      // Sharp linear zigzag — sawtooth wave on pan, square on tilt
+      // Sharp linear zigzag - sawtooth wave on pan, square on tilt
       panNorm = ((phase / Math.PI) % 2) - 1; // sawtooth -1..1
       tiltNorm = Math.sin(phase) > 0 ? 0.5 : -0.5;
       break;
     }
     case 'diamond': {
-      // Diamond/rhombus path — triangle waves 90° out of phase
+      // Diamond/rhombus path - triangle waves 90° out of phase
       panNorm = ((phase / Math.PI) % 2) - 1; // triangle saw
       tiltNorm = (((phase + Math.PI/2) / Math.PI) % 2) - 1;
       break;
     }
     case 'spiral': {
-      // Expanding/contracting spiral — sin/cos with amplitude modulation
+      // Expanding/contracting spiral - sin/cos with amplitude modulation
       const spiralR = 0.3 + 0.7 * Math.abs(Math.sin(phase * 0.3));
       panNorm = Math.sin(phase * 2) * spiralR;
       tiltNorm = Math.cos(phase * 2) * spiralR;
       break;
     }
     case 'heartbeat': {
-      // Double-pulse like a heartbeat — two quick beats, then pause
+      // Double-pulse like a heartbeat - two quick beats, then pause
       const hbPhase = (phase / (Math.PI * 2)) % 1; // 0..1 cycle
       const hb = hbPhase < 0.15 ? 1 : hbPhase < 0.3 ? 0.6 : 0;
       panNorm = hb * Math.sin(phase * 3);
@@ -273,7 +274,7 @@ function computeMovement(
       break;
     }
     case 'randomWalk': {
-      // Smooth random drift — use seeded sin with irrational frequencies for organic feel
+      // Smooth random drift - use seeded sin with irrational frequencies for organic feel
       panNorm = Math.sin(phase * 0.7) * 0.5 + Math.sin(phase * 1.3) * 0.3 + Math.cos(phase * 2.1) * 0.2;
       tiltNorm = Math.cos(phase * 0.6) * 0.5 + Math.sin(phase * 1.7) * 0.3 + Math.sin(phase * 2.3) * 0.2;
       break;
@@ -451,6 +452,28 @@ const ABSOLUTE_MIN_INTENSITY = 60;
 
 
 const SHUTTER_OPEN_SAFE = 255;
+
+/**
+ * Valeur « strobe off » pour un canal Strobe dédié (strobeOffset) :
+ * - si le canal a des caps, la cap Open / No function / No effect (capMid) ;
+ * - sinon 0 (off par défaut sur les bee-eye/flower).
+ * Jamais 255 (sur un canal Strobe, 255 = strobe max permanent).
+ */
+function strobeOffValue(caps: DmxFixtureCapability[] | null | undefined): number {
+  if (caps && caps.length > 0) {
+    const open = caps.find((c) => /open|no function|no.?effect|neutral|steady/i.test(c.name ?? ''));
+    if (open) return Math.round((open.min + open.max) / 2);
+    const first = caps[0];
+    if (first.min === 0 && first.max < 64) return Math.round((first.min + first.max) / 2);
+  }
+  return 0;
+}
+
+// ── Exploitation laser (beat-sync) ────────────────────────────
+const LASER_PATTERN_BEATS = 8; // un motif toutes les 8 beats (2 bars)
+const LASER_SCAN_BEATS = 4; // période du balayage X/Y (1 bar)
+const LASER_COLOR_BARS = 2; // un cran de roue couleur toutes les 2 bars
+const LASER_ROT_BEATS = 16; // période de base des rotations (lente)
 
 // SoundSwitch: map intensity level + energy -> DMX value within level range
 function mapIntensity(level: string, energy: number): number {
@@ -701,12 +724,31 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
 
         if (fa.rgbOffsets && paletteColor) {
           let [r, g, b] = hexToRgb(paletteColor);
+          const rawRgb = [r, g, b];
           // Apply color temperature shift
           if (cue.colorTemp) {
             [r, g, b] = applyColorTemp([r, g, b], cue.colorTemp);
           }
-          // Scale RGB by intensity when fixture has no master dimmer (wash/par without dedicated dimmer channel)
-          if (fa.intensityOffset === null) {
+          // Paire de couleurs laser (Red/Green Laser, type Shutter OFL) : ce
+          // sont des GATES ouvert/fermé — 0-31 fermé, milieu = stroboscope.
+          // Pas de scaling d'intensité, jamais de valeur intermédiaire.
+          const laserGate = fa.isLaser && fa.laserColorMode === 'rgb' && fa.rgbSegments.length === 0;
+          if (laserGate) {
+            r = laserGateValue(r);
+            g = laserGateValue(g);
+            b = laserGateValue(b);
+            // Palette non représentable (ex. bleue/violette sur un laser R/G) :
+            // ouvrir R+G plutôt que d'éteindre le laser (« ça ne fait rien »).
+            const pairClosed =
+              (fa.rgbOffsets[0] !== undefined ? r === 0 : true) &&
+              (fa.rgbOffsets[1] !== undefined ? g === 0 : true) &&
+              (fa.rgbOffsets[2] !== undefined ? b === 0 : true);
+            if (pairClosed && rawRgb.some((v) => v > 22)) {
+              r = 255;
+              g = 255;
+            }
+          } else if (fa.intensityOffset === null) {
+            // Scale RGB by intensity when fixture has no master dimmer (wash/par without dedicated dimmer channel)
             const scale = computedIntensity / 255;
             r = Math.round(r * scale);
             g = Math.round(g * scale);
@@ -789,6 +831,17 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
         if (!fa.rgbOffsets && fa.wheelOffset === null && fa.effectOffset !== null && (!fa.effectCaps || fa.effectCaps.length === 0)) {
           const effectVal = 8 + ((cueIndex % 24) * 10);
           channelValues[pf.startAddress + fa.effectOffset] = Math.min(255, effectVal);
+        }
+
+        // Canal Strobe dédié (strobeOffset) : PAS un shutter — il ne contrôle
+        // PAS la luminosité (pas de mapping intensity→shutter ici).
+        // Off = valeur de la cap Open/No function si connue, sinon 0. Jamais
+        // SHUTTER_OPEN_SAFE=255 : sur un canal Strobe, 255 = strobe max PERMANENT.
+        if (fa.strobeOffset !== null) {
+          const strobeAddr = pf.startAddress + fa.strobeOffset;
+          channelValues[strobeAddr] = (enableStrobe && shouldTierStrobe(pf.tier))
+            ? strobeRate
+            : strobeOffValue(fa.strobeCaps);
         }
 
         // Always set the shutter when available: open when not strobing (DMX 8-15 = shutter open),
@@ -912,16 +965,84 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
           channelValues[pf.startAddress + fa.speedOffset] = Math.max(0, Math.min(255, speedVal));
         }
 
+        // ── 7b. Laser exploitation - jamais statique, jamais synchrone ──
+        if (fa.isLaser) {
+          const bpm = Math.max(60, Math.min(200, (options as any)?.bpm ?? 120));
+          const beat = (cue.time ?? 0) * bpm / 60;
+          // Déphasage par fixture via l'adresse de départ : stable dans le
+          // temps, décolle les lasers jumeaux (plus de superposition).
+          const laserPhase = ((pf.startAddress % 16) / 16) * 2 * Math.PI;
+          // Un tiers des lasers évolue en Lissajous (figure-8) : variété de
+          // trajectoires au lieu d'un cercle unique.
+          const lissajous = pf.startAddress % 3 === 2;
+
+          // (a) Mode : toujours un mode pilotable en DMX (jamais sound/off).
+          if (fa.laserModeOffset !== null) {
+            channelValues[pf.startAddress + fa.laserModeOffset] = capMid(pickLaserModeCap(fa.laserModeCaps));
+          }
+
+          // (b) Pattern : cycle un motif toutes les LASER_PATTERN_BEATS beats.
+          if (fa.patternOffset !== null && fa.patternCaps.length > 0) {
+            const idx = Math.floor(beat / LASER_PATTERN_BEATS) % fa.patternCaps.length;
+            channelValues[pf.startAddress + fa.patternOffset] = capMid(fa.patternCaps[idx]);
+          }
+
+          // (c) Scan X/Y : cercle ou Lissajous, phase par fixture.
+          if (fa.scanXOffset !== null) {
+            channelValues[pf.startAddress + fa.scanXOffset] = 128 + Math.round(90 * Math.sin(2 * Math.PI * beat / LASER_SCAN_BEATS + laserPhase));
+          }
+          if (fa.scanYOffset !== null) {
+            const yv = lissajous
+              ? Math.sin(2 * 2 * Math.PI * beat / LASER_SCAN_BEATS + laserPhase)
+              : Math.cos(2 * Math.PI * beat / LASER_SCAN_BEATS + laserPhase);
+            channelValues[pf.startAddress + fa.scanYOffset] = 128 + Math.round(90 * yv);
+          }
+
+          // (d) Roue couleur : cycle uniquement si aucune couleur de palette
+          // n'a déjà été écrite (évite de contredire le matching de la section 2).
+          if (fa.laserColorMode === 'wheel' && fa.wheelOffset !== null && fa.wheelCaps.length > 0
+              && channelValues[pf.startAddress + fa.wheelOffset] === undefined) {
+            const idx = Math.floor(beat / (LASER_COLOR_BARS * 4)) % fa.wheelCaps.length;
+            channelValues[pf.startAddress + fa.wheelOffset] = capMid(fa.wheelCaps[idx]);
+          }
+
+          // (e) Vitesses + rotations : oscillent, déphasées par fixture.
+          if (fa.laserSpeedScanOffset !== null) {
+            // Borné à 0-127 : au-delà, l'OFL IODA passe en « With gaps » (faisceau troué).
+            channelValues[pf.startAddress + fa.laserSpeedScanOffset] = Math.min(127, 128 + Math.round(60 * Math.sin(2 * Math.PI * beat / LASER_SCAN_BEATS + laserPhase)));
+          }
+          if (fa.laserSpeedPatternOffset !== null) {
+            channelValues[pf.startAddress + fa.laserSpeedPatternOffset] = 128 + Math.round(64 * Math.sin(2 * Math.PI * beat / LASER_ROT_BEATS));
+          }
+          fa.laserRotationOffsets.forEach((off, i) => {
+            channelValues[pf.startAddress + off] = 128 + Math.round(70 * Math.sin(2 * Math.PI * beat / (LASER_ROT_BEATS * (i + 1)) + laserPhase));
+          });
+
+          // (f) Blanking : ouvert (jamais de blackout par défaut), gate strobe en drop.
+          if (fa.blankOffset !== null) {
+            channelValues[pf.startAddress + fa.blankOffset] = enableStrobe && isDrop ? 255 : 0;
+          }
+
+          // (g) Gates 2 canaux sans palette : ouvrir R+G — jamais « rien ».
+          if (fa.rgbOffsets && fa.rgbSegments.length === 0 && channelValues[pf.startAddress + fa.rgbOffsets[0]] === undefined) {
+            channelValues[pf.startAddress + fa.rgbOffsets[0]] = 255;
+            if (fa.rgbOffsets[1] !== undefined) channelValues[pf.startAddress + fa.rgbOffsets[1]] = 255;
+          }
+        }
+
         // Safety net: set unrecognized channels to safe neutral (128)
         // Prevents fixtures from being stuck in bad states when channel types aren't detected.
-        // Macro channels are excluded — they are user-configured only.
+        // Macro channels are excluded - they are user-configured only.
+        // Lasers : 0 (off/neutre) au lieu de 128 — sur un laser, 128 = strobe ou
+        // macro autonome (Galaxian R/G et Macros), jamais un état neutre.
         if (fa.channelCount > 0) {
           const macroSet = new Set(fa.macroOffsets);
           for (let c = 0; c < fa.channelCount; c++) {
             if (macroSet.has(c)) continue;
+            if (fa.strobeOffset === c) continue; // écrit par le bloc strobe dédié (off/rate)
             const addr = pf.startAddress + c;
             if (channelValues[addr] === undefined) {
-              channelValues[addr] = 128;
+              channelValues[addr] = fa.isLaser ? 0 : 128;
             }
           }
         }
@@ -929,7 +1050,7 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
         fixtureNames.push(pf.name);
       }
 
-      // ALWAYS ensure minimum DMX output — even if no fixture channels matched.
+      // ALWAYS ensure minimum DMX output - even if no fixture channels matched.
       // Every cue must produce at least dimmer=128 on all universe fixtures.
       if (activeList.length > 0 && Object.keys(channelValues).length === 0) {
         for (const fa of activeList) {
@@ -938,6 +1059,8 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
             channelValues[pf.startAddress + fa.intensityOffset] = 128;
           } else if (fa.shutterOffset !== null) {
             channelValues[pf.startAddress + fa.shutterOffset] = SHUTTER_OPEN_SAFE;
+          } else if (fa.strobeOffset !== null) {
+            channelValues[pf.startAddress + fa.strobeOffset] = 0;
           }
         }
       }

@@ -9,8 +9,53 @@
  */
 
 import type { PatchedFixture } from '../stores/showStore';
-import type { DmxFixtureDefinition, DmxFixtureCapability } from '../hooks/dmx-cues';
+import type { DmxFixtureDefinition, DmxFixtureCapability, DmxFixtureChannel } from '../hooks/dmx-cues';
 import { RgbSegment, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments } from './dmx-color';
+
+// Canaux couleur auxiliaires à exclure du calcul RGB (rotation/mouvement…).
+const COLOUR_AUX_RE = /rotation|rolling|move|movement|speed|scan|strobe|effect|macro/i;
+
+// Canal « Strobe » dédié : détection par NOM (avant le switch par type) pour
+// qu'un canal Strobe (typé Shutter OU Effect selon l'OFL/QLC+) ne finisse
+// JAMAIS en shutterOffset (les blocs shutter écrivent 255 → strobe permanent)
+// ni en effectOffset (effet générique / safety net 128 = pulse). Exclut les
+// composites (« Shutter / Strobe », « Dimmer / Strobe », « Strobe Functions »)
+// et les paramètres (« Strobe Speed/Frequency/Duration/Density ») — ce sont
+// de vrais shutters ou des vitesses, pas des canaux de strobe.
+const STROBE_NAME_RE = /\bstrobe\b/i;
+const STROBE_EXCLUDE_RE = /shutter|dimmer|function|multifunctional|pattern|speed|frequency|duration|density|intensity/i;
+
+/** Un canal est un « Strobe » dédié (nom + exclusions + garde caps 0=Closed). */
+function isStrobeNamedChannel(ch: DmxFixtureChannel): boolean {
+  const name = ch.name ?? '';
+  if (!STROBE_NAME_RE.test(name)) return false;
+  if (STROBE_EXCLUDE_RE.test(name)) return false;
+  const firstCap = ch.capabilities?.[0];
+  if (firstCap && firstCap.min === 0 && /closed|dark|blackout/i.test(firstCap.name ?? '')) return false;
+  return true;
+}
+
+/**
+ * Valeur « gate » pour les canaux couleur laser typés Shutter (Red Laser /
+ * Green Laser, ex. Galaxian 3D) : un Shutter OFL est fermé 0-31, ouvert 32-255,
+ * avec une zone stroboscope possible au milieu — on renvoie donc 0 (fermé) ou
+ * 255 (grand ouvert), jamais de valeur intermédiaire qui éteint ou stroboscope
+ * le faisceau.
+ */
+export function laserGateValue(v: number): number { return v > 22 ? 255 : 0; }
+
+/**
+ * Gate couleur mono-canal : au moins une cap du canal associe une couleur à
+ * laser/beam (« Red laser », « Green laser », « Red + Green alternating » —
+ * ex. Showtec Dominator ch « Laser »). Sélecteur pilotable, pas un effet.
+ */
+export function hasLaserColorGateCaps(ch: DmxFixtureChannel): boolean {
+  const caps = ch.capabilities ?? [];
+  if (caps.length === 0) return false;
+  return caps.some((c) =>
+    /(red|green|blue|amber|cyan|magenta|yellow|white).*(laser|beam)|(laser|beam).*(red|green|blue|amber|cyan|magenta|yellow|white)/i.test(c.name ?? ''),
+  );
+}
 
 // ─── Interface unifiée ─────────────────────────────────────────
 
@@ -24,6 +69,13 @@ export interface FixtureChannelAnalysis {
 
   // Shutter / Effect
   shutterOffset: number | null;
+  /** Canal « Strobe » dédié (type Shutter OU Effect selon l'OFL/QLC+) : détecté
+   *  par NOM. 0 = pas de strobe, valeurs hautes = strobe. N'est PAS un shutter :
+   *  ne contrôle pas la luminosité, jamais 255 par défaut (255 = strobe max). */
+  strobeOffset: number | null;
+  /** Caps du canal Strobe (si présentes) — pour écrire une valeur « off »
+   *  caps-aware (Open / No function) au lieu de 0 arbitraire. */
+  strobeCaps: DmxFixtureCapability[] | null;
   effectOffset: number | null;
   effectCaps: DmxFixtureCapability[] | null;
 
@@ -54,9 +106,37 @@ export interface FixtureChannelAnalysis {
 
   // Autres
   prismOffset: number | null;
+  prismCaps: DmxFixtureCapability[];
   speedOffset: number | null;
   macroOffsets: number[];
   presetOverrideOffsets: number[];
+
+  // ── Laser ───────────────────────────────────────────────────
+  /** Fixture détectée comme laser (type fixtureType OU signature de canaux). */
+  isLaser: boolean;
+  /** Comment le laser fait de la couleur : additif RGB | roue ColorPreset | gate mono-canal (caps couleur) | aucune. */
+  laserColorMode: 'rgb' | 'wheel' | 'gate' | 'none';
+  /** Canal « Mode / Mode Select » (DMX/dynamic/auto/sound). */
+  laserModeOffset: number | null;
+  laserModeCaps: DmxFixtureCapability[];
+  /** Gate couleur mono-canal (caps « Red laser / Green laser / … », ex. Showtec Dominator). */
+  laserColorGateOffset: number | null;
+  laserColorGateCaps: DmxFixtureCapability[];
+  /** Canal « Pattern Selection / Pattern » (motifs : ligne, tunnel, vague…). */
+  patternOffset: number | null;
+  patternCaps: DmxFixtureCapability[];
+  /** Canal scan horizontal (« Horizontal Angle/Movement ») = « pan » du laser. */
+  scanXOffset: number | null;
+  /** Canal scan vertical (« Vertical Angle/Movement ») = « tilt » du laser. */
+  scanYOffset: number | null;
+  /** « Scanning Speed » (vitesse du balayage). */
+  laserSpeedScanOffset: number | null;
+  /** « Dynamic Pattern Speed » (vitesse d'animation du motif). */
+  laserSpeedPatternOffset: number | null;
+  /** « Rotation X/Y/Z-axis » (0 à 3 canaux). */
+  laserRotationOffsets: number[];
+  /** Canal « Blanking » (blackout du faisceau). */
+  blankOffset: number | null;
 
   // Méta
   channelCount: number;
@@ -72,17 +152,100 @@ export type ChannelAnalysis = FixtureChannelAnalysis;
 
 const _logged = new Set<string>();
 
+// ─── Helpers laser ────────────────────────────────────────────
+
+/** Valeur d'activation au centre de la plage DMX d'une capacité. */
+export function capMid(cap: DmxFixtureCapability | null | undefined): number {
+  if (!cap) return 128;
+  return Math.round((cap.min + cap.max) / 2);
+}
+
+/**
+ * Synthétise `count` bandes DMX équidistantes quand un canal « Pattern
+ * Selection » n'a aucune capability déclarée (cas EL-400RGB/CS-1000RGB :
+ * OFL ne fournit pas les motifs). Le générateur cycle alors sur N motifs.
+ */
+export function synthPatternCaps(count = 8): DmxFixtureCapability[] {
+  const caps: DmxFixtureCapability[] = [];
+  const step = 256 / count;
+  for (let i = 0; i < count; i++) {
+    caps.push({
+      min: Math.floor(i * step),
+      max: Math.max(Math.floor(i * step), Math.floor((i + 1) * step) - 1),
+      name: `Pattern ${i + 1}`,
+    });
+  }
+  return caps;
+}
+
+/**
+ * Choisit le cap « Mode » d'un laser : priorité DMX > dynamic > auto > premier
+ * cap non nul > cap synthétique. Jamais « Sound » ni « Off » (le laser doit
+ * rester pilotable en DMX, jamais figé dans un programme interne aléatoire).
+ */
+export function pickLaserModeCap(caps: DmxFixtureCapability[]): DmxFixtureCapability {
+  const byName = (re: RegExp) => caps.find((c) => re.test(c.name ?? ''));
+  return (
+    byName(/dmx|dynamic|manual/i) ??
+    byName(/auto/i) ??
+    caps.find((c) => c.max >= 200 && c.min > 0) ??
+    caps.find((c) => c.min > 0) ??
+    { min: 128, max: 255, name: 'DMX' }
+  );
+}
+
+/**
+ * Détecte une fixture laser FX (DMX). Trois sources :
+ *  1. le type de fixture normalisé contient « laser » ;
+ *  2. signature laser dans les canaux/caps (nom ou cap contenant « laser »,
+ *     ou cap « Laser off ») — les vrais lasers OFL sont souvent typés
+ *     « Color Changer » (EL-400, IODA, Twin Effect, Boom Box Fx2…) et sans
+ *     ça leur canal mode reste sur « Laser off »/« NoFunction » : le laser ne
+ *     s'allume jamais en lecture ;
+ *  3. (fallback) triple conjonction de canaux : « pattern » + axe de scan
+ *     (horizontal/vertical angle · scan · circular) + un canal couleur.
+ */
+export function isLaserFixture(pf: PatchedFixture, channels: DmxFixtureChannel[]): boolean {
+  // Exclure les vidéoprojecteurs laser (panasonic PT-RZ120/RZ120L…) : « Laser »
+  // y désigne la source lumineuse (laser-phosphore), pas un effet laser. Leur
+  // signature = contrôles d'optique/entrée propres aux projecteurs.
+  const isVideoProjector = channels.some((c) =>
+    /^(input select|lens|lens function|lens control|geometry|keystone|(custom )?masking|fade in|fade out|light output|slideshow|white balance|dvi|hdmi|sdi)/i.test((c.name ?? '').trim()),
+  );
+  if (isVideoProjector) return false;
+  const norm = String(pf.fixtureType ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (norm.includes('laser')) return true;
+  // Signature laser dans les canaux/caps (ex. « Laser off » est TOUJOURS sur
+  // le canal mode d'un laser FX — jamais sur un par/bar LED).
+  const laserSig = channels.some(
+    (c) => /laser/i.test(c.name ?? '') || (c.capabilities ?? []).some((cap) => /laser/i.test(cap.name ?? '')),
+  );
+  if (laserSig) return true;
+  const names = channels.map((c) => (c.name ?? '').toLowerCase());
+  const hasPattern = names.some((n) => /\bpattern\b/.test(n));
+  const hasScanAxis = names.some(
+    (n) => /(horizontal|vertical)\s*(angle|movement|position)/.test(n) || /\bscan/.test(n) || /\bcircular/.test(n),
+  );
+  const hasColor = channels.some(
+    (c) => /\bcolor|colour\b/i.test(c.name ?? '') && (c.type === 'Colour' || (c.capabilities ?? []).some((cap) => cap.color)),
+  );
+  return hasPattern && hasScanAxis && hasColor;
+}
+
 export function analyzeFixtureChannels(
   pf: PatchedFixture,
   def: DmxFixtureDefinition | undefined,
 ): FixtureChannelAnalysis {
   const channels = def?.modes[pf.modeIndex]?.channels ?? [];
+  const isLaser = isLaserFixture(pf, channels);
 
   const fa: FixtureChannelAnalysis = {
     fixture: pf,
     intensityOffset: null,
     ledIntensityOffsets: [],
     shutterOffset: null,
+    strobeOffset: null,
+    strobeCaps: null,
     effectOffset: null,
     effectCaps: null,
     rgbSegments: [],
@@ -103,9 +266,24 @@ export function analyzeFixtureChannels(
     focusOffset: null,
     beamOffset: null,
     prismOffset: null,
+    prismCaps: [],
     speedOffset: null,
     macroOffsets: [],
     presetOverrideOffsets: [],
+    isLaser,
+    laserColorMode: 'none',
+    laserModeOffset: null,
+    laserModeCaps: [],
+    laserColorGateOffset: null,
+    laserColorGateCaps: [],
+    patternOffset: null,
+    patternCaps: [],
+    scanXOffset: null,
+    scanYOffset: null,
+    laserSpeedScanOffset: null,
+    laserSpeedPatternOffset: null,
+    laserRotationOffsets: [],
+    blankOffset: null,
     channelCount: channels.length,
     universeIndex: 0,
   };
@@ -117,14 +295,18 @@ export function analyzeFixtureChannels(
     const off = ch.offset ?? i;
     const chName = (ch.name?.trim() ?? '');
 
-    // Preset override channels — excluded from auto-generated DMX
-    if (isPresetMode.test(chName)) {
+    // Preset override channels — excluded from auto-generated DMX. Mais un
+    // canal au nom « macro/auto/sound » qui PORTE des capacités (ex. « Color
+    // Macro », « Prism Macro ») est un vrai canal DMX à exploiter, pas un mode.
+    if (isPresetMode.test(chName) && !ch.capabilities?.length) {
       fa.presetOverrideOffsets.push(off);
       continue;
     }
 
-    // Macro channels — excluded from auto-generated DMX (user-configured only)
-    if (ch.type === 'Macro') {
+    // Macro channels — excluded only when they carry no exploitable
+    // capabilities. A « Color Macro / Prism Macro / Effect Macro » channel
+    // WITH capabilities is a real DMX channel to exploit, not a user mode.
+    if (ch.type === 'Macro' && !ch.capabilities?.length) {
       fa.macroOffsets.push(off);
       continue;
     }
@@ -140,10 +322,99 @@ export function analyzeFixtureChannels(
     const isRgbNamed = /^(red|green|blue|r|g|b)(\s*\(?\d*\)?)?$/i.test(chNameLower);
 
     // Colour channel detection (merged from both analyzers)
+    // Pour un laser, on capture aussi les canaux nommés rouge/vert/bleu même
+    // typés Shutter/Nothing (OFL Galaxian 3D : « Red Laser »/« Green Laser »
+    // typés ShutterStrobe) — sinon ils sont perdus (ni RGB complet ni roue).
     const hasColorCaps = ch.capabilities?.some(cap => cap.color);
-    if (isRgbNamed || startsWithRgb.test(chName) || ch.type === 'Colour' || (ch.type === 'Beam' && hasColorWord.test(chName)) || hasColorCaps) {
+    const isLaserColorNamed = isLaser && (isRed.test(chName) || isGreen.test(chName) || isBlue.test(chName)) && !COLOUR_AUX_RE.test(chName);
+    // Gate couleur mono-canal laser (caps « Red laser / Green laser / … »,
+    // ex. Showtec Dominator) : interceptée AVANT la collecte couleur — ses
+    // caps portent `color: true` dans l'OFL et l'auraient avalée comme canal
+    // couleur générique (jamais atteinte par le routing laser).
+    if (isLaser && fa.laserColorGateOffset === null && hasLaserColorGateCaps(ch)) {
+      fa.laserColorGateOffset = off;
+      fa.laserColorGateCaps = ch.capabilities ?? [];
+      fa.laserColorMode = 'gate';
+      continue;
+    }
+    if (isRgbNamed || isLaserColorNamed || startsWithRgb.test(chName) || ch.type === 'Colour' || (ch.type === 'Beam' && hasColorWord.test(chName)) || hasColorCaps) {
       colourChannels.push({ offset: off, name: chName, caps: ch.capabilities });
       continue;
+    }
+
+    // Strobe par NOM (avant le switch par type) : un canal nommé « Strobe »
+    // (type Effect OU Shutter/Strobe, QLC+ .qxf) ne doit jamais finir en
+    // shutterOffset (blocs shutter → 255 = strobe permanent) ni en
+    // effectOffset (jamais écrit proprement). Garde : si la 1re cap couvre 0
+    // avec un nom Closed/Dark (rares fixtures où « Strobe » = shutter
+    // ouvert/fermé, 0 = éteint), on laisse le switch le traiter.
+    if (isStrobeNamedChannel(ch) && fa.strobeOffset === null) {
+      fa.strobeOffset = off;
+      fa.strobeCaps = ch.capabilities ?? null;
+      continue;
+    }
+
+    // ── Laser routing (avant le switch générique) : matcher par NOM les
+    // canaux signature d'un laser, pour qu'ils ne soient ni avalés (caps
+    // vides → Nothing) ni déplacés (BeamPosition → beamOffset, Rotation →
+    // speedOffset…). Gated `isLaser` : zéro impact sur les autres fixtures.
+    if (isLaser) {
+      let matched = false;
+      if (/^(mode|mode\s*select|mode\s*selection)$/i.test(chName) || (!fa.laserModeOffset && /laser.*mode|mode.*laser/i.test(chName))) {
+        if (fa.laserModeOffset === null) { fa.laserModeOffset = off; fa.laserModeCaps = ch.capabilities ?? []; }
+        matched = true;
+      } else if (fa.laserModeOffset === null && /^(show\s*mode|program|show)$/i.test(chName)) {
+        // Modes réels OFL (IODA « Program », Stinger « Show Mode », Fusion
+        // « Show ») : les capter comme MODE pilotable (valeur stable choisie
+        // par pickLaserModeCap) au lieu de les laisser cycler comme
+        // shutter/effect génériques. Gated isLaser ; inactif si un « Mode »
+        // propre a déjà été capté plus tôt.
+        fa.laserModeOffset = off;
+        fa.laserModeCaps = ch.capabilities ?? [];
+        matched = true;
+      } else if (/scann?ing\s*speed/i.test(chName)) {
+        if (fa.laserSpeedScanOffset === null) fa.laserSpeedScanOffset = off;
+        matched = true;
+      } else if (/(dynamic|pattern).*speed|speed.*(dynamic|pattern)/i.test(chName)) {
+        if (fa.laserSpeedPatternOffset === null) fa.laserSpeedPatternOffset = off;
+        matched = true;
+      } else if (/rotat\w*[\s_-]*(x|y|z)|\b(x|y|z)[\s_-]*(axis[\s_-]*)?(rolling|spin|rotat\w*)/i.test(chName)) {
+        fa.laserRotationOffsets.push(off);
+        matched = true;
+      } else if (/laser.*(rotat\w*|rolling|spin)|(red|green|blue|white|amber|yellow|color).*(rotat\w*|rolling|spin)|(rotat\w*|rolling|spin).*laser/i.test(chName)) {
+        // Rotations à nom composé des lasers (Galaxian 3D : « Red Laser
+        // Rotation », Showtec « Rotating Laser ») : axes de rotation
+        // graphique, pas des speed génériques.
+        fa.laserRotationOffsets.push(off);
+        matched = true;
+      } else if (/^(x|y)[\s_-]*(axis[\s_-]*)?(moving|movement|position|angle)/i.test(chName)) {
+        // Axes à deux lettres des lasers OFL (IODA 400/600/1000, Twin Effect…) :
+        // « X/Y Axis Moving » sont des axes de balayage, pas des rotations.
+        if (chName[0].toLowerCase() === 'x' && fa.scanXOffset === null) fa.scanXOffset = off;
+        else if (chName[0].toLowerCase() === 'y' && fa.scanYOffset === null) fa.scanYOffset = off;
+        matched = true;
+      } else if (/horizontal.*(angle|movement|position)/i.test(chName)) {
+        if (fa.scanXOffset === null) fa.scanXOffset = off;
+        matched = true;
+      } else if (/vertical.*(angle|movement|position)/i.test(chName)) {
+        if (fa.scanYOffset === null) fa.scanYOffset = off;
+        matched = true;
+      } else if (fa.laserColorGateOffset === null && hasLaserColorGateCaps(ch)) {
+        // Gate couleur mono-canal : caps « Red laser / Green laser / … »
+        // (Showtec Dominator ch « Laser ») — sélecteur pilotable, le bloc
+        // laser l'ouvre sur la palette.
+        fa.laserColorGateOffset = off;
+        fa.laserColorGateCaps = ch.capabilities ?? [];
+        fa.laserColorMode = 'gate';
+        matched = true;
+      } else if (/\bblank/i.test(chName)) {
+        if (fa.blankOffset === null) fa.blankOffset = off;
+        matched = true;
+      } else if (/\bpattern\b/i.test(chName)) {
+        if (fa.patternOffset === null) { fa.patternOffset = off; fa.patternCaps = ch.capabilities ?? []; }
+        matched = true;
+      }
+      if (matched) continue;
     }
 
     switch (ch.type) {
@@ -155,14 +426,23 @@ export function analyzeFixtureChannels(
         }
         break;
       case 'Shutter':
-        if (fa.shutterOffset === null) fa.shutterOffset = off;
+      case 'Strobe':
+        if (isStrobeNamedChannel(ch)) {
+          if (fa.strobeOffset === null) { fa.strobeOffset = off; fa.strobeCaps = ch.capabilities ?? null; }
+        } else if (fa.shutterOffset === null) fa.shutterOffset = off;
         break;
-      case 'Effect':
+      case 'Effect': {
+        const hasCaps = (ch.capabilities?.length ?? 0) > 0;
         if (fa.effectOffset === null) {
           fa.effectOffset = off;
           fa.effectCaps = ch.capabilities ?? null;
+        } else if ((fa.effectCaps?.length ?? 0) === 0 && hasCaps) {
+          // Premier canal Effect sans capacités : on repointe sur celui qui en a.
+          fa.effectOffset = off;
+          fa.effectCaps = ch.capabilities;
         }
         break;
+      }
       case 'Pan':
         if (fa.panOffset === null) fa.panOffset = off;
         else if (fa.panFineOffset === null && /\bfine\b/i.test(chName)) fa.panFineOffset = off;
@@ -180,7 +460,10 @@ export function analyzeFixtureChannels(
         }
         break;
       case 'Prism':
-        if (fa.prismOffset === null) fa.prismOffset = off;
+        if (fa.prismOffset === null) {
+          fa.prismOffset = off;
+          fa.prismCaps = ch.capabilities ?? [];
+        }
         break;
       case 'Zoom':
         if (fa.zoomOffset === null) fa.zoomOffset = off;
@@ -197,9 +480,41 @@ export function analyzeFixtureChannels(
       case 'Speed':
         if (fa.speedOffset === null) fa.speedOffset = off;
         break;
-      case 'Beam':
-        if (fa.beamOffset === null) fa.beamOffset = off;
+      case 'Beam': {
+        // Les fixtures réelles typent zoom/frost/iris/focus en 'Beam' (GDTF
+        // BeamZoom/BeamFocus/… → 'Beam'). On route par nom vers l'offset dédié ;
+        // sinon on conserve beamOffset (fallback générique).
+        if (/\bzoom\b/.test(chNameLower)) {
+          if (fa.zoomOffset === null) fa.zoomOffset = off;
+        } else if (/\bfrost\b/.test(chNameLower)) {
+          if (fa.frostOffset === null) fa.frostOffset = off;
+        } else if (/\biris\b/.test(chNameLower)) {
+          if (fa.irisOffset === null) fa.irisOffset = off;
+        } else if (/\bfocus\b/.test(chNameLower)) {
+          if (fa.focusOffset === null) fa.focusOffset = off;
+        } else if (fa.beamOffset === null) {
+          fa.beamOffset = off;
+        }
         break;
+      }
+      case 'Macro': {
+        // Macro non-couleur porteur de capacités (prism/gobo/effect/speed
+        // macro). Les macros COULEUR sont déjà routées via colourChannels
+        // (hasColorCaps → roue). On route par nom, sinon effect générique.
+        if (/\bprism\b/i.test(chName)) {
+          if (fa.prismOffset === null) { fa.prismOffset = off; fa.prismCaps = ch.capabilities ?? []; }
+        } else if (/\bgobo\b/i.test(chName)) {
+          if (fa.goboOffset === null) { fa.goboOffset = off; fa.goboCaps = ch.capabilities ?? []; }
+        } else if (/\beffect\b/i.test(chName)) {
+          if (fa.effectOffset === null) { fa.effectOffset = off; fa.effectCaps = ch.capabilities ?? null; }
+        } else if (/\bspeed\b/i.test(chName)) {
+          if (fa.speedOffset === null) fa.speedOffset = off;
+        } else if (fa.effectOffset === null) {
+          fa.effectOffset = off;
+          fa.effectCaps = ch.capabilities ?? null;
+        }
+        break;
+      }
     }
   }
 
@@ -233,13 +548,15 @@ export function analyzeFixtureChannels(
         fa.wheelOffset = wheel.offset;
         fa.wheelCaps = wheel.caps ?? [];
       }
-    } else if (colourChannels.length >= 3) {
-      // Fallback: treat first 3 as RGB
-      fa.rgbSegments = buildRgbSegments(colourChannels);
+    } else if (colourChannels.filter((c) => !COLOUR_AUX_RE.test(c.name)).length >= 3) {
+      // Fallback: treat first 3 as RGB (hors canaux de rotation/mouvement —
+      // un « Red Laser Rotation » ne doit pas devenir le 3e canal RGB).
+      const plainColours = colourChannels.filter((c) => !COLOUR_AUX_RE.test(c.name));
+      fa.rgbSegments = buildRgbSegments(plainColours);
       if (fa.rgbSegments.length === 0) {
-        fa.rgbSegments = [{ r: colourChannels[0].offset, g: colourChannels[1].offset, b: colourChannels[2].offset, w: null }];
+        fa.rgbSegments = [{ r: plainColours[0].offset, g: plainColours[1].offset, b: plainColours[2].offset, w: null }];
       }
-      fa.rgbOffsets = colourChannels.slice(0, 3).map(c => c.offset);
+      fa.rgbOffsets = plainColours.slice(0, 3).map(c => c.offset);
     } else if (colourChannels.length === 1) {
       // Single color channel — treat as wheel
       fa.wheelOffset = colourChannels[0].offset;
@@ -258,6 +575,27 @@ export function analyzeFixtureChannels(
     }
   }
 
+  // ── Lasers 2 canaux couleur (Galaxian 3D : « Red Laser » + « Green Laser »,
+  // typés Shutter dans l'OFL, capturés via isLaserColorNamed plus haut) ──
+  // Détection par nom en excluant les canaux de rotation/mouvement ; n'entre
+  // jamais en conflit avec une roue ou des segments RGB déjà résolus.
+  if (fa.isLaser && fa.wheelOffset === null && fa.rgbSegments.length === 0) {
+    const plainColours = colourChannels.filter((c) => !COLOUR_AUX_RE.test(c.name));
+    const red = plainColours.find((c) => isRed.test(c.name));
+    const green = plainColours.find((c) => isGreen.test(c.name));
+    const blue = plainColours.find((c) => isBlue.test(c.name));
+    if (red && green) fa.rgbOffsets = [red.offset, green.offset];
+    else if (red && blue) fa.rgbOffsets = [red.offset, blue.offset];
+    else if (green && blue) fa.rgbOffsets = [green.offset, blue.offset];
+  }
+
+  // ── Laser post-processing ──
+  fa.laserColorMode = fa.rgbOffsets !== null ? 'rgb' : fa.wheelOffset !== null ? 'wheel' : 'none';
+  // Canaux Pattern sans capabilities (EL-400/CS-1000) → synthèse de 8 motifs.
+  if (fa.patternOffset !== null && (fa.patternCaps.length === 0 || (fa.patternCaps.length === 1 && fa.patternCaps[0].max - fa.patternCaps[0].min >= 255))) {
+    fa.patternCaps = synthPatternCaps(8);
+  }
+
   // Debug log (from dmx-channel.ts, once per fixture)
   if (!_logged.has(pf.id)) {
     _logged.add(pf.id);
@@ -266,8 +604,9 @@ export function analyzeFixtureChannels(
       `| rgbSegments: ${fa.rgbSegments.length > 0 ? fa.rgbSegments.map(s => `R${s.r}G${s.g}B${s.b}`).join('; ') : '∅'}`,
       `| rgbOffsets: ${fa.rgbOffsets ? fa.rgbOffsets.join(',') : '∅'}`,
       `| wheelOffset: ${fa.wheelOffset} (caps:${fa.wheelCaps.length})`,
-      `| intensityOffset: ${fa.intensityOffset} shutterOffset: ${fa.shutterOffset}`,
-      `| panOffsets: [${fa.panOffsets.join(',')}] tiltOffsets: [${fa.tiltOffsets.join(',')}]`);
+      `| intensityOffset: ${fa.intensityOffset} shutterOffset: ${fa.shutterOffset} strobeOffset: ${fa.strobeOffset}`,
+      `| panOffsets: [${fa.panOffsets.join(',')}] tiltOffsets: [${fa.tiltOffsets.join(',')}]`,
+      `| laser: ${fa.isLaser} (${fa.laserColorMode}) pattern:${fa.patternOffset} scanX:${fa.scanXOffset} scanY:${fa.scanYOffset} rot:[${fa.laserRotationOffsets.join(',')}] blank:${fa.blankOffset}`);
   }
 
   return fa;

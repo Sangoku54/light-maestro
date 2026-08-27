@@ -269,8 +269,8 @@ export function computeChaserTrackOverrides(
 import type { RgbSegment } from '../engine/dmx-color';
 import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, findBestWheelCap } from '../engine/dmx-color';
 import type { ChannelAnalysis } from '../engine/fixture-analyzer';
-import { analyzeChannels } from '../engine/fixture-analyzer';
-import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSmartMovement } from '../engine/dmx-movement';
+import { analyzeChannels, capMid, pickLaserModeCap, laserGateValue, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
+import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSmartMovement, spatialPhaseFor } from '../engine/dmx-movement';
 import { useAppStore } from '../stores/appStore';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { recordAudioTick } from '../utils/latency-meter';
@@ -332,7 +332,11 @@ export interface CuePlayback {
   movement?: 'static' | 'sweep' | 'circle' | 'pulse' | 'wave' | 'bounce' | 'figure8' | 'spiral' | 'zigzag' | 'heartbeat' | 'randomWalk' | 'diamond';
   movementAmplitude?: number;
   movementSpeed?: number;
+  /** Chorégraphie spatiale par section : wave | circle | expand | contract | alternate | off. */
+  spatialPattern?: string;
   energy?: number;
+  /** Tiers de fixtures actifs pour cette cue (densité par section, ex. intro = ['primary']). */
+  activeTiers?: string[];
   forcedColor?: string;
   forcedStrobe?: boolean;
   forcedDimmerVal?: number;
@@ -366,7 +370,7 @@ export function useDmxPlayback(options: {
   chasersRef?: React.MutableRefObject<Array<{ id: string; steps: Array<{ sceneId: string; fadeIn?: number; hold?: number; fadeOut?: number }> }>>; // Saved chasers
   scenesRef?: React.MutableRefObject<Array<{ id: string; channels: Record<number, number> }>>; // Saved scenes (for chaser steps)
   disabledFixturesRef?: React.MutableRefObject<Set<string>>; // Disabled fixture IDs
-  fixturePositionsRef?: React.MutableRefObject<Record<string, { x: number; y: number }>>; // For stage-aware pan/tilt
+  fixturePositionsRef?: React.MutableRefObject<Record<string, { x: number; y: number; h?: number }>>; // For stage-aware pan/tilt
   panTiltLimitsRef?: React.MutableRefObject<{ pan: number; tilt: number; perFixture?: Record<string, { pan: number; tilt: number }> }>; // DMX half-amplitude limits for autoscript movement (128 = full)
   onVirtualDmx?: (universe: number, channelValues: Record<number, number>) => void; // Mirror for 3D view
   dryRunMode?: boolean; // Skip hardware DMX output, keep store/3D updates
@@ -381,6 +385,15 @@ export function useDmxPlayback(options: {
   const dryRunRef=useRef(dryRunMode);dryRunRef.current=dryRunMode;
   // Keep the bridge dry-run flag in sync (hardware flush happens in the bridge)
   useEffect(()=>{ dmxBridge.setDryRun(dryRunMode); },[dryRunMode]);
+  // When dry-run is enabled, stop the hardware engine so it stops retrying a
+  // missing USB port (e.g. COM6) while the user previews in 3D. Turning dry-run
+  // off lets the tick loop's engine re-check start it again on next play.
+  useEffect(()=>{
+    if(!dryRunMode)return;
+    const api=(typeof window!=='undefined'?(window as any).lightMaestro?.dmx:null);
+    if(!api)return;
+    api.stop().catch(()=>{});
+  },[dryRunMode]);
   const lastChannelsRef=useRef<Map<number,Record<number,number>>>(new Map());
   const freezerRef=useRef(frozenRef);freezerRef.current=frozenRef;
   const forceDropRefLocal=useRef(forceDropRef);forceDropRefLocal.current=forceDropRef;
@@ -394,7 +407,14 @@ export function useDmxPlayback(options: {
     const analyses:ChannelAnalysis[]=[];
     for(const pf of patchedFixtures){
       const def=fixtureDefs.get(pf.fixtureDefId);
-      if(!def){analysisRef.current=null;return;}
+      if(!def){
+        // Ne PAS tuer tout le show pour une seule fixture sans définition :
+        // on l'ignore et on garde les autres. C'était le bail « tout ou rien »
+        // qui blackoutait la 3D entière dès qu'une def était perdue/renommée
+        // (le chargement de defs est déjà tolérant, mais ce point ne l'était pas).
+        console.warn(`[DMX-PLAYBACK] fixture "${pf.name}" sans définition (fixtureDefId="${pf.fixtureDefId}") — ignorée pour la lecture`);
+        continue;
+      }
       const fa=analyzeChannels(pf,def);
       fa.universeIndex=uniIds.indexOf(pf.universeId);
       if(fa.universeIndex<0)fa.universeIndex=0;
@@ -418,6 +438,9 @@ export function useDmxPlayback(options: {
   useEffect(()=>{
     const api=(typeof window!=='undefined'?(window as any).lightMaestro?.dmx:null);
     if(!api||universes.length===0)return;
+    // Dry-run: don't start the hardware engine at all — the 3D preview is
+    // written renderer-side (channelData) and never needs the USB/sACN backend.
+    if(dryRunRef.current)return;
     let cancelled=false;
     (async()=>{
       try{
@@ -494,12 +517,25 @@ export function useDmxPlayback(options: {
 
     hasPlayedRef.current=true;
     const api=(typeof window!=='undefined'?(window as any).lightMaestro?.dmx:null);
-    if(!api)return;
-    // Dry-run mode: skip hardware DMX, keep store/3D updates
+    // Dry-run preview must not require the hardware DMX API: the 3D mirror is
+    // written renderer-side. Without this guard, a missing `lightMaestro.dmx`
+    // killed the whole playback loop (and therefore the 3D show) even in DRY.
+    if(!api && !dryRunRef.current)return;
+    console.warn('[DMX-PLAYBACK] lecture démarrée —',
+      'dryRun='+dryRunRef.current,
+      'dmxOutput='+dmxEnabledRef.current,
+      'api='+(!!api),
+      'cues='+(cuesRef.current?.length ?? -1),
+      'analysis='+(analysisRef.current ? 'ok' : 'NULL'),
+      'universes='+universes.length,
+      'fixtures='+patchedFixtures.length);
+    // Dry-run mode: skip hardware DMX, keep store/3D updates. Hardware flush is
+    // skipped in dmxBridge.flushToHardware; dryRunRef is checked at every engine
+    // start/restart site below so the engine is never started in dry-run.
 
 
     // Ensure engine is started (re-attempt on first play tick if needed)
-    if(!engineStartedRef.current){
+    if(!engineStartedRef.current && !dryRunRef.current){
       engineStartedRef.current=true;
       (async()=>{
         try{
@@ -533,6 +569,7 @@ export function useDmxPlayback(options: {
       (tick as any)._engineRecheck = ((tick as any)._engineRecheck ?? 119) + 1;
       if((tick as any)._engineRecheck >= 120){
         (tick as any)._engineRecheck = 0;
+        if(dryRunRef.current)return; // dry-run: never (re)start the hardware engine
         (async()=>{
           try{
             const a=(window as any).lightMaestro?.dmx;
@@ -642,9 +679,33 @@ export function useDmxPlayback(options: {
         : null;
       if(crossfadeT>0&&nextCue){
         try{
+          // Track takeover in crossfade snapshot: the blend must not mix autoscript
+          // movement into fixtures driven by user tracks (or a chaser).
+          const ftoSnap: { forcedMovements: Map<string, { pattern: string; amplitude: number; speed?: number }> } = { forcedMovements: new Map() };
+          if (fixtureTracksRef?.current && fixtureGroupsRef?.current) {
+            for (const ft of fixtureTracksRef.current) {
+              if (!ft.enabled) continue;
+              const targets = resolveTrackTargets(ft, patchedFixturesRef.current, fixtureGroupsRef.current);
+              if (targets.length === 0) continue;
+              for (const b of ft.movementBlocks) {
+                if (ct >= b.time && ct < b.endTime) {
+                  for (const fid of targets) ftoSnap.forcedMovements.set(fid, { pattern: b.pattern, amplitude: b.amplitude, speed: b.speed });
+                  break;
+                }
+              }
+            }
+          }
+          const choSnap = computeChaserTrackOverrides(
+            chaserTracksRef.current,
+            chasersRef.current,
+            scenesRef.current,
+            ct,
+            patchedFixturesRef.current,
+            fixtureGroupsRef?.current || [],
+          );
           nextCueDmx=computeDmxForCue(
-            nextCue,patchedFixturesRef.current,fixtureDefs,universes as any,tierMultipliers,undefined,
-            colorTrackColors,strobeOverridesEarly,undefined,disabledFixturesRef?.current,fixturePositions
+            nextCue,patchedFixturesRef.current,fixtureDefs,universes as any,tierMultipliers,ftoSnap,
+            colorTrackColors,strobeOverridesEarly,undefined,disabledFixturesRef?.current,fixturePositions,choSnap
           );
         }catch(e){crossfadeT=0;nextCueDmx=null;console.warn('[crossfade] computeDmxForCue failed, skipping:',e);}
       }
@@ -744,6 +805,19 @@ export function useDmxPlayback(options: {
           const _dimmerTrackActive = !!(dimmerOverrides && dimmerOverrides.get(pf.id));
           if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(_dimmerTrackActive){chVals[addr]=dimmerVal;}else if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=dimmerVal;}
 
+          // Densite par section (activeTiers) : les fixtures hors tiers actifs
+          // sont eteintes (dimmer 0 + shutter 0 + gates laser 0). Le show
+          // respire entre intro (primary seul) et drop (toutes les couches).
+          if (Array.isArray(active.activeTiers) && !active.activeTiers.includes(pf.tier)) {
+            if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = 0;
+            if (fa.shutterOffset !== null) chVals[pf.startAddress + fa.shutterOffset] = 0;
+            if (fa.strobeOffset !== null) chVals[pf.startAddress + fa.strobeOffset] = 0;
+            if (fa.isLaser) {
+              if (fa.rgbOffsets) for (const o of fa.rgbOffsets) chVals[pf.startAddress + o] = 0;
+              if (fa.laserColorGateOffset !== null) chVals[pf.startAddress + fa.laserColorGateOffset] = 0;
+            }
+          }
+
           let paletteColor = (() => {
             // Color track override (highest priority)
             if (colorTrackColors.has(pf.id)) {
@@ -831,11 +905,9 @@ export function useDmxPlayback(options: {
               `| rgbSegments=${fa.rgbSegments.length>0?fa.rgbSegments.map(s=>`R${pf.startAddress+s.r}=${chVals[pf.startAddress+s.r]??0} G${pf.startAddress+s.g}=${chVals[pf.startAddress+s.g]??0} B${pf.startAddress+s.b}=${chVals[pf.startAddress+s.b]??0}`).join('; '):'∅'}`);
           }
 
-          // Shutter
-          if(fa.shutterOffset!==null){const sAddr=pf.startAddress+fa.shutterOffset;
-            // Strobe track override (highest priority, pre-computed)
-            const strobeTrackOverride = strobeOverrides ? (strobeOverrides.get(pf.id) || null) : null;
-            const trackStrobe = (() => {
+          // Strobe decision (partagée shutter + canal strobe dédié)
+          const strobeTrackOverride = strobeOverrides ? (strobeOverrides.get(pf.id) || null) : null;
+          const trackStrobe = (() => {
               const ftEntries3 = fixtureTrackMap.get(pf.id);
               if (ftEntries3) {
                 for (const { ft } of ftEntries3) {
@@ -853,16 +925,19 @@ export function useDmxPlayback(options: {
               }
               return null;
             })();
-            const useStrobe = strobeTrackOverride
-              ? strobeTrackOverride.active
-              : trackStrobe
-              ? trackStrobe.active
-              : forcedStrobe !== undefined ? forcedStrobe : ((isDrop || isChorus) && active.strobe && pf.tier === 'primary');
+          const useStrobe = strobeTrackOverride
+            ? strobeTrackOverride.active
+            : trackStrobe
+            ? trackStrobe.active
+            : forcedStrobe !== undefined ? forcedStrobe : ((isDrop || isChorus || sec === 'build') && active.strobe && pf.tier === 'primary');
+          const strobeSpeed = Math.min(strobeTrackOverride?.speed || trackStrobe?.speed || active.strobeSpeed || 10, strobeLimit);
+
+          // Shutter
+          if(fa.shutterOffset!==null){const sAddr=pf.startAddress+fa.shutterOffset;
             if (useStrobe) {
               // Adaptive strobe speed: section-dependent multiplier
               const sectionMult = isDrop ? 1.5 : isChorus ? 1.2 : sec === 'build' ? 1.3 : sec === 'bridge' ? 1.0 : sec === 'verse' ? 0.8 : 0.5;
-              const baseSpeed = Math.min(strobeTrackOverride?.speed || trackStrobe?.speed || active.strobeSpeed || 10, strobeLimit);
-              const adaptedSpeed = Math.min(baseSpeed * sectionMult, strobeLimit);
+              const adaptedSpeed = Math.min(strobeSpeed * sectionMult, strobeLimit);
               // Strobe track override: oscillate shutter between open/closed at the track speed
               if (strobeTrackOverride) {
                 const strobePhase = Math.sin(ct * Math.PI * 2 * adaptedSpeed);
@@ -882,8 +957,17 @@ export function useDmxPlayback(options: {
             }
             else if(fa.intensityOffset===null){chVals[sAddr]=Math.max(8,Math.min(255,8+Math.round((dimmerVal/255)*247)));}
             else{chVals[sAddr]=255;}}
+          // Canal Strobe dédié : off (0) = pas de strobe, sinon valeur de strobe
+          // constante (le canal génère le clignotement lui-même — pas
+          // d'oscillation 255/0 qui produirait un double effet). Jamais 255.
+          if(fa.strobeOffset!==null){
+            const stAddr=pf.startAddress+fa.strobeOffset;
+            chVals[stAddr]=useStrobe
+              ? Math.min(250,Math.max(8,Math.round(8+strobeSpeed*20)))
+              : 0;
+          }
           // No dedicated shutter channel: simulate strobe by oscillating dimmer/intensity
-          if(fa.shutterOffset===null){
+          if(fa.shutterOffset===null&&fa.strobeOffset===null){
             const strobeTrackOverride = strobeOverrides ? (strobeOverrides.get(pf.id) || null) : null;
             const trackStrobeNoShutter = (() => {
               const ftEntriesNS = fixtureTrackMap.get(pf.id);
@@ -933,10 +1017,13 @@ export function useDmxPlayback(options: {
                 }
                 return null;
               })();
+              // Amplitude par tier : la cue fixe le nominal (primary = plein),
+              // les tiers suivent a 72 %/42 % -> couches visuelles distinctes.
+              const tierAmpMult = pf.tier === 'primary' ? 1 : pf.tier === 'secondary' ? 0.72 : 0.42;
               const amplitude = trackMovement
                 ? trackMovement.amplitude
                 : active.movementAmplitude !== undefined
-                  ? Math.min(128, Math.max(0, Math.round(active.movementAmplitude)))
+                  ? Math.max(4, Math.min(128, Math.round(active.movementAmplitude * tierAmpMult)))
                   : pf.tier === 'primary' ? 90 : pf.tier === 'secondary' ? 70 : 40;
                 const movPattern = (() => {
                   if (trackMovement) return trackMovement.pattern;
@@ -972,17 +1059,30 @@ export function useDmxPlayback(options: {
                   }
                   return sec;
                 })();
+              // Spatial choreography: per-fixture phase offset from real stage position
+              const spatialPattern = (active as any).spatialPattern;
+              let mobileIdx = -1, totalMobile = 0;
+              if (spatialPattern && !trackMovement) {
+                for (const ffa of fixtures) {
+                  if (ffa.panOffsets.length > 0 || ffa.tiltOffsets.length > 0) {
+                    if (ffa.fixture.id === pf.id) mobileIdx = totalMobile;
+                    totalMobile++;
+                  }
+                }
+              }
               if(amplitude>0){for(let m=0;m<motorCount;m++){const motorPhase=m*(Math.PI*2/motorCount);const speedMult=active.movementSpeed??1;
                 // Crossfade movement params: blend toward next cue
                 const curAmp = amplitude; const curSpd = speedMult;
                 const blendAmp = (crossfadeT>0&&nextCue&&!trackMovement)
-                  ? Math.round(curAmp*(1-crossfadeT) + (nextCue.movementAmplitude!==undefined?Math.min(128,Math.max(0,Math.round(nextCue.movementAmplitude))):curAmp)*crossfadeT)
+                  ? Math.round(curAmp*(1-crossfadeT) + (nextCue.movementAmplitude!==undefined?Math.max(4,Math.min(128,Math.round(nextCue.movementAmplitude*tierAmpMult))):curAmp)*crossfadeT)
                   : curAmp;
-                const blendSpd = (crossfadeT>0&&nextCue&&!trackMovement)
+                const blendSpd = trackMovement
+                  ? (trackMovement.speed ?? curSpd)
+                  : (crossfadeT>0&&nextCue
                   ? curSpd*(1-crossfadeT) + (nextCue.movementSpeed??curSpd)*crossfadeT
-                  : curSpd;
-                const phase=(ct*Math.PI*2*blendSpd)+motorPhase+movementPhase;let px=0,py=0;
-                switch(movPattern){case'intro':px=Math.sin(phase*.1)*.3;py=Math.cos(phase*.08+motorPhase)*.3;break;case'verse':px=Math.sin(phase*.25)*.5;py=Math.cos(phase*.2+motorPhase)*.4;break;case'chorus':px=Math.sin(phase*.5)*.7;py=Math.cos(phase*.5+motorPhase)*.7;break;case'bridge':px=Math.sin(phase*.3)*.5;py=Math.sin(phase*.6+motorPhase)*.5;break;case'drop':px=Math.sin(phase*.8)*.9;py=Math.cos(phase*1.2+motorPhase)*.6;break;case'outro':px=Math.sin(phase*.15)*.2;py=Math.cos(phase*.12+motorPhase)*.2;break;case'sweep':px=Math.sin(phase*.35+motorPhase)*.7;py=Math.cos(phase*.3+motorPhase)*.5;break;case'circle':px=Math.sin(phase*.5+motorPhase)*.7;py=Math.cos(phase*.5+motorPhase)*.7;break;case'bounce':px=Math.sin(phase*.4+motorPhase)*.5;py=Math.abs(Math.sin(phase*.8+motorPhase))*.8;break;case'wave':px=Math.sin(phase*.6+motorPhase)*.5;py=Math.sin(phase*.35+motorPhase*1.5)*.5;break;case'figure8':px=Math.sin(phase*.4+motorPhase)*.6;py=Math.sin(phase*.8+motorPhase)*.5;break;case'static':px=Math.sin(phase*.05+motorPhase)*.1;py=Math.cos(phase*.05+motorPhase)*.1;break;
+                  : curSpd);
+                const phase=(ct*Math.PI*2*blendSpd)+motorPhase+(trackMovement?0:movementPhase)+(spatialPattern&&!trackMovement?spatialPhaseFor(fixturePositions?.[pf.id],spatialPattern,mobileIdx):0);let px=0,py=0;
+                switch(movPattern){case'intro':px=Math.sin(phase*.1)*.3;py=Math.cos(phase*.08+motorPhase)*.3;break;case'verse':px=Math.sin(phase*.25)*.5;py=Math.cos(phase*.2+motorPhase)*.4;break;case'chorus':px=Math.sin(phase*.5)*.7;py=Math.cos(phase*.5+motorPhase)*.7;break;case'bridge':px=Math.sin(phase*.3)*.5;py=Math.sin(phase*.6+motorPhase)*.5;break;case'drop':px=Math.sin(phase*.8)*.9;py=Math.cos(phase*1.2+motorPhase)*.6;break;case'outro':px=Math.sin(phase*.15)*.2;py=Math.cos(phase*.12+motorPhase)*.2;break;case'sweep':px=Math.sin(phase*.35+motorPhase)*.7;py=Math.cos(phase*.3+motorPhase)*.5;break;case'circle':px=Math.sin(phase*.5+motorPhase)*.7;py=Math.cos(phase*.5+motorPhase)*.7;break;case'bounce':px=Math.sin(phase*.4+motorPhase)*.5;py=Math.abs(Math.sin(phase*.8+motorPhase))*.8;break;case'wave':px=Math.sin(phase*.6+motorPhase)*.5;py=Math.sin(phase*.35+motorPhase*1.5)*.5;break;case'figure8':px=Math.sin(phase*.4+motorPhase)*.6;py=Math.sin(phase*.8+motorPhase)*.5;break;case'static':px=Math.sin(phase*.05+motorPhase)*.1;py=Math.cos(phase*.05+motorPhase)*.1;break;case'pulse':px=Math.sin(phase*.9+motorPhase)*.25;py=Math.abs(Math.sin(phase*1.8+motorPhase))*.85;break;
                 case'zigzag':{const saw=((phase/Math.PI)%2)-1;px=saw*.8;py=Math.sin(phase)>0?.5:-.5;}break;case'diamond':{px=(((phase/Math.PI)%2)-1)*.8;py=((((phase+Math.PI/2)/Math.PI)%2)-1)*.8;}break;case'spiral':{const r=.3+.7*Math.abs(Math.sin(phase*.3));px=Math.sin(phase*2)*r;py=Math.cos(phase*2)*r;}break;case'heartbeat':{const hp=((phase/(Math.PI*2))%1);const hb=hp<.15?1:hp<.3?.6:0;px=hb*Math.sin(phase*3);py=hb*Math.cos(phase*3);}break;case'randomWalk':px=Math.sin(phase*.7)*.5+Math.sin(phase*1.3)*.3+Math.cos(phase*2.1)*.2;py=Math.cos(phase*.6)*.5+Math.sin(phase*1.7)*.3+Math.sin(phase*2.3)*.2;break;case'panOnly':px=Math.sin(phase);py=0;break;case'tiltOnly':px=0;py=Math.sin(phase);break;
       default:px=Math.sin(phase*.35)*.4;py=Math.cos(phase*.3+motorPhase)*.4;}
                 const pfl = panTiltLimits.perFixture?.[pf.id];
@@ -1010,30 +1110,52 @@ export function useDmxPlayback(options: {
           // GOBO / PRISM / ZOOM / FROST / IRIS / FOCUS — audio-reactive
           const fxEnergy = (active.energy ?? 0.5);
           const fxPhase = ct * Math.PI * 2 * (active.movementSpeed ?? 1);
+          // FX (gobo/zoom/frost) modulés par section : profil optique propre à
+          // chaque type (zoom serré en drop, frost diffus en bridge, gobo rapide
+          // en drop/chorus, lent en intro/outro).
+const _FXPROF: Record<string, [number, number, number, number]> = {
+            intro: [0.4, 0.55, 0.75, 0.6], verse: [0.7, 0.5, 0.8, 0.3],
+            chorus: [1.3, 0.35, 0.9, 0.1], bridge: [0.5, 0.6, 0.8, 0.7],
+            drop: [2, 0.15, 0.7, 0], build: [1.6, 0.25, 0.85, 0.15],
+            outro: [0.3, 0.6, 0.8, 0.5],
+          };
+          const _fxSec = ((active as any)?.section as string) || '';
+          const _fxP = _FXPROF[_fxSec] || [1, 0.4, 0.85, 0.2];
+          const fxPhase2 = fxPhase * _fxP[0];
 
           if(fa.goboOffset!==null){const gAddr=pf.startAddress+fa.goboOffset;
             if(fa.goboCaps.length>0){
               const gc=Math.max(1,fa.goboCaps.length);
-              const gi=Math.floor((fxPhase*0.5)%gc);
+              const gi=Math.floor((fxPhase2*0.5)%gc);
               chVals[gAddr]=Math.round((fa.goboCaps[gi].min+fa.goboCaps[gi].max)/2);
             }else{
               chVals[gAddr]=Math.round(fxEnergy*255);
             }
           }
           if(fa.prismOffset!==null){const pAddr=pf.startAddress+fa.prismOffset;
-            chVals[pAddr]=Math.round(Math.max(0,Math.min(255,64+Math.sin(fxPhase*0.7)*128*fxEnergy)));
+            chVals[pAddr]=Math.round(Math.max(0,Math.min(255,64+Math.sin(fxPhase2*0.7)*128*fxEnergy)));
           }
           if(fa.zoomOffset!==null){const zAddr=pf.startAddress+fa.zoomOffset;
-            chVals[zAddr]=Math.round(64+Math.sin(fxPhase*0.4)*96*fxEnergy+64*fxEnergy);
+            chVals[zAddr]=Math.round(Math.max(0,Math.min(255,64+Math.sin(fxPhase2*0.4)*96*(_fxP[1]+(_fxP[2]-_fxP[1])*fxEnergy)+64*fxEnergy)));
           }
           if(fa.frostOffset!==null){const fAddr=pf.startAddress+fa.frostOffset;
-            chVals[fAddr]=Math.round(Math.max(0,255-(fxEnergy*255)));
+            chVals[fAddr]=Math.round(Math.max(0,Math.min(255,(255-fxEnergy*255)*(1-_fxP[3])+_fxP[3]*200)));
           }
           if(fa.irisOffset!==null){const iAddr=pf.startAddress+fa.irisOffset;
-            chVals[iAddr]=Math.round(40+fxEnergy*200+Math.sin(fxPhase*0.5)*15*fxEnergy);
+            chVals[iAddr]=Math.round(40+fxEnergy*200+Math.sin(fxPhase2*0.5)*15*fxEnergy);
           }
           if(fa.focusOffset!==null){const fcAddr=pf.startAddress+fa.focusOffset;
-            chVals[fcAddr]=Math.round(80+fxEnergy*120+Math.sin(fxPhase*0.3)*30);
+            chVals[fcAddr]=Math.round(80+fxEnergy*120+Math.sin(fxPhase2*0.3)*30);
+          }
+
+          // ─── Laser : bloc live du tick (même logique que computeDmxForCue) ───
+          // Le tick principal ne calculait AUCUN canal laser (mode/pattern/scan/
+          // rotations/vitesses/blank) : en lecture QuickShow/AutoScript, le mode
+          // restait sur « Laser off » — d'où « ça ne fait rien, ou une apparition
+          // brève au crossfade » (le bloc n'existait que dans computeDmxForCue,
+          // appelé uniquement lors des fondus < 0,3 s). Appliqué à chaque frame.
+          if (fa.isLaser) {
+            computeLaserChannels(fa, pf, chVals, ct, effectiveEnergy, paletteColor);
           }
         }
 
@@ -1135,6 +1257,105 @@ export function useDmxPlayback(options: {
 // Standalone DMX computation (for VC AudioAutoScript, etc.)
 // ═══════════════════════════════════════════════════════════
 
+/**
+ * Bloc laser partagé (tick de lecture live ET computeDmxForCue) : écrit mode
+ * DMX stable, pattern cyclé, scan X/Y (cercle/Lissajous), roue ou gates R/G
+ * (binaire 0/255, jamais fermé/stroboscope), vitesses et rotations oscillantes,
+ * blanking ouvert. Sans ce bloc, le canal mode d'un laser reste sur « Laser
+ * off » → « ça ne fait rien » en lecture.
+ */
+export function computeLaserChannels(
+  fa: FixtureChannelAnalysis,
+  pf: PatchedFixture,
+  chVals: Record<number, number>,
+  laserT: number,
+  energy: number,
+  paletteColor: string | undefined,
+  options?: { blankWhenStrobe?: boolean },
+): void {
+  const laserPhase = ((pf.startAddress % 16) / 16) * 2 * Math.PI;
+  const lissajous = pf.startAddress % 3 === 2;
+  const laserRadius = 60 + Math.round(energy * 40); // 60..100 selon l'énergie
+
+  // Mode : toujours un mode pilotable en DMX (jamais sound/off).
+  if (fa.laserModeOffset !== null) {
+    chVals[pf.startAddress + fa.laserModeOffset] = capMid(pickLaserModeCap(fa.laserModeCaps));
+  }
+  // Pattern : cycle un motif toutes les ~2 s.
+  if (fa.patternOffset !== null && fa.patternCaps.length > 0) {
+    const idx = Math.floor(laserT / 2) % fa.patternCaps.length;
+    chVals[pf.startAddress + fa.patternOffset] = capMid(fa.patternCaps[idx]);
+  }
+  // Scan X/Y : cercle (phase par fixture) ou Lissajous (1 laser sur 3).
+  if (fa.scanXOffset !== null) {
+    chVals[pf.startAddress + fa.scanXOffset] = Math.round(128 + laserRadius * Math.sin(2 * Math.PI * laserT + laserPhase));
+  }
+  if (fa.scanYOffset !== null) {
+    const yv = lissajous
+      ? Math.sin(4 * Math.PI * laserT + laserPhase)
+      : Math.cos(2 * Math.PI * laserT + laserPhase);
+    chVals[pf.startAddress + fa.scanYOffset] = Math.round(128 + laserRadius * yv);
+  }
+  // Roue couleur : cycle seulement si aucune couleur de palette écrite.
+  if (fa.laserColorMode === 'wheel' && fa.wheelOffset !== null && fa.wheelCaps.length > 0
+      && chVals[pf.startAddress + fa.wheelOffset] === undefined) {
+    const idx = Math.floor(laserT / 2) % fa.wheelCaps.length;
+    chVals[pf.startAddress + fa.wheelOffset] = capMid(fa.wheelCaps[idx]);
+  }
+  // Couleur 2 canaux (R+G / R+B / G+B, ex. Galaxian 3D) : écrire les
+  // canaux existants si aucune couleur de palette n'a été écrite. Ce
+  // sont des GATES (Red/Green Laser typés Shutter) : binaire 0/255,
+  // jamais de zone fermée (0-31) ni stroboscope (milieu).
+  if (fa.rgbOffsets && fa.rgbSegments.length === 0 && chVals[pf.startAddress + fa.rgbOffsets[0]] === undefined) {
+    const [rr0, gg0, bb0] = paletteColor ? hexToRgb(paletteColor) : [Math.round(255 * energy), Math.round(255 * energy), 0];
+    let rr = laserGateValue(rr0), gg = laserGateValue(gg0), bb = laserGateValue(bb0);
+    // Palette non représentable (bleue/violette/cyan sur un laser R/G) :
+    // ouvrir R+G plutôt que d'éteindre le laser (« ça ne fait rien »).
+    const pairClosed =
+      (fa.rgbOffsets[0] !== undefined ? rr === 0 : true) &&
+      (fa.rgbOffsets[1] !== undefined ? gg === 0 : true) &&
+      (fa.rgbOffsets[2] !== undefined ? bb === 0 : true);
+    if (pairClosed && (rr0 > 22 || gg0 > 22 || bb0 > 22)) {
+      rr = 255;
+      gg = 255;
+    }
+    if (fa.rgbOffsets[0] !== undefined) chVals[pf.startAddress + fa.rgbOffsets[0]] = rr;
+    if (fa.rgbOffsets[1] !== undefined) chVals[pf.startAddress + fa.rgbOffsets[1]] = gg;
+    if (fa.rgbOffsets[2] !== undefined) chVals[pf.startAddress + fa.rgbOffsets[2]] = bb;
+  }
+  // Gate couleur mono-canal (caps « Red laser / Green laser / … », ex.
+  // Showtec Dominator) : ouvrir sur la couleur de la palette, sinon première
+  // couleur non-blackout. Le bloc n'est appelé que si le laser est ouvert.
+  if (fa.laserColorMode === 'gate' && fa.laserColorGateOffset !== null && chVals[pf.startAddress + fa.laserColorGateOffset] === undefined) {
+    const colorCaps = fa.laserColorGateCaps.filter((c) =>
+      /(red|green|blue|amber|cyan|magenta|yellow|white)/i.test(c.name ?? '') && !/blackout|off|closed|none/i.test(c.name ?? ''),
+    );
+    let target: DmxFixtureCapability | undefined;
+    if (paletteColor) {
+      const [rr, gg, bb] = hexToRgb(paletteColor);
+      target = colorCaps.find((c) => (rr > 122 && /red/i.test(c.name!)) || (gg > 122 && /green/i.test(c.name!)) || (bb > 122 && /blue/i.test(c.name!))) ?? colorCaps[0];
+    } else {
+      target = colorCaps[0];
+    }
+    if (target) chVals[pf.startAddress + fa.laserColorGateOffset] = capMid(target);
+  }
+  // Vitesses + rotations : oscillent, déphasées par fixture. La vitesse de
+  // scan reste bornée à 0-127 (au-delà, l'OFL IODA passe en « With gaps »).
+  if (fa.laserSpeedScanOffset !== null) {
+    chVals[pf.startAddress + fa.laserSpeedScanOffset] = Math.min(127, Math.round(128 + 60 * Math.sin(2 * Math.PI * laserT + laserPhase)));
+  }
+  if (fa.laserSpeedPatternOffset !== null) {
+    chVals[pf.startAddress + fa.laserSpeedPatternOffset] = Math.round(128 + 64 * Math.sin(2 * Math.PI * laserT / 4));
+  }
+  fa.laserRotationOffsets.forEach((off, i) => {
+    chVals[pf.startAddress + off] = Math.round(128 + 65 * Math.sin(2 * Math.PI * laserT / (4 * (i + 1)) + laserPhase));
+  });
+  // Blanking : ouvert sauf gate strobe en drop/chorus.
+  if (fa.blankOffset !== null) {
+    chVals[pf.startAddress + fa.blankOffset] = options?.blankWhenStrobe ? 255 : 0;
+  }
+}
+
 export function computeDmxForCue(
   cue: CuePlayback & { energy?: number },
   patchedFixtures: PatchedFixture[],
@@ -1145,13 +1366,13 @@ export function computeDmxForCue(
     forcedColors?: Map<string, string>;
     forcedDimmers?: Map<string, number>;
     forcedStrobes?: Map<string, { active: boolean; speed: number }>;
-    forcedMovements?: Map<string, { pattern: string; amplitude: number }>;
+    forcedMovements?: Map<string, { pattern: string; amplitude: number; speed?: number }>;
   },
   colorTrackColors?: Map<string, string>,
   strobeTrackOverrides?: Map<string, { active: boolean; speed: number }>,
   dimmerTrackOverrides?: Map<string, { active: boolean; value: number }>,
   disabledFixtures?: Set<string>,
-  fixturePositions?: Record<string, { x: number; y: number }>,
+  fixturePositions?: Record<string, { x: number; y: number; h?: number }>,
   chaserTakeover?: Map<string, Record<number, number>>,
 ): Array<{ universe: number; channelValues: Record<number, number> }> {
   const uniIds = universes.map(u => String(u.id));
@@ -1272,19 +1493,49 @@ export function computeDmxForCue(
         }
       }
 
+      // Canal Strobe dédié (snapshot/crossfade) : off par défaut, valeur de
+      // strobe quand le strobe est demandé. Jamais 255 (strobe max permanent).
+      if (fa.strobeOffset !== null) {
+        const stAddr2 = pf.startAddress + fa.strobeOffset;
+        const strobeTrackStrobe2 = strobeTrackOverrides?.get(pf.id);
+        const trackStrobe2 = fixtureTrackOverrides?.forcedStrobes?.get(pf.id);
+        const useStrobe2 = strobeTrackStrobe2
+          ? strobeTrackStrobe2.active
+          : trackStrobe2
+          ? trackStrobe2.active
+          : (cue as any).forcedStrobe !== undefined ? (cue as any).forcedStrobe : ((isDrop || isChorus) && cue.strobe && pf.tier === 'primary');
+        if (useStrobe2) {
+          const speed2 = Math.min(strobeTrackStrobe2?.speed || trackStrobe2?.speed || (cue as any).strobeSpeed || 10, 10);
+          chVals[stAddr2] = Math.min(250, Math.max(8, Math.round(8 + speed2 * 20)));
+        } else {
+          chVals[stAddr2] = 0;
+        }
+      }
+
       const panCount = fa.panOffsets.length;
       const tiltCount = fa.tiltOffsets.length;
       const motorCount = Math.max(panCount, tiltCount, 1);
       if (panCount > 0 || tiltCount > 0) {
         const trackMovement = fixtureTrackOverrides?.forcedMovements?.get(pf.id);
+        const speedMult = trackMovement?.speed ?? (cue as any).movementSpeed ?? 1;
         const amplitude = trackMovement
           ? trackMovement.amplitude
           : (cue as any).movementAmplitude !== undefined
             ? Math.min(128, Math.max(0, Math.round((cue as any).movementAmplitude)))
             : pf.tier === 'primary' ? 90 : pf.tier === 'secondary' ? 70 : 40;
         if (amplitude > 0) {
-          const speedMult = (cue as any).movementSpeed ?? 1;
-          const phase = cue.time * Math.PI * 2 * speedMult;
+          // Spatial choreography: keep crossfade snapshots coherent with the live tick
+          const spatialPattern = (cue as any).spatialPattern;
+          let mobileIdx = -1, totalMobile = 0;
+          if (spatialPattern && !trackMovement) {
+            for (const a of analyses) {
+              if (a.panOffsets.length > 0 || a.tiltOffsets.length > 0) {
+                if (a.fixture.id === pf.id) mobileIdx = totalMobile;
+                totalMobile++;
+              }
+            }
+          }
+          const phase = cue.time * Math.PI * 2 * speedMult + (spatialPattern && !trackMovement ? spatialPhaseFor(fixturePositions?.[pf.id], spatialPattern, mobileIdx) : 0);
           for (let m = 0; m < motorCount; m++) {
             const motorPhase = m * (Math.PI * 2 / motorCount);
             const movSec = (() => {
@@ -1330,6 +1581,7 @@ export function computeDmxForCue(
               case 'wave': px = Math.sin(phase * .6 + motorPhase) * .5; py = Math.sin(phase * .35 + motorPhase * 1.5) * .5; break;
               case 'figure8': px = Math.sin(phase * .4 + motorPhase) * .6; py = Math.sin(phase * .8 + motorPhase) * .5; break;
               case 'static': px = Math.sin(phase * .05 + motorPhase) * .1; py = Math.cos(phase * .05 + motorPhase) * .1; break;
+              case 'pulse': px = Math.sin(phase * .9 + motorPhase) * .25; py = Math.abs(Math.sin(phase * 1.8 + motorPhase)) * .85; break;
               case 'zigzag': { const saw = ((phase / Math.PI) % 2) - 1; px = saw * .8; py = Math.sin(phase) > 0 ? .5 : -.5; } break;
               case 'diamond': { px = (((phase / Math.PI) % 2) - 1) * .8; py = ((((phase + Math.PI / 2) / Math.PI) % 2) - 1) * .8; } break;
               case 'spiral': { const r = .3 + .7 * Math.abs(Math.sin(phase * .3)); px = Math.sin(phase * 2) * r; py = Math.cos(phase * 2) * r; } break;
@@ -1359,12 +1611,20 @@ export function computeDmxForCue(
       // GOBO / PRISM / ZOOM / FROST / IRIS / FOCUS — audio-reactive
       const fxEnergy = (cue as any).energy ?? 0.5;
       const fxPhase = cue.time * Math.PI * 2 * ((cue as any).movementSpeed ?? 1);
+      const _FXPROF: Record<string, [number, number, number, number]> = {
+        intro: [0.4, 0.55, 0.75, 0.6], verse: [0.7, 0.5, 0.8, 0.3],
+        chorus: [1.3, 0.35, 0.9, 0.1], bridge: [0.5, 0.6, 0.8, 0.7],
+        drop: [2, 0.15, 0.7, 0], build: [1.6, 0.25, 0.85, 0.15],
+        outro: [0.3, 0.6, 0.8, 0.5],
+      };
+      const _fxP = _FXPROF[sec] || [1, 0.4, 0.85, 0.2];
+      const fxPhase2 = fxPhase * _fxP[0];
 
       if (fa.goboOffset !== null) {
         const gAddr = pf.startAddress + fa.goboOffset;
         if (fa.goboCaps.length > 0) {
           const goboCount = Math.max(1, fa.goboCaps.length);
-          const goboIdx = Math.floor((fxPhase * 0.5) % goboCount);
+          const goboIdx = Math.floor((fxPhase2 * 0.5) % goboCount);
           chVals[gAddr] = Math.round((fa.goboCaps[goboIdx].min + fa.goboCaps[goboIdx].max) / 2);
         } else {
           chVals[gAddr] = Math.round(fxEnergy * 255);
@@ -1372,23 +1632,33 @@ export function computeDmxForCue(
       }
 
       if (fa.prismOffset !== null) {
-        chVals[pf.startAddress + fa.prismOffset] = Math.round(Math.max(0, Math.min(255, 64 + Math.sin(fxPhase * 0.7) * 128 * fxEnergy)));
+        chVals[pf.startAddress + fa.prismOffset] = Math.round(Math.max(0, Math.min(255, 64 + Math.sin(fxPhase2 * 0.7) * 128 * fxEnergy)));
       }
 
       if (fa.zoomOffset !== null) {
-        chVals[pf.startAddress + fa.zoomOffset] = Math.round(64 + Math.sin(fxPhase * 0.4) * 96 * fxEnergy + 64 * fxEnergy);
+        chVals[pf.startAddress + fa.zoomOffset] = Math.round(Math.max(0, Math.min(255, 64 + Math.sin(fxPhase2 * 0.4) * 96 * (_fxP[1] + (_fxP[2] - _fxP[1]) * fxEnergy) + 64 * fxEnergy)));
       }
 
       if (fa.frostOffset !== null) {
-        chVals[pf.startAddress + fa.frostOffset] = Math.round(Math.max(0, 255 - (fxEnergy * 255)));
+        chVals[pf.startAddress + fa.frostOffset] = Math.round(Math.max(0, Math.min(255, (255 - fxEnergy * 255) * (1 - _fxP[3]) + _fxP[3] * 200)));
       }
 
       if (fa.irisOffset !== null) {
-        chVals[pf.startAddress + fa.irisOffset] = Math.round(40 + fxEnergy * 200 + Math.sin(fxPhase * 0.5) * 15 * fxEnergy);
+        chVals[pf.startAddress + fa.irisOffset] = Math.round(40 + fxEnergy * 200 + Math.sin(fxPhase2 * 0.5) * 15 * fxEnergy);
       }
 
       if (fa.focusOffset !== null) {
-        chVals[pf.startAddress + fa.focusOffset] = Math.round(80 + fxEnergy * 120 + Math.sin(fxPhase * 0.3) * 30);
+        chVals[pf.startAddress + fa.focusOffset] = Math.round(80 + fxEnergy * 120 + Math.sin(fxPhase2 * 0.3) * 30);
+      }
+
+      // ── Laser : exploitation live (mode, pattern, scan, vitesses, rotations, blanking) ──
+      // Jamais statique, jamais synchrone : phase par fixture, cercle ou
+      // Lissajous, vitesses oscillantes. C'est CE chemin (QuickShow/AutoScript
+      // live) qui joue en concert — les lasers doivent bouger ici aussi.
+      if (fa.isLaser) {
+        computeLaserChannels(fa, pf, chVals, cue.time, energy, paletteColor, {
+          blankWhenStrobe: (isDrop || isChorus) && !!cue.strobe,
+        });
       }
     }
 
