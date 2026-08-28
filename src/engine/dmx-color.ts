@@ -1,8 +1,17 @@
 // ─── DMX Color Utilities ──────────────────────────────────
-// Extracted from dmx-playback.ts — pure color math functions
+// Extracted from dmx-playback.ts - pure color math functions
 // No React/hook dependencies.
 
-export interface RgbSegment { r: number; g: number; b: number; w: number | null; }
+export interface RgbSegment {
+  r: number; g: number;
+  /** Bleu — null pour les lasers RG (Rouge+Vert sans bleu) : le canal n'existe pas. */
+  b: number | null;
+  w: number | null;
+  /** Amber (RGBA / RGBAW) - offset DMX, null si absent. */
+  a?: number | null;
+  /** UV (RGBAUUV) - offset DMX, null si absent. */
+  uv?: number | null;
+}
 
 export function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');
@@ -74,23 +83,91 @@ export const isRed=/\b(red|r|rouge|rojo)\b/i;
 export const isGreen=/\b(green|g|vert|verde)\b/i;
 export const isBlue=/\b(blue|b|bleu|azul)\b/i;
 export const isWhite=/\b(white|w|blanc|blanco)\b/i;
+export const isAmber=/\b(amber|ambre|a|naranja)\b/i;
+export const isUv=/\b(uv|ultraviolet|ultra\s*violet)\b/i;
 export const isPresetMode=/presets?|macro|auto|sound/i;
 
 // ── RGB segment builder ─────────────────────────────
 
+/** Couleurs nommées → hex (roues de couleur dont les caps n'ont pas de champ color). */
+export const NAMED_CAP_COLOR_HEX: Record<string, string> = {
+  red: '#ff0000', green: '#00ff00', blue: '#0000ff', white: '#ffffff',
+  yellow: '#ffff00', cyan: '#00ffff', magenta: '#ff00ff', orange: '#ff8800',
+  purple: '#8800ff', violet: '#8800ff', amber: '#ffbf00', pink: '#ff69b4',
+  uv: '#8800ff', lime: '#00ff44',
+};
+
+/** Hex d'une couleur si le nom de cap en contient une, sinon null. */
+export function capColorFromName(name: string | undefined): string | null {
+  if (!name) return null;
+  const n = name.toLowerCase();
+  for (const key of Object.keys(NAMED_CAP_COLOR_HEX)) {
+    if (new RegExp(`\\b${key}\\b`).test(n)) return NAMED_CAP_COLOR_HEX[key];
+  }
+  return null;
+}
+
+/**
+ * Remplit cap.color depuis le nom quand absent (roues nommées « Yellow »,
+ * « Deep Blue »… sans champ color dans le fichier fixture) — sans cela, une
+ * roue nommée non colorisée tombait sur un fallback arbitraire (jaune).
+ */
+export function enrichWheelCaps(caps: DmxFixtureCapability[] | null | undefined): DmxFixtureCapability[] {
+  if (!caps || caps.length === 0) return [];
+  let changed = false;
+  const out = caps.map((cap) => {
+    if (cap.color) return cap;
+    const hex = capColorFromName(cap.name);
+    if (!hex) return cap;
+    changed = true;
+    return { ...cap, color: hex };
+  });
+  return changed ? out : caps;
+}
+
+/**
+ * v2 : regroupe les canaux couleur par FAMILLE de nom (le nom sans son mot
+ * couleur) pour ne jamais mélanger deux jeux (ex : « Bee eye red » avec
+ * « Beam green »), puis tolère les lasers RG sans bleu (b: null).
+ */
 export function buildRgbSegments(colourChannels: Array<{offset:number;name:string}>): RgbSegment[] {
-  const segments: RgbSegment[]=[]; const used=new Set<number>();
-  for(let i=0;i<colourChannels.length;i++){
-    if(used.has(i))continue;
-    let ri=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&!/\bfine\b/i.test(colourChannels[j].name)&&isRed.test(colourChannels[j].name)){ri=j;break;}}
-    if(ri<0)continue;
-    let gi=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&j!==ri&&!/\bfine\b/i.test(colourChannels[j].name)&&isGreen.test(colourChannels[j].name)){gi=j;break;}}
-    if(gi<0)continue;
-    let bi=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&j!==ri&&j!==gi&&!/\bfine\b/i.test(colourChannels[j].name)&&isBlue.test(colourChannels[j].name)){bi=j;break;}}
-    if(bi<0)continue;
-    let wi=-1;for(let j=0;j<colourChannels.length;j++){if(!used.has(j)&&j!==ri&&j!==gi&&j!==bi&&!/\bfine\b/i.test(colourChannels[j].name)&&isWhite.test(colourChannels[j].name)){wi=j;break;}}
-    used.add(ri);used.add(gi);used.add(bi);if(wi>=0)used.add(wi);
-    segments.push({r:colourChannels[ri].offset,g:colourChannels[gi].offset,b:colourChannels[bi].offset,w:wi>=0?colourChannels[wi].offset:null});
+  const used = new Set<number>();
+  const segments: RgbSegment[] = [];
+  const FAMILY_STRIP = /\b(red|green|blue|white|amber|uv|rouge|vert|bleu|blanc|ambre|rojo|verde|azul|blanco|fine)\b/gi;
+  const familyOf = (name: string): string =>
+    name.toLowerCase().replace(FAMILY_STRIP, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  const families = new Map<string, number[]>();
+  for (let j = 0; j < colourChannels.length; j++) {
+    const fam = familyOf(colourChannels[j].name);
+    const list = families.get(fam) ?? [];
+    list.push(j);
+    families.set(fam, list);
+  }
+  const pickIn = (fam: number[], re: RegExp): number =>
+    fam.find((j) => !used.has(j) && re.test(colourChannels[j].name)) ?? -1;
+  for (const fam of families.values()) {
+    const ri = pickIn(fam, isRed);
+    if (ri < 0) continue;
+    const gi = pickIn(fam, isGreen);
+    if (gi < 0) continue;
+    const bi = pickIn(fam, isBlue); // -1 possible : laser RG -> b null
+    const wi = bi >= 0 ? pickIn(fam, isWhite) : -1;
+    const ai = bi >= 0 ? pickIn(fam, isAmber) : -1;
+    const uvi = bi >= 0 ? pickIn(fam, isUv) : -1;
+    if (bi < 0 && wi >= 0) continue; // R+G+W sans B : ambigu, on ignore
+    used.add(ri); used.add(gi);
+    if (bi >= 0) used.add(bi);
+    if (wi >= 0) used.add(wi);
+    if (ai >= 0) used.add(ai);
+    if (uvi >= 0) used.add(uvi);
+    segments.push({
+      r: colourChannels[ri].offset,
+      g: colourChannels[gi].offset,
+      b: bi >= 0 ? colourChannels[bi].offset : null,
+      w: wi >= 0 ? colourChannels[wi].offset : null,
+      a: ai >= 0 ? colourChannels[ai].offset : null,
+      uv: uvi >= 0 ? colourChannels[uvi].offset : null,
+    });
   }
   return segments;
 }

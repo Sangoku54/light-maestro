@@ -13,10 +13,14 @@
 // chasers (the existing chaser engine plays them unchanged).
 
 import type { PatchedFixture, FixtureTier, SavedScene, SavedChaser } from '../stores/showStore';
-import type { DmxFixtureDefinition } from '../hooks/dmx-cues';
-import { analyzeChannels, type ChannelAnalysis } from './dmx-channel';
+import type { DmxFixtureDefinition, DmxFixtureCapability } from '../hooks/dmx-cues';
+import { analyzeChannels, type ChannelAnalysis, pickLaserModeCap } from './fixture-analyzer';
 
-export type AutoLoopKind = 'color-chase' | 'movement' | 'dimmer-pulse' | 'strobe';
+export type AutoLoopKind =
+  | 'color-chase' | 'movement' | 'dimmer-pulse' | 'strobe'
+  | 'color-wheel' | 'gobo' | 'effect' | 'prism'
+  | 'beam-zoom' | 'beam-frost' | 'beam-iris' | 'beam-focus'
+  | 'laser-pattern' | 'laser-scan' | 'laser-color';
 
 /** Libellés de catégorie (FR) — partagés entre le catalogue QuickShow et le picker widget. */
 export const LOOP_KIND_LABEL: Record<AutoLoopKind, string> = {
@@ -24,10 +28,25 @@ export const LOOP_KIND_LABEL: Record<AutoLoopKind, string> = {
   movement: 'Mouvement',
   'dimmer-pulse': 'Ambiance',
   strobe: 'Strobe',
+  'color-wheel': 'Roue couleur',
+  gobo: 'Gobo',
+  effect: 'Effet',
+  prism: 'Prisme',
+  'beam-zoom': 'Zoom',
+  'beam-frost': 'Frost',
+  'beam-iris': 'Iris',
+  'beam-focus': 'Focus',
+  'laser-pattern': 'Motif laser',
+  'laser-scan': 'Balayage laser',
+  'laser-color': 'Couleur laser',
 };
 
 /** Ordre d'affichage des catégories dans le catalogue. */
-export const LOOP_KIND_ORDER: AutoLoopKind[] = ['color-chase', 'movement', 'dimmer-pulse', 'strobe'];
+export const LOOP_KIND_ORDER: AutoLoopKind[] = [
+  'color-chase', 'color-wheel', 'movement', 'dimmer-pulse', 'strobe',
+  'gobo', 'effect', 'prism', 'beam-zoom', 'beam-frost', 'beam-iris', 'beam-focus',
+  'laser-pattern', 'laser-scan', 'laser-color',
+];
 
 export interface AutoLoopStep {
   /** Absolute DMX address → value (0-255) for this loop's fixtures. */
@@ -49,6 +68,7 @@ export interface AutoLoop {
   pattern?: string; // nom de motif (movement)
   radius?: number; // amplitude pan/tilt (movement), 0..128
   chaseSteps?: number; // nb de couleurs (color-chase)
+  variant?: string; // variante : 'rotate'|'static' (gobo) · sous-canal beam (beam-*)
 }
 
 /**
@@ -66,6 +86,7 @@ export interface LoopRecipe {
   pattern?: string;
   radius?: number;
   chaseSteps?: number;
+  variant?: string; // variante : 'rotate'|'static' (gobo) · sous-canal beam (beam-*)
 }
 
 export interface AutoLoopOptions {
@@ -170,12 +191,43 @@ function putRgbSegments(
   analysis: ChannelAnalysis,
   c: readonly [number, number, number],
 ): void {
+  const [r, g, b] = c;
+  const mx = Math.max(r, g, b);
+  const mn = Math.min(r, g, b);
+  // Blanc dérivé : réservé aux couleurs quasi-neutres (désaturées). min(r,g,b)
+  // allumerait la LED blanche sur des teintes saturées → on ne l'utilise que
+  // lorsque la saturation < 0.3 (blanc pur, pastels, gris).
+  const sat = mx === 0 ? 0 : (mx - mn) / mx;
+  const white = sat < 0.3 ? mn : 0;
+  // Ambre : couleurs chaudes (rouge dominant, vert moyen, peu de bleu).
+  const amber = r > 150 && g > 60 && b < 90 && r - b > 70 ? Math.round((r - b) * 0.5) : 0;
+  // UV : couleurs violettes/UV (bleu dominant, rouge présent, peu de vert).
+  const uv = b > 140 && r > 90 && g < 90 ? Math.round(b * 0.6) : 0;
   for (const seg of analysis.rgbSegments) {
-    put(frame, absAddr(pf, seg.r), c[0]);
-    put(frame, absAddr(pf, seg.g), c[1]);
-    put(frame, absAddr(pf, seg.b), c[2]);
-    if (seg.w !== null) put(frame, absAddr(pf, seg.w), 0);
+    put(frame, absAddr(pf, seg.r), r);
+    put(frame, absAddr(pf, seg.g), g);
+    if (seg.b !== null) put(frame, absAddr(pf, seg.b), b);
+    if (seg.w !== null) put(frame, absAddr(pf, seg.w), white);
+    if (seg.a != null) put(frame, absAddr(pf, seg.a), amber);
+    if (seg.uv != null) put(frame, absAddr(pf, seg.uv), uv);
   }
+}
+
+/** Valeur d'activation au centre de la plage DMX d'une capacité. */
+function capMid(cap: DmxFixtureCapability): number {
+  return Math.round((cap.min + cap.max) / 2);
+}
+
+type BeamChannel = 'zoom' | 'frost' | 'iris' | 'focus';
+
+function beamOffsetOf(fa: ChannelAnalysis, k: BeamChannel): number | null {
+  const map: Record<BeamChannel, number | null> = {
+    zoom: fa.zoomOffset,
+    frost: fa.frostOffset,
+    iris: fa.irisOffset,
+    focus: fa.focusOffset,
+  };
+  return map[k];
 }
 
 function buildColorChase(
@@ -230,6 +282,10 @@ function buildMovementLoop(
     for (const { pf, analysis } of fixtures) {
       for (const off of analysis.panOffsets) put(frame, absAddr(pf, off), pan);
       for (const off of analysis.tiltOffsets) put(frame, absAddr(pf, off), tilt);
+      // Fine 16-bit : neutralisé (0) pour éviter une valeur résiduelle « stale »
+      // qui fausserait la précision du mouvement.
+      if (analysis.panFineOffset !== null) put(frame, absAddr(pf, analysis.panFineOffset), 0);
+      if (analysis.tiltFineOffset !== null) put(frame, absAddr(pf, analysis.tiltFineOffset), 0);
       if (analysis.rgbSegments.length > 0) putRgbSegments(frame, pf, analysis, VISIBLE_FILL);
       if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), 255);
       if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), 255);
@@ -309,6 +365,321 @@ function buildStrobeLoop(
   };
 }
 
+function buildColorWheelLoop(
+  tier: FixtureTier,
+  fixtures: AnalyzedFixture[],
+  speedBpm: number,
+  direction: AutoLoop['direction'] = 'forward',
+): AutoLoop {
+  const capCount = Math.min(...fixtures.map((f) => f.analysis.wheelCaps.length));
+  const steps: AutoLoopStep[] = [];
+  for (let step = 0; step < capCount; step++) {
+    const frame: Record<number, number> = {};
+    for (let i = 0; i < fixtures.length; i++) {
+      const { pf, analysis } = fixtures[i];
+      const cap = analysis.wheelCaps[(i + step) % analysis.wheelCaps.length];
+      put(frame, absAddr(pf, analysis.wheelOffset!), capMid(cap));
+      if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), 255);
+      if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), 255);
+    }
+    steps.push({ channels: frame });
+  }
+  return {
+    id: `auto-cw-${tier}`,
+    name: `Color wheel · ${tier}`,
+    tier,
+    kind: 'color-wheel',
+    fixtureIds: fixtures.map((f) => f.pf.id),
+    steps,
+    speedBpm,
+    direction,
+  };
+}
+
+function buildGoboLoop(
+  tier: FixtureTier,
+  fixtures: AnalyzedFixture[],
+  speedBpm: number,
+  rotate: boolean,
+  direction: AutoLoop['direction'] = 'forward',
+): AutoLoop {
+  const capCount = Math.min(...fixtures.map((f) => f.analysis.goboCaps.length));
+  const steps: AutoLoopStep[] = [];
+  for (let step = 0; step < capCount; step++) {
+    const frame: Record<number, number> = {};
+    for (let i = 0; i < fixtures.length; i++) {
+      const { pf, analysis } = fixtures[i];
+      const cap = analysis.goboCaps[(i + step) % analysis.goboCaps.length];
+      put(frame, absAddr(pf, analysis.goboOffset!), capMid(cap));
+      if (rotate && analysis.speedOffset !== null) {
+        put(frame, absAddr(pf, analysis.speedOffset), 128 + Math.round(127 * (step / capCount)));
+      }
+      if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), 255);
+      if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), 255);
+    }
+    steps.push({ channels: frame });
+  }
+  return {
+    id: `auto-gb-${tier}`,
+    name: `Gobo · ${tier}`,
+    tier,
+    kind: 'gobo',
+    fixtureIds: fixtures.map((f) => f.pf.id),
+    steps,
+    speedBpm,
+    direction,
+    variant: rotate ? 'rotate' : 'static',
+  };
+}
+
+function buildEffectLoop(
+  tier: FixtureTier,
+  fixtures: AnalyzedFixture[],
+  speedBpm: number,
+  direction: AutoLoop['direction'] = 'forward',
+): AutoLoop {
+  const capsFor = (f: AnalyzedFixture): DmxFixtureCapability[] => {
+    const all = f.analysis.effectCaps ?? [];
+    const active = all.filter((c) => c.min > 0);
+    return active.length > 0 ? active : all;
+  };
+  const capCount = Math.min(...fixtures.map((f) => capsFor(f).length));
+  const steps: AutoLoopStep[] = [];
+  for (let step = 0; step < capCount; step++) {
+    const frame: Record<number, number> = {};
+    for (let i = 0; i < fixtures.length; i++) {
+      const { pf, analysis } = fixtures[i];
+      const caps = capsFor({ pf, analysis });
+      const cap = caps[(i + step) % caps.length];
+      put(frame, absAddr(pf, analysis.effectOffset!), capMid(cap));
+      if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), 255);
+      if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), 255);
+    }
+    steps.push({ channels: frame });
+  }
+  return {
+    id: `auto-fx-${tier}`,
+    name: `Effect · ${tier}`,
+    tier,
+    kind: 'effect',
+    fixtureIds: fixtures.map((f) => f.pf.id),
+    steps,
+    speedBpm,
+    direction,
+  };
+}
+
+function buildPrismLoop(
+  tier: FixtureTier,
+  fixtures: AnalyzedFixture[],
+  speedBpm: number,
+): AutoLoop {
+  // 4 pas. Si une fixture a des capacités prism, on utilise off(0) puis les
+  // milieux de plage (capMid) ; sinon les états conventionnels 128/170/255/0.
+  const CONVENTIONAL = [128, 170, 255, 0];
+  const steps: AutoLoopStep[] = [];
+  for (let step = 0; step < 4; step++) {
+    const frame: Record<number, number> = {};
+    for (const { pf, analysis } of fixtures) {
+      let v: number;
+      if (analysis.prismCaps.length > 0) {
+        v = step === 0 ? 0 : capMid(analysis.prismCaps[(step - 1) % analysis.prismCaps.length]);
+      } else {
+        v = CONVENTIONAL[step] ?? 0;
+      }
+      put(frame, absAddr(pf, analysis.prismOffset!), v);
+      if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), 255);
+      if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), 255);
+    }
+    steps.push({ channels: frame });
+  }
+  return {
+    id: `auto-pr-${tier}`,
+    name: `Prism · ${tier}`,
+    tier,
+    kind: 'prism',
+    fixtureIds: fixtures.map((f) => f.pf.id),
+    steps,
+    speedBpm,
+    direction: 'forward',
+  };
+}
+
+function buildBeamLoop(
+  tier: FixtureTier,
+  fixtures: AnalyzedFixture[],
+  kind: AutoLoopKind,
+  speedBpm: number,
+  direction: AutoLoop['direction'] = 'forward',
+): AutoLoop {
+  const k = kind.slice('beam-'.length) as BeamChannel;
+  const BEAM_STEPS = 8;
+  const steps: AutoLoopStep[] = [];
+  for (let step = 0; step < BEAM_STEPS; step++) {
+    const v = Math.round(255 * (0.5 + 0.5 * Math.sin((step / BEAM_STEPS) * Math.PI * 2)));
+    const frame: Record<number, number> = {};
+    for (const { pf, analysis } of fixtures) {
+      const off = beamOffsetOf(analysis, k);
+      if (off === null) continue;
+      put(frame, absAddr(pf, off), v);
+      if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), 255);
+      if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), 255);
+    }
+    steps.push({ channels: frame });
+  }
+  return {
+    id: `auto-${k}-${tier}`,
+    name: `${k} · ${tier}`,
+    tier,
+    kind,
+    fixtureIds: fixtures.map((f) => f.pf.id),
+    steps,
+    speedBpm,
+    direction,
+  };
+}
+
+/** Baseline laser (toujours appliquée) : mode pilotable en DMX + blanking ouvert + zoom large + pleine puissance. */
+function laserBaseline(frame: Record<number, number>, pf: PatchedFixture, analysis: ChannelAnalysis): void {
+  if (analysis.laserModeOffset !== null) put(frame, absAddr(pf, analysis.laserModeOffset), capMid(pickLaserModeCap(analysis.laserModeCaps)));
+  if (analysis.blankOffset !== null) put(frame, absAddr(pf, analysis.blankOffset), 0);
+  if (analysis.zoomOffset !== null) put(frame, absAddr(pf, analysis.zoomOffset), 255);
+  if (analysis.intensityOffset !== null) put(frame, absAddr(pf, analysis.intensityOffset), 255);
+  if (analysis.shutterOffset !== null) put(frame, absAddr(pf, analysis.shutterOffset), 255);
+}
+
+function buildLaserPatternLoop(
+  tier: FixtureTier,
+  fixtures: AnalyzedFixture[],
+  speedBpm: number,
+  steps: number = 8,
+  direction: AutoLoop['direction'] = 'forward',
+  startOffset: number = 0,
+): AutoLoop {
+  const n = Math.max(2, steps);
+  const k = Math.max(1, fixtures.length);
+  const stepsArr: AutoLoopStep[] = [];
+  for (let step = 0; step < n; step++) {
+    const frame: Record<number, number> = {};
+    const phase = 2 * Math.PI * (step / n);
+    for (let i = 0; i < fixtures.length; i++) {
+      const { pf, analysis } = fixtures[i];
+      const caps = analysis.patternCaps;
+      if (analysis.patternOffset !== null && caps.length > 0) {
+        put(frame, absAddr(pf, analysis.patternOffset), capMid(caps[(i + step + startOffset) % caps.length]));
+      }
+      // Rotations : oscillation lente, déphasée par axe ET par fixture
+      // (deux lasers jumeaux ne tournent plus en parfaite synchronie).
+      const rotPhase = (2 * Math.PI * i) / k;
+      analysis.laserRotationOffsets.forEach((off, ri) => {
+        put(frame, absAddr(pf, off), 128 + Math.round(70 * Math.sin(phase * (ri + 1) + rotPhase)));
+      });
+      // Vitesse de pattern : oscille par step (plus vivant qu'un 160 figé).
+      if (analysis.laserSpeedPatternOffset !== null) {
+        put(frame, absAddr(pf, analysis.laserSpeedPatternOffset), 128 + Math.round(64 * Math.sin(phase)));
+      }
+      laserBaseline(frame, pf, analysis);
+    }
+    stepsArr.push({ channels: frame });
+  }
+  return {
+    id: `auto-lp-${tier}`,
+    name: `Motifs laser · ${tier}`,
+    tier,
+    kind: 'laser-pattern',
+    fixtureIds: fixtures.map((f) => f.pf.id),
+    steps: stepsArr,
+    speedBpm,
+    direction,
+  };
+}
+
+function buildLaserScanLoop(
+  tier: FixtureTier,
+  fixtures: AnalyzedFixture[],
+  speedBpm: number,
+  radius: number = 90,
+  direction: AutoLoop['direction'] = 'forward',
+  shape: 'circle' | 'lissajous' = 'circle',
+): AutoLoop {
+  const n = 8;
+  const r = Math.max(0, Math.min(128, radius));
+  const k = Math.max(1, fixtures.length);
+  const stepsArr: AutoLoopStep[] = [];
+  for (let step = 0; step < n; step++) {
+    const t = step / n;
+    const frame: Record<number, number> = {};
+    for (let i = 0; i < fixtures.length; i++) {
+      const { pf, analysis } = fixtures[i];
+      // Déphasage par fixture : des lasers identiques se répartissent
+      // autour du cercle (bracketing) au lieu de se superposer.
+      const phase = (2 * Math.PI * i) / k;
+      const sx = 128 + Math.round(r * Math.cos(2 * Math.PI * t + phase));
+      const sy = shape === 'lissajous'
+        ? 128 + Math.round(r * Math.sin(2 * Math.PI * t * 2 + phase))
+        : 128 + Math.round(r * Math.sin(2 * Math.PI * t + phase));
+      if (analysis.scanXOffset !== null) put(frame, absAddr(pf, analysis.scanXOffset), sx);
+      if (analysis.scanYOffset !== null) put(frame, absAddr(pf, analysis.scanYOffset), sy);
+      // Vitesse de scan : oscille par step (vivant, jamais figé).
+      if (analysis.laserSpeedScanOffset !== null) {
+        put(frame, absAddr(pf, analysis.laserSpeedScanOffset), 128 + Math.round(64 * Math.sin(2 * Math.PI * t)));
+      }
+      laserBaseline(frame, pf, analysis);
+    }
+    stepsArr.push({ channels: frame });
+  }
+  return {
+    id: `auto-ls-${tier}`,
+    name: shape === 'lissajous' ? `Balayage laser ∞ · ${tier}` : `Balayage laser · ${tier}`,
+    tier,
+    kind: 'laser-scan',
+    fixtureIds: fixtures.map((f) => f.pf.id),
+    steps: stepsArr,
+    speedBpm,
+    direction,
+    radius: r,
+    variant: shape,
+  };
+}
+
+function buildLaserColorLoop(
+  tier: FixtureTier,
+  fixtures: AnalyzedFixture[],
+  speedBpm: number,
+  direction: AutoLoop['direction'] = 'forward',
+): AutoLoop {
+  const capCount = Math.max(1, ...fixtures.map((f) => f.analysis.wheelCaps.length));
+  const k = Math.max(1, fixtures.length);
+  const stepsArr: AutoLoopStep[] = [];
+  for (let step = 0; step < capCount; step++) {
+    const frame: Record<number, number> = {};
+    for (let i = 0; i < fixtures.length; i++) {
+      const { pf, analysis } = fixtures[i];
+      const caps = analysis.wheelCaps;
+      if (analysis.wheelOffset !== null && caps.length > 0) {
+        put(frame, absAddr(pf, analysis.wheelOffset), capMid(caps[(i + step) % caps.length]));
+      }
+      // Rotations animées pendant le cycle couleur, déphasées par fixture.
+      const rotPhase = (2 * Math.PI * i) / k;
+      analysis.laserRotationOffsets.forEach((off, ri) => {
+        put(frame, absAddr(pf, off), 128 + Math.round(70 * Math.sin(2 * Math.PI * (step / capCount) * (ri + 1) + rotPhase)));
+      });
+      laserBaseline(frame, pf, analysis);
+    }
+    stepsArr.push({ channels: frame });
+  }
+  return {
+    id: `auto-lc-${tier}`,
+    name: `Couleur laser · ${tier}`,
+    tier,
+    kind: 'laser-color',
+    fixtureIds: fixtures.map((f) => f.pf.id),
+    steps: stepsArr,
+    speedBpm,
+    direction,
+  };
+}
+
 function analyzeTiers(
   patchedFixtures: PatchedFixture[],
   defs: Map<string, DmxFixtureDefinition>,
@@ -356,10 +727,33 @@ export function generateAutoLoops(
         f.analysis.panOffsets.length === 0 &&
         f.analysis.tiltOffsets.length === 0,
     );
+    const wheels = fixtures.filter(
+      (f) => f.analysis.wheelOffset !== null && f.analysis.wheelCaps.length > 0 && f.analysis.rgbSegments.length === 0 && !f.analysis.isLaser,
+    );
+    const gobos = fixtures.filter((f) => f.analysis.goboOffset !== null && f.analysis.goboCaps.length > 0);
+    const effects = fixtures.filter((f) => f.analysis.effectOffset !== null && (f.analysis.effectCaps?.length ?? 0) > 0);
+    const prisms = fixtures.filter((f) => f.analysis.prismOffset !== null);
+
+    // Laser : pattern (motifs), scan (balayage X/Y), couleur roue — chacun
+    // avec sa baseline (mode DMX + blanking + zoom).
+    const laserPatterns = fixtures.filter((f) => f.analysis.isLaser && f.analysis.patternOffset !== null && f.analysis.patternCaps.length > 0);
+    const laserScans = fixtures.filter((f) => f.analysis.isLaser && (f.analysis.scanXOffset !== null || f.analysis.scanYOffset !== null));
+    const laserWheels = fixtures.filter((f) => f.analysis.isLaser && f.analysis.laserColorMode === 'wheel' && f.analysis.wheelOffset !== null && f.analysis.wheelCaps.length > 0);
 
     if (rgb.length > 0) loops.push(buildColorChase(tier, rgb, CHASE_COLORS.slice(0, chaseSteps), speedBpm));
     if (movers.length > 0) loops.push(buildMovementLoop(tier, movers, movementSteps, movementRadius, speedBpm));
     if (dimmers.length > 0) loops.push(buildDimmerPulse(tier, dimmers, speedBpm));
+    if (wheels.length > 0) loops.push(buildColorWheelLoop(tier, wheels, speedBpm));
+    if (gobos.length > 0) loops.push(buildGoboLoop(tier, gobos, speedBpm, true));
+    if (effects.length > 0) loops.push(buildEffectLoop(tier, effects, speedBpm));
+    if (prisms.length > 0) loops.push(buildPrismLoop(tier, prisms, speedBpm));
+    if (laserPatterns.length > 0) loops.push(buildLaserPatternLoop(tier, laserPatterns, speedBpm));
+    if (laserScans.length > 0) loops.push(buildLaserScanLoop(tier, laserScans, speedBpm));
+    if (laserWheels.length > 0) loops.push(buildLaserColorLoop(tier, laserWheels, speedBpm));
+    for (const k of ['zoom', 'frost', 'iris', 'focus'] as BeamChannel[]) {
+      const beam = fixtures.filter((f) => beamOffsetOf(f.analysis, k) !== null);
+      if (beam.length > 0) loops.push(buildBeamLoop(tier, beam, `beam-${k}` as AutoLoopKind, speedBpm));
+    }
   }
 
   return loops;
@@ -399,6 +793,14 @@ export function generateLoopLibrary(
     movers: AnalyzedFixture[];
     dimmers: AnalyzedFixture[];
     shutters: AnalyzedFixture[];
+    wheels: AnalyzedFixture[];
+    gobos: AnalyzedFixture[];
+    effects: AnalyzedFixture[];
+    prisms: AnalyzedFixture[];
+    beams: Record<BeamChannel, AnalyzedFixture[]>;
+    laserPatterns: AnalyzedFixture[];
+    laserScans: AnalyzedFixture[];
+    laserWheels: AnalyzedFixture[];
     kinds: AutoLoopKind[];
   }
   const caps = new Map<FixtureTier, Cap>();
@@ -416,12 +818,37 @@ export function generateLoopLibrary(
         f.analysis.tiltOffsets.length === 0,
     );
     const shutters = fixtures.filter((f) => f.analysis.shutterOffset !== null);
+    const wheels = fixtures.filter(
+      (f) => f.analysis.wheelOffset !== null && f.analysis.wheelCaps.length > 0 && f.analysis.rgbSegments.length === 0 && !f.analysis.isLaser,
+    );
+    const gobos = fixtures.filter((f) => f.analysis.goboOffset !== null && f.analysis.goboCaps.length > 0);
+    const effects = fixtures.filter((f) => f.analysis.effectOffset !== null && (f.analysis.effectCaps?.length ?? 0) > 0);
+    const prisms = fixtures.filter((f) => f.analysis.prismOffset !== null);
+    const beams: Record<BeamChannel, AnalyzedFixture[]> = {
+      zoom: fixtures.filter((f) => f.analysis.zoomOffset !== null),
+      frost: fixtures.filter((f) => f.analysis.frostOffset !== null),
+      iris: fixtures.filter((f) => f.analysis.irisOffset !== null),
+      focus: fixtures.filter((f) => f.analysis.focusOffset !== null),
+    };
+    const laserPatterns = fixtures.filter((f) => f.analysis.isLaser && f.analysis.patternOffset !== null && f.analysis.patternCaps.length > 0);
+    const laserScans = fixtures.filter((f) => f.analysis.isLaser && (f.analysis.scanXOffset !== null || f.analysis.scanYOffset !== null));
+    const laserWheels = fixtures.filter((f) => f.analysis.isLaser && f.analysis.laserColorMode === 'wheel' && f.analysis.wheelOffset !== null && f.analysis.wheelCaps.length > 0);
     const kinds: AutoLoopKind[] = [];
     if (rgb.length > 0) kinds.push('color-chase');
     if (movers.length > 0) kinds.push('movement');
     if (dimmers.length > 0) kinds.push('dimmer-pulse');
     if (shutters.length > 0) kinds.push('strobe');
-    caps.set(tier, { rgb, movers, dimmers, shutters, kinds });
+    if (wheels.length > 0) kinds.push('color-wheel');
+    if (gobos.length > 0) kinds.push('gobo');
+    if (effects.length > 0) kinds.push('effect');
+    if (prisms.length > 0) kinds.push('prism');
+    if (laserPatterns.length > 0) kinds.push('laser-pattern');
+    if (laserScans.length > 0) kinds.push('laser-scan');
+    if (laserWheels.length > 0) kinds.push('laser-color');
+    for (const k of ['zoom', 'frost', 'iris', 'focus'] as BeamChannel[]) {
+      if (beams[k].length > 0) kinds.push(`beam-${k}` as AutoLoopKind);
+    }
+    caps.set(tier, { rgb, movers, dimmers, shutters, wheels, gobos, effects, prisms, beams, laserPatterns, laserScans, laserWheels, kinds });
   }
 
   const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(rng() * arr.length)];
@@ -448,6 +875,37 @@ export function generateLoopLibrary(
         break;
       case 'strobe':
         loop = buildStrobeLoop(tier, cap.shutters, speed);
+        break;
+      case 'color-wheel':
+        loop = buildColorWheelLoop(tier, cap.wheels, speed, direction);
+        break;
+      case 'gobo':
+        loop = buildGoboLoop(tier, cap.gobos, speed, rng() < 0.5, direction);
+        break;
+      case 'effect':
+        loop = buildEffectLoop(tier, cap.effects, speed, direction);
+        break;
+      case 'prism':
+        loop = buildPrismLoop(tier, cap.prisms, speed);
+        break;
+      case 'beam-zoom':
+      case 'beam-frost':
+      case 'beam-iris':
+      case 'beam-focus':
+        loop = buildBeamLoop(tier, cap.beams[kind.slice('beam-'.length) as BeamChannel], kind, speed, direction);
+        break;
+      case 'laser-pattern':
+        // Nombre de motifs variable (6-12) + offset de départ aléatoire : les
+        // VALEURS de pattern changent vraiment d'une carte à l'autre (plus de
+        // séquence 1,3,5… identique à chaque seed).
+        loop = buildLaserPatternLoop(tier, cap.laserPatterns, speed, 6 + Math.floor(rng() * 7), direction, Math.floor(rng() * 8));
+        break;
+      case 'laser-scan':
+        // Deux formes de balayage (cercle / Lissajous) : variété réelle.
+        loop = buildLaserScanLoop(tier, cap.laserScans, speed, 36 + Math.floor(rng() * 81), direction, rng() < 0.5 ? 'lissajous' : 'circle');
+        break;
+      case 'laser-color':
+        loop = buildLaserColorLoop(tier, cap.laserWheels, speed, direction);
         break;
       default:
         return undefined;
@@ -592,6 +1050,7 @@ export function loopToRecipe(loop: AutoLoop): LoopRecipe {
     pattern: loop.pattern,
     radius: loop.radius,
     chaseSteps: loop.chaseSteps,
+    variant: loop.variant,
   };
 }
 
@@ -640,6 +1099,52 @@ export function generateLoopFromRecipe(
     case 'strobe':
       if (shutters.length === 0) return undefined;
       return buildStrobeLoop(recipe.tier, shutters, recipe.speedBpm);
+    case 'color-wheel': {
+      const wheels = fixtures.filter(
+        (f) => f.analysis.wheelOffset !== null && f.analysis.wheelCaps.length > 0 && f.analysis.rgbSegments.length === 0,
+      );
+      if (wheels.length === 0) return undefined;
+      return buildColorWheelLoop(recipe.tier, wheels, recipe.speedBpm, recipe.direction);
+    }
+    case 'gobo': {
+      const gobos = fixtures.filter((f) => f.analysis.goboOffset !== null && f.analysis.goboCaps.length > 0);
+      if (gobos.length === 0) return undefined;
+      return buildGoboLoop(recipe.tier, gobos, recipe.speedBpm, recipe.variant === 'rotate', recipe.direction);
+    }
+    case 'effect': {
+      const effects = fixtures.filter((f) => f.analysis.effectOffset !== null && (f.analysis.effectCaps?.length ?? 0) > 0);
+      if (effects.length === 0) return undefined;
+      return buildEffectLoop(recipe.tier, effects, recipe.speedBpm, recipe.direction);
+    }
+    case 'prism': {
+      const prisms = fixtures.filter((f) => f.analysis.prismOffset !== null);
+      if (prisms.length === 0) return undefined;
+      return buildPrismLoop(recipe.tier, prisms, recipe.speedBpm);
+    }
+    case 'beam-zoom':
+    case 'beam-frost':
+    case 'beam-iris':
+    case 'beam-focus': {
+      const k = recipe.kind.slice('beam-'.length) as BeamChannel;
+      const beam = fixtures.filter((f) => beamOffsetOf(f.analysis, k) !== null);
+      if (beam.length === 0) return undefined;
+      return buildBeamLoop(recipe.tier, beam, recipe.kind, recipe.speedBpm, recipe.direction);
+    }
+    case 'laser-pattern': {
+      const lasers = fixtures.filter((f) => f.analysis.isLaser && f.analysis.patternOffset !== null && f.analysis.patternCaps.length > 0);
+      if (lasers.length === 0) return undefined;
+      return buildLaserPatternLoop(recipe.tier, lasers, recipe.speedBpm, recipe.chaseSteps ?? 8, recipe.direction);
+    }
+    case 'laser-scan': {
+      const lasers = fixtures.filter((f) => f.analysis.isLaser && (f.analysis.scanXOffset !== null || f.analysis.scanYOffset !== null));
+      if (lasers.length === 0) return undefined;
+      return buildLaserScanLoop(recipe.tier, lasers, recipe.speedBpm, recipe.radius ?? 90, recipe.direction, recipe.variant === 'lissajous' ? 'lissajous' : 'circle');
+    }
+    case 'laser-color': {
+      const lasers = fixtures.filter((f) => f.analysis.isLaser && f.analysis.laserColorMode === 'wheel' && f.analysis.wheelOffset !== null && f.analysis.wheelCaps.length > 0);
+      if (lasers.length === 0) return undefined;
+      return buildLaserColorLoop(recipe.tier, lasers, recipe.speedBpm, recipe.direction);
+    }
     default:
       return undefined;
   }

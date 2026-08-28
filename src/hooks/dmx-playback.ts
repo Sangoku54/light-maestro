@@ -890,9 +890,9 @@ export function useDmxPlayback(options: {
             for(const po of fa.presetOverrideOffsets){chVals[pf.startAddress+po]=0;}
             // If intensityOffset was detected (including Dimmer/Shutter), set it
             if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=dimmerVal;}
-            for(const seg of fa.rgbSegments){const key=pf.id+'_'+seg.r;let cur=fadeState.get(key);if(!cur){cur={r:r,g:g,b:b};fadeState.set(key,cur);}else{cur.r=Math.round(cur.r+(r-cur.r)*FADE_ALPHA);cur.g=Math.round(cur.g+(g-cur.g)*FADE_ALPHA);cur.b=Math.round(cur.b+(b-cur.b)*FADE_ALPHA);}chVals[pf.startAddress+seg.r]=cur.r;chVals[pf.startAddress+seg.g]=cur.g;chVals[pf.startAddress+seg.b]=cur.b;if(seg.w!==null)chVals[pf.startAddress+seg.w]=0;}
+            for(const seg of fa.rgbSegments){const key=pf.id+'_'+seg.r;let cur=fadeState.get(key);if(!cur){cur={r:r,g:g,b:b};fadeState.set(key,cur);}else{cur.r=Math.round(cur.r+(r-cur.r)*FADE_ALPHA);cur.g=Math.round(cur.g+(g-cur.g)*FADE_ALPHA);cur.b=Math.round(cur.b+(b-cur.b)*FADE_ALPHA);}chVals[pf.startAddress+seg.r]=cur.r;chVals[pf.startAddress+seg.g]=cur.g;if(seg.b!==null)chVals[pf.startAddress+seg.b]=cur.b;if(seg.w!==null)chVals[pf.startAddress+seg.w]=0;}
             // Apply dimmer track/cue dimmer to RGB when no dedicated intensity channel
-            if(fa.intensityOffset===null){const dScale=dimmerVal/255;for(const seg of fa.rgbSegments){chVals[pf.startAddress+seg.r]=Math.round((chVals[pf.startAddress+seg.r]??0)*dScale);chVals[pf.startAddress+seg.g]=Math.round((chVals[pf.startAddress+seg.g]??0)*dScale);chVals[pf.startAddress+seg.b]=Math.round((chVals[pf.startAddress+seg.b]??0)*dScale);if(seg.w!==null)chVals[pf.startAddress+seg.w]=Math.round((chVals[pf.startAddress+seg.w]??0)*dScale);}}
+            if(fa.intensityOffset===null){const dScale=dimmerVal/255;for(const seg of fa.rgbSegments){chVals[pf.startAddress+seg.r]=Math.round((chVals[pf.startAddress+seg.r]??0)*dScale);chVals[pf.startAddress+seg.g]=Math.round((chVals[pf.startAddress+seg.g]??0)*dScale);if(seg.b!==null)chVals[pf.startAddress+seg.b]=Math.round((chVals[pf.startAddress+seg.b]??0)*dScale);if(seg.w!==null)chVals[pf.startAddress+seg.w]=Math.round((chVals[pf.startAddress+seg.w]??0)*dScale);}}
 
           }else if(fa.wheelOffset!==null&&paletteColor){
             const caps=fa.wheelCaps;
@@ -1458,7 +1458,7 @@ export function computeDmxForCue(
         for (const seg of fa.rgbSegments) {
           chVals[pf.startAddress + seg.r] = r;
           chVals[pf.startAddress + seg.g] = g;
-          chVals[pf.startAddress + seg.b] = b;
+          if (seg.b !== null) chVals[pf.startAddress + seg.b] = b;
           if (seg.w !== null) chVals[pf.startAddress + seg.w] = 0;
         }
         // Apply dimmer track/cue dimmer to RGB when no dedicated intensity channel
@@ -1467,7 +1467,7 @@ export function computeDmxForCue(
           for (const seg of fa.rgbSegments) {
             chVals[pf.startAddress + seg.r] = Math.round((chVals[pf.startAddress + seg.r] ?? 0) * dScale);
             chVals[pf.startAddress + seg.g] = Math.round((chVals[pf.startAddress + seg.g] ?? 0) * dScale);
-            chVals[pf.startAddress + seg.b] = Math.round((chVals[pf.startAddress + seg.b] ?? 0) * dScale);
+            if (seg.b !== null) chVals[pf.startAddress + seg.b] = Math.round((chVals[pf.startAddress + seg.b] ?? 0) * dScale);
             if (seg.w !== null) chVals[pf.startAddress + seg.w] = Math.round((chVals[pf.startAddress + seg.w] ?? 0) * dScale);
           }
         }

@@ -10,7 +10,7 @@
 
 import type { PatchedFixture } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureCapability, DmxFixtureChannel } from '../hooks/dmx-cues';
-import { RgbSegment, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments } from './dmx-color';
+import { RgbSegment, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, enrichWheelCaps } from './dmx-color';
 
 // Canaux couleur auxiliaires à exclure du calcul RGB (rotation/mouvement…).
 const COLOUR_AUX_RE = /rotation|rolling|move|movement|speed|scan|strobe|effect|macro/i;
@@ -51,10 +51,17 @@ export function laserGateValue(v: number): number { return v > 22 ? 255 : 0; }
  */
 export function hasLaserColorGateCaps(ch: DmxFixtureChannel): boolean {
   const caps = ch.capabilities ?? [];
-  if (caps.length === 0) return false;
-  return caps.some((c) =>
-    /(red|green|blue|amber|cyan|magenta|yellow|white).*(laser|beam)|(laser|beam).*(red|green|blue|amber|cyan|magenta|yellow|white)/i.test(c.name ?? ''),
-  );
+  if (caps.length < 2) return false; // 1 seule cap pleine plage = intensité d'une couleur (ex : « Red laser » 0-255), pas un sélecteur
+  const colors = new Set<string>();
+  for (const c of caps) {
+    const m = (c.name ?? '').toLowerCase().match(/red|green|blue|amber|cyan|magenta|yellow|white/i);
+    if (m && /(red|green|blue|amber|cyan|magenta|yellow|white).*(laser|beam)|(laser|beam).*(red|green|blue|amber|cyan|magenta|yellow|white)/i.test(c.name ?? '')) {
+      colors.add(m[0]);
+    }
+  }
+  // Un sélecteur choisit entre au moins 2 couleurs ; une seule couleur =
+  // intensité mono-couleur (route couleur, pas gate).
+  return colors.size >= 2;
 }
 
 // ─── Interface unifiée ─────────────────────────────────────────
@@ -333,7 +340,7 @@ export function analyzeFixtureChannels(
     // couleur générique (jamais atteinte par le routing laser).
     if (isLaser && fa.laserColorGateOffset === null && hasLaserColorGateCaps(ch)) {
       fa.laserColorGateOffset = off;
-      fa.laserColorGateCaps = ch.capabilities ?? [];
+      fa.laserColorGateCaps = enrichWheelCaps(ch.capabilities ?? []);
       fa.laserColorMode = 'gate';
       continue;
     }
@@ -546,7 +553,7 @@ export function analyzeFixtureChannels(
       const wheel = colourChannels.find(c => c.caps?.some(cap => cap.color));
       if (wheel) {
         fa.wheelOffset = wheel.offset;
-        fa.wheelCaps = wheel.caps ?? [];
+        fa.wheelCaps = enrichWheelCaps(wheel.caps ?? []);
       }
     } else if (colourChannels.filter((c) => !COLOUR_AUX_RE.test(c.name)).length >= 3) {
       // Fallback: treat first 3 as RGB (hors canaux de rotation/mouvement —
@@ -562,7 +569,7 @@ export function analyzeFixtureChannels(
       fa.wheelOffset = colourChannels[0].offset;
       const ch = channels.find((c, idx) => (c.offset ?? idx) === colourChannels[0].offset);
       if (ch?.capabilities && ch.capabilities.length > 0) {
-        fa.wheelCaps = ch.capabilities;
+        fa.wheelCaps = enrichWheelCaps(ch.capabilities);
       }
     }
   }
@@ -571,7 +578,7 @@ export function analyzeFixtureChannels(
   if (fa.wheelOffset !== null && fa.wheelCaps.length === 0) {
     const ch = channels.find((c, idx) => (c.offset ?? idx) === fa.wheelOffset);
     if (ch?.capabilities && ch.capabilities.length > 0) {
-      fa.wheelCaps = ch.capabilities;
+      fa.wheelCaps = enrichWheelCaps(ch.capabilities);
     }
   }
 

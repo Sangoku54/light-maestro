@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { clampRect } from '../components/clampedpopup';
 import { generateAllThumbnails, getVariantsForCategory, type ThumbnailVariant } from '../utils/fixtureThumbnails';
 import { useTranslation } from 'react-i18next';
 import { Plus, Play, Pause, Square, Trash2, GripVertical, Search, X, Edit2, Check, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Zap, Save, FolderPlus, Maximize2 } from 'lucide-react';
@@ -11,6 +12,8 @@ import { Stage3D } from './Stage3D';
 import { useFixtureTest } from '../hooks/useFixtureTest';
 import { loadFixtureDefinitions, type DmxFixtureDefinition, clearFixtureDefCache } from '../hooks/dmx-cues';
 import { analyzeChannels } from '../engine/fixture-analyzer';
+import { AUTO_LOOP_FOLDER } from '../engine/auto-loops';
+import { groupByTier, TIER_KEYS } from '../engine/tier-utils';
 import { sendChannelsToHardware, sendToUniverse, sendFixtureOn, sendFixtureOff, sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { fixtureTestState } from '../utils/fixture-test-state';
@@ -602,13 +605,15 @@ const SceneList: React.FC = () => {
                 >
                   <X size={11} />
                 </button>
-                <button
-                  onClick={() => setConfirmDeleteFolder(activeFolderName)}
-                  title={t('design.scenes.deleteFolder')}
-                  className="p-1 text-gray-500 hover:text-red-400"
-                >
-                  <Trash2 size={11} />
-                </button>
+                {activeFolderName !== AUTO_LOOP_FOLDER && (
+                  <button
+                    onClick={() => setConfirmDeleteFolder(activeFolderName)}
+                    title={t('design.scenes.deleteFolder')}
+                    className="p-1 text-gray-500 hover:text-red-400"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -627,9 +632,8 @@ const SceneList: React.FC = () => {
         {folderOptions.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {folderOptions.map((fo) => (
-              <button
+              <div
                 key={fo.value}
-                onClick={() => setSceneFilter(fo.value)}
                 onDragOver={(e) => {
                   if (!dragSceneId) return;
                   e.preventDefault();
@@ -642,15 +646,33 @@ const SceneList: React.FC = () => {
                   e.stopPropagation();
                   handleDropOnFolder(fo.name);
                 }}
-                title={t('design.scenes.dropSceneHint')}
-                className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                className={`group inline-flex items-center text-[10px] rounded border transition-colors ${
                   dragOverFolder === fo.name
                     ? 'border-purple-400 bg-purple-600/30 text-purple-200'
                     : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:text-purple-300 hover:border-purple-500/50'
                 }`}
               >
-                📁 {fo.name}
-              </button>
+                <button
+                  onClick={() => setSceneFilter(fo.value)}
+                  title={t('design.scenes.dropSceneHint')}
+                  className="px-1.5 py-0.5"
+                >
+                  📁 {fo.name}
+                </button>
+                {fo.name !== AUTO_LOOP_FOLDER && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSceneFilter(fo.value);
+                      setConfirmDeleteFolder(fo.name);
+                    }}
+                    title={t('design.scenes.deleteFolder')}
+                    className="px-1 py-0.5 text-gray-500 hover:text-red-400 opacity-60 group-hover:opacity-100 transition-opacity"
+                  >
+                    <Trash2 size={10} />
+                  </button>
+                )}
+              </div>
             ))}
             {uncategorizedCount < scenes.length && (
               <button
@@ -713,9 +735,8 @@ const SceneList: React.FC = () => {
                 e.preventDefault();
                 setCtxMenu({
                   visible: true,
-                  // Clamp so the menu never opens off-screen (bottom/right edge).
-                  x: Math.min(e.clientX, window.innerWidth - 210),
-                  y: Math.min(e.clientY, window.innerHeight - 280),
+                          x: e.clientX,
+        y: e.clientY,
                   sceneId: scene.id,
                   sceneName: scene.name,
                 });
@@ -777,7 +798,7 @@ const SceneList: React.FC = () => {
       {ctxMenu.visible && (
         <div
           className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[190px] max-h-[80vh] overflow-y-auto"
-          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          style={{ ...clampRect(ctxMenu.x, ctxMenu.y, 240, 240, window.innerWidth, window.innerHeight) }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider truncate">
@@ -907,6 +928,7 @@ const SceneEditor: React.FC = () => {
   const [musicians, setMusicians] = useState<MusicianRoster>({});
   const [stageScene, setStageScene] = useState<StageScene>('rear-front');
   const [showFloating3D, setShowFloating3D] = useState(false);
+  const [show3D, setShow3D] = useState(false);
   const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
   const [float3DSize, setFloat3DSize] = useState({ w: 960, h: 540 });
   const float3DDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
@@ -915,7 +937,7 @@ const SceneEditor: React.FC = () => {
     float3DDragRef.current = { startX: e.clientX, startY: e.clientY, startLeft: float3DPos.x, startTop: float3DPos.y };
     const onMove = (ev: MouseEvent) => {
       if (!float3DDragRef.current) return;
-      setFloat3DPos({ x: float3DDragRef.current.startLeft + ev.clientX - float3DDragRef.current.startX, y: float3DDragRef.current.startTop + ev.clientY - float3DDragRef.current.startY });
+      setFloat3DPos({ x: Math.max(0, Math.min(float3DDragRef.current.startLeft + ev.clientX - float3DDragRef.current.startX, window.innerWidth - 120)), y: Math.max(0, Math.min(float3DDragRef.current.startTop + ev.clientY - float3DDragRef.current.startY, window.innerHeight - 40)) });
     };
     const onUp = () => { float3DDragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
     window.addEventListener('mousemove', onMove);
@@ -1096,15 +1118,7 @@ const SceneEditor: React.FC = () => {
 
   // Group fixtures by tier, sorted by name
   const fixturesByTier = React.useMemo(() => {
-    const map: Record<string, typeof patchedFixtures> = {
-      primary: [],
-      secondary: [],
-      tertiary: [],
-    };
-    for (const pf of patchedFixtures) {
-      const tierGroup = pf.tier || 'primary';
-      map[tierGroup].push(pf);
-    }
+    const map = groupByTier(patchedFixtures);
     for (const tierGroup of Object.keys(map)) {
       map[tierGroup].sort((a, b) => a.name.localeCompare(b.name));
     }
@@ -1117,7 +1131,7 @@ const SceneEditor: React.FC = () => {
     tertiary: { icon: '⬜' },
     other: { icon: '⚙️' },
   };
-  const TIER_ORDER = ['primary', 'secondary', 'tertiary', 'other'];
+  const TIER_ORDER = TIER_KEYS;
 
   // ── If no scene selected, show empty state ──
   if (!scene && patchedFixtures.length === 0) {
@@ -1131,7 +1145,7 @@ const SceneEditor: React.FC = () => {
   }
 
   return (
-    <div className="flex gap-4 h-full min-h-0">
+    <div className="flex gap-4 h-full min-h-0 relative">
       <div className="flex-1 min-w-0 space-y-5 overflow-y-auto">
       {/* Scene name */}
       <div className="flex items-center gap-3">
@@ -1247,8 +1261,8 @@ const SceneEditor: React.FC = () => {
         </div>
       )}
       </div>
-      {/* Live 3D preview of the programmed scene (detachable) */}
-      {!showFloating3D && (
+      {/* Live 3D preview of the programmed scene (hidden by default, toggled) */}
+      {show3D && !showFloating3D && (
         <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-0 h-full relative">
           <Stage3D
             musicians={musicians}
@@ -1262,18 +1276,27 @@ const SceneEditor: React.FC = () => {
               if (scene) updateScene(scene.id, { stageScene: cfg });
             }}
           />
-          <button
-            onClick={() => setShowFloating3D(true)}
-            title="Détacher la vue 3D"
-            className="absolute bottom-2 right-2 z-10 flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white text-[11px] font-medium shadow-lg transition-all"
-          >
-            <Maximize2 size={12} /> Détacher
-          </button>
+          <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1">
+            <button
+              onClick={() => setShowFloating3D(true)}
+              title="Détacher la vue 3D"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white text-[11px] font-medium shadow-lg transition-all"
+            >
+              <Maximize2 size={12} /> Détacher
+            </button>
+            <button
+              onClick={() => setShow3D(false)}
+              title="Masquer la vue 3D"
+              className="w-7 h-7 rounded-md bg-gray-700/80 hover:bg-gray-600 text-white text-[11px] font-medium shadow-lg transition-all flex items-center justify-center"
+            >
+              <X size={12} />
+            </button>
+          </div>
         </div>
       )}
 
       {/* Floating 3D view (detached) */}
-      {showFloating3D && (
+      {show3D && showFloating3D && (
         <div
           className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col"
           style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, overflow: 'hidden' }}
@@ -1305,6 +1328,17 @@ const SceneEditor: React.FC = () => {
             />
           </div>
         </div>
+      )}
+
+      {/* Open 3D button (bottom-right) — only when the 3D view is hidden */}
+      {!show3D && (
+        <button
+          onClick={() => setShow3D(true)}
+          title="Afficher la vue 3D"
+          className="absolute bottom-2 right-2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white text-[11px] font-medium shadow-lg transition-all"
+        >
+          <Maximize2 size={12} /> Vue 3D
+        </button>
       )}
     </div>
   );
@@ -1686,6 +1720,36 @@ const FixtureChannelEditor: React.FC<{
 
 // ─── Channel Slider Component ──────────────────────────────
 
+const clamp255 = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+
+const NumberField: React.FC<{ value: number; min: number; max: number; onChange: (v: number) => void }> = ({ value, min, max, onChange }) => {
+  const [text, setText] = useState(String(value));
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (!editing) setText(String(value));
+  }, [value, editing]);
+  const commit = () => {
+    const n = Number(text);
+    const clamped = clamp255(Number.isNaN(n) ? min : n);
+    setText(String(clamped));
+    if (!Number.isNaN(n)) onChange(clamped);
+    setEditing(false);
+  };
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      value={text}
+      onFocus={() => setEditing(true)}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); }}
+      className="w-12 shrink-0 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-200 font-mono text-right outline-none focus:border-purple-500/50"
+    />
+  );
+};
+
 const ChannelSlider: React.FC<{
   icon: string;
   label: string;
@@ -1693,27 +1757,40 @@ const ChannelSlider: React.FC<{
   value: number;
   onChange: (v: number) => void;
   color: string;
-}> = ({ icon, label, address, value, onChange, color }) => (
-  <div className="flex items-center gap-2 group">
-    <span className="text-xs w-5 text-center shrink-0" title={icon.length > 1 ? icon : ''}>{icon}</span>
-    <div className="flex-1 min-w-0 flex items-center gap-2">
-      <span className="text-[10px] text-gray-400 truncate w-28 shrink-0" title={label}>
-        {label}
-      </span>
-      <input
-        type="range"
-        min={0}
-        max={255}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="flex-1 h-1 cursor-pointer accent-purple-500"
-        style={{ accentColor: color.startsWith('bg-') ? undefined : color }}
-      />
-      <span className="text-[10px] text-gray-300 font-mono w-8 text-right shrink-0">{value}</span>
-      <span className="text-[8px] text-gray-600 w-8 text-right shrink-0 hidden group-hover:inline">@{address}</span>
+}> = ({ icon, label, address, value, onChange, color }) => {
+  const step = (delta: number) => onChange(clamp255(value + delta));
+  return (
+    <div className="flex items-center gap-2 group">
+      <span className="text-xs w-5 text-center shrink-0" title={icon.length > 1 ? icon : ''}>{icon}</span>
+      <div className="flex-1 min-w-0 flex items-center gap-1.5">
+        <span className="text-[10px] text-gray-400 truncate w-24 shrink-0" title={label}>
+          {label}
+        </span>
+        <button
+          onClick={() => step(-1)}
+          title="-1"
+          className="w-5 h-5 shrink-0 rounded bg-gray-800/80 border border-gray-700 hover:bg-gray-700 text-gray-300 text-xs leading-none flex items-center justify-center"
+        >−</button>
+        <input
+          type="range"
+          min={0}
+          max={255}
+          value={value}
+          onChange={(e) => onChange(clamp255(Number(e.target.value)))}
+          className="flex-1 h-1 cursor-pointer accent-purple-500"
+          style={{ accentColor: color.startsWith('bg-') ? undefined : color }}
+        />
+        <button
+          onClick={() => step(1)}
+          title="+1"
+          className="w-5 h-5 shrink-0 rounded bg-gray-800/80 border border-gray-700 hover:bg-gray-700 text-gray-300 text-xs leading-none flex items-center justify-center"
+        >+</button>
+        <NumberField value={value} min={0} max={255} onChange={onChange} />
+        <span className="text-[8px] text-gray-600 w-8 text-right shrink-0 hidden group-hover:inline">@{address}</span>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 // ─── Save Icon (minimal inline SVG since lucide doesn't have Save) ──
 
@@ -1803,7 +1880,7 @@ const ChaserList: React.FC = () => {
       {ctxMenu.visible && (
         <div
           className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
-          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          style={{ ...clampRect(ctxMenu.x, ctxMenu.y, 240, 240, window.innerWidth, window.innerHeight) }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider">{ctxMenu.name}</div>
@@ -2891,7 +2968,7 @@ const CueListList: React.FC = () => {
 
       {ctxMenu.visible && (
         <div className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
-          style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
+          style={{ ...clampRect(ctxMenu.x, ctxMenu.y, 240, 240, window.innerWidth, window.innerHeight) }} onClick={(e) => e.stopPropagation()}>
           <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider">{ctxMenu.name}</div>
           <button onClick={() => { setConfirmDelete(ctxMenu.id); setCtxMenu((c) => ({ ...c, visible: false })); }}
             className="w-full text-left px-3 py-1.5 text-xs text-red-300 hover:bg-red-600/20 flex items-center gap-2">
@@ -3767,8 +3844,8 @@ const EFXEditor: React.FC = () => {
               <label className="block text-[10px] text-gray-500">X Offset: {xOffset}</label>
               <input
                 type="range"
-                min={-255}
-                max={255}
+                min={-400}
+                max={400}
                 value={xOffset}
                 onChange={(e) => setXOffset(Number(e.target.value))}
                 className="w-full accent-purple-500"
@@ -3778,8 +3855,8 @@ const EFXEditor: React.FC = () => {
               <label className="block text-[10px] text-gray-500">Y Offset: {yOffset}</label>
               <input
                 type="range"
-                min={-255}
-                max={255}
+                min={-400}
+                max={400}
                 value={yOffset}
                 onChange={(e) => setYOffset(Number(e.target.value))}
                 className="w-full accent-purple-500"
@@ -4661,7 +4738,7 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
       {contextMenu.visible && (
         <div
           className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
+          style={{ ...clampRect(contextMenu.x, contextMenu.y, 240, 240, window.innerWidth, window.innerHeight) }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider">
@@ -5820,7 +5897,7 @@ const PatchedFixtureList: React.FC = () => {
       {ctxMenu.visible && (
         <div
           className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
-          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          style={{ ...clampRect(ctxMenu.x, ctxMenu.y, 240, 240, window.innerWidth, window.innerHeight) }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider">
@@ -5939,7 +6016,7 @@ const GroupsList: React.FC = () => {
       {ctxMenu.visible && (
         <div
           className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
-          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          style={{ ...clampRect(ctxMenu.x, ctxMenu.y, 240, 240, window.innerWidth, window.innerHeight) }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider">
@@ -6339,7 +6416,10 @@ const DesignSettingsPanel: React.FC = () => {
         try {
           const ports = await window.lightMaestro.dmx.listSerialPorts();
           const dmxPorts = (ports || []).filter(isDmxPort);
-          const chosen = dmxPorts[0] || (ports && ports[0]);
+          // Never fall back to an arbitrary port (e.g. a Bluetooth serial link)
+          // when no DMX adapter is detected — that silently misconfigures a
+          // non-DMX port as USB-DMX output.
+          const chosen = dmxPorts[0];
           if (chosen) {
             const st = useShowStore.getState();
             st.setShowUniverses(st.universes.map((u: any) => u.type === 'usb-dmx' && !u.serialPort ? { ...u, serialPort: chosen.path } : u));
@@ -6389,7 +6469,8 @@ const DesignSettingsPanel: React.FC = () => {
       try {
         const ports = await window.lightMaestro.dmx.listSerialPorts();
         const dmxPorts = (ports || []).filter(isDmxPort);
-        const chosen = dmxPorts[0] || (ports && ports[0]);
+        // Same rule as above: only auto-assign a port that looks like a DMX adapter.
+        const chosen = dmxPorts[0];
         if (chosen) {
           const merged = st.universes.map((u: any) => u.type === 'usb-dmx' && !u.serialPort ? { ...u, serialPort: chosen.path } : u);
           st.setShowUniverses(merged);
@@ -6661,8 +6742,16 @@ const FIXTURE_TYPES = [
 
 const CHANNEL_TYPES = [
   'Intensity', 'Pan', 'Tilt', 'Colour', 'Gobo', 'Shutter',
-  'Strobe', 'Speed', 'Prism', 'Effect', 'Beam', 'Macro', 'Nothing', 'Maintenance',
+  'Strobe', 'Speed', 'Prism', 'Effect', 'Beam', 'Zoom', 'Frost', 'Focus', 'Iris',
+  'Macro', 'Nothing', 'Maintenance',
 ];
+
+/** Libellé du sous-menu de capacités par type de canal (fallback « Capabilities »). */
+const CAPABILITY_LABELS: Record<string, string> = {
+  Colour: 'Colors',
+  Gobo: 'Gobo Patterns',
+  Macro: 'Macros',
+};
 
 interface EditorChannel {
   name: string;
@@ -6687,7 +6776,7 @@ const FixtureEditorModal: React.FC<{ onClose: () => void; preloadedFixture?: any
   const [fixtureType, setFixtureType] = useState(preloadedFixture?.type || 'Moving Head');
   const [createModes, setCreateModes] = useState<EditorMode[]>(
     preloadedFixture?.modes?.length > 0
-      ? preloadedFixture.modes.map((m: any) => ({ name: m.name, channels: m.channels?.map((ch: any) => ({ name: ch.name, type: ch.type, defaultVal: ch.defaultValue ?? 0, caps: ch.capabilities?.map((c: any) => ({ min: c.min, max: c.max, name: c.name, color: c.color })) || [] })) || [] }))
+      ? preloadedFixture.modes.map((m: any) => ({ name: m.name, channels: m.channels?.map((ch: any) => ({ name: ch.name, type: ch.type, defaultValue: ch.defaultValue ?? 0, capabilities: ch.capabilities?.map((c: any) => ({ min: c.min, max: c.max, name: c.name, color: c.color })) || [] })) || [] }))
       : [{ name: 'Default', channels: [] }]
   );
   // Physical properties (create tab)
@@ -6804,7 +6893,9 @@ const FixtureEditorModal: React.FC<{ onClose: () => void; preloadedFixture?: any
   const addCapability = (target: 'create' | 'edit', mi: number, ci: number) => {
     const [modes] = target === 'create' ? [createModes] as const : [editModes] as const;
     const ch = modes[mi].channels[ci];
-    updateChannel(target, mi, ci, { capabilities: [...(ch.capabilities || []), { min: 0, max: 255, name: 'New Color', color: '#ff0000' }] });
+    const cap: { min: number; max: number; name: string; color?: string } = { min: 0, max: 255, name: 'New Capability' };
+    if (ch.type === 'Colour') cap.color = '#ff0000';
+    updateChannel(target, mi, ci, { capabilities: [...(ch.capabilities || []), cap] });
   };
 
   const removeCapability = (target: 'create' | 'edit', mi: number, ci: number, capIdx: number) => {
@@ -6897,80 +6988,32 @@ const FixtureEditorModal: React.FC<{ onClose: () => void; preloadedFixture?: any
           className="p-1 text-gray-500 hover:text-gray-300 disabled:opacity-20 shrink-0" title="Move down">▼</button>
         <button onClick={() => removeChannel(target, mi, ci)} className="p-1 text-gray-500 hover:text-red-400 shrink-0" title="Remove channel"><X size={14} /></button>
       </div>
-      {ch.type === 'Colour' && (
-        <div className="ml-7 space-y-1.5">
-          <div className="flex items-center gap-2">
-            <span className="text-[9px] text-gray-500 uppercase tracking-wider">Colors</span>
-            <button onClick={() => addCapability(target, mi, ci)}
-              className="text-[9px] text-purple-400 hover:text-purple-300 flex items-center gap-1">
-              <Plus size={10} /> Add
-            </button>
-          </div>
-          {(ch.capabilities || []).map((cap, cci) => (
-            <div key={cci} className="flex items-center gap-1.5">
-              <span className="text-[9px] text-gray-600 w-5 shrink-0">{cci + 1}</span>
-              <input type="number" value={cap.min} onChange={(e) => updateCapability(target, mi, ci, cci, { min: Math.max(0, Math.min(255, parseInt(e.target.value) || 0)) })}
-                className="w-12 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono outline-none" placeholder="0" />
-              <span className="text-[9px] text-gray-600">–</span>
-              <input type="number" value={cap.max} onChange={(e) => updateCapability(target, mi, ci, cci, { max: Math.max(0, Math.min(255, parseInt(e.target.value) || 0)) })}
-                className="w-12 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono outline-none" placeholder="255" />
-              <input type="text" value={cap.name} onChange={(e) => updateCapability(target, mi, ci, cci, { name: e.target.value })}
-                className="flex-1 min-w-0 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 outline-none" placeholder="Color name" />
+      <div className="ml-7 space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] text-gray-500 uppercase tracking-wider">{CAPABILITY_LABELS[ch.type] ?? 'Capabilities'}</span>
+          <button onClick={() => addCapability(target, mi, ci)}
+            className="text-[9px] text-purple-400 hover:text-purple-300 flex items-center gap-1">
+            <Plus size={10} /> Add
+          </button>
+        </div>
+        {(ch.capabilities || []).map((cap, cci) => (
+          <div key={cci} className="flex items-center gap-1.5">
+            <span className="text-[9px] text-gray-600 w-5 shrink-0">{cci + 1}</span>
+            <input type="number" value={cap.min} onChange={(e) => updateCapability(target, mi, ci, cci, { min: Math.max(0, Math.min(255, parseInt(e.target.value) || 0)) })}
+              className="w-12 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono outline-none" placeholder="0" />
+            <span className="text-[9px] text-gray-600">–</span>
+            <input type="number" value={cap.max} onChange={(e) => updateCapability(target, mi, ci, cci, { max: Math.max(0, Math.min(255, parseInt(e.target.value) || 0)) })}
+              className="w-12 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono outline-none" placeholder="255" />
+            <input type="text" value={cap.name} onChange={(e) => updateCapability(target, mi, ci, cci, { name: e.target.value })}
+              className="flex-1 min-w-0 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 outline-none" placeholder="Name" />
+            {ch.type === 'Colour' && (
               <input type="color" value={cap.color || '#ff0000'} onChange={(e) => updateCapability(target, mi, ci, cci, { color: e.target.value })}
                 className="w-6 h-5 rounded cursor-pointer border-0 p-0 bg-transparent shrink-0" />
-              <button onClick={() => removeCapability(target, mi, ci, cci)} className="text-gray-500 hover:text-red-400 shrink-0" title="Remove color"><X size={10} /></button>
-            </div>
-          ))}
-        </div>
-      )}
-      {ch.type === 'Gobo' && (
-        <div className="ml-7 space-y-1.5">
-          <div className="flex items-center gap-2">
-            <span className="text-[9px] text-gray-500 uppercase tracking-wider">Gobo Patterns</span>
-            <button onClick={() => addCapability(target, mi, ci)}
-              className="text-[9px] text-purple-400 hover:text-purple-300 flex items-center gap-1">
-              <Plus size={10} /> Add
-            </button>
+            )}
+            <button onClick={() => removeCapability(target, mi, ci, cci)} className="text-gray-500 hover:text-red-400 shrink-0" title="Remove"><X size={10} /></button>
           </div>
-          {(ch.capabilities || []).map((cap, cci) => (
-            <div key={cci} className="flex items-center gap-1.5">
-              <span className="text-[9px] text-gray-600 w-5 shrink-0">{cci + 1}</span>
-              <input type="number" value={cap.min} onChange={(e) => updateCapability(target, mi, ci, cci, { min: Math.max(0, Math.min(255, parseInt(e.target.value) || 0)) })}
-                className="w-12 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono outline-none" placeholder="0" />
-              <span className="text-[9px] text-gray-600">–</span>
-              <input type="number" value={cap.max} onChange={(e) => updateCapability(target, mi, ci, cci, { max: Math.max(0, Math.min(255, parseInt(e.target.value) || 0)) })}
-                className="w-12 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono outline-none" placeholder="255" />
-              <input type="text" value={cap.name} onChange={(e) => updateCapability(target, mi, ci, cci, { name: e.target.value })}
-                className="flex-1 min-w-0 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 outline-none" placeholder="Gobo name" />
-              <button onClick={() => removeCapability(target, mi, ci, cci)} className="text-gray-500 hover:text-red-400 shrink-0" title="Remove gobo"><X size={10} /></button>
-            </div>
-          ))}
-        </div>
-      )}
-      {ch.type === 'Macro' && (
-        <div className="ml-7 space-y-1.5">
-          <div className="flex items-center gap-2">
-            <span className="text-[9px] text-gray-500 uppercase tracking-wider">Macros</span>
-            <button onClick={() => addCapability(target, mi, ci)}
-              className="text-[9px] text-purple-400 hover:text-purple-300 flex items-center gap-1">
-              <Plus size={10} /> Add
-            </button>
-          </div>
-          {(ch.capabilities || []).map((cap, cci) => (
-            <div key={cci} className="flex items-center gap-1.5">
-              <span className="text-[9px] text-gray-600 w-5 shrink-0">{cci + 1}</span>
-              <input type="number" value={cap.min} onChange={(e) => updateCapability(target, mi, ci, cci, { min: Math.max(0, Math.min(255, parseInt(e.target.value) || 0)) })}
-                className="w-12 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono outline-none" placeholder="0" />
-              <span className="text-[9px] text-gray-600">–</span>
-              <input type="number" value={cap.max} onChange={(e) => updateCapability(target, mi, ci, cci, { max: Math.max(0, Math.min(255, parseInt(e.target.value) || 0)) })}
-                className="w-12 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono outline-none" placeholder="255" />
-              <input type="text" value={cap.name} onChange={(e) => updateCapability(target, mi, ci, cci, { name: e.target.value })}
-                className="flex-1 min-w-0 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 outline-none" placeholder="Macro name" />
-              <button onClick={() => removeCapability(target, mi, ci, cci)} className="text-gray-500 hover:text-red-400 shrink-0" title="Remove macro"><X size={10} /></button>
-            </div>
-          ))}
-        </div>
-      )}
+        ))}
+      </div>
     </div>
   );
 

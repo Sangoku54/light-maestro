@@ -248,8 +248,10 @@ function wheelValueToColor(
       }
     }
   }
-  // Fallback: map value 0-255 to hue
-  return new THREE.Color().setHSL(value / 255, 1, 0.5);
+  // Fallback : blanc neutre — l'arc-en-ciel calculé depuis la valeur DMX brute
+  // rendait du jaune stable pour les valeurs 60-85 (roues non analysées).
+  void value;
+  return new THREE.Color(0xffffff);
 }
 
 // ─── Fixture 3D Object ───────────────────────────────────────
@@ -1556,7 +1558,7 @@ export const Stage3D: React.FC<{
       } else if (cm.rgbOffsets) {
         const r = data[baseAddr + cm.rgbOffsets[0]] ?? 0;
         const g = data[baseAddr + cm.rgbOffsets[1]] ?? 0;
-        const b = data[baseAddr + cm.rgbOffsets[2]] ?? 0;
+        const b = cm.rgbOffsets[2] !== undefined ? (data[baseAddr + cm.rgbOffsets[2]] ?? 0) : 0;
         intensity = Math.max(r, g, b);
       } else if (cm.isLaser && cm.wheelOffset !== null) {
         // Laser à roue (IODA…) : pas de dimmer — allumé dès que la roue porte

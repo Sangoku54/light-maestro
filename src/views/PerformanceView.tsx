@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { clampRect } from '../components/clampedpopup';
 import { useTranslation } from 'react-i18next';
 import {
   Grid, Sliders, Crosshair, Music, Zap, ChevronRight, Settings,
@@ -18,6 +19,7 @@ import { dmxBridge } from '../utils/dmx-bridge';
 import { startAutoLoop, stopAutoLoop, isAutoLoopActive, stopAllAutoLoops } from '../engine/auto-loop-player';
 import { generateLoopLibrary, loopToRecipe, LOOP_KIND_LABEL, LOOP_KIND_ORDER, type AutoLoop, type LoopRecipe } from '../engine/auto-loops';
 import { preloadAudioUrl, decodeAudioUrl } from '../utils/audio-cache';
+import { importCustomFixtureDefs } from '../utils/custom-fixtures';
 import { timecodeToMs, msToTimecode, isValidTimecode } from '../engine/mtc-markers';
 import { Stage3D } from './Stage3D';
 import {
@@ -152,8 +154,8 @@ const VirtualConsolePanel: React.FC = () => {
     const onMove = (ev: MouseEvent) => {
       if (!float3DDragRef.current) return;
       setFloat3DPos({
-        x: float3DDragRef.current.startLeft + ev.clientX - float3DDragRef.current.startX,
-        y: float3DDragRef.current.startTop + ev.clientY - float3DDragRef.current.startY,
+        x: Math.max(0, Math.min(float3DDragRef.current.startLeft + ev.clientX - float3DDragRef.current.startX, window.innerWidth - 120)),
+        y: Math.max(0, Math.min(float3DDragRef.current.startTop + ev.clientY - float3DDragRef.current.startY, window.innerHeight - 40)),
       });
     };
     const onUp = () => { float3DDragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
@@ -438,8 +440,8 @@ const VirtualConsolePanel: React.FC = () => {
               const hz = efx.speed || 0.5;
               const width = efx.width ?? 0.5;
               const height = efx.height ?? 0.5;
-              const xOffset = ((efx.xOffset ?? 128) / 255) * 0.3;
-              const yOffset = ((efx.yOffset ?? 128) / 255) * 0.3;
+              const xOffset = ((efx.xOffset ?? 0) / 255) * 0.3;
+              const yOffset = ((efx.yOffset ?? 0) / 255) * 0.3;
               const rot = ((efx.rotation ?? 0) / 255) * 2 * pi;
               const rx = width * 0.7;
               const ry = height * 0.7;
@@ -830,7 +832,7 @@ const ContextMenuPopup: React.FC<{
       <div
         ref={menuRef}
         className="fixed z-[100] bg-[#12121a] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[140px]"
-        style={{ left: Math.min(x, window.innerWidth - 160), top: Math.min(y, window.innerHeight - 180) }}
+        style={{ ...clampRect(x, y, 180, 220, window.innerWidth, window.innerHeight) }}
       >
         <button
           onClick={() => onConfigure(widgetId)}
@@ -1711,6 +1713,8 @@ const VCButtonWidget: React.FC<{
             if (!r?.content) return;
             p = JSON.parse(r.content);
           }
+          // Ré-importer les fixtures custom embarquées (.lmshow/.lmproj)
+          await importCustomFixtureDefs(p?.customFixtures);
           const s = useShowStore.getState();
           // Restore from .lmshow format (ShowManager save)
           if (p.scenes) s.setScenes(p.scenes);
