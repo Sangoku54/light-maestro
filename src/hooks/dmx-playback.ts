@@ -667,6 +667,12 @@ export function useDmxPlayback(options: {
         fadeFactor = 1.0 - (t * t);
       }
 
+      // Dimmer track overrides: computed BEFORE the crossfade snapshot so the
+      // next-cue blend also respects the track (highest priority for intensity).
+      const dimmerOverrides = dimmerTracksRef?.current && dimmerTracksRef.current.length > 0
+        ? computeDimmerTrackOverrides(dimmerTracksRef.current, ct, patchedFixturesRef.current, fixtureGroupsRef?.current || [])
+        : null;
+
       // Crossfade: find next cue and pre-compute its DMX values
       let nextCue:CuePlayback|null=null;
       let crossfadeT = 0;
@@ -705,7 +711,7 @@ export function useDmxPlayback(options: {
           );
           nextCueDmx=computeDmxForCue(
             nextCue,patchedFixturesRef.current,fixtureDefs,universes as any,tierMultipliers,ftoSnap,
-            colorTrackColors,strobeOverridesEarly,undefined,disabledFixturesRef?.current,fixturePositions,choSnap
+            colorTrackColors,strobeOverridesEarly,dimmerOverrides,disabledFixturesRef?.current,fixturePositions,choSnap
           );
         }catch(e){crossfadeT=0;nextCueDmx=null;console.warn('[crossfade] computeDmxForCue failed, skipping:',e);}
       }
@@ -744,9 +750,7 @@ export function useDmxPlayback(options: {
 
       // ── Hoist per-frame computations OUT of the fixture loop (perf P1) ──
       // Pre-compute once per frame instead of once per fixture
-      const dimmerOverrides = dimmerTracksRef?.current && dimmerTracksRef.current.length > 0
-        ? computeDimmerTrackOverrides(dimmerTracksRef.current, ct, patchedFixturesRef.current, fixtureGroupsRef?.current || [])
-        : null;
+      // (dimmerOverrides is computed earlier, before the crossfade snapshot)
       const strobeOverrides = strobeOverridesEarly;
       // Pre-compute fixture-track targets for this frame
       const fixtureTrackTargets: Array<{ ft: FixtureTrack; targets: string[] }> = [];
@@ -804,11 +808,13 @@ export function useDmxPlayback(options: {
           }
           const _dimmerTrackActive = !!(dimmerOverrides && dimmerOverrides.get(pf.id));
           if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(_dimmerTrackActive){chVals[addr]=dimmerVal;}else if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=dimmerVal;}
+          // Dimmer track: propagate to ALL intensity channels (LED heads 2..N)
+          if(_dimmerTrackActive){for(const li of (fa.ledIntensityOffsets||[])){chVals[pf.startAddress+li]=dimmerVal;}}
 
           // Densite par section (activeTiers) : les fixtures hors tiers actifs
           // sont eteintes (dimmer 0 + shutter 0 + gates laser 0). Le show
           // respire entre intro (primary seul) et drop (toutes les couches).
-          if (Array.isArray(active.activeTiers) && !active.activeTiers.includes(pf.tier)) {
+          if (Array.isArray(active.activeTiers) && !active.activeTiers.includes(pf.tier) && !_dimmerTrackActive) {
             if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = 0;
             if (fa.shutterOffset !== null) chVals[pf.startAddress + fa.shutterOffset] = 0;
             if (fa.strobeOffset !== null) chVals[pf.startAddress + fa.strobeOffset] = 0;
@@ -1417,15 +1423,19 @@ export function computeDmxForCue(
         ? fixtureTrackOverrides.forcedDimmers.get(pf.id)!
         : mapIntensity(cue.intensity, energy, pf.tier, tierMultipliers);
       // Dimmer track override (highest priority for intensity)
-      if (dimmerTrackOverrides) {
-        const dimmerOverride = dimmerTrackOverrides.get(pf.id);
-        if (dimmerOverride) {
-          dimmerVal = Math.round(255 * dimmerOverride.value / 100);
-        }
+      const dimmerOverride = dimmerTrackOverrides?.get(pf.id);
+      if (dimmerOverride) {
+        dimmerVal = Math.round(255 * dimmerOverride.value / 100);
       }
       if (fa.intensityOffset !== null) {
         const addr = pf.startAddress + fa.intensityOffset;
         if (!chVals[addr] || dimmerVal > chVals[addr]) chVals[addr] = dimmerVal;
+      }
+      // Dimmer track: force-write the main intensity channel and propagate to
+      // ALL intensity channels (LED heads 2..N) — the track outranks cues.
+      if (dimmerOverride) {
+        if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = dimmerVal;
+        for (const li of (fa.ledIntensityOffsets || [])) chVals[pf.startAddress + li] = dimmerVal;
       }
 
       // Color track > fixture track > cue color
