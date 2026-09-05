@@ -15,6 +15,7 @@
 import type { PatchedFixture, FixtureTier, SavedScene, SavedChaser } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureCapability } from '../hooks/dmx-cues';
 import { analyzeChannels, type ChannelAnalysis, pickLaserModeCap } from './fixture-analyzer';
+import { movementAt, type EffectPattern } from './effect-engine';
 
 export type AutoLoopKind =
   | 'color-chase' | 'movement' | 'dimmer-pulse' | 'strobe'
@@ -155,22 +156,11 @@ interface MovementPattern {
   at: (t: number, r: number) => [number, number]; // t ∈ [0,1) → [pan, tilt]
 }
 
-/** Movement shapes for the loop library (and generateAutoLoops default). */
-const MOVEMENT_PATTERNS: MovementPattern[] = [
-  { name: 'circle', at: (t, r) => [DMX_CENTER + r * Math.cos(2 * Math.PI * t), DMX_CENTER + r * Math.sin(2 * Math.PI * t)] },
-  {
-    name: 'square',
-    at: (t, r) => {
-      const c = Math.cos(2 * Math.PI * t);
-      const s = Math.sin(2 * Math.PI * t);
-      const m = Math.max(Math.abs(c), Math.abs(s)) || 1;
-      return [DMX_CENTER + r * (c / m), DMX_CENTER + r * (s / m)];
-    },
-  },
-  { name: 'figure8', at: (t, r) => [DMX_CENTER + r * Math.sin(2 * Math.PI * t), DMX_CENTER + r * Math.sin(4 * Math.PI * t)] },
-  { name: 'zigzag', at: (t, r) => [DMX_CENTER + r * Math.sin(4 * Math.PI * t), DMX_CENTER + r * (2 * t - 1)] },
-  { name: 'sweep', at: (t, r) => [DMX_CENTER + r * Math.sin(2 * Math.PI * t), DMX_CENTER] },
-];
+/** Movement shapes — délégués à EffectEngine (source unique). */
+const MOVEMENT_PATTERNS: MovementPattern[] = (['circle', 'square', 'figure8', 'zigzag', 'sweep'] as EffectPattern[]).map((name) => ({
+  name,
+  at: (t: number, r: number) => movementAt(name, t, r),
+}));
 
 interface AnalyzedFixture {
   pf: PatchedFixture;

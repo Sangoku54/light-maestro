@@ -6,6 +6,13 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 WshShell.CurrentDirectory = scriptDir
 
+' Auto-pull avant chaque lancement (si dépôt git + remote + git dispo)
+On Error Resume Next
+If fso.FolderExists(".git") Then
+    WshShell.Run "cmd /c git pull --ff-only", 0, True
+End If
+On Error GoTo 0
+
 ' Ensure node_modules exists
 If Not fso.FolderExists("node_modules") Then
     WshShell.Run "cmd /c npm install", 0, True

@@ -1,12 +1,15 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { clampRect } from '../components/clampedpopup';
 import {
   Play, Pause, Square, Repeat, Plus, Trash2, Music, Film,
   Zap, Volume2, VolumeX, GripHorizontal, ChevronDown, X,
   SkipBack, Save, Edit2, FolderOpen, Crosshair,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useShowStore, type ShowData, type ShowTrack, type ShowTrackItem } from '../stores/showStore';
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from '../hooks/dmx-cues';
 import { sendChannelsToHardware } from '../utils/dmx-helpers';
+import { collectCustomFixtureDefs, importCustomFixtureDefs } from '../utils/custom-fixtures';
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -30,6 +33,7 @@ const RULER_TICK_INTERVAL = 5000; // 5s ticks
 // ─── Main Component ──────────────────────────────────────────
 
 export const ShowManager: React.FC = () => {
+  const { t } = useTranslation();
   const shows = useShowStore((s) => s.shows);
   const scenes = useShowStore((s) => s.scenes);
   const chasers = useShowStore((s) => s.chasers);
@@ -42,6 +46,7 @@ export const ShowManager: React.FC = () => {
   const deleteShow = useShowStore((s) => s.deleteShow);
 
   const [selectedShowId, setSelectedShowId] = useState<string | null>(null);
+  useEffect(() => { (window as any).__lm_selectedShowId = selectedShowId; }, [selectedShowId]);
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -185,6 +190,17 @@ export const ShowManager: React.FC = () => {
       setPlayheadTime(currentMs);
       const currentState = useShowStore.getState();
 
+      // Aggregate all active DMX values for this frame (HTP merge) — single write
+      // évite que chaque scène n'écrase la précédente dans le même source (bug show multi-scènes)
+      const merged: Record<number, number> = {};
+      const merge = (vals: Record<number, number>) => {
+        for (const [addrStr, v] of Object.entries(vals)) {
+          const a = Number(addrStr);
+          const prev = merged[a];
+          if (prev === undefined || v > prev) merged[a] = v;
+        }
+      };
+
       for (const track of selectedShow.tracks) {
         if (track.muted) continue;
         for (const item of track.items) {
@@ -230,7 +246,7 @@ export const ShowManager: React.FC = () => {
             if (scene) {
               const faded: Record<number, number> = {};
               for (const [addr, val] of Object.entries(scene.channels)) faded[Number(addr)] = Math.round(val * intensity);
-              sendChannelsToHardware(faded, currentState.patchedFixtures, currentState.universes, 'show-manager').catch(() => {})
+              merge(faded);
             }
           }
 
@@ -253,7 +269,7 @@ export const ShowManager: React.FC = () => {
                   if (stepScene) {
                     const faded: Record<number, number> = {};
                     for (const [addr, val] of Object.entries(stepScene.channels)) faded[Number(addr)] = Math.round(val * si * intensity);
-                    sendChannelsToHardware(faded, currentState.patchedFixtures, currentState.universes, 'show-manager').catch(() => {})
+                    merge(faded);
                   }
                   break;
                 }
@@ -343,12 +359,16 @@ export const ShowManager: React.FC = () => {
                   if (tiltOff >= 0) vals[pf.startAddress + tiltOff] = dmxTilt;
                   if (panFineOff >= 0) vals[pf.startAddress + panFineOff] = dmxPan;
                   if (tiltFineOff >= 0) vals[pf.startAddress + tiltFineOff] = dmxTilt;
-                  sendChannelsToHardware(vals, currentState.patchedFixtures, currentState.universes, 'show-manager').catch(() => {})
+                  merge(vals);
                 }
               }
             }
           }
         }
+      }
+      // Single HTP-merged write for the whole frame — toutes les scènes superposées jouent ensemble
+      if (Object.keys(merged).length > 0) {
+        sendChannelsToHardware(merged, currentState.patchedFixtures, currentState.universes, 'show-manager').catch(() => {});
       }
 
       if (currentMs >= selectedShow.duration) {
@@ -818,7 +838,7 @@ export const ShowManager: React.FC = () => {
         <button
           onClick={() => { setSelectedShowId(null); stopPlayback(); }}
           className="p-1 text-gray-500 hover:text-gray-300"
-          title="Back to shows"
+          title={t('showManager.backToShows')}
         >
           <SkipBack size={16} />
         </button>
@@ -840,22 +860,22 @@ export const ShowManager: React.FC = () => {
         <div className="flex items-center gap-1">
           {playState === 'stopped' || playState === 'paused' ? (
             <button onClick={playState === 'paused' ? resumePlayback : startPlayback}
-              className="p-1.5 rounded-md bg-green-600/20 text-green-400 hover:bg-green-600/30 transition-colors" title="Play">
+              className="p-1.5 rounded-md bg-green-600/20 text-green-400 hover:bg-green-600/30 transition-colors" title={t('showManager.play')}>
               <Play size={16} />
             </button>
           ) : (
             <button onClick={pausePlayback}
-              className="p-1.5 rounded-md bg-yellow-600/20 text-yellow-400 hover:bg-yellow-600/30 transition-colors" title="Pause">
+              className="p-1.5 rounded-md bg-yellow-600/20 text-yellow-400 hover:bg-yellow-600/30 transition-colors" title={t('showManager.pause')}>
               <Pause size={16} />
             </button>
           )}
           <button onClick={stopPlayback}
-            className="p-1.5 rounded-md bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-colors" title="Stop">
+            className="p-1.5 rounded-md bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-colors" title={t('showManager.stop')}>
             <Square size={16} />
           </button>
           <button onClick={() => setLoop(!loop)}
             className={`p-1.5 rounded-md transition-colors ${loop ? 'bg-purple-600/30 text-purple-300' : 'text-gray-500 hover:text-gray-300'}`}
-            title="Loop">
+            title={t('showManager.loop')}>
             <Repeat size={16} />
           </button>
         </div>
@@ -899,6 +919,7 @@ export const ShowManager: React.FC = () => {
                 // patched fixtures, universes...). The VC loadShow widget restores
                 // everything from this payload — a tracks-only save leaves the
                 // widget empty because chasers/scenes can't be resolved.
+                const customFixtures = await collectCustomFixtureDefs(useShowStore.getState().patchedFixtures);
                 const p = {
                   id: selectedShow.id,
                   name: selectedShow.name,
@@ -906,6 +927,8 @@ export const ShowManager: React.FC = () => {
                   tracks: selectedShow.tracks,
                   audioFileBase64: selectedShow.audioFileBase64,
                   audioFileName: selectedShow.audioFileName,
+                  musicians: (selectedShow as any).musicians,
+                  stageScene: (selectedShow as any).stageScene,
                   scenes: useShowStore.getState().scenes,
                   sceneFolders: useShowStore.getState().sceneFolders,
                   chasers: useShowStore.getState().chasers,
@@ -915,6 +938,7 @@ export const ShowManager: React.FC = () => {
                   universes: useShowStore.getState().universes,
                   fixtureGroups: useShowStore.getState().fixtureGroups,
                   fixturePositions: useShowStore.getState().fixturePositions,
+                  customFixtures,
                   format: 'lightmaestro/show',
                 };
                 // Save via system file dialog
@@ -933,15 +957,17 @@ export const ShowManager: React.FC = () => {
               } catch (err) { console.error('Save failed', err); }
             }}
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-green-600/20 text-green-300 hover:bg-green-600/30 transition-colors"
-            title="Save Show"
+            title={t('showManager.saveShow')}
           >
             <Save size={12} />
-            <span className="hidden sm:inline">Save</span>
+            <span className="hidden sm:inline">{t('showManager.save')}</span>
           </button>
           <button
             onClick={async () => {
               const show = await window.lightMaestro.show.openDialog();
               if (!show) return;
+              // Ré-importer les fixtures custom embarquées dans le .lmshow
+              await importCustomFixtureDefs(show?.customFixtures);
               // Merge into the store
               const state = useShowStore.getState();
               const others = state.shows.filter((s: any) => s.id !== show.id);
@@ -963,10 +989,10 @@ export const ShowManager: React.FC = () => {
               setSelectedShowId(show.id);
             }}
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-gray-800/30 text-gray-400 hover:bg-gray-700/40 transition-colors"
-            title="Load Show"
+            title={t('showManager.loadShow')}
           >
             <FolderOpen size={12} />
-            <span className="hidden sm:inline">Load</span>
+            <span className="hidden sm:inline">{t('showManager.load')}</span>
           </button>
         </div>
       </div>
@@ -1258,7 +1284,7 @@ export const ShowManager: React.FC = () => {
           <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
           <div
             className="fixed z-50 bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
-            style={{ left: Math.min(contextMenu.x, window.innerWidth - 180), top: Math.min(contextMenu.y, window.innerHeight - 180) }}
+            style={{ ...clampRect(contextMenu.x, contextMenu.y, 180, 180, window.innerWidth, window.innerHeight) }}
           >
             <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider">Item</div>
             <button
@@ -1301,8 +1327,7 @@ export const ShowManager: React.FC = () => {
             <div
               className="fixed z-50 bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[180px] max-h-[300px] overflow-y-auto"
               style={{
-                left: Math.min(addItemBtnRect.left, window.innerWidth - 200),
-                top: Math.min(addItemBtnRect.bottom + 4, window.innerHeight - 320),
+                ...clampRect(addItemBtnRect.left, addItemBtnRect.bottom + 4, 200, 340, window.innerWidth, window.innerHeight),
               }}
             >
               <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider">

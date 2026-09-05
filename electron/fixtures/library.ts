@@ -17,6 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import { parseStringPromise } from 'xml2js';
 import { app } from 'electron';
+import { parseGdtfFile } from './gdtf';
 
 // ─── Fixture Definition Types ──────────────────────────────
 // Mirrors QLC+'s fixture definition format
@@ -136,9 +137,13 @@ const PRESET_TYPE_MAP: Record<string, FixtureChannel['type']> = {
   ShutterOpen: 'Shutter',
   ShutterClose: 'Shutter',
   ShutterStrobe: 'Shutter',
+  ShutterStrobeSlowFast: 'Shutter',
+  ShutterStrobeFastSlow: 'Shutter',
+  ShutterStrobeRandom: 'Shutter',
   StrobeSpeed: 'Speed',
   StrobeSlowToFast: 'Shutter',
   StrobeFreqRange: 'Shutter',
+  IntensityStrobe: 'Shutter',
 
   // Speed
   SpeedPanTilt: 'Speed',
@@ -161,14 +166,32 @@ const PRESET_TYPE_MAP: Record<string, FixtureChannel['type']> = {
   // Effect
   EffectDimmer: 'Effect',
   EffectSpeed: 'Effect',
+  RotationIndexed: 'Effect',
+  RotationClockwiseSlowToFast: 'Speed',
+  RotationClockwise: 'Speed',
+  RotationCounterClockwise: 'Speed',
 
-  // Maintenance
+  // Position — laser axes
+  PositionXAxis: 'Pan',
+  PositionYAxis: 'Tilt',
+
+  // Maintenance / macros
   Maintenance: 'Maintenance',
+  NoFunction: 'Nothing',
+  ColorMacro: 'Colour',
+  GoboMacro: 'Gobo',
 };
 
 function presetToType(preset: string | undefined): FixtureChannel['type'] {
   if (!preset) return 'Nothing';
-  return PRESET_TYPE_MAP[preset] || 'Nothing';
+  if (PRESET_TYPE_MAP[preset]) return PRESET_TYPE_MAP[preset];
+  // Fine variants (e.g. IntensityRedFine, PanFine, TiltFine) — strip suffix and retry
+  if (preset.endsWith('Fine')) {
+    const base = preset.slice(0, -4);
+    if (PRESET_TYPE_MAP[base]) return PRESET_TYPE_MAP[base];
+    if (base === 'Pan' || base === 'Tilt') return base as FixtureChannel['type'];
+  }
+  return 'Nothing';
 }
 
 function groupToType(group: string | undefined): FixtureChannel['type'] {
@@ -254,6 +277,10 @@ const OFL_TYPE_MAP: Record<string, FixtureChannel['type']> = {
 
   // Rotation (gobo rotation / prism rotation)
   Rotation: 'Speed',
+
+  // Laser / Color helpers
+  Color: 'Colour',
+  Laser: 'Effect',
 
   // Catch-all
   NoFunction: 'Nothing',
@@ -444,30 +471,69 @@ function getAllFiles(dir: string, ...extensions: string[]): string[] {
   return results;
 }
 
+// Resolve the bundled fixtures directory across packaging layouts:
+// - dev + standard packaged (asar:false): <app>/resources/fixtures
+// - packaged fallback via resourcesPath:   <resources>/app/resources/fixtures
+function resolveBundledFixturesRoot(): string {
+  const candidates = [
+    path.join(app.getAppPath(), 'resources', 'fixtures'),
+    path.join(process.resourcesPath, 'app', 'resources', 'fixtures'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return candidates[0];
+}
+
+// Append a diagnostic line to userData/logs/fixture-library.log so the
+// resolved paths + loaded count can be inspected on any machine (portable
+// exe has no console). Never throws.
+function logFixtureDiagnostic(msg: string): void {
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'fixture-library.log'), `[${new Date().toISOString()}] ${msg}\n`);
+  } catch {
+    /* diagnostics must never break loading */
+  }
+}
+
 // ─── Fixture Library ───────────────────────────────────────
 
 export class FixtureLibrary {
   private fixtures: Map<string, FixtureDefinition> = new Map();
   private searchIndex: { id: string; manufacturer: string; model: string; type: string }[] = [];
   private normalizedKeys: Set<string> = new Set();
+  private normalizedIdMap: Map<string, string> = new Map();
 
   async load(): Promise<number> {
     // Clear existing data for a full reload
     this.fixtures.clear();
     this.searchIndex = [];
     this.normalizedKeys.clear();
+    this.normalizedIdMap.clear();
     this.budgetCache = null; // invalidate budget cache on reload
 
     // Load bundled QXF/JSON fixtures (recursively)
-    const fixturesDir = path.join(app.getAppPath(), 'resources', 'fixtures');
+    const fixturesDir = resolveBundledFixturesRoot();
+    logFixtureDiagnostic(
+      `load start — packaged=${app.isPackaged} appPath=${app.getAppPath()} ` +
+      `resourcesPath=${process.resourcesPath} fixturesDir=${fixturesDir} exists=${fs.existsSync(fixturesDir)}`
+    );
     if (fs.existsSync(fixturesDir)) {
       await this.loadDirectory(fixturesDir);
     }
 
     // Load OFL fixtures (separate directory, different format)
-    const oflDir = path.join(app.getAppPath(), 'resources', 'fixtures', 'ofl');
+    const oflDir = path.join(fixturesDir, 'ofl');
     if (fs.existsSync(oflDir)) {
       await this.loadOflDirectory(oflDir);
+    }
+
+    // Load bundled GDTF fixtures (ZIP format, separate parser)
+    const gdtfDir = path.join(fixturesDir, 'gdtf');
+    if (fs.existsSync(gdtfDir)) {
+      await this.loadGdtfDirectory(gdtfDir);
     }
 
     // Load user data OFL fixtures (override bundled with same ID)
@@ -479,6 +545,16 @@ export class FixtureLibrary {
       }
     }
 
+    // Load user-provided GDTF fixtures. Auto-import at launch — no button :
+    // drop .gdtf files in <userData>/gdtf-fixtures and they appear on next start.
+    // (Folder is auto-created so it's discoverable.)
+    const userGdtfDir = path.join(app.getPath('userData'), 'gdtf-fixtures');
+    fs.mkdirSync(userGdtfDir, { recursive: true });
+    const gdtfResult = await this.loadGdtfDirectory(userGdtfDir);
+    if (gdtfResult.added > 0) {
+      console.log(`User data GDTF: ${gdtfResult.added} fixtures loaded`);
+    }
+
     // Load custom fixtures from user data
     const userFixturesDir = path.join(app.getPath('userData'), 'fixtures');
     if (fs.existsSync(userFixturesDir)) {
@@ -486,6 +562,7 @@ export class FixtureLibrary {
     }
 
     console.log(`Fixture library loaded: ${this.fixtures.size} fixtures`);
+    logFixtureDiagnostic(`load done — fixtures=${this.fixtures.size}`);
     return this.fixtures.size;
   }
 
@@ -769,12 +846,16 @@ export class FixtureLibrary {
       let type: FixtureDefinition['type'] = 'Other';
       for (const cat of categories) {
         const c = cat.toLowerCase();
+        // « Laser » prioritaire et bloquant : de vrais lasers OFL listent aussi
+        // « Color Changer » / « Effect » après « Laser » (GLP impression Laser,
+        // Minuit Une IVL Carré…) et l'écrasement les déclassait en Color
+        // Changer → isLaser false → bloc laser inactif en lecture.
+        if (c.includes('laser')) { type = 'Laser'; break; }
         if (c.includes('color')) type = 'Color Changer';
         else if (c.includes('moving head')) type = 'Moving Head';
         else if (c.includes('scanner')) type = 'Scanner';
         else if (c.includes('dimmer')) type = 'Dimmer';
         else if (c.includes('strobe')) type = 'Strobe';
-        else if (c.includes('laser')) type = 'Laser';
         else if (c.includes('hazer') || c.includes('fog') || c.includes('smoke')) type = 'Smoke';
         else if (c.includes('fan')) type = 'Fan';
         else if (c.includes('flower')) type = 'Flower';
@@ -1159,6 +1240,40 @@ export class FixtureLibrary {
     return { added, skipped, updated };
   }
 
+  // ─── Load GDTF directory ─────────────────────────────────
+
+  async loadGdtfDirectory(dir: string): Promise<{ added: number; skipped: number }> {
+    let added = 0;
+    let skipped = 0;
+
+    if (!fs.existsSync(dir)) {
+      console.log('GDTF directory not found:', dir);
+      return { added, skipped };
+    }
+
+    const files = getAllFiles(dir, '.gdtf');
+    for (const file of files) {
+      try {
+        const def = await parseGdtfFile(file);
+        if (!def) {
+          console.warn(`GDTF ignoré (description.xml introuvable ou invalide) : ${path.basename(file)}`);
+          continue;
+        }
+        if (this.hasFixture(def.manufacturer, def.model)) {
+          skipped++;
+          continue;
+        }
+        this.add(def);
+        added++;
+      } catch (e) {
+        console.warn(`Failed to load GDTF fixture ${path.basename(file)}:`, e);
+      }
+    }
+
+    console.log(`GDTF import from ${path.basename(dir)}: ${added} added, ${skipped} skipped`);
+    return { added, skipped };
+  }
+
   // ─── Import QLC+ fixture definitions ─────────────────────
 
   async importQLC(filePath: string): Promise<FixtureDefinition | null> {
@@ -1174,10 +1289,31 @@ export class FixtureLibrary {
     return def;
   }
 
+  // ─── Import GDTF fixture definition ──────────────────────
+
+  async importGDTF(filePath: string): Promise<FixtureDefinition | null> {
+    const def = await parseGdtfFile(filePath);
+    if (def) {
+      this.add(def);
+      // Save to user fixtures so it survives app restart
+      const userDir = path.join(app.getPath('userData'), 'fixtures');
+      fs.mkdirSync(userDir, { recursive: true });
+      fs.writeFileSync(path.join(userDir, `${def.id}.json`), JSON.stringify(def, null, 2));
+    }
+    return def;
+  }
+
   // ─── Normalized dedup key ───────────────────────────────
 
   private normalizeKey(manufacturer: string, model: string): string {
     return `${manufacturer}-${model}`.toLowerCase().replace(/[^a-z0-9]/g, '-');
+  }
+
+  /** Normalise un id de fixture : retire le préfixe « custom- » et met en minuscules.
+   *  Permet de résoudre un fixtureDefId GDTF original (ex. "stage-right-Stage-Wash-7x10W-LED-Moving-Head")
+   *  vers la def ré-écrite par addCustom (ex. "custom-stage-right-stage-wash-7x10w-led-moving-head"). */
+  private normalizeId(id: string): string {
+    return id.replace(/^custom-/i, '').toLowerCase();
   }
 
   hasFixture(manufacturer: string, model: string): boolean {
@@ -1187,18 +1323,29 @@ export class FixtureLibrary {
   // ─── CRUD ────────────────────────────────────────────────
 
   add(def: FixtureDefinition): void {
+    const isNew = !this.fixtures.has(def.id);
     this.fixtures.set(def.id, def);
     this.normalizedKeys.add(this.normalizeKey(def.manufacturer, def.model));
-    this.searchIndex.push({
-      id: def.id,
-      manufacturer: def.manufacturer || 'Unknown',
-      model: def.model || 'Unknown',
-      type: def.type || 'Other',
-    });
+    this.normalizedIdMap.set(this.normalizeId(def.id), def.id);
+    if (isNew) {
+      this.searchIndex.push({
+        id: def.id,
+        manufacturer: def.manufacturer || 'Unknown',
+        model: def.model || 'Unknown',
+        type: def.type || 'Other',
+      });
+    }
   }
 
   addCustom(def: FixtureDefinition): void {
-    def.id = `custom-${def.manufacturer}-${def.model}`.replace(/\s+/g, '-').toLowerCase();
+    // Preserve an existing id (e.g. a re-imported "stage-right-…" / GDTF def
+    // embedded in a show file). Only mint a "custom-…" id when the caller left
+    // it empty — the old code always rewrote def.id, which broke the
+    // embed→re-import round-trip (the re-imported def was stored under a new id
+    // and the original fixtureDefId could no longer resolve it).
+    if (!def.id) {
+      def.id = `custom-${def.manufacturer}-${def.model}`.replace(/\s+/g, '-').toLowerCase();
+    }
     this.add(def);
     // Persist to disk so custom fixtures survive app restart
     const userDir = path.join(app.getPath('userData'), 'fixtures');
@@ -1207,7 +1354,11 @@ export class FixtureLibrary {
   }
 
   get(id: string): FixtureDefinition | undefined {
-    return this.fixtures.get(id);
+    const exact = this.fixtures.get(id);
+    if (exact) return exact;
+    // Fallback : résout un id GDTF original vers la def ré-écrite « custom-… ».
+    const actualId = this.normalizedIdMap.get(this.normalizeId(id));
+    return actualId ? this.fixtures.get(actualId) : undefined;
   }
 
   search(query: string): FixtureDefinition[] {
@@ -1255,7 +1406,7 @@ export class FixtureLibrary {
 
   getBudgetList(): { entries: BudgetEntry[] } {
     if (this.budgetCache) return this.budgetCache;
-    const p = path.join(app.getAppPath(), 'resources', 'fixtures', 'ofl', 'budget.json');
+    const p = path.join(resolveBundledFixturesRoot(), 'ofl', 'budget.json');
     if (fs.existsSync(p)) {
       try {
         this.budgetCache = JSON.parse(fs.readFileSync(p, 'utf-8')) as { entries: BudgetEntry[] };
@@ -1271,7 +1422,7 @@ export class FixtureLibrary {
   // ─── Fixture Instance Creator ────────────────────────────
 
   createInstance(defId: string, modeIndex: number = 0, startAddress: number = 1): FixtureInstance | null {
-    const def = this.fixtures.get(defId);
+    const def = this.get(defId);
     if (!def || modeIndex >= def.modes.length) return null;
 
     const mode = def.modes[modeIndex];

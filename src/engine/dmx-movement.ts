@@ -46,3 +46,54 @@ export function getSmartMovement(
   const idx = (fixtureIndex + timeIdx + Math.abs(hash % 97)) % patterns.length;
   return patterns[idx];
 }
+
+// ---- Spatial choreography -------------------------------------------------
+// Per-fixture phase offsets derived from real stage positions (x,y normalized 0..1).
+// Turns a uniform movement pattern into a wave/circle/expand across the whole rig.
+
+export type SpatialPattern = 'off' | 'wave' | 'circle' | 'expand' | 'contract' | 'alternate';
+
+export const SPATIAL_BY_SECTION: Record<string, SpatialPattern> = {
+  intro:   'wave',
+  verse:   'wave',
+  chorus:  'circle',
+  bridge:  'wave',
+  drop:    'expand',
+  outro:   'contract',
+  build:   'alternate',
+};
+
+/** Fallback stage position: same grid formula as showStore.initFixturePosition. */
+export function fallbackPosition(mobileIdx: number): { x: number; y: number } {
+  const col = mobileIdx % 6;
+  const row = Math.floor(mobileIdx / 6);
+  return { x: 0.1 + col * 0.16, y: 0.1 + row * 0.18 };
+}
+
+/**
+ * Per-fixture phase offset (radians) for a spatial pattern, added to the movement phase.
+ * - wave:      phase ~ -x   -> cascade sweeping left to right (lambda = full stage)
+ * - circle:    phase ~ +x   -> rotating ring along the line (Lissajous circle)
+ * - expand:    phase ~ -dist to center -> impulse from center to the edges (drop)
+ * - contract:  phase ~ +dist to center -> converge toward the center (outro)
+ * - alternate: pi on odd mobile index -> alternating pair/impair groups (build)
+ * Missing position -> grid fallback by index. Unknown/off -> 0 (current behavior).
+ */
+export function spatialPhaseFor(
+  pos: { x: number; y: number } | undefined,
+  pattern: string | undefined,
+  mobileIdx: number,
+): number {
+  if (!pattern || pattern === 'off') return 0;
+  if (pattern === 'alternate') return mobileIdx % 2 === 0 ? 0 : Math.PI;
+  const p = pos ?? fallbackPosition(Math.max(0, mobileIdx));
+  const cx = p.x - 0.5;
+  const cy = p.y - 0.5;
+  switch (pattern) {
+    case 'wave': return -Math.PI * 2 * cx;
+    case 'circle': return Math.PI * 2 * cx;
+    case 'expand': return -Math.PI * 2 * Math.sqrt(cx * cx + cy * cy);
+    case 'contract': return Math.PI * 2 * Math.sqrt(cx * cx + cy * cy);
+    default: return 0;
+  }
+}

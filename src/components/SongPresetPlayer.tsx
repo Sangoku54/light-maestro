@@ -60,6 +60,9 @@ export const SongPresetPlayer: React.FC<{
   onEnded: () => void;
 }> = ({ preset, onEnded }) => {
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const fixturePositions = useShowStore((s) => s.fixturePositions);
+  const fixturePositionsRef = useRef(fixturePositions);
+  fixturePositionsRef.current = fixturePositions;
   const universes = useShowStore((s) => s.universes);
   const fixtureGroups = useShowStore((s) => s.fixtureGroups);
   const effects = useShowStore((s) => s.effects);
@@ -243,6 +246,7 @@ export const SongPresetPlayer: React.FC<{
     chaserTracksRef,
     chasersRef,
     scenesRef,
+    fixturePositionsRef,
   });
 
   return null;

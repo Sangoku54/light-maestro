@@ -424,7 +424,7 @@ function computeNoveltyCurve(frames: SpectralFrame[]): number[] {
 // Two-pass: global threshold → local peak refinement with spectral contrast check
 // ═══════════════════════════════════════════════════════════
 
-function detectSectionBoundaries(
+export function detectSectionBoundaries(
   noveltyCurve: number[],
   energyCurve: number[],
   lowCurve: number[],
@@ -520,7 +520,7 @@ function detectSectionBoundaries(
 // 6. Self-similarity matrix & repeating pattern detection
 // ═══════════════════════════════════════════════════════════
 
-interface SegmentFeatures {
+export interface SegmentFeatures {
   startF: number;
   endF: number;
   startT: number;
@@ -553,11 +553,17 @@ function computeSegmentSimilarityMatrix(segments: SegmentFeatures[]): number[][]
 
   const getFeat = (s: SegmentFeatures) => featKeys.map(k => (s[k] - featMeans[k]) / featStds[k]);
 
+  // Poids par feature : le TIMBRE (centroid, flatness, bass ratio) domine la
+  // détection de répétition ; l'énergie est volontairement sous-pondérée pour
+  // que deux occurrences d'un même motif (verse/chorus) se groupent même si
+  // leur niveau d'énergie diffère légèrement.
+  const weights = [0.5, 1.2, 1.5, 1.3, 1.0]; // energy, bassRatio, centroidNorm, flatness, subBassRatio
+
   for (let i = 0; i < n; i++) {
     for (let j = i; j < n; j++) {
-      const sim = cosineSimilarity(getFeat(segments[i]), getFeat(segments[j]));
-      // Clamp to [0, 1] — standardized cosine can go negative
-      const clamped = Math.max(0, sim);
+      const wsim = weightedCosine(getFeat(segments[i]), getFeat(segments[j]), weights);
+      // Clamp to [0, 1]
+      const clamped = Math.max(0, Math.min(1, wsim));
       matrix[i][j] = clamped;
       matrix[j][i] = clamped;
     }
@@ -565,12 +571,39 @@ function computeSegmentSimilarityMatrix(segments: SegmentFeatures[]): number[][]
   return matrix;
 }
 
+/** Similarité cosinus pondérée (les poids accentuent les features timbrales). */
+function weightedCosine(a: number[], b: number[], weights: number[]): number {
+  let dot = 0, normA = 0, normB = 0;
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const w = weights[i] ?? 1;
+    dot += w * a[i] * b[i];
+    normA += w * a[i] * a[i];
+    normB += w * b[i] * b[i];
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom > 0 ? dot / denom : 0;
+}
+
 function detectRepeatingPatterns(
   ssm: number[][],
-  similarityThreshold: number = 0.75,
+  similarityThreshold: number = 0.7,
 ): string[] {
   const n = ssm.length;
   if (n < 2) return n === 1 ? ['A'] : [];
+
+  // Seuil ADAPTATIF : une paire est considérée « répétée » si sa similarité
+  // dépasse nettement la médiane des similarités hors-diagonale (au lieu d'un
+  // seuil absolu fragile qui dépend de l'échelle de la métrique).
+  const offDiag: number[] = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) offDiag.push(ssm[i][j]);
+  }
+  const med = offDiag.length > 0 ? median(offDiag) : 0;
+  const maxOff = offDiag.length > 0 ? Math.max(...offDiag) : 0;
+  // Seuil adaptatif : entre la médiane et le max, mais jamais sous le seuil
+  // plancher passé en argument.
+  const adaptive = Math.max(similarityThreshold, med + (maxOff - med) * 0.35);
 
   const visited = new Array(n).fill(false);
   const clusters: number[][] = [];
@@ -584,10 +617,10 @@ function detectRepeatingPatterns(
 
     for (let j = i + 1; j < n; j++) {
       if (visited[j]) continue;
-      if (ssm[i][j] >= similarityThreshold) {
+      if (ssm[i][j] >= adaptive) {
         let allSimilar = true;
         for (const c of cluster) {
-          if (ssm[c][j] < similarityThreshold * 0.85) {
+          if (ssm[c][j] < adaptive * 0.8) {
             allSimilar = false;
             break;
           }
@@ -612,7 +645,7 @@ function detectRepeatingPatterns(
 // 7. Section classification (spectral + repetition based)
 // ═══════════════════════════════════════════════════════════
 
-interface ClassifiedSection {
+export interface ClassifiedSection {
   type: TrackSection['type'];
   structuralLabel: string;
   isRepeated: boolean;
@@ -620,7 +653,7 @@ interface ClassifiedSection {
   centroidLevel: number;
 }
 
-function classifySections(
+export function classifySections(
   segments: SegmentFeatures[],
   duration: number,
   structuralLabels: string[],
@@ -650,128 +683,125 @@ function classifySections(
     result[i].isRepeated = (labelCounts.get(structuralLabels[i]) || 0) > 1;
   }
 
-  const classStats = new Map<string, { energies: number[]; centroids: number[]; bassRatios: number[] }>();
+  // Énergie globale : référence relative (plus robuste que des seuils absolus).
+  const globalMeanEnergy = mean(segments.map(s => s.energy));
+  const maxEnergy = Math.max(...segments.map(s => s.energy));
+  const energies = segments.map(s => s.energy);
+  const energyStd = Math.max(0.01, std(energies, globalMeanEnergy));
+
+  // Indique un pic d'énergie net (par rapport à la variabilité globale).
+  const energyZ = (i: number) => (segments[i].energy - globalMeanEnergy) / energyStd;
+
+  // Classe répétée la plus énergique = candidat chorus (plutôt qu'un seuil fixe).
+  const maxLabelEnergy = new Map<string, number>();
   for (let i = 0; i < N; i++) {
     const l = structuralLabels[i];
-    if (!classStats.has(l)) classStats.set(l, { energies: [], centroids: [], bassRatios: [] });
-    const s = classStats.get(l)!;
-    s.energies.push(segments[i].energy);
-    s.centroids.push(segments[i].centroidNorm);
-    s.bassRatios.push(segments[i].bassRatio);
+    maxLabelEnergy.set(l, Math.max(maxLabelEnergy.get(l) ?? -Infinity, segments[i].energy));
   }
+  const repeatedClasses = [...labelCounts.entries()].filter(([, c]) => c > 1);
+  const highestRepeatedClass = repeatedClasses
+    .reduce<{ label: string; energy: number } | null>((best, [l]) => {
+      const e = maxLabelEnergy.get(l) ?? 0;
+      if (!best || e > best.energy) return { label: l, energy: e };
+      return best;
+    }, null);
 
-  const classMeanEnergy = new Map<string, number>();
-  const classMeanCentroid = new Map<string, number>();
-  const classMeanBass = new Map<string, number>();
-  for (const [label, stats] of classStats) {
-    classMeanEnergy.set(label, mean(stats.energies));
-    classMeanCentroid.set(label, mean(stats.centroids));
-    classMeanBass.set(label, mean(stats.bassRatios));
+  // Localise le pic global d'énergie (candidat "drop").
+  let dropIdx = -1;
+  for (let i = 0; i < N; i++) {
+    if (segments[i].energy === maxEnergy) { dropIdx = i; break; }
   }
-
-  const classByEnergy = [...classMeanEnergy.entries()].sort((a, b) => b[1] - a[1]);
-  const highestEnergyClass = classByEnergy[0]?.[0] || '';
-  const numDistinctClasses = classByEnergy.length;
-  const globalMeanEnergy = mean(segments.map(s => s.energy));
 
   for (let i = 0; i < N; i++) {
     const seg = segments[i];
     const midPos = (seg.startT + seg.endT) / 2 / duration;
     const label = structuralLabels[i];
     const isRepeated = result[i].isRepeated;
-    const classEnergy = classMeanEnergy.get(label) || 0;
+    const z = energyZ(i);
 
-    if (midPos < 0.12) {
+    // ── Intro : au début du morceau ET énergie nettement basse.
+    // On élargit la fenêtre de détection à 25% pour couvrir les intro plus longues.
+    const isIntroPos = midPos < 0.25;
+    const isIntroEnergy = seg.energy < globalMeanEnergy * 0.85;
+    const isIntroZ = z < 0.5;
+    if (isIntroPos && isIntroEnergy && isIntroZ) {
       result[i].type = 'intro';
       continue;
     }
-    if (midPos > 0.92) {
+
+    // ── Outro : en fin de morceau ET énergie basse.
+    if (midPos > 0.85 && seg.energy < globalMeanEnergy * 0.95 && z < 0.3) {
       result[i].type = 'outro';
       continue;
     }
 
-    const isHighestEnergy = label === highestEnergyClass;
-    const energyRatio = seg.energy / Math.max(0.01, globalMeanEnergy);
-
-    // Bug #4 fix: require >1 distinct class and higher energy threshold for chorus
-    if (isRepeated && isHighestEnergy && classEnergy > 0.45 && numDistinctClasses > 1 && energyRatio > 1.1) {
+    // ── Chorus : la classe répétée de plus haute énergie, au-dessus de la moyenne.
+    //    (à détecter AVANT le drop : un segment répété et énergique est le
+    //     refrain, pas un drop — le drop est un événement non-répété.)
+    if (isRepeated && highestRepeatedClass && label === highestRepeatedClass.label && seg.energy >= globalMeanEnergy) {
       result[i].type = 'chorus';
       continue;
     }
 
-    if (i > 0 && seg.energy > 0.55) {
-      const prevSeg = segments[i - 1];
-      if (seg.energy > prevSeg.energy * 1.4 || seg.energy > 0.65) {
-        result[i].type = 'drop';
-        continue;
-      }
-    }
-
-    const betweenChoruses =
-      (i > 0 && result[i - 1].type === 'chorus' && i < N - 1 && structuralLabels[i + 1] === structuralLabels[i - 1]) ||
-      (i > 0 && i < N - 1 && result[i - 1].type === 'chorus' && result[i + 1].type === 'chorus');
-
-    if (betweenChoruses && seg.energy < classEnergy * 0.85) {
-      result[i].type = 'bridge';
+    // ── Drop : pic d'énergie net, NON répété, après une montée réelle.
+    //    Seuil d'énergie abaissé pour capturer les drops subtils; le contraste
+    //    montant est tout de même requis pour éviter les faux positifs.
+    const risingBefore = i > 0 && seg.energy > segments[i - 1].energy * 1.1;
+    const dropCandidate = !isRepeated && z > 0.8 && risingBefore && seg.energy > globalMeanEnergy * 1.1;
+    if (dropCandidate && i > 0 && i < N - 1 && midPos > 0.2 && midPos < 0.85) {
+      result[i].type = 'drop';
       continue;
     }
 
-    if (isRepeated && !isHighestEnergy) {
-      result[i].type = 'verse';
-      continue;
-    }
-
-    if (!isRepeated && seg.energy < 0.4) {
-      result[i].type = 'bridge';
-      continue;
-    }
-
-    // Build / pre-chorus: non-repeated segment with rising energy before a chorus
-    if (!isRepeated && i < N - 1) {
-      const nextLabel = structuralLabels[i + 1];
-      const nextIsChorusCandidate = (labelCounts.get(nextLabel) || 0) > 1
-        && nextLabel === highestEnergyClass;
-      const energyRising = i > 0 && seg.energy > segments[i - 1].energy;
-      if (nextIsChorusCandidate && (energyRising || seg.energy >= 0.35)) {
+    // ── Build : segment montant juste avant le drop (ou chorus).
+    if (i > 0 && i < N - 1) {
+      const nextZ = energyZ(i + 1);
+      const rising = seg.energy > segments[i - 1].energy;
+      if (nextZ > 1.0 && rising && (i + 1 === dropIdx || !result[i].isRepeated)) {
         result[i].type = 'build';
         continue;
       }
     }
 
-    // Non-repeated moderate-energy segment → bridge
-    if (!isRepeated && seg.energy < 0.55) {
+    // ── Bridge : non-répété ET énergie contrastée (sous la moyenne).
+    // On assouplit les seuils : énergie < 0.95*mean suffit, et z < 0.3
+    // (au lieu de < 0) permet d'inclure les segments légèrement en dessous
+    // de la moyenne qui ne sont pas des drops.
+    if (!isRepeated && seg.energy < globalMeanEnergy * 0.95 && z < 0.3) {
       result[i].type = 'bridge';
       continue;
     }
 
-    if (isRepeated) {
+    // ── Verse : classe(s) répétée(s) d'énergie moyenne/basse.
+    if (isRepeated && seg.energy < globalMeanEnergy * 1.1) {
       result[i].type = 'verse';
       continue;
     }
 
-    // Final fallback: never leave 'unknown' — verse is the safest default
-    result[i].type = 'verse';
+    // ── Repli.
+    if (seg.energy < globalMeanEnergy) {
+      result[i].type = isRepeated ? 'verse' : 'bridge';
+    } else {
+      result[i].type = isRepeated ? 'verse' : (seg.energy >= globalMeanEnergy * 1.1 ? 'chorus' : 'verse');
+    }
   }
 
+  // ── Garde-fou temporel : intro toujours au début, outro toujours à la fin ──
+  for (let i = 1; i < N; i++) if (result[i].type === 'intro') result[i].type = result[i].isRepeated ? 'verse' : 'bridge';
+  for (let i = 0; i < N - 1; i++) if (result[i].type === 'outro') result[i].type = result[i].isRepeated ? 'verse' : 'bridge';
+  // Un seul outro : si les deux derniers sont outro (cas 2 outros), garde le dernier
+  if (N >= 2 && result[N - 2].type === 'outro' && result[N - 1].type === 'outro') result[N - 2].type = 'bridge';
+
+  // ── Lissage contextuel ──
+  // Un drop isolé coincé entre deux chorus n'est pas un drop → chorus.
   for (let i = 0; i < N; i++) {
     if (result[i].type !== 'drop') continue;
-    const prevIsChorus = i > 0 && result[i - 1].type === 'chorus';
-    const nextIsChorus = i < N - 1 && result[i + 1].type === 'chorus';
-    if (prevIsChorus && nextIsChorus) {
-      result[i].type = 'chorus';
-    }
+    const prev = i > 0 ? result[i - 1].type : null;
+    const next = i < N - 1 ? result[i + 1].type : null;
+    if (prev === 'chorus' && next === 'chorus') result[i].type = 'chorus';
   }
 
-  for (let i = 0; i < N; i++) {
-    if (result[i].type !== 'chorus') continue;
-    const prevRepeated = i > 0 && structuralLabels[i - 1] === structuralLabels[i];
-    const nextRepeated = i < N - 1 && structuralLabels[i + 1] === structuralLabels[i];
-    if (!prevRepeated && !nextRepeated && i > 0 && i < N - 1) {
-      result[i].type = 'verse';
-    }
-  }
-
-  // Safety net: eliminate any remaining 'unknown' by contextual inference
+  // Éliminer les 'unknown' restants par inférence contextuelle.
   for (let i = 0; i < N; i++) {
     if (result[i].type !== 'unknown') continue;
     const prevType = i > 0 ? result[i - 1].type : null;
@@ -1247,6 +1277,7 @@ function detectGenre(
     { genre: 'electro', label: 'Electro', desc: 'Synthétique, moderne', bMin: 120, bMax: 140, bassW: 0.55, centroidW: 0.7, onsetW: 0.45, evarW: 0.35, bregW: 0.8, harmonicW: 0.25, subBassW: 0.45, energyGrowthW: 0.1, pal: 'electro' },
     { genre: 'house', label: 'House', desc: '4/4 kick, deep/progressive', bMin: 118, bMax: 130, bassW: 0.6, centroidW: 0.55, onsetW: 0.5, evarW: 0.25, bregW: 0.95, harmonicW: 0.3, subBassW: 0.6, energyGrowthW: 0.2, pal: 'house' },
     { genre: 'techno', label: 'Techno', desc: 'Industriel, hypnotique', bMin: 125, bMax: 150, bassW: 0.75, centroidW: 0.65, onsetW: 0.4, evarW: 0.15, bregW: 1.0, harmonicW: 0.1, subBassW: 0.7, energyGrowthW: 0.05, pal: 'techno' },
+    { genre: 'trance', label: 'Trance', desc: 'Melodic, arpeggiated, progressive', bMin: 125, bMax: 150, bassW: 0.5, centroidW: 0.6, onsetW: 0.3, evarW: 0.2, bregW: 0.8, harmonicW: 0.3, subBassW: 0.4, energyGrowthW: 0.1, pal: 'techno' },
     { genre: 'dubstep', label: 'Dubstep', desc: 'Wobble bass, half-time feel', bMin: 135, bMax: 155, bassW: 0.9, centroidW: 0.55, onsetW: 0.3, evarW: 0.6, bregW: 0.5, harmonicW: 0.1, subBassW: 0.95, energyGrowthW: 0.1, pal: 'dubstep' },
     { genre: 'drum_and_bass', label: 'Drum & Bass', desc: 'Breakbeats rapides, bass', bMin: 160, bMax: 185, bassW: 0.75, centroidW: 0.6, onsetW: 0.7, evarW: 0.5, bregW: 0.6, harmonicW: 0.2, subBassW: 0.7, energyGrowthW: 0.05, pal: 'cool' },
 
@@ -1729,7 +1760,7 @@ export async function analyzeAudioBuffer(
 
   // ══ Phase B: Novelty curve & section boundaries ══
   const noveltyCurve = computeNoveltyCurve(spectralFrames);
-  const boundaries = detectSectionBoundaries(noveltyCurve, normEnergy, normLow, spectralCentroidCurve, analysisRate, duration, 4);
+  const boundaries = detectSectionBoundaries(noveltyCurve, normEnergy, normLow, spectralCentroidCurve, analysisRate, duration, 3);
 
   // ══ Phase C: Build segments with spectral features ══
   // Bug #6 fix: extract real spectral flatness curve from spectralFrames
@@ -1790,7 +1821,7 @@ export async function analyzeAudioBuffer(
 
   // ══ Phase D: Self-similarity matrix & pattern detection ══
   const ssm = computeSegmentSimilarityMatrix(segments);
-  const structuralLabels = detectRepeatingPatterns(ssm, 0.85);
+  const structuralLabels = detectRepeatingPatterns(ssm, 0.7);
 
   // ══ Phase E: Classify sections (spectral + repetition) ══
   const classified = classifySections(segments, duration, structuralLabels);

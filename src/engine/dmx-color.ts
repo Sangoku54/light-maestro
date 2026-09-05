@@ -133,7 +133,7 @@ export function enrichWheelCaps(caps: DmxFixtureCapability[] | null | undefined)
 export function buildRgbSegments(colourChannels: Array<{offset:number;name:string}>): RgbSegment[] {
   const used = new Set<number>();
   const segments: RgbSegment[] = [];
-  const FAMILY_STRIP = /\b(red|green|blue|white|amber|uv|rouge|vert|bleu|blanc|ambre|rojo|verde|azul|blanco|fine)\b/gi;
+  const FAMILY_STRIP = /\b(red|green|blue|white|amber|uv|rouge|vert|bleu|blanc|ambre|rojo|verde|azul|blanco|fine)(?=\d|\b)/gi;
   const familyOf = (name: string): string =>
     name.toLowerCase().replace(FAMILY_STRIP, '').replace(/[^a-z0-9]+/g, ' ').trim();
   const families = new Map<string, number[]>();
@@ -143,8 +143,11 @@ export function buildRgbSegments(colourChannels: Array<{offset:number;name:strin
     list.push(j);
     families.set(fam, list);
   }
+  // Fix: canaux numérotés type Red1/Green1/Blue1 — /\b(red)\b/ ne matche pas "Red1" (chiffre = \w, pas de frontière)
+  const stripDigits = (s: string) => s.toLowerCase().replace(/\d+/g, ' ').replace(/\s+/g,' ').trim();
+  const matches = (name: string, re: RegExp): boolean => re.test(name) || re.test(stripDigits(name));
   const pickIn = (fam: number[], re: RegExp): number =>
-    fam.find((j) => !used.has(j) && re.test(colourChannels[j].name)) ?? -1;
+    fam.find((j) => !used.has(j) && matches(colourChannels[j].name, re)) ?? -1;
   for (const fam of families.values()) {
     const ri = pickIn(fam, isRed);
     if (ri < 0) continue;

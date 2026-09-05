@@ -524,7 +524,26 @@ ipcMain.handle('fixtures:getUpdateStatus', async () => getFixtureUpdateStatus())
 
 // ─── IPC Handlers: Show ──────────────────────────────────────
 ipcMain.handle('show:save', async (_, show: any, filePath?: string) => showStorage.save(show, filePath));
-ipcMain.handle('show:load', async (_, filePath: string) => showStorage.load(filePath));
+ipcMain.handle('show:load', async (_, filePath: string) => {
+    const rawShow = showStorage.load(filePath) as any; // .lmproj may have customFixtures not in ShowData interface
+
+    // Add custom fixtures from the show file to the fixture library
+    // so that fixtureDefId references resolve correctly during DMX playback
+    if (rawShow.customFixtures && rawShow.customFixtures.length > 0) {
+      for (const def of rawShow.customFixtures) {
+        // Normalize the ID: the .lmproj stores IDs like "custom-stage-right-stage-wash-7x10w-led-moving-head"
+        // FixtureLibrary.addCustom already handles the "custom-" prefix logic
+        // and persists to userData/fixtures/.json for survival across launches.
+        fixtureLibrary.addCustom(def);
+      }
+      console.log(`[main] Added ${rawShow.customFixtures.length} custom fixtures from show to library`);
+    }
+
+    // Return the show but strip customFixtures from the returned object
+    // so the renderer doesn't see an unexpected property
+    const { customFixtures, ...show } = rawShow;
+    return show;
+  });
 ipcMain.handle('show:listRecent', async () => showStorage.listRecent());
 ipcMain.handle('show:openDialog', async () => {
   const { filePaths } = await dialog.showOpenDialog({

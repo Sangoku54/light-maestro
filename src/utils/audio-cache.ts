@@ -23,6 +23,22 @@ function getSharedCtx(): AudioContext {
 }
 
 /**
+ * Normalise une valeur audio en data URL utilisable par fetch().
+ *
+ * Les presets récents stockent un data URL complet (data:audio/mpeg;base64,…),
+ * mais les anciens .lmpreset et certains imports stockent le base64 NU
+ * (audioDataBase64, ex. RIFF/WAV brut). fetch() échoue sur le base64 nu →
+ * decodeAudioData ne reçoit rien → le widget joue l'horloge virtuelle sans
+ * SON. On préfixe donc tout ce qui n'est déjà ni data: ni une URL réelle.
+ */
+export function normalizeAudioUrl(url: string | undefined | null): string | null {
+  if (!url) return null;
+  if (/^(data:|https?:|blob:|file:)/i.test(url)) return url;
+  // base64 nu (legacy) : sniffé par decodeAudioData (WAV/MP3) quel que soit le mime.
+  return `data:audio/mpeg;base64,${url}`;
+}
+
+/**
  * Decode a base64 data URL (or any URL) into an AudioBuffer.
  * Concurrent calls for the same URL share a single decode promise.
  * Returns null when the input is missing or decoding fails.
@@ -36,7 +52,9 @@ export async function decodeAudioUrl(url: string | undefined | null): Promise<Au
 
   const p = (async () => {
     try {
-      const resp = await fetch(url);
+      const target = normalizeAudioUrl(url);
+      if (!target) return null;
+      const resp = await fetch(target);
       const ab = await resp.arrayBuffer();
       const ctx = getSharedCtx();
       const buffer = await ctx.decodeAudioData(ab);

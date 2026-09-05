@@ -160,59 +160,71 @@ export const Stage2DEditor: React.FC = () => {
 
     const W = rect.width;
     const H = rect.height;
-    const pad = 48;
-    const sw = W - pad * 2;
-    const sh = H - pad * 2;
+    // Base aux mêmes dimensions que la vue 3D : rectangle proportionnel à stageDims (mètres), centré, même aspect que Stage3D
+    const availW = Math.max(80, W - 96);
+    const availH = Math.max(80, H - 96);
+    const aspect = Math.max(0.2, Math.min(5, stageDims.width / Math.max(0.1, stageDims.depth)));
+    let sw: number, sh: number;
+    if (availW / availH > aspect) {
+      sh = availH;
+      sw = sh * aspect;
+    } else {
+      sw = availW;
+      sh = sw / aspect;
+    }
+    const padX = (W - sw) / 2;
+    const padY = (H - sh) / 2;
+    const pad = 48; // gardé pour compatibilité hitTest (sera recalculé via padX/padY)
 
     const render = () => {
       ctx.clearRect(0, 0, W, H);
       ctx.fillStyle = '#0a0a14';
       ctx.fillRect(0, 0, W, H);
 
-      // Grid
+      // Grid — même repère que Stage3D (mètres)
       ctx.strokeStyle = '#1a1a2e';
       ctx.lineWidth = 0.5;
       const cols = stageDims.width;
       const rows = stageDims.depth;
       for (let i = 0; i <= cols; i++) {
-        const x = pad + (i / cols) * sw;
+        const x = padX + (i / cols) * sw;
         ctx.beginPath();
-        ctx.moveTo(x, pad);
-        ctx.lineTo(x, pad + sh);
+        ctx.moveTo(x, padY);
+        ctx.lineTo(x, padY + sh);
         ctx.stroke();
       }
       for (let i = 0; i <= rows; i++) {
-        const y = pad + (i / rows) * sh;
+        const y = padY + (i / rows) * sh;
         ctx.beginPath();
-        ctx.moveTo(pad, y);
-        ctx.lineTo(pad + sw, y);
+        ctx.moveTo(padX, y);
+        ctx.lineTo(padX + sw, y);
         ctx.stroke();
       }
 
-      // Stage border
+      // Stage border — mêmes dimensions/proportions que Stage3D
       ctx.strokeStyle = '#3a3a5e';
       ctx.lineWidth = 2;
-      ctx.strokeRect(pad, pad, sw, sh);
+      ctx.strokeRect(padX, padY, sw, sh);
 
       // Stage label
       ctx.fillStyle = '#3a3a5e';
       ctx.font = '10px monospace';
-      ctx.fillText(`${stageDims.width}m × ${stageDims.depth}m`, pad + 6, pad + 14);
+      ctx.fillText(`${stageDims.width}m × ${stageDims.depth}m`, padX + 6, padY + 14);
 
       // Direction labels
       ctx.fillStyle = '#4a4a6e';
       ctx.font = '9px Inter, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('FRONT (Audience ↓)', W / 2, pad - 8);
+      ctx.fillText('FRONT (Audience ↓)', padX + sw / 2, padY - 8);
       ctx.textAlign = 'left';
-      ctx.fillText('BACK', pad + sw / 2 - 16, pad + sh + 14);
+      ctx.fillText('BACK', padX + sw / 2 - 16, padY + sh + 14);
 
       // Fixtures
       for (let i = 0; i < patchedFixtures.length; i++) {
         const pf = patchedFixtures[i];
         const pos = fixturePositions[pf.id] || { x: 0.5, y: 0.3, h: 0.5, heading: 0 };
-        const fx = pad + pos.x * sw;
-        const fy = pad + pos.y * sh;
+        const fx = padX + pos.x * sw;
+        const fy = padY + pos.y * sh;
         const r = 16;
         const color = getFixtureColor(i);
         const isSelected = selectedFixtureIds.has(pf.id);
@@ -346,28 +358,36 @@ export const Stage2DEditor: React.FC = () => {
     return () => cancelAnimationFrame(animRef.current);
   }, [patchedFixtures, fixturePositions, stageDims, selectedFixtureIds, showBeams, showLabels, thumbnails]);
 
-  // ── Mouse handlers ──
+  // ── Mouse handlers — même repère centré que le rendu (aspect stageDims)
   const getCanvasCoords = useCallback((e: React.MouseEvent) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return { fx: 0, fy: 0 };
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const pad = 48;
-    const sw = rect.width - 96;
-    const sh = rect.height - 96;
-    return { fx: (x - pad) / sw, fy: (y - pad) / sh };
-  }, []);
+    const availW = Math.max(80, rect.width - 96);
+    const availH = Math.max(80, rect.height - 96);
+    const aspect = Math.max(0.2, Math.min(5, stageDims.width / Math.max(0.1, stageDims.depth)));
+    let sw: number, sh: number;
+    if (availW / availH > aspect) { sh = availH; sw = sh * aspect; } else { sw = availW; sh = sw / aspect; }
+    const padX = (rect.width - sw) / 2;
+    const padY = (rect.height - sh) / 2;
+    return { fx: (x - padX) / sw, fy: (y - padY) / sh };
+  }, [stageDims]);
 
   const hitTestFixture = useCallback((cx: number, cy: number): string | null => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return null;
-    const pad = 48;
-    const sw = rect.width - 96;
-    const sh = rect.height - 96;
+    const availW = Math.max(80, rect.width - 96);
+    const availH = Math.max(80, rect.height - 96);
+    const aspect = Math.max(0.2, Math.min(5, stageDims.width / Math.max(0.1, stageDims.depth)));
+    let sw: number, sh: number;
+    if (availW / availH > aspect) { sh = availH; sw = sh * aspect; } else { sw = availW; sh = sw / aspect; }
+    const padX = (rect.width - sw) / 2;
+    const padY = (rect.height - sh) / 2;
     for (const pf of patchedFixtures) {
       const pos = fixturePositions[pf.id] || { x: 0.5, y: 0.3, h: 0.5, heading: 0 };
-      const fx = pad + pos.x * sw;
-      const fy = pad + pos.y * sh;
+      const fx = padX + pos.x * sw;
+      const fy = padY + pos.y * sh;
       if (Math.hypot(cx - fx, cy - fy) < 20) return pf.id;
     }
     return null;
@@ -473,9 +493,9 @@ export const Stage2DEditor: React.FC = () => {
   }, [hitTestFixture]);
 
   return (
-    <div className="h-full flex flex-col bg-[#08080e]">
-      {/* Toolbar */}
-      <div className="h-9 border-b border-gray-800/30 flex items-center px-4 gap-3 shrink-0 bg-[#0d0d14]">
+    <div className="h-full flex flex-col bg-[#08080e] min-h-0 min-w-0 overflow-hidden">
+      {/* Toolbar — scroll horizontal si beaucoup de boutons (≥2 sélectionnés), ne pousse jamais le canvas */}
+      <div className="h-9 border-b border-gray-800/30 flex items-center px-4 gap-3 shrink-0 bg-[#0d0d14] overflow-x-auto overflow-y-hidden min-w-0 scrollbar-thin">
         <span className="text-xs font-semibold text-gray-400 flex items-center gap-1.5">
           <Maximize2 size={13} className="text-purple-400" /> Stage 2D
         </span>
@@ -534,11 +554,11 @@ export const Stage2DEditor: React.FC = () => {
         </span>
       </div>
 
-      {/* Canvas */}
-      <div className="flex-1 relative">
+      {/* Canvas — min-h-0/min-w-0 empêche le flex de pousser la base hors écran quand la toolbar déborde */}
+      <div className="flex-1 relative min-h-0 min-w-0 overflow-hidden">
         <canvas
           ref={canvasRef}
-          className="w-full h-full"
+          className="w-full h-full block"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}

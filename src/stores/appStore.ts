@@ -75,6 +75,8 @@ export interface QuickShowState {
   colorEntries: Array<{ id: string; time: number; endTime: number; color: string }>;
   dimmerEntries: Array<{ id: string; time: number; endTime: number; value: number }>;
   strobeEntries: Array<{ id: string; time: number; endTime: number; speed: number }>;
+  useScenesInAutoscript: boolean;
+  scenesAutoscriptWeight: number; // 0-100
 }
 
 interface DMXState {
@@ -218,6 +220,8 @@ export const useAppStore = create<AppState>()(
         colorEntries: [],
         dimmerEntries: [],
         strobeEntries: [],
+        useScenesInAutoscript: false,
+        scenesAutoscriptWeight: 30,
       },
 
       dmx: {

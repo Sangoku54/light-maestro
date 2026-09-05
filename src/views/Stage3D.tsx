@@ -19,9 +19,10 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { useShowStore, type PatchedFixture, type FixturePos, type StageScene } from '../stores/showStore';
+import { useShowStore, getFixtureColor, type PatchedFixture, type FixturePos, type StageScene, type View3DState } from '../stores/showStore';
 import { analyzeFixtureChannels, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
 import { useAppStore } from '../stores/appStore';
+import { dmxBridge } from '../utils/dmx-bridge';
 import {
   loadFixtureDefinitions,
   clearFixtureDefCache,
@@ -29,7 +30,8 @@ import {
   type DmxFixtureChannel,
   type DmxFixtureCapability,
 } from '../hooks/dmx-cues';
-import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X, LayoutGrid, Music, Zap, List, Search, Crosshair } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X, LayoutGrid, Music, Zap, List, Search, Crosshair, Sparkles } from 'lucide-react';
 import { DEFAULT_POSITIONS, DEFAULT_ROSTER, MUSICIAN_KINDS, MUSICIAN_LABELS, isRosterEmpty, normalizeRoster, rosterTotal, type MusicianKind, type MusicianRoster } from '../utils/musicians';
 import clavierImg from '../assets/musicians/clavier.png';
 import chanteuseImg from '../assets/musicians/chanteuse.png';
@@ -40,6 +42,8 @@ import guitaristeImg from '../assets/musicians/guitariste.png';
 import cuivreImg from '../assets/musicians/cuivre.png';
 import { sendFixtureOn, sendFixtureOff } from '../utils/dmx-helpers';
 import { fixtureTestState } from '../utils/fixture-test-state';
+import { generateAllThumbnails, getVariantsForCategory } from '../utils/fixtureThumbnails';
+import { useProgrammerStore } from '../stores/programmerStore';
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -52,6 +56,31 @@ const DMX_POLL_INTERVAL = 1000 / 60; // 60fps — smooth pan/tilt update every r
 const MAX_TRAIL_POINTS = 80;
 const TRAIL_ADD_INTERVAL = 100; // ms between trail samples
 const GRID_SIZE = 1; // 1m grid squares
+
+// ─── Frame the whole stage on open ──────────────────────────
+// The 3D view often lives in a narrow dock, so the default camera can crop
+// the stage and force the user to zoom out. This extends the camera along
+// its current direction just enough to fit the whole stage volume
+// (width × truss height × depth) with the current aspect — angles unchanged.
+function ensureStageFits(
+  camera: THREE.PerspectiveCamera,
+  width: number,
+  depth: number,
+  pos: THREE.Vector3,
+  target: THREE.Vector3,
+): void {
+  const size = new THREE.Vector3(width, TRUSS_HEIGHT + STAGE_HEIGHT, depth);
+  const radius = size.length() / 2;
+  const halfVFov = THREE.MathUtils.degToRad(camera.fov) / 2;
+  const halfHFov = Math.atan(Math.tan(halfVFov) * camera.aspect);
+  const fitDist = (radius / Math.sin(Math.min(halfVFov, halfHFov))) * 1.08;
+  const dir = pos.clone().sub(target);
+  if (dir.lengthSq() < 0.001) dir.set(0, 0.2, -1);
+  dir.normalize();
+  if (pos.distanceTo(target) < fitDist) {
+    pos.copy(target).addScaledVector(dir, fitDist);
+  }
+}
 
 // ─── Virtual musicians (free-form roster + SVG silhouette textures) ──
 
@@ -269,6 +298,7 @@ interface Fixture3D {
   id: string;
   group: THREE.Group;           // Root group (positioned on stage)
   bodyMesh: THREE.Mesh;         // Fixture body
+  thumbSprite?: THREE.Sprite;   // Thumbnail sprite (replaces sphere for non-moving fixtures)
   armGroup?: THREE.Group;       // Arm (pan, Y-axis rotation)
   headGroup?: THREE.Group;      // Head (tilt, X-axis rotation)
   lightTarget: THREE.Object3D;  // Where the light is attached
@@ -297,7 +327,17 @@ export const Stage3D: React.FC<{
   stageScene?: StageScene;
   onMusiciansChange?: (roster: MusicianRoster) => void;
   onStageSceneChange?: (cfg: StageScene) => void;
-}> = ({ disabledFixtures, musicians: musiciansProp, stageScene: stageSceneProp, onMusiciansChange, onStageSceneChange }) => {
+  /** External 3D view state (camera position/target, toolbar toggles).
+   *  When provided, Stage3D uses it as the source of truth for those values
+   *  and emits updates through `onView3DChange` whenever the user drags the
+   *  camera or toggles a flag. When omitted, the component falls back to
+   *  internal state (ephemeral UI chrome — old behavior). */
+  view3D?: View3DState;
+  onView3DChange?: (state: View3DState) => void;
+  /** N'affiche l'option EFX Snapshot que si true — uniquement onglet Scènes (Design) */
+  enableEfxApply?: boolean;
+}> = ({ disabledFixtures, musicians: musiciansProp, stageScene: stageSceneProp, onMusiciansChange, onStageSceneChange, view3D: view3DProp, onView3DChange, enableEfxApply }) => {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const disabledRef = useRef<Set<string>>(new Set());
   disabledRef.current = disabledFixtures ?? new Set();
@@ -316,9 +356,9 @@ export const Stage3D: React.FC<{
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
 
-  const [showBeams, setShowBeams] = useState(true);
-  const [showLabels, setShowLabels] = useState(true);
-  const [showSmoke, setShowSmoke] = useState(true);
+  const [showBeamsInternal, setShowBeamsInternal] = useState(true);
+  const [showLabelsInternal, setShowLabelsInternal] = useState(true);
+  const [showSmokeInternal, setShowSmokeInternal] = useState(true);
   const [musiciansInternal, setMusiciansInternal] = useState<MusicianRoster>(DEFAULT_ROSTER);
   const musicianPositionsRef = useRef<Record<string, { x: number; z: number }>>(buildRosterPositions(DEFAULT_ROSTER));
   const dragMusicianRef = useRef<string | null>(null);
@@ -342,6 +382,67 @@ export const Stage3D: React.FC<{
     onStageSceneChange?.(cfg);
   };
 
+  // ── Controlled 3D view state (camera + toolbar) ──
+  // Same pattern as musicians/stageScene: prop wins when supplied, otherwise
+  // we fall back to internal defaults (legacy behavior — panel detaches and the
+  // toggles revert to local state).
+  const view3DToggles: Required<Pick<View3DState, 'showBeams' | 'showSmoke' | 'showLabels'>> = {
+    showBeams: view3DProp?.showBeams ?? showBeamsInternal,
+    showSmoke: view3DProp?.showSmoke ?? showSmokeInternal,
+    showLabels: view3DProp?.showLabels ?? showLabelsInternal,
+  };
+  const showBeams = view3DToggles.showBeams;
+  const showSmoke = view3DToggles.showSmoke;
+  const showLabels = view3DToggles.showLabels;
+  // Direct mode is below — but expose the setter wrapper here for symmetry.
+  const setShowBeams = (v: boolean | ((prev: boolean) => boolean)) => {
+    const cur = view3DToggles.showBeams;
+    const next = typeof v === 'function' ? (v as (p: boolean) => boolean)(cur) : v;
+    setShowBeamsInternal(next);
+    if (view3DProp !== undefined) onView3DChange?.({ ...view3DProp, showBeams: next });
+  };
+  const setShowSmoke = (v: boolean | ((prev: boolean) => boolean)) => {
+    const cur = view3DToggles.showSmoke;
+    const next = typeof v === 'function' ? (v as (p: boolean) => boolean)(cur) : v;
+    setShowSmokeInternal(next);
+    if (view3DProp !== undefined) onView3DChange?.({ ...view3DProp, showSmoke: next });
+  };
+  const setShowLabels = (v: boolean | ((prev: boolean) => boolean)) => {
+    const cur = view3DToggles.showLabels;
+    const next = typeof v === 'function' ? (v as (p: boolean) => boolean)(cur) : v;
+    setShowLabelsInternal(next);
+    if (view3DProp !== undefined) onView3DChange?.({ ...view3DProp, showLabels: next });
+  };
+
+  // Capture current OrbitControls state and forward it to the parent so it
+  // round-trips through .lmpreset. Coalesced via a microtask so a single drag
+  // gesture (which fires dozens of `change` ticks) emits exactly one update.
+  const emitView3DCameraRef = useRef<() => void>(() => {});
+  emitView3DCameraRef.current = () => {
+    if (view3DProp === undefined || !onView3DChange) return;
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+    const cp = camera.position;
+    const ct = controls.target;
+    onView3DChange({
+      ...view3DProp,
+      cameraPosition: [cp.x, cp.y, cp.z],
+      cameraTarget: [ct.x, ct.y, ct.z],
+    });
+  };
+  const emitPendingRef = useRef(false);
+  const emitView3DCameraCoalesced = useCallback(() => {
+    // Microtask coalescing — OrbitControls fires 'change' on every pointer
+    // move, but we only want one emission per drag gesture.
+    if (emitPendingRef.current) return;
+    emitPendingRef.current = true;
+    queueMicrotask(() => {
+      emitPendingRef.current = false;
+      emitView3DCameraRef.current();
+    });
+  }, []);
+
   // Reset musician positions whenever the roster changes (manual or via prop)
   useEffect(() => {
     musicianPositionsRef.current = buildRosterPositions(musicians);
@@ -350,6 +451,7 @@ export const Stage3D: React.FC<{
   const [selectedFixtureId, setSelectedFixtureId] = useState<string | null>(null);
   const [showFixtureList, setShowFixtureList] = useState(false);
   const [fixtureSearch, setFixtureSearch] = useState('');
+  const [leftDockCollapsed, setLeftDockCollapsed] = useState(true);
   const [musiciansMenuOpen, setMusiciansMenuOpen] = useState(false);
   const musiciansBtnRef = useRef<HTMLButtonElement>(null);
   const [musiciansMenuPos, setMusiciansMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -359,16 +461,31 @@ export const Stage3D: React.FC<{
   // Fixture positions are normalized (0-1), so resizing scales hardware spacing proportionally.
   const stageDimsRef = useRef(stageDims);
   stageDimsRef.current = stageDims;
-  const [draftDims, setDraftDims] = useState({ width: stageDims.width, depth: stageDims.depth });
+  const [draftDims, setDraftDims] = useState<{ width: string | number; depth: string | number }>({ width: stageDims.width, depth: stageDims.depth });
   const commitStageDims = () => {
-    const w = Math.max(1, Number.isFinite(Number(draftDims.width)) ? Number(draftDims.width) : STAGE_WIDTH);
-    const d = Math.max(1, Number.isFinite(Number(draftDims.depth)) ? Number(draftDims.depth) : STAGE_DEPTH);
+    const wRaw = draftDims.width === '' ? NaN : Number(draftDims.width);
+    const dRaw = draftDims.depth === '' ? NaN : Number(draftDims.depth);
+    const w = Math.max(1, Number.isFinite(wRaw) ? wRaw : STAGE_WIDTH);
+    const d = Math.max(1, Number.isFinite(dRaw) ? dRaw : STAGE_DEPTH);
     setStageDims({ width: w, depth: d });
     setDraftDims({ width: w, depth: d });
   };
   // ── Rotate selected fixture on drag ────────────────
   const dragRotateRef = useRef<{ startX: number; startY: number; fixtureId: string } | null>(null);
   const [hoveredFixtureId, setHoveredFixtureId] = useState<string | null>(null);
+  const [directModeInternal, setDirectModeInternal] = useState(false);
+  const directMode = view3DProp?.directMode ?? directModeInternal;
+  const setDirectMode = (v: boolean | ((prev: boolean) => boolean)) => {
+    const cur = view3DProp?.directMode ?? directModeInternal;
+    const next = typeof v === 'function' ? (v as (p: boolean) => boolean)(cur) : v;
+    setDirectModeInternal(next);
+    if (view3DProp !== undefined) onView3DChange?.({ ...view3DProp, directMode: next });
+  };
+  // Keep draft dims in sync when stageDims changes from store (preset load, external)
+  useEffect(() => {
+    setDraftDims({ width: stageDims.width, depth: stageDims.depth });
+  }, [stageDims.width, stageDims.depth]);
+  const panTiltDragRef = useRef<{ fixtureId: string; startX: number; startY: number; startPan: number; startTilt: number } | null>(null);
 
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
   const fixturePositions = useShowStore((s) => s.fixturePositions);
@@ -411,6 +528,27 @@ export const Stage3D: React.FC<{
     });
     return () => { cancelled = true; };
   }, [patchedFixtures.map(f => f.fixtureDefId).join(',')]);
+
+  // Thumbnails cache (same source as Stage2DEditor) — id → dataUrl
+  const thumbDataUrlMap = useMemo(() => {
+    const m = new Map<string, string>();
+    try { for (const v of generateAllThumbnails()) m.set(v.id, v.dataUrl); } catch { /* SSR */ }
+    return m;
+  }, []);
+  const thumbTextureCache = useRef<Map<string, THREE.Texture>>(new Map());
+
+  function getThumbTexture(id: string | undefined, fallbackType: string): THREE.Texture | null {
+    const vid = id || getVariantsForCategory(fallbackType)[0]?.id;
+    if (!vid) return null;
+    const cached = thumbTextureCache.current.get(vid);
+    if (cached) return cached;
+    const url = thumbDataUrlMap.get(vid);
+    if (!url) return null;
+    const tex = new THREE.TextureLoader().load(url);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    thumbTextureCache.current.set(vid, tex);
+    return tex;
+  }
 
   // ── Create procedural fixture geometry ──────────────────
   const createFixtureGeometry = useCallback((
@@ -719,10 +857,48 @@ export const Stage3D: React.FC<{
     group.castShadow = false;
     group.receiveShadow = false;
 
+    // ── Thumbnail sprite: remplace la sphère / body par l'icône fixture ──
+    let thumbSprite: THREE.Sprite | undefined;
+    const tex = getThumbTexture(fixture.thumbnailId, fixture.fixtureType);
+    if (tex) {
+      const hasMovement = (channelMap.panOffsets?.length ?? 0) > 0 || (channelMap.tiltOffsets?.length ?? 0) > 0 || !!armGroup;
+      const scale = 0.55 * (pos.thumbnailScale ?? 0.75) / 0.75;
+      const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: false, sizeAttenuation: true });
+      thumbSprite = new THREE.Sprite(mat);
+      thumbSprite.scale.set(scale, scale, 1);
+      thumbSprite.userData.fixtureId = fixture.id;
+      // Attach inside headGroup if moving, otherwise at group center
+      if (headGroup) {
+        // Hide sphere mesh, keep lightExit
+        for (const c of [...headGroup.children]) {
+          if ((c as THREE.Mesh).isMesh && (c as THREE.Mesh).geometry instanceof THREE.SphereGeometry) (c as THREE.Mesh).visible = false;
+        }
+        thumbSprite.position.set(0, 0, 0);
+        headGroup.add(thumbSprite);
+      } else {
+        // Static fixture: hide body box/cylinder, show sprite slightly above
+        (bodyMesh as any).visible = false;
+        thumbSprite.position.set(0, 0.35, 0);
+        group.add(thumbSprite);
+      }
+      // Extra heads also get thumbnails (smaller)
+      for (const eh of extraHeads) {
+        for (const c of [...eh.headGroup.children]) {
+          if ((c as THREE.Mesh).isMesh && (c as THREE.Mesh).geometry instanceof THREE.SphereGeometry) (c as THREE.Mesh).visible = false;
+        }
+        const ehMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: false, sizeAttenuation: true });
+        const ehSpr = new THREE.Sprite(ehMat);
+        ehSpr.scale.set(scale * 0.7, scale * 0.7, 1);
+        ehSpr.position.set(0, 0, 0);
+        eh.headGroup.add(ehSpr);
+      }
+    }
+
     return {
       id: fixture.id,
       group,
       bodyMesh,
+      thumbSprite,
       armGroup,
       headGroup,
       lightTarget,
@@ -736,7 +912,7 @@ export const Stage3D: React.FC<{
       trailLastAdd: 0,
       extraHeads: extraHeads.length > 0 ? extraHeads : undefined,
     };
-  }, [universeIndexMap]);
+  }, [universeIndexMap, thumbDataUrlMap]);
 
   // ── Scene initialization ──────────────────────────────
   useEffect(() => {
@@ -768,19 +944,24 @@ export const Stage3D: React.FC<{
     scene.fog = new THREE.FogExp2(0x0a0a18, 0.0008);
     // Environment map so metallic materials (aluminum truss, fixtures) read as bright metal
     const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.environment = envTex;
     pmrem.dispose();
     sceneRef.current = scene;
 
-    // Camera
+    // Camera — audience view by default, pulled back so the whole stage fits
+    // (a saved preset camera, if any, is applied right after by the view3D effect)
     const camera = new THREE.PerspectiveCamera(50, W / H, 0.5, Math.max(80, STAGE_WIDTH + STAGE_DEPTH + 60));
-    camera.position.set(0, 1.2, -STAGE_DEPTH / 2 - 4); // audience view by default
-    camera.lookAt(0, STAGE_HEIGHT + 1.5, 0);
+    const defaultTarget = new THREE.Vector3(0, STAGE_HEIGHT + 1.5, 0);
+    const defaultPos = new THREE.Vector3(0, 1.2, -STAGE_DEPTH / 2 - 4);
+    ensureStageFits(camera, STAGE_WIDTH, STAGE_DEPTH, defaultPos, defaultTarget);
+    camera.position.copy(defaultPos);
+    camera.lookAt(defaultTarget);
     cameraRef.current = camera;
 
     // OrbitControls
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, STAGE_HEIGHT + 1.5, 0);
+    controls.target.copy(defaultTarget);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.minDistance = 3;
@@ -788,6 +969,11 @@ export const Stage3D: React.FC<{
     controls.maxPolarAngle = Math.PI * 0.85;
     controls.update();
     controlsRef.current = controls;
+
+    // Forward every free-flight camera change to the parent so it persists in
+    // the preset. emitView3DCameraCoalesced microtask-collapses the burst of
+    // 'change' events fired during a single drag gesture into one update.
+    controls.addEventListener('change', emitView3DCameraCoalesced);
 
     // ── Lighting ───────────────────────────────────
     // Ambient
@@ -1050,16 +1236,92 @@ export const Stage3D: React.FC<{
 
     // ── Cleanup ────────────────────────────────────
     return () => {
+      controls.removeEventListener('change', emitView3DCameraCoalesced);
       cancelAnimationFrame(animFrameRef.current);
+      // Dispose fixtures (geometries/materials/textures)
+      for (const f3d of fixturesRef.current.values()) {
+        try { scene.remove(f3d.group); } catch {}
+        try { disposeFixture3D(f3d); } catch {}
+      }
+      fixturesRef.current.clear();
+      // Dispose particles
+      if (particlesRef.current) {
+        try { scene.remove(particlesRef.current); } catch {}
+        try { particlesRef.current.geometry.dispose(); } catch {}
+        try { (particlesRef.current.material as any)?.dispose?.(); } catch {}
+        particlesRef.current = null;
+      }
+      // Dispose truss
+      try {
+        const tb = trussBeamsRef.current;
+        [tb.back, tb.front, tb.left, tb.right, ...(tb.poles || [])].forEach((o: any) => {
+          if (!o) return;
+          try { scene.remove(o); } catch {}
+          o.traverse?.((c: any) => {
+            try { c.geometry?.dispose?.(); } catch {}
+            try {
+              if (Array.isArray(c.material)) c.material.forEach((m: any) => m?.dispose?.());
+              else c.material?.dispose?.();
+            } catch {}
+          });
+        });
+        trussBeamsRef.current = { back: null, front: null, left: null, right: null, poles: [] };
+      } catch {}
+      // Dispose musicians
+      if (musiciansGroupRef.current) {
+        try { scene.remove(musiciansGroupRef.current); } catch {}
+        musiciansGroupRef.current.traverse((o: any) => {
+          if (o instanceof THREE.Sprite) {
+            try { (o.material as any).map?.dispose?.(); } catch {}
+            try { (o.material as any)?.dispose?.(); } catch {}
+          }
+        });
+        musiciansGroupRef.current = null;
+      }
+      musiciansRef.current = [];
+      // Dispose env
+      try { (envTex as any)?.dispose?.(); } catch {}
+      try { if (scene.environment) (scene.environment as any).dispose?.(); } catch {}
+      scene.environment = null;
+      (scene as any).background = null;
+      (scene as any).fog = null;
       renderer.dispose();
       controls.dispose();
-      // Fixtures live in the old scene — drop them so the sync effect re-adds them on rebuild
-      fixturesRef.current.clear();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
     };
   }, [stageDims]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Overlay gizmo (axes) ──────────────────────────
+  // Minimal gizmo via HTML (évite 2e renderer) — coin bas-gauche
+  const Gizmo: React.FC = () => (
+    <div className="absolute bottom-2 left-2 w-10 h-10 rounded bg-black/40 border border-white/10 flex items-center justify-center text-[8px] text-white/60 pointer-events-none select-none">XYZ</div>
+  );
+
+  // ── Apply external 3D view state ───────────────────────
+  // When the parent (preset) hands us a `view3DProp`, sync the camera to its
+  // position/target. We compare values (not array identity) so that the
+  // microtask-coalesced self-emit from the drag handler doesn't re-trigger
+  // an apply on every render.
+  useEffect(() => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+    const cp = view3DProp?.cameraPosition;
+    const ct = view3DProp?.cameraTarget;
+    if (!cp || !ct) return;
+    const same = (a: [number, number, number], b: [number, number, number]) =>
+      Math.abs(a[0]-b[0]) < 1e-4 && Math.abs(a[1]-b[1]) < 1e-4 && Math.abs(a[2]-b[2]) < 1e-4;
+    const cur = camera.position;
+    const tgt = controls.target;
+    const currentPos: [number, number, number] = [cur.x, cur.y, cur.z];
+    const currentTgt: [number, number, number] = [tgt.x, tgt.y, tgt.z];
+    if (same(currentPos, cp) && same(currentTgt, ct)) return;
+    camera.position.set(cp[0], cp[1], cp[2]);
+    controls.target.set(ct[0], ct[1], ct[2]);
+    controls.update();
+  }, [view3DProp?.cameraPosition, view3DProp?.cameraTarget]);
 
   // ── Handle resize ───────────────────────────────────
   useEffect(() => {
@@ -1072,6 +1334,7 @@ export const Stage3D: React.FC<{
       const H = container.clientHeight;
       camera.aspect = W / H;
       camera.updateProjectionMatrix();
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.setSize(W, H);
     };
     window.addEventListener('resize', handleResize);
@@ -1092,6 +1355,7 @@ export const Stage3D: React.FC<{
       if (W === 0 || H === 0) return;
       camera.aspect = W / H;
       camera.updateProjectionMatrix();
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.setSize(W, H);
     });
     ro.observe(container);
@@ -1250,17 +1514,20 @@ export const Stage3D: React.FC<{
   // ── Truss visibility by stage scene ────────────────
   useEffect(() => {
     const tr = trussBeamsRef.current;
-    // Back beam always visible
-    if (tr.back) tr.back.visible = true;
+    const isEmpty = stageScene === 'empty';
+    // Back beam — hidden en scène vide
+    if (tr.back) tr.back.visible = !isEmpty;
     // Front beam: rear-front or full
-    if (tr.front) tr.front.visible = stageScene !== 'rear';
+    if (tr.front) tr.front.visible = !isEmpty && stageScene !== 'rear';
     // Side beams: full only
-    if (tr.left) tr.left.visible = stageScene === 'full';
-    if (tr.right) tr.right.visible = stageScene === 'full';
-    // Poles: back corners always visible; front corners for rear-front/full
+    if (tr.left) tr.left.visible = !isEmpty && stageScene === 'full';
+    if (tr.right) tr.right.visible = !isEmpty && stageScene === 'full';
+    // Poles: back corners always visible sauf vide; front corners pour rear-front/full
     for (const pole of tr.poles) {
       const corner: string = pole.userData.corner || '';
-      if (corner.includes('back')) {
+      if (isEmpty) {
+        pole.visible = false;
+      } else if (corner.includes('back')) {
         pole.visible = true;
       } else {
         pole.visible = stageScene !== 'rear';
@@ -1493,7 +1760,19 @@ export const Stage3D: React.FC<{
   // ── DMX update function (called from render loop) ───
   const updateDmxState = useCallback(() => {
     const dmxState = useAppStore.getState().dmx;
-    let channelData = dmxState.channelData as Record<number, Uint8Array | number[]>;
+    // Use arbitrated buffer (LTP fidèle: auto-loop LTP75 > quickshow HTP40) au lieu de channelData brut
+    const bridged: Record<number, Uint8Array | number[]> = {};
+    const uniCount = universes.length || 1;
+    for (let u = 0; u < uniCount; u++) {
+      const buf = dmxBridge.getChannels(u);
+      if (buf) {
+        const arr = new Uint8Array(512);
+        for (const [chStr, v] of Object.entries(buf)) { const ch = Number(chStr); if (ch >= 1 && ch <= 512) arr[ch - 1] = v as number; }
+        bridged[u] = arr;
+      }
+    }
+    const hasBridged = Object.keys(bridged).length > 0;
+    let channelData = hasBridged ? bridged : (dmxState.channelData as Record<number, Uint8Array | number[]>);
     const blackout = dmxState.blackout ?? false;
     const grandMaster = dmxState.grandMaster ?? 255;
     const maxPanTiltSpeed = dmxState.panTiltMaxSpeed ?? 120;
@@ -1789,6 +2068,9 @@ export const Stage3D: React.FC<{
         return;
     }
 
+    // Keep the preset angle but pull back if the stage would be cropped
+    ensureStageFits(camera, stageDimsRef.current.width, stageDimsRef.current.depth, pos, target);
+
     // Animate camera
     const startPos = camera.position.clone();
     const startTarget = controls.target.clone();
@@ -1807,6 +2089,8 @@ export const Stage3D: React.FC<{
 
       if (t < 1) {
         requestAnimationFrame(animateCamera);
+      } else {
+        emitView3DCameraRef.current();
       }
     };
     requestAnimationFrame(animateCamera);
@@ -1843,7 +2127,11 @@ export const Stage3D: React.FC<{
       camera.position.lerpVectors(startPos, dest, ease);
       controls.target.lerpVectors(startTarget, target, ease);
       controls.update();
-      if (t < 1) requestAnimationFrame(animateCamera);
+      if (t < 1) {
+        requestAnimationFrame(animateCamera);
+      } else {
+        emitView3DCameraRef.current();
+      }
     };
     requestAnimationFrame(animateCamera);
   }, [fixturePositions]);
@@ -1864,7 +2152,7 @@ export const Stage3D: React.FC<{
     const targets: THREE.Object3D[] = [];
     for (const f3d of fixturesRef.current.values()) {
       f3d.group.traverse((child) => {
-        if (child instanceof THREE.Mesh) targets.push(child);
+        if (child instanceof THREE.Mesh || child instanceof THREE.Sprite) targets.push(child);
       });
     }
 
@@ -1876,12 +2164,27 @@ export const Stage3D: React.FC<{
       if (obj?.userData?.fixtureId) {
         const fid = obj.userData.fixtureId as string;
         if (fid !== selectedFixtureId) setSelectedFixtureId(fid);
+        // Direct mode : init pan/tilt drag on mousedown over selected fixture
+        if (directMode && fid === selectedFixtureId) {
+          const f3d = fixturesRef.current.get(fid);
+          if (f3d) {
+            const pf = patchedFixtures.find(f => f.id === fid);
+            const prog = useProgrammerStore.getState().channels;
+            const panAddr = pf ? pf.startAddress + (f3d.channelMap.panOffset ?? f3d.channelMap.panOffsets?.[0] ?? 0) : 0;
+            const tiltAddr = pf ? pf.startAddress + (f3d.channelMap.tiltOffset ?? f3d.channelMap.tiltOffsets?.[0] ?? 0) : 0;
+            const curPan = prog[panAddr] ?? 128;
+            const curTilt = prog[tiltAddr] ?? 128;
+            panTiltDragRef.current = { fixtureId: fid, startX: e.clientX, startY: e.clientY, startPan: curPan, startTilt: curTilt };
+            if (controlsRef.current) controlsRef.current.enabled = false;
+            e.preventDefault();
+          }
+        }
       }
     } else {
       // Clicked empty space → deselect (no auto-rotate)
       setSelectedFixtureId(null);
     }
-  }, [selectedFixtureId]);
+  }, [selectedFixtureId, directMode, patchedFixtures]);
 
   // ── Hover handler ────────────────────────────────────
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -1914,9 +2217,35 @@ export const Stage3D: React.FC<{
     }
   }, []);
 
-  // ── Rotate selected fixture on drag ────────────────
+  // ── Rotate selected fixture on drag (position) + Direct Pan/Tilt via programmer ──
   useEffect(() => {
     const onMove = (ev: MouseEvent) => {
+      // Direct Pan/Tilt has priority when directMode
+      if (panTiltDragRef.current) {
+        const { fixtureId, startX, startY, startPan, startTilt } = panTiltDragRef.current;
+        const f3d = fixturesRef.current.get(fixtureId);
+        const pf = patchedFixtures.find(f => f.id === fixtureId);
+        if (!f3d || !pf) return;
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        const pan = Math.max(0, Math.min(255, Math.round(startPan + dx * 0.7)));
+        const tilt = Math.max(0, Math.min(255, Math.round(startTilt - dy * 0.7)));
+        // Push to programmer (LTP 85) — visible en 3D + hardware, enregistrable via Store
+        const cm = f3d.channelMap;
+        const setProg = useProgrammerStore.getState().setChannel;
+        for (const off of (cm.panOffsets ?? [])) setProg(pf.startAddress + off, pan);
+        if (cm.panOffset !== null && !(cm.panOffsets ?? []).includes(cm.panOffset)) setProg(pf.startAddress + cm.panOffset, pan);
+        for (const off of (cm.tiltOffsets ?? [])) setProg(pf.startAddress + off, tilt);
+        if (cm.tiltOffset !== null && !(cm.tiltOffsets ?? []).includes(cm.tiltOffset)) setProg(pf.startAddress + cm.tiltOffset, tilt);
+        // Fallback: si pas de pan/tilt DMX, bouge la tare visuelle
+        if ((cm.panOffsets?.length ?? 0) === 0 && cm.panOffset === null && (cm.tiltOffsets?.length ?? 0) === 0 && cm.tiltOffset === null) {
+          const h = ((pan - 128) / 128) * 90;
+          const t = ((tilt - 128) / 128) * 45;
+          setFixturePosition(fixtureId, { heading: h, tilt: t });
+        }
+        if (controlsRef.current) controlsRef.current.enabled = false;
+        return;
+      }
       if (!dragRotateRef.current) return;
       const { startX, startY, fixtureId } = dragRotateRef.current;
       const dx = ev.clientX - startX;
@@ -1928,14 +2257,20 @@ export const Stage3D: React.FC<{
       setFixturePosition(fixtureId, { heading: newHeading, tilt: newTilt });
       dragRotateRef.current = { startX: ev.clientX, startY: ev.clientY, fixtureId };
     };
-    const onUp = () => { dragRotateRef.current = null; };
+    const onUp = () => {
+      if (panTiltDragRef.current) {
+        panTiltDragRef.current = null;
+        if (controlsRef.current) controlsRef.current.enabled = true;
+      }
+      dragRotateRef.current = null;
+    };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [fixturePositions, setFixturePosition]);
+  }, [fixturePositions, setFixturePosition, patchedFixtures]);
 
   // ── Selected fixture info ────────────────────────────
   const selectedFixture = selectedFixtureId
@@ -1971,6 +2306,95 @@ export const Stage3D: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFixture?.id]);
 
+  // ── EFX snapshot — uniquement si enableEfxApply (onglet Scènes) ──
+  const effects = useShowStore((s) => s.effects);
+  const [selectedEfxId, setSelectedEfxId] = useState<string>('');
+  const handleApplyEfxSnapshot = useCallback(async () => {
+    const efx = effects.find((e) => e.id === selectedEfxId);
+    if (!efx) return;
+    const sceneId = (window as any).__lm_selectedSceneId as string | null;
+    const store = useShowStore.getState();
+    // Snapshot : fige le pattern EFX à phase 0 (centre du pattern) comme valeurs DMX statiques — prévisualisable en 3D dans l'onglet Scène
+    const targetIds = efx.fixtureIds.length > 0 ? new Set(efx.fixtureIds) : selectedFixtureId ? new Set([selectedFixtureId]) : new Set<string>();
+    if (targetIds.size === 0) return;
+    // Calcule le point du pattern à phase 0 (même math que l'aperçu live DesignView.tsx:3657)
+    const phase = 0;
+    const rx = efx.width * 0.7;
+    const ry = efx.height * 0.7;
+    const rotRad = (efx.rotation * Math.PI) / 180;
+    const ox = (efx.xOffset / 255) * 0.3;
+    const oy = (efx.yOffset / 255) * 0.3;
+    let px = 0, py = 0;
+    const seg = phase / (Math.PI * 2);
+    switch (efx.pattern) {
+      case 'Circle': px = Math.cos(phase) * rx; py = Math.sin(phase) * ry; break;
+      case 'Line': { const lp = seg % 1; const lineX = lp < 0.5 ? (lp * 2) * 2 - 1 : (1 - (lp - 0.5) * 2) * 2 - 1; px = lineX * rx; py = 0; break; }
+      case 'Eight': px = Math.sin(phase) * rx; py = Math.sin(phase * 2) * ry * 0.5; break;
+      case 'Square': { const s = seg * 4; const sIdx = Math.floor(s) % 4; const sFrac = s - Math.floor(s); const cs: [number, number][] = [[1,1],[-1,1],[-1,-1],[1,-1]]; const ce: [number, number][] = [[-1,1],[-1,-1],[1,-1],[1,1]]; px = (cs[sIdx][0] + (ce[sIdx][0] - cs[sIdx][0]) * sFrac) * rx; py = (cs[sIdx][1] + (ce[sIdx][1] - cs[sIdx][1]) * sFrac) * ry; break; }
+      case 'Triangle': { const ta = seg * 3; const ti = Math.floor(ta) % 3; const tf = ta - Math.floor(ta); const tv: [number, number][] = [[0,-1],[-0.866,0.5],[0.866,0.5]]; const tn = tv[(ti+1)%3]; px = (tv[ti][0] + (tn[0]-tv[ti][0])*tf)*rx; py = (tv[ti][1] + (tn[1]-tv[ti][1])*tf)*ry; break; }
+      case 'Infinity': px = Math.cos(phase) * rx; py = Math.sin(phase * 2) * ry * 0.5; break;
+      case 'Zigzag': { const z = (seg % 1) * 2 - 1; px = z * rx; const zs = seg * 8; const zi = Math.floor(zs); const zf = zs - zi; const zy = zi % 2 === 0 ? -1 + zf * 2 : 1 - zf * 2; py = zy * ry; break; }
+      case 'Spiral': { const sc = seg % 1; const sr = 0.2 + sc * 0.8; px = Math.cos(phase) * rx * sr; py = Math.sin(phase) * ry * sr; break; }
+      case 'DoubleCircle': { const dc = Math.cos(phase) * rx; const ds = Math.sin(phase) * ry; const dc2 = Math.cos(phase + Math.PI) * rx * 0.5; const ds2 = Math.sin(phase + Math.PI) * ry * 0.5; const blending = (Math.sin(phase * 3) + 1) / 2; px = dc * (1 - blending) + dc2 * blending; py = ds * (1 - blending) + ds2 * blending; break; }
+      case 'Heart': { const t = phase; const hx = 16 * Math.pow(Math.sin(t), 3); const hy = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t); px = (hx / 16) * rx; py = (hy / 16) * -ry; break; }
+      default: px = Math.cos(phase) * rx; py = Math.sin(phase) * ry; break;
+    }
+    const rx2 = px * Math.cos(rotRad) - py * Math.sin(rotRad) + ox;
+    const ry2 = px * Math.sin(rotRad) + py * Math.cos(rotRad) + oy;
+    const dmxPan = Math.round(Math.max(0, Math.min(255, 128 + rx2 * 127)));
+    const dmxTilt = Math.round(Math.max(0, Math.min(255, 128 + ry2 * 127)));
+    // Construit les canaux DMX du snapshot (pan/tilt + dimmer 255 pour visibilité 3D)
+    const snapshot: Record<number, number> = {};
+    for (const fid of targetIds) {
+      const pf = store.patchedFixtures.find((f) => f.id === fid);
+      if (!pf) continue;
+      // Résout les offsets pan/tilt via la définition du fixture (comme l'aperçu live)
+      try {
+        const def = await window.lightMaestro.fixtures.getDefinition(pf.fixtureDefId);
+        const mode = def?.modes?.[pf.modeIndex];
+        if (!mode) continue;
+        for (let ci = 0; ci < mode.channels.length; ci++) {
+          const ch = mode.channels[ci];
+          const addr = pf.startAddress + ci;
+          if (ch.type === 'Pan') snapshot[addr] = dmxPan;
+          else if (ch.type === 'Tilt') snapshot[addr] = dmxTilt;
+          else if (ch.type === 'Intensity') snapshot[addr] = 255;
+        }
+      } catch {}
+      // Fallback via fixturePositions si pas de définition : on marque au moins le pan/tilt via le store 3D (visuel)
+      const f3d = fixturesRef.current.get(fid);
+      if (f3d?.channelMap) {
+        if (f3d.channelMap.panOffset !== null && f3d.channelMap.panOffset !== undefined) snapshot[pf.startAddress + f3d.channelMap.panOffset] = dmxPan;
+        if (f3d.channelMap.tiltOffset !== null && f3d.channelMap.tiltOffset !== undefined) snapshot[pf.startAddress + f3d.channelMap.tiltOffset] = dmxTilt;
+        if (f3d.channelMap.intensityOffset !== null) snapshot[pf.startAddress + f3d.channelMap.intensityOffset] = 255;
+      }
+    }
+    // Applique l'EFX à la scène : snapshot + lien dynamique (efxId) pour rejouer l'EFX en continu pendant la durée de la scène
+    // Libère d'abord l'aperçu design-efx (LTP 70) sinon il masque scene-efx (LTP 75) pendant 3s
+    try { const { dmxBridge } = await import('../utils/dmx-bridge'); dmxBridge.release('design-efx'); } catch {}
+    if (sceneId) {
+      const sc = store.getScene(sceneId);
+      if (sc) {
+        const tag = ` [EFX:${efx.name}]`;
+        const merged = { ...sc.channels, ...snapshot };
+        store.updateScene(sceneId, { name: sc.name.includes('[EFX:') ? sc.name : sc.name + tag, channels: merged, efxId: efx.id } as any);
+        // Push immédiat + flag pour que l'aperçu EFX ne blackout pas ces fixtures dans les 2s qui suivent
+        (window as any).__lm_efxSnapshotApplied = { sceneId, efxId: efx.id, at: Date.now() };
+        try { const { sendChannelsToHardwareAndStore } = await import('../utils/dmx-helpers'); await sendChannelsToHardwareAndStore(merged, store.patchedFixtures, store.universes); } catch {}
+      }
+    } else {
+      // Nouvelle scène : reprend la durée courante de l'éditeur si dispo, sinon 0 = infini (l'EFX ne doit pas s'arrêter seul)
+      const curDur = (document.querySelector('input[data-scene-duration]') as HTMLInputElement)?.valueAsNumber ?? 0;
+      const dur = Number.isFinite(curDur) && curDur > 0 ? curDur : 0;
+      const newId = store.createScene(`Scene + ${efx.name}`);
+      store.updateScene(newId, { name: `Scene + ${efx.name}`, channels: snapshot, efxId: efx.id, duration: dur } as any);
+      (window as any).__lm_selectedSceneId = newId;
+      (window as any).__lm_efxSnapshotApplied = { sceneId: newId, efxId: efx.id, at: Date.now() };
+      try { const { sendChannelsToHardwareAndStore } = await import('../utils/dmx-helpers'); await sendChannelsToHardwareAndStore(snapshot, store.patchedFixtures, store.universes); } catch {}
+    }
+    try { (window as any).__lm_toast?.(`EFX "${efx.name}" appliqué à la scène — prévisualisation 3D à jour`, 'success'); } catch {}
+  }, [effects, selectedEfxId, selectedFixtureId]);
+
   // ── Render ──────────────────────────────────────────
   const filteredFixtures = fixtureSearch.trim()
     ? patchedFixtures.filter((f) =>
@@ -1981,12 +2405,91 @@ export const Stage3D: React.FC<{
 
   return (
     <div className="h-full flex flex-col bg-[#08080e]">
+      {/* Header pro — groupé, lisible en régie */}
+      <div className="h-11 border-b border-gray-800/40 flex items-center px-3 gap-2 shrink-0 bg-[#0d0d14] overflow-x-auto">
+        <div className="flex items-center gap-2 min-w-max">
+          <span className="text-xs font-bold tracking-widest text-gray-300 flex items-center gap-1.5">
+            <Eye size={14} className="text-purple-400" /> {t('stage3D.title')}
+          </span>
+          <span className="w-px h-5 bg-gray-800" />
+          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Caméra</span>
+          <div className="flex items-center gap-1 p-0.5 rounded-lg bg-black/30 border border-gray-800/50">
+            <button onClick={() => setCameraPreset('front')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.frontView')}><PanelTop size={11} /> {t('stage3D.front')}</button>
+            <button onClick={() => setCameraPreset('top')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.topView')}><ChevronUp size={11} /> {t('stage3D.top')}</button>
+            <button onClick={() => setCameraPreset('side')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.sideView')}><PanelRight size={11} /> {t('stage3D.side')}</button>
+            <button onClick={() => setCameraPreset('audience')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.audienceView')}><Users size={11} /> {t('stage3D.audience')}</button>
+          </div>
+          <span className="w-px h-5 bg-gray-800" />
+          <button onClick={() => setDirectMode((v) => !v)} className={`px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 transition-all ${directMode ? 'bg-violet-600 text-white border-violet-500 shadow' : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-gray-200 hover:border-gray-600'}`} title={directMode ? t('stage3D.directOnTitle') : t('stage3D.directOffTitle')}>
+            <Crosshair size={12} /> {directMode ? t('stage3D.directOn') : t('stage3D.direct')}
+          </button>
+        </div>
+        <div className="flex-1 min-w-[12px]" />
+        <div className="flex items-center gap-2 min-w-max">
+          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider hidden lg:inline">Scène</span>
+          <div className="relative flex items-center">
+            <LayoutGrid size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
+            <select value={stageScene} onChange={(e) => handleStageSceneChange(e.target.value as StageScene)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50" title="Configuration de scène">
+              <option value="empty" className="bg-[#0d0d14]">Scène vide</option>
+              <option value="rear" className="bg-[#0d0d14]">Pont arrière</option>
+              <option value="rear-front" className="bg-[#0d0d14]">Pont arrière + avant</option>
+              <option value="full" className="bg-[#0d0d14]">Arrière + avant + 2 côtés</option>
+            </select>
+          </div>
+          <div className="hidden md:flex items-center gap-1 bg-black/20 border border-gray-800/50 rounded-lg px-2 py-1">
+            <Maximize2 size={11} className="text-gray-500" />
+            <input type="number" min={1} step={0.5} value={draftDims.width} onChange={(e) => setDraftDims((prev) => ({ ...prev, width: e.target.value }))} onBlur={commitStageDims} onKeyDown={(e) => { if (e.key === 'Enter') commitStageDims(); }} className="w-11 bg-transparent text-gray-200 text-[10px] text-center focus:outline-none" aria-label="Largeur" />
+            <span className="text-gray-600 text-[10px]">×</span>
+            <input type="number" min={1} step={0.5} value={draftDims.depth} onChange={(e) => setDraftDims((prev) => ({ ...prev, depth: e.target.value }))} onBlur={commitStageDims} onKeyDown={(e) => { if (e.key === 'Enter') commitStageDims(); }} className="w-11 bg-transparent text-gray-200 text-[10px] text-center focus:outline-none" aria-label="Profondeur" />
+            <span className="text-gray-600 text-[10px]">m</span>
+          </div>
+          <div className="relative flex items-center">
+            <Music size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
+            <button ref={musiciansBtnRef} onClick={() => setMusiciansMenuOpen(v => !v)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50 whitespace-nowrap" title="Présence musiciens/chanteurs sur scène">
+              {rosterTotal(musicians) > 0 ? `Musiciens · ${rosterTotal(musicians)}` : 'Musiciens'}
+            </button>
+          </div>
+        </div>
+      </div>
+      {/* Musiciens popup — centrée comme toutes les modales */}
+      {musiciansMenuOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setMusiciansMenuOpen(false)}>
+          <div className="w-64 rounded-lg border border-gray-700/60 bg-[#0d0d14] shadow-xl shadow-black/60 p-2" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
+              <span className="text-[10px] font-medium text-gray-300">Musiciens sur scène</span>
+              <button onClick={() => handleMusiciansChange({})} className="text-[9px] text-gray-500 hover:text-purple-300" title="Retirer tous les musiciens">Tout retirer</button>
+            </div>
+            {MUSICIAN_KINDS.map(kind => {
+              const count = musicians[kind] ?? 0;
+              const checked = count > 0;
+              return (
+                <div key={kind} className="flex items-center gap-2 px-1 py-1 rounded hover:bg-gray-800/30">
+                  <input type="checkbox" checked={checked} onChange={() => handleMusiciansChange({ ...musicians, [kind]: checked ? 0 : 1 })} className="accent-purple-500 w-3 h-3 cursor-pointer shrink-0" />
+                  <span className={`flex-1 text-[10px] ${checked ? 'text-gray-200' : 'text-gray-500'}`}>{MUSICIAN_LABELS[kind]}</span>
+                  <button onClick={() => handleMusiciansChange({ ...musicians, [kind]: Math.max(0, count - 1) })} disabled={count <= 0} className="w-5 h-5 rounded bg-gray-800/60 text-gray-300 text-[11px] leading-none hover:bg-gray-700/60 disabled:opacity-30" aria-label={`Réduire ${MUSICIAN_LABELS[kind]}`}>−</button>
+                  <span className="w-5 text-center text-[10px] text-gray-200 tabular-nums">{count}</span>
+                  <button onClick={() => handleMusiciansChange({ ...musicians, [kind]: Math.min(8, count + 1) })} className="w-5 h-5 rounded bg-gray-800/60 text-gray-300 text-[11px] leading-none hover:bg-gray-700/60" aria-label={`Augmenter ${MUSICIAN_LABELS[kind]}`}>+</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {/* Toolbar legacy — conservée cachée pour compat, le nouveau header la remplace */}
+      <div className="hidden">
       {/* Toolbar */}
       <div className="h-10 border-b border-gray-800/30 flex items-center px-4 gap-3 shrink-0 bg-[#0d0d14] overflow-x-auto">
         <div className="flex items-center gap-3 min-w-max">
         <span className="text-xs font-semibold text-gray-400 flex items-center gap-1.5">
-          <Eye size={14} className="text-purple-400" /> 3D Stage
+          <Eye size={14} className="text-purple-400" /> {t('stage3D.title')}
         </span>
+        <button
+          onClick={() => setDirectMode(v => !v)}
+          className={`px-2.5 py-1 rounded text-[10px] font-semibold border flex items-center gap-1 transition-colors ${directMode ? 'bg-violet-600 text-white border-violet-500 shadow' : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-gray-200'}`}
+          title={directMode ? t('stage3D.directOnTitle') : t('stage3D.directOffTitle')}
+        >
+          <Crosshair size={12} /> {directMode ? t('stage3D.directOn') : t('stage3D.direct')}
+        </button>
 
         <div className="w-px h-4 bg-gray-800" />
 
@@ -1994,30 +2497,30 @@ export const Stage3D: React.FC<{
         <button
           onClick={() => setCameraPreset('front')}
           className="px-2 py-1 rounded text-[10px] text-gray-500 hover:text-gray-300 hover:bg-gray-800/30 flex items-center gap-1"
-          title="Front View"
+          title={t('stage3D.frontView')}
         >
-          <PanelTop size={12} /> Front
+          <PanelTop size={12} /> {t('stage3D.front')}
         </button>
         <button
           onClick={() => setCameraPreset('top')}
           className="px-2 py-1 rounded text-[10px] text-gray-500 hover:text-gray-300 hover:bg-gray-800/30 flex items-center gap-1"
-          title="Top View"
+          title={t('stage3D.topView')}
         >
-          <ChevronUp size={12} /> Top
+          <ChevronUp size={12} /> {t('stage3D.top')}
         </button>
         <button
           onClick={() => setCameraPreset('side')}
           className="px-2 py-1 rounded text-[10px] text-gray-500 hover:text-gray-300 hover:bg-gray-800/30 flex items-center gap-1"
-          title="Side View"
+          title={t('stage3D.sideView')}
         >
-          <PanelRight size={12} /> Side
+          <PanelRight size={12} /> {t('stage3D.side')}
         </button>
         <button
           onClick={() => setCameraPreset('audience')}
           className="px-2 py-1 rounded text-[10px] text-gray-500 hover:text-gray-300 hover:bg-gray-800/30 flex items-center gap-1"
-          title="Audience View"
+          title={t('stage3D.audienceView')}
         >
-          <Users size={12} /> Audience
+          <Users size={12} /> {t('stage3D.audience')}
         </button>
 
         <div className="w-px h-4 bg-gray-800" />
@@ -2031,6 +2534,7 @@ export const Stage3D: React.FC<{
             className="bg-gray-800/40 text-gray-300 text-[10px] pl-7 pr-2 py-1 rounded border border-gray-700/40 appearance-none cursor-pointer hover:border-gray-600/60 focus:outline-none focus:border-purple-500/50"
             title="Configuration de scène"
           >
+            <option value="empty" className="bg-[#0d0d14]">Scène vide</option>
             <option value="rear" className="bg-[#0d0d14]">Pont arrière</option>
             <option value="rear-front" className="bg-[#0d0d14]">Pont arrière + avant</option>
             <option value="full" className="bg-[#0d0d14]">Arrière + avant + 2 côtés</option>
@@ -2090,60 +2594,6 @@ export const Stage3D: React.FC<{
           </button>
         </div>
 
-        {musiciansMenuOpen && musiciansMenuPos && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setMusiciansMenuOpen(false)} />
-            <div
-              className="fixed z-50 w-64 rounded-lg border border-gray-700/60 bg-[#0d0d14] shadow-xl shadow-black/60 p-2"
-              style={{ top: musiciansMenuPos.top, left: musiciansMenuPos.left }}
-            >
-              <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
-                <span className="text-[10px] font-medium text-gray-300">Musiciens sur scène</span>
-                <button
-                  onClick={() => handleMusiciansChange({})}
-                  className="text-[9px] text-gray-500 hover:text-purple-300"
-                  title="Retirer tous les musiciens"
-                >
-                  Tout retirer
-                </button>
-              </div>
-              {MUSICIAN_KINDS.map(kind => {
-                const count = musicians[kind] ?? 0;
-                const checked = count > 0;
-                return (
-                  <div key={kind} className="flex items-center gap-2 px-1 py-1 rounded hover:bg-gray-800/30">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => handleMusiciansChange({ ...musicians, [kind]: checked ? 0 : 1 })}
-                      className="accent-purple-500 w-3 h-3 cursor-pointer shrink-0"
-                    />
-                    <span className={`flex-1 text-[10px] ${checked ? 'text-gray-200' : 'text-gray-500'}`}>
-                      {MUSICIAN_LABELS[kind]}
-                    </span>
-                    <button
-                      onClick={() => handleMusiciansChange({ ...musicians, [kind]: Math.max(0, count - 1) })}
-                      disabled={count <= 0}
-                      className="w-5 h-5 rounded bg-gray-800/60 text-gray-300 text-[11px] leading-none hover:bg-gray-700/60 disabled:opacity-30"
-                      aria-label={`Réduire ${MUSICIAN_LABELS[kind]}`}
-                    >
-                      −
-                    </button>
-                    <span className="w-5 text-center text-[10px] text-gray-200 tabular-nums">{count}</span>
-                    <button
-                      onClick={() => handleMusiciansChange({ ...musicians, [kind]: Math.min(8, count + 1) })}
-                      className="w-5 h-5 rounded bg-gray-800/60 text-gray-300 text-[11px] leading-none hover:bg-gray-700/60"
-                      aria-label={`Augmenter ${MUSICIAN_LABELS[kind]}`}
-                    >
-                      +
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-
         <button
           onClick={() => setShowFixtureList(v => !v)}
           className={`px-2 py-1 rounded text-[10px] flex items-center gap-1 transition-colors ${
@@ -2161,7 +2611,53 @@ export const Stage3D: React.FC<{
         </span>
         </div>
       </div>
+      </div>{/* fin toolbar legacy cachée */}
 
+      {/* Corps pro : Left dock + Centre 3D + Right dock */}
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        {/* Left dock — Fixtures (rétractable) */}
+        {!leftDockCollapsed ? (
+          <div className="w-[260px] shrink-0 border-r border-gray-800/50 bg-[#0d0d14]/80 flex flex-col min-h-0">
+            <div className="px-3 py-2 border-b border-gray-800/50">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">Fixtures</span>
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-purple-300 font-mono">{filteredFixtures.length}</span>
+                  <button onClick={() => setLeftDockCollapsed(true)} className="w-5 h-5 rounded bg-black/30 border border-gray-800 text-gray-500 hover:text-gray-300 hover:border-gray-600 flex items-center justify-center" title="Réduire la liste">
+                    <ChevronUp size={10} className="rotate-[-90deg]" />
+                  </button>
+                </div>
+              </div>
+            <div className="mt-2 relative">
+              <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+              <input value={fixtureSearch} onChange={(e) => setFixtureSearch(e.target.value)} placeholder="Rechercher…" className="w-full pl-7 pr-2 py-1.5 bg-black/30 border border-gray-800 rounded-lg text-xs text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-purple-500/50" />
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {filteredFixtures.length === 0 ? (
+              <div className="text-xs text-gray-600 text-center py-8">Aucun projecteur</div>
+            ) : filteredFixtures.map((f) => (
+              <button key={f.id} onClick={() => { setSelectedFixtureId(f.id); focusFixture(f.id); }} className={`w-full text-left px-2.5 py-2 rounded-lg border flex items-center gap-2 transition-all ${selectedFixtureId===f.id ? 'bg-purple-600/15 border-purple-500/40 text-purple-200' : 'bg-black/20 border-gray-800/50 text-gray-400 hover:bg-white/[0.04] hover:border-gray-700'}`}>
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: getFixtureColor(patchedFixtures.findIndex(p=>p.id===f.id)) }} />
+                <span className="flex-1 min-w-0 truncate text-xs font-medium">{f.name}</span>
+                <span className="text-[10px] text-gray-500 font-mono">{f.startAddress}</span>
+              </button>
+            ))}
+          </div>
+          <div className="p-2 border-t border-gray-800/50 text-[10px] text-gray-600">Glisser sur le canvas pour orbiter • Clic = sélectionner</div>
+        </div>
+        ) : (
+          <div className="w-8 shrink-0 border-r border-gray-800/50 bg-[#0d0d14]/60 flex flex-col items-center py-2 gap-2">
+            <button onClick={() => setLeftDockCollapsed(false)} className="w-6 h-6 rounded bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 border border-purple-500/30 flex items-center justify-center" title="Ouvrir la liste fixtures">
+              <List size={12} />
+            </button>
+            <span className="text-[9px] text-gray-600 [writing-mode:vertical-lr] tracking-widest uppercase">Fixtures</span>
+            <span className="text-[9px] text-purple-400 font-mono">{filteredFixtures.length}</span>
+          </div>
+        )}
+
+        {/* Centre 3D */}
+        <div className="flex-1 flex flex-col min-w-0 bg-[#08080e] relative">
       {/* 3D Canvas */}
       <div
         ref={containerRef}
@@ -2181,7 +2677,7 @@ export const Stage3D: React.FC<{
 
         {/* Hovered fixture label */}
         {hoveredFixture && !selectedFixture && (
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-[#1a1a28]/95 border border-gray-700/80 rounded-lg px-3 py-1.5 text-xs text-gray-300 pointer-events-none z-20 backdrop-blur-sm shadow-xl">
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-[#1a1a28] border border-gray-700/80 rounded-lg px-3 py-1.5 text-xs text-gray-300 pointer-events-none z-20 shadow-xl">
             <span className="font-medium text-gray-200">{hoveredFixture.name}</span>
             <span className="text-gray-600 ml-2">{hoveredFixture.fixtureType}</span>
           </div>
@@ -2190,7 +2686,7 @@ export const Stage3D: React.FC<{
         {/* Fixture quick-select list — search + click to select & zoom */}
         {showFixtureList && (
           <div
-            className="absolute top-3 left-3 z-20 w-72 max-h-[75%] bg-[#12121a]/95 border border-gray-800 rounded-xl shadow-2xl backdrop-blur-sm flex flex-col overflow-hidden"
+            className="absolute top-3 left-3 z-20 w-72 max-h-[75%] bg-[#12121a] border border-gray-800 rounded-xl shadow-2xl flex flex-col overflow-hidden"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
@@ -2249,21 +2745,27 @@ export const Stage3D: React.FC<{
         {/* Selected fixture editor - floating panel, draggable by header only */}
         {selectedFixture && selectedPos && (
           <div
-            className="fixed bg-[#12121a]/95 border border-purple-500/30 rounded-xl shadow-2xl backdrop-blur-sm min-w-[240px]"
-            style={{ right: 16, top: 80 }}
+            className="fixed bg-[#12121a] border border-purple-500/30 rounded-xl shadow-2xl min-w-[240px] max-h-[85vh] overflow-y-auto"
+            style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
             <div
               className="flex items-center justify-between px-4 py-3 cursor-grab active:cursor-grabbing border-b border-gray-800/50"
               onMouseDown={(e) => {
-                const panel = e.currentTarget.parentElement!;
-                const ox = e.clientX - panel.offsetLeft;
-                const oy = e.clientY - panel.offsetTop;
+                const panel = e.currentTarget.parentElement! as HTMLElement;
+                // Centre initial via transform → passer en coordonnées left/top fixes au premier drag
+                const rect = panel.getBoundingClientRect();
+                const ox = e.clientX - rect.left;
+                const oy = e.clientY - rect.top;
+                // Figer la position actuelle en left/top et retirer le transform de centrage
+                panel.style.left = rect.left + 'px';
+                panel.style.top = rect.top + 'px';
+                panel.style.transform = 'none';
+                panel.style.right = 'auto';
                 const onMove = (ev: MouseEvent) => {
                   panel.style.left = Math.max(0, Math.min(ev.clientX - ox, window.innerWidth - 120)) + 'px';
                   panel.style.top = Math.max(0, Math.min(ev.clientY - oy, window.innerHeight - 40)) + 'px';
-                  panel.style.right = 'auto';
                 };
                 const onUp = () => {
                   document.removeEventListener('mousemove', onMove);
@@ -2309,15 +2811,19 @@ export const Stage3D: React.FC<{
                   <span className="text-gray-500">X Position</span>
                   <span className="text-gray-400 font-mono">{(selectedPos.x * stageDims.width).toFixed(1)}m</span>
                 </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={selectedPos.x}
-                  onChange={(e) => setFixturePosition(selectedFixture.id, { x: parseFloat(e.target.value) })}
-                  className="w-full h-1 accent-purple-500 cursor-pointer"
-                />
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { x: Math.max(0, Math.min(1, (selectedPos.x - 0.01))) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={selectedPos.x}
+                    onChange={(e) => setFixturePosition(selectedFixture.id, { x: parseFloat(e.target.value) })}
+                    className="flex-1 h-1 accent-purple-500 cursor-pointer"
+                  />
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { x: Math.max(0, Math.min(1, (selectedPos.x + 0.01))) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                </div>
                 <div className="flex justify-between text-[8px] text-gray-700">
                   <span>0m</span><span>{stageDims.width}m</span>
                 </div>
@@ -2329,15 +2835,19 @@ export const Stage3D: React.FC<{
                   <span className="text-gray-500">Z Depth</span>
                   <span className="text-gray-400 font-mono">{(selectedPos.y * stageDims.depth).toFixed(1)}m</span>
                 </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={selectedPos.y}
-                  onChange={(e) => setFixturePosition(selectedFixture.id, { y: parseFloat(e.target.value) })}
-                  className="w-full h-1 accent-purple-500 cursor-pointer"
-                />
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { y: Math.max(0, Math.min(1, (selectedPos.y - 0.01))) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={selectedPos.y}
+                    onChange={(e) => setFixturePosition(selectedFixture.id, { y: parseFloat(e.target.value) })}
+                    className="flex-1 h-1 accent-purple-500 cursor-pointer"
+                  />
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { y: Math.max(0, Math.min(1, (selectedPos.y + 0.01))) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                </div>
                 <div className="flex justify-between text-[8px] text-gray-700">
                   <span>0m</span><span>{stageDims.depth}m</span>
                 </div>
@@ -2349,15 +2859,19 @@ export const Stage3D: React.FC<{
                   <span className="text-gray-500">Height</span>
                   <span className="text-gray-400 font-mono">{(selectedPos.h * 5.0).toFixed(1)}m</span>
                 </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={selectedPos.h}
-                  onChange={(e) => setFixturePosition(selectedFixture.id, { h: parseFloat(e.target.value) })}
-                  className="w-full h-1 accent-purple-500 cursor-pointer"
-                />
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { h: Math.max(0, Math.min(1, (selectedPos.h - 0.01))) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={selectedPos.h}
+                    onChange={(e) => setFixturePosition(selectedFixture.id, { h: parseFloat(e.target.value) })}
+                    className="flex-1 h-1 accent-purple-500 cursor-pointer"
+                  />
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { h: Math.max(0, Math.min(1, (selectedPos.h + 0.01))) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                </div>
                 <div className="flex justify-between text-[8px] text-gray-700">
                   <span>0m</span><span>5m</span>
                 </div>
@@ -2425,6 +2939,113 @@ export const Stage3D: React.FC<{
                 </div>
               </div>
 
+              {/* Direct DMX — intensity + couleur (programmer) */}
+              <div className="space-y-2 p-2 rounded-lg bg-violet-600/10 border border-violet-500/20">
+                <div className="text-[10px] font-semibold text-violet-300">Direct — programmer (violet)</div>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px]"><span className="text-gray-500">Dimmer</span><span className="text-violet-300 font-mono">{useProgrammerStore.getState().channels[selectedFixture ? (patchedFixtures.find(f=>f.id===selectedFixture.id)?.startAddress ?? 0) + (fixturesRef.current.get(selectedFixture.id)?.channelMap.intensityOffset ?? 0) : 0] ?? 0}</span></div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => {
+                      const f3d = fixturesRef.current.get(selectedFixture!.id);
+                      const pf = patchedFixtures.find(f=>f.id===selectedFixture!.id);
+                      if (!f3d || !pf) return;
+                      const addr = pf.startAddress+(f3d.channelMap.intensityOffset ?? 0);
+                      const cur = useProgrammerStore.getState().channels[addr] ?? 0;
+                      const v = Math.max(0, cur - 1);
+                      const setCh = useProgrammerStore.getState().setChannel;
+                      if (f3d.channelMap.intensityOffset!==null) setCh(addr, v);
+                      (document.querySelector('input[type="range"][min="0"][max="255"]') as HTMLInputElement | null)?.dispatchEvent(new Event('input', {bubbles:true}));
+                    }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                    <input type="range" min={0} max={255} defaultValue={useProgrammerStore.getState().channels[selectedFixture ? (patchedFixtures.find(f=>f.id===selectedFixture.id)?.startAddress ?? 0) + (fixturesRef.current.get(selectedFixture.id)?.channelMap.intensityOffset ?? 0) : 0] ?? 0}
+                      onChange={(e)=>{
+                        const f3d = fixturesRef.current.get(selectedFixture!.id);
+                        const pf = patchedFixtures.find(f=>f.id===selectedFixture!.id);
+                        if (!f3d || !pf) return;
+                        const v = Number(e.target.value);
+                        const addrs: number[] = [];
+                        if (f3d.channelMap.intensityOffset!==null) addrs.push(pf.startAddress+f3d.channelMap.intensityOffset);
+                        for (const o of f3d.channelMap.rgbOffsets ?? []) addrs.push(pf.startAddress+o);
+                        for (const seg of f3d.channelMap.rgbSegments ?? []) { addrs.push(pf.startAddress+seg.r); if(seg.g!==null) addrs.push(pf.startAddress+seg.g); if(seg.b!==null) addrs.push(pf.startAddress+seg.b); }
+                        if (addrs.length===0 && f3d.channelMap.intensityOffset!==null) addrs.push(pf.startAddress+f3d.channelMap.intensityOffset);
+                        const setCh = useProgrammerStore.getState().setChannel;
+                        if (f3d.channelMap.intensityOffset!==null) setCh(pf.startAddress+f3d.channelMap.intensityOffset, v);
+                        else for (const a of addrs) setCh(a, v);
+                      }} className="flex-1 h-1 accent-violet-500 cursor-pointer" />
+                    <button onClick={() => {
+                      const f3d = fixturesRef.current.get(selectedFixture!.id);
+                      const pf = patchedFixtures.find(f=>f.id===selectedFixture!.id);
+                      if (!f3d || !pf) return;
+                      const addr = pf.startAddress+(f3d.channelMap.intensityOffset ?? 0);
+                      const cur = useProgrammerStore.getState().channels[addr] ?? 0;
+                      const v = Math.min(255, cur + 1);
+                      const setCh = useProgrammerStore.getState().setChannel;
+                      if (f3d.channelMap.intensityOffset!==null) setCh(addr, v);
+                    }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                  </div>
+                </div>
+                <div className="flex gap-1">
+                  {['#ff0000','#00ff00','#0000ff','#ffff00','#ffffff'].map(hex=>(
+                    <button key={hex} onClick={()=>{
+                      const f3d = fixturesRef.current.get(selectedFixture!.id);
+                      const pf = patchedFixtures.find(f=>f.id===selectedFixture!.id);
+                      if (!f3d || !pf) return;
+                      const setCh = useProgrammerStore.getState().setChannel;
+                      const hexToRgb = (h:string)=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)] as [number,number,number];
+                      const [r,g,b]=hexToRgb(hex);
+                      for (const seg of f3d.channelMap.rgbSegments ?? []) {
+                        setCh(pf.startAddress+seg.r, r); setCh(pf.startAddress+seg.g, g); if(seg.b!==null) setCh(pf.startAddress+seg.b, b); if(seg.w!==null) setCh(pf.startAddress+seg.w, 0);
+                      }
+                      if ((f3d.channelMap.rgbSegments?.length ?? 0)===0) {
+                        for (const off of f3d.channelMap.rgbOffsets ?? []) {
+                          const idx = f3d.channelMap.rgbOffsets!.indexOf(off);
+                          setCh(pf.startAddress+off, idx===0?r:idx===1?g:b);
+                        }
+                      }
+                      if (f3d.channelMap.wheelOffset!==null) {
+                        // approx wheel position
+                        setCh(pf.startAddress+f3d.channelMap.wheelOffset, hex==='#ff0000'?10:hex==='#00ff00'?60:hex==='#0000ff'?120:hex==='#ffff00'?30:0);
+                      }
+                    }} style={{backgroundColor:hex}} className="w-6 h-6 rounded border border-gray-700 hover:scale-110 transition-transform" title={hex} />
+                  ))}
+                  <input type="color" defaultValue="#ff0064" onChange={(e)=>{
+                    const hex=e.target.value;
+                    const f3d = fixturesRef.current.get(selectedFixture!.id);
+                    const pf = patchedFixtures.find(f=>f.id===selectedFixture!.id);
+                    if (!f3d || !pf) return;
+                    const setCh = useProgrammerStore.getState().setChannel;
+                    const [r,g,b]=[parseInt(hex.slice(1,3),16),parseInt(hex.slice(3,5),16),parseInt(hex.slice(5,7),16)];
+                    for (const seg of f3d.channelMap.rgbSegments ?? []) { setCh(pf.startAddress+seg.r,r); setCh(pf.startAddress+seg.g,g); if(seg.b!==null) setCh(pf.startAddress+seg.b,b); }
+                  }} className="w-6 h-6 rounded border border-gray-700 cursor-pointer p-0" />
+                </div>
+                <div className="text-[9px] text-gray-500">Drag sur la fixture en mode Direct = Pan/Tilt. Store pour créer Scene/EFX/Show.</div>
+                <div className="flex gap-1.5">
+                  <button onClick={()=>{
+                    const prog = useProgrammerStore.getState().channels;
+                    if (Object.keys(prog).length===0) return;
+                    const f3d = fixturesRef.current.get(selectedFixture!.id);
+                    const pf = patchedFixtures.find(f=>f.id===selectedFixture!.id);
+                    const s = useShowStore.getState();
+                    const panAddr = pf ? pf.startAddress + (f3d?.channelMap.panOffset ?? f3d?.channelMap.panOffsets?.[0] ?? 0) : 0;
+                    const tiltAddr = pf ? pf.startAddress + (f3d?.channelMap.tiltOffset ?? f3d?.channelMap.tiltOffsets?.[0] ?? 0) : 0;
+                    const pan = prog[panAddr] ?? 128; const tilt = prog[tiltAddr] ?? 128;
+                    const xOff = Math.round(((pan-128)/128)*120);
+                    const yOff = Math.round(((tilt-128)/128)*120);
+                    const id = s.createEffect(`EFX 3D ${s.effects.length+1}`);
+                    s.updateEffect(id, { name:`EFX 3D ${s.effects.length}`, pattern:'Circle', width:1, height:1, rotation:0, speed:0.5, xOffset:xOff, yOffset:yOff, fixtureIds: selectedFixture ? [selectedFixture.id] : [] });
+                  }} className="flex-1 py-1 rounded bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-medium hover:bg-cyan-600/30">Rec EFX</button>
+                  <button onClick={()=>{
+                    const prog = useProgrammerStore.getState().channels;
+                    if (Object.keys(prog).length===0) return;
+                    const s = useShowStore.getState();
+                    const scId = s.createScene(`Scene 3D ${s.scenes.length+1}`);
+                    s.updateScene(scId, { name:`Scene 3D ${s.scenes.length}`, channels:{...prog}, fadeIn:0, fadeOut:0, duration:0 });
+                    const shId = s.createShow(`Show 3D ${s.shows.length+1}`);
+                    const show = s.shows.find(sh=>sh.id===shId);
+                    if (show) s.updateShow(shId, { tracks:[{ id:`trk-${Date.now()}`, name:'Scene Track', type:'scene', items:[{ id:`tmi-${Date.now()}`, startTime:0, duration:5000, resourceId:scId, fadeIn:0, fadeOut:0, name:s.scenes.find(sc=>sc.id===scId)?.name || 'Scene 3D' }], muted:false, solo:false }] as any });
+                  }} className="flex-1 py-1 rounded bg-amber-600/20 text-amber-300 border border-amber-500/30 text-[10px] font-medium hover:bg-amber-600/30">Rec Show</button>
+                </div>
+              </div>
+
               {/* Pan/Tilt tare — visual only, does NOT touch DMX */}
               {selectedFixture && selectedFixture.fixtureType && (() => {
                 const f3d = fixturesRef.current.get(selectedFixture.id);
@@ -2438,15 +3059,19 @@ export const Stage3D: React.FC<{
                   <span className="text-gray-500">Pan (tare visuelle)</span>
                   <span className="text-gray-400 font-mono">{((selectedPos.heading ?? 0)).toFixed(0)}°</span>
                 </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={360}
-                  step={5}
-                  value={selectedPos.heading ?? 0}
-                  onChange={(e) => setFixturePosition(selectedFixture.id, { heading: parseFloat(e.target.value) })}
-                  className="w-full h-1 accent-orange-500 cursor-pointer"
-                />
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { heading: Math.max(0, Math.min(360, (selectedPos.heading ?? 0) - 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                  <input
+                    type="range"
+                    min={0}
+                    max={360}
+                    step={5}
+                    value={selectedPos.heading ?? 0}
+                    onChange={(e) => setFixturePosition(selectedFixture.id, { heading: parseFloat(e.target.value) })}
+                    className="flex-1 h-1 accent-orange-500 cursor-pointer"
+                  />
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { heading: Math.max(0, Math.min(360, (selectedPos.heading ?? 0) + 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                </div>
                 <div className="flex justify-between text-[8px] text-gray-700">
                   <span>0°</span><span>360°</span>
                 </div>
@@ -2457,15 +3082,19 @@ export const Stage3D: React.FC<{
                   <span className="text-gray-500">Tilt (tare visuelle)</span>
                   <span className="text-gray-400 font-mono">{((selectedPos.tilt ?? 0)).toFixed(0)}°</span>
                 </div>
-                <input
-                  type="range"
-                  min={-90}
-                  max={90}
-                  step={1}
-                  value={selectedPos.tilt ?? 0}
-                  onChange={(e) => setFixturePosition(selectedFixture.id, { tilt: parseFloat(e.target.value) })}
-                  className="w-full h-1 accent-blue-500 cursor-pointer"
-                />
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { tilt: Math.max(-90, Math.min(90, (selectedPos.tilt ?? 0) - 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                  <input
+                    type="range"
+                    min={-90}
+                    max={90}
+                    step={1}
+                    value={selectedPos.tilt ?? 0}
+                    onChange={(e) => setFixturePosition(selectedFixture.id, { tilt: parseFloat(e.target.value) })}
+                    className="flex-1 h-1 accent-blue-500 cursor-pointer"
+                  />
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { tilt: Math.max(-90, Math.min(90, (selectedPos.tilt ?? 0) + 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                </div>
                 <div className="flex justify-between text-[8px] text-gray-700">
                   <span>-90°</span><span>+90°</span>
                 </div>
@@ -2475,39 +3104,131 @@ export const Stage3D: React.FC<{
                 ) : null;
               })()}
 
+              {/* Thumbnail Scale */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-gray-500">Taille icône</span>
+                  <span className="text-gray-400 font-mono">{((selectedPos.thumbnailScale ?? 0.75)).toFixed(2)}×</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => { const v = Math.max(0.2, Math.min(2.0, (selectedPos.thumbnailScale ?? 0.75) - 0.05)); setFixturePosition(selectedFixture.id, { thumbnailScale: v }); const f3d = fixturesRef.current.get(selectedFixture.id); if (f3d?.thumbSprite) { const s = 0.55 * v / 0.75; f3d.thumbSprite.scale.set(s,s,1); } }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                  <input
+                    type="range"
+                    min={0.2}
+                    max={2.0}
+                    step={0.05}
+                    value={selectedPos.thumbnailScale ?? 0.75}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      setFixturePosition(selectedFixture.id, { thumbnailScale: v });
+                      const f3d = fixturesRef.current.get(selectedFixture.id);
+                      if (f3d?.thumbSprite) { const s = 0.55 * v / 0.75; f3d.thumbSprite.scale.set(s,s,1); }
+                    }}
+                    className="flex-1 h-1 accent-pink-500 cursor-pointer"
+                  />
+                  <button onClick={() => { const v = Math.max(0.2, Math.min(2.0, (selectedPos.thumbnailScale ?? 0.75) + 0.05)); setFixturePosition(selectedFixture.id, { thumbnailScale: v }); const f3d = fixturesRef.current.get(selectedFixture.id); if (f3d?.thumbSprite) { const s = 0.55 * v / 0.75; f3d.thumbSprite.scale.set(s,s,1); } }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                </div>
+                <div className="flex justify-between text-[8px] text-gray-700">
+                  <span>0.2×</span><span>2.0×</span>
+                </div>
+              </div>
+
               {/* Beam Angle (Zoom) */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
                   <span className="text-gray-500">Beam Angle</span>
                   <span className="text-gray-400 font-mono">{((selectedPos.beamAngle ?? 0.15) * 180 / Math.PI).toFixed(0)}°</span>
                 </div>
-                <input
-                  type="range"
-                  min={0.02}
-                  max={0.8}
-                  step={0.01}
-                  value={selectedPos.beamAngle ?? 0.15}
-                  onChange={(e) => setFixturePosition(selectedFixture.id, { beamAngle: parseFloat(e.target.value) })}
-                  className="w-full h-1 accent-cyan-500 cursor-pointer"
-                />
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { beamAngle: Math.max(0.02, Math.min(0.8, (selectedPos.beamAngle ?? 0.15) - 0.01)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                  <input
+                    type="range"
+                    min={0.02}
+                    max={0.8}
+                    step={0.01}
+                    value={selectedPos.beamAngle ?? 0.15}
+                    onChange={(e) => setFixturePosition(selectedFixture.id, { beamAngle: parseFloat(e.target.value) })}
+                    className="flex-1 h-1 accent-cyan-500 cursor-pointer"
+                  />
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { beamAngle: Math.max(0.02, Math.min(0.8, (selectedPos.beamAngle ?? 0.15) + 0.01)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                </div>
                 <div className="flex justify-between text-[8px] text-gray-700">
                   <span>1°</span><span>46°</span>
                 </div>
               </div>
 
             </div>
+            {/* EFX snapshot — uniquement si enableEfxApply (Scènes) */}
+            {enableEfxApply && (
+              <div className="mx-4 mb-3 p-3 rounded-xl bg-gradient-to-br from-violet-600/15 via-purple-600/10 to-cyan-600/10 border border-violet-500/20">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <span className="text-[10px] font-bold tracking-widest text-violet-300 uppercase">✨ EFX Snapshot</span>
+                  <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/20">Nouveau</span>
+                </div>
+                <p className="text-[10px] text-gray-400 leading-relaxed mb-2">Applique un effet enregistré à la scène en cours — la 3D fige la pose, la scène garde la mémoire.</p>
+                <select value={selectedEfxId} onChange={(e) => setSelectedEfxId(e.target.value)} className="w-full bg-black/40 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-violet-500/50">
+                  <option value="">— Choisir un EFX —</option>
+                  {effects.map((efx) => (
+                    <option key={efx.id} value={efx.id} className="bg-[#0d0d14]">{efx.name} · {efx.pattern}</option>
+                  ))}
+                </select>
+                <button onClick={handleApplyEfxSnapshot} disabled={!selectedEfxId} className="mt-2 w-full py-2 rounded-lg bg-gradient-to-r from-violet-600 to-purple-600 text-white text-xs font-bold hover:from-violet-500 hover:to-purple-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all">
+                  <Sparkles size={12} /> Appliquer à la scène
+                </button>
+                {effects.length === 0 && <p className="text-[9px] text-gray-600 mt-1 text-center">Aucun EFX enregistré — crée-en dans Design → EFX</p>}
+              </div>
+            )}
             {/* Close button */}
             <div className="px-4 py-2 border-t border-gray-800/50">
               <button
                 onClick={() => setSelectedFixtureId(null)}
                 className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-700/50 transition-colors"
               >
-                Close
+                Fermer
               </button>
             </div>
             </div>
           </div>
         )}
+        </div>{/* fin Centre 3D */}
+        {/* Right dock — EFX uniquement si enableEfxApply (Scènes) */}
+        {enableEfxApply && !selectedFixture && (
+          <div className="w-[300px] shrink-0 border-l border-gray-800/50 bg-[#0d0d14]/60 flex flex-col min-h-0">
+            <div className="px-3 py-2 border-b border-gray-800/50">
+              <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">Scène & EFX</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              <div className="p-3 rounded-xl bg-gradient-to-br from-violet-600/15 to-cyan-600/10 border border-violet-500/20">
+                <div className="text-xs font-bold text-violet-300 mb-1">✨ Appliquer un EFX</div>
+                <p className="text-[10px] text-gray-400 mb-2">Choisis un effet, il sera figé dans la scène en cours (ou nouvelle scène).</p>
+                <select value={selectedEfxId} onChange={(e) => setSelectedEfxId(e.target.value)} className="w-full bg-black/40 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-violet-500/50">
+                  <option value="">— Choisir un EFX —</option>
+                  {effects.map((efx) => (
+                    <option key={efx.id} value={efx.id} className="bg-[#0d0d14]">{efx.name} · {efx.pattern}</option>
+                  ))}
+                </select>
+                <button onClick={handleApplyEfxSnapshot} disabled={!selectedEfxId} className="mt-2 w-full py-2 rounded-lg bg-gradient-to-r from-violet-600 to-purple-600 text-white text-xs font-bold hover:from-violet-500 hover:to-purple-500 disabled:opacity-40 flex items-center justify-center gap-1.5">
+                  <Sparkles size={12} /> Appliquer à la scène
+                </button>
+              </div>
+              <div className="p-2.5 rounded-lg bg-black/20 border border-gray-800/50">
+                <div className="text-[10px] font-semibold text-gray-400 mb-1">Astuce pro</div>
+                <p className="text-[10px] text-gray-500 leading-relaxed">Sélectionne une lyre à gauche, ajuste sa position avec `−/+`, puis fige un EFX — ta scène garde la pose exacte vue en 3D.</p>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Fermeture du centre + row principale */}
+        </div>
+      </div>
+      {/* Status bar pro */}
+      <div className="h-6 border-t border-gray-800/50 bg-[#0d0d14] flex items-center px-3 gap-3 text-[10px] text-gray-500 shrink-0">
+        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> 3D 30 fps</span>
+        <span className="w-px h-3 bg-gray-800" />
+        <span>{patchedFixtures.length} fixtures</span>
+        {selectedFixture && <><span className="w-px h-3 bg-gray-800" /><span className="text-purple-300">{selectedFixture.name}</span></>}
+        <span className="flex-1" />
+        <span className="hidden md:inline">Glisser = orbiter • Clic = sélectionner • `−/+` = pas de 1</span>
       </div>
     </div>
   );
@@ -2516,6 +3237,10 @@ export const Stage3D: React.FC<{
 // ─── Helper: dispose fixture 3D resources ────────────────────
 
 function disposeFixture3D(f3d: Fixture3D): void {
+  if (f3d.thumbSprite) {
+    (f3d.thumbSprite.material as THREE.SpriteMaterial).map?.dispose();
+    (f3d.thumbSprite.material as THREE.Material).dispose();
+  }
   f3d.group.traverse((child) => {
     if (child instanceof THREE.Mesh) {
       child.geometry?.dispose();
@@ -2524,6 +3249,10 @@ function disposeFixture3D(f3d: Fixture3D): void {
       } else {
         child.material?.dispose();
       }
+    }
+    if (child instanceof THREE.Sprite && child !== f3d.thumbSprite) {
+      (child.material as THREE.SpriteMaterial).map?.dispose();
+      (child.material as THREE.Material).dispose();
     }
   });
   if (f3d.pointLight) {

@@ -70,6 +70,42 @@ describe('computeChaserTrackOverrides', () => {
     expect(map.size).toBe(0);
   });
 
+  it('freezes a static focus scene: same pan/tilt across the hold (10s guitar focus)', () => {
+    // Scène "focus guitariste" : pan/tilt fixes + rouge, jouée via un chaser
+    // 1 step de 10s de hold. La lecture doit rester figée, pas suivre l'autoscript.
+    const focusScenes = [
+      { id: 'sc-focus', name: 'Focus guitare', channels: { 43: 100, 44: 150, 45: 255, 46: 0, 47: 0 } },
+    ];
+    const focusChasers = [
+      { id: 'ch-focus', name: 'Focus', steps: [{ sceneId: 'sc-focus', fadeIn: 0, hold: 10000, fadeOut: 0 }] },
+    ];
+    const focusTracks = [
+      { id: 't-focus', name: 'T', entries: [{ id: 'e', time: 0, endTime: 10, chaserId: 'ch-focus' }], targetFixtures: { type: 'all' } },
+    ];
+    const at5 = computeChaserTrackOverrides(focusTracks as any, focusChasers as any, focusScenes as any, 5.0, fixtures as any, groups as any);
+    const at55 = computeChaserTrackOverrides(focusTracks as any, focusChasers as any, focusScenes as any, 5.5, fixtures as any, groups as any);
+    expect(at5.get('fx-2')?.[43]).toBe(100);
+    expect(at5.get('fx-2')?.[44]).toBe(150);
+    expect(at5.get('fx-2')?.[45]).toBe(255);
+    expect(at55.get('fx-2')).toEqual(at5.get('fx-2'));
+  });
+
+  it('still triggers with inverted entry bounds (resized block)', () => {
+    const inverted = [
+      { id: 't-inv', name: 'T', entries: [{ id: 'e', time: 10, endTime: 0, chaserId: 'ch-1' }], targetFixtures: { type: 'all' } },
+    ];
+    const map = computeChaserTrackOverrides(inverted as any, chasers as any, scenes as any, 5.0, fixtures as any, groups as any);
+    expect(map.has('fx-1')).toBe(true);
+  });
+
+  it('works without targetFixtures (old presets)', () => {
+    const legacy = [
+      { id: 't-leg', name: 'T', entries: [{ id: 'e', time: 0, endTime: 6, chaserId: 'ch-1' }] },
+    ];
+    const map = computeChaserTrackOverrides(legacy as any, chasers as any, scenes as any, 1.0, fixtures as any, groups as any);
+    expect(map.has('fx-1')).toBe(true);
+  });
+
   it('returns empty map when chaser has no steps or scenes are missing', () => {
     const empty = computeChaserTrackOverrides(
       [{ id: 't', name: 't', entries: [{ id: 'e', time: 0, endTime: 10, chaserId: 'missing' }], targetFixtures: { type: 'all' } }] as any,

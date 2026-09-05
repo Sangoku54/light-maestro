@@ -59,7 +59,7 @@ export interface FixtureGroup {
 // @deprecated — replaced by `musicians` (free-form roster). Kept only so scenes
 // saved before the roster feature can still be read and migrated.
 export type BandConfig = 'none' | 'solo' | 'solo-chanteuse' | 'duo' | 'trio' | 'quartet' | 'quintet' | 'sextet';
-export type StageScene = 'rear' | 'rear-front' | 'full';
+export type StageScene = 'rear' | 'rear-front' | 'full' | 'empty';
 
 export interface SavedScene {
   id: string;
@@ -79,6 +79,8 @@ export interface SavedScene {
   musicians?: MusicianRoster;
   /** Truss layout. */
   stageScene?: StageScene;
+  /** EFX lié — si présent, la scène rejoue l'EFX en continu pendant sa durée (au lieu d'un snapshot statique). */
+  efxId?: string;
 }
 
 // ─── Show Manager Types ──────────────────────────────────
@@ -112,6 +114,9 @@ export interface ShowData {
   audioFileBase64?: string;
   audioRef?: string; // blob audio externalisé (userData/audio-<hash>.json)
   audioFileName?: string;
+  /** Vue 3D associée au show (pont + musiciens). */
+  musicians?: MusicianRoster;
+  stageScene?: StageScene;
 }
 
 // ─── Chaser Types ──────────────────────────────────────────
@@ -158,6 +163,8 @@ export interface CueListCue {
   hold: number;     // ms
   fadeOut: number;  // ms
   note?: string;
+  follow?: boolean; // auto Go after hold
+  linkTo?: number;  // index to jump to (0-based), undefined = next
 }
 
 export interface FixturePos {
@@ -169,6 +176,27 @@ export interface FixturePos {
   beamAngle?: number; // beam opening angle in radians (0.02-0.8)
   thumbnailScale?: number; // sprite scale multiplier (0.2-2.0, default 0.75)
   mountMode?: 'top' | 'ground' | 'rear'; // beam direction: top=down, ground=up, rear=forward
+}
+
+/**
+ * Per-preset 3D view state. Captures everything the user can configure in the
+ * floating Stage3D panel so it round-trips through .lmpreset (save → export →
+ * re-import → load) and stays in sync when the same preset is loaded twice.
+ *
+ * - cameraPosition / cameraTarget — OrbitControls free-flight state (drag, zoom).
+ *   Absent → Stage3D falls back to the hardcoded "audience" preset.
+ * - showBeams / showSmoke / showLabels / directMode — toolbar toggles.
+ *
+ * Optional fields are backward-compatible with presets saved before this type
+ * existed (they just load as defaults).
+ */
+export interface View3DState {
+  cameraPosition?: [number, number, number];
+  cameraTarget?: [number, number, number];
+  showBeams?: boolean;
+  showSmoke?: boolean;
+  showLabels?: boolean;
+  directMode?: boolean;
 }
 
 export interface SongPreset {
@@ -191,6 +219,11 @@ export interface SongPreset {
   dimmerTracks?: any[];
   chaserTracks?: any[];
   disabledFixtures?: string[];
+  /** Vue 3D associée au preset (pont + musiciens). */
+  musicians?: MusicianRoster;
+  stageScene?: StageScene;
+  /** Configuration de la vue 3D (caméra, options d'affichage) associée au preset. */
+  view3D?: View3DState;
   createdAt: string;
 }
 
@@ -688,9 +721,30 @@ export const useShowStore = create<ShowState>((set, get) => ({
   },
 
   updateScene: (id, updates) => {
+    // Normalize folder and clamp numeric fields before persist
+    const normalized: typeof updates = { ...updates };
+    if ('folder' in normalized) {
+      const n = normalizeFolderName((normalized.folder as string) || '');
+      normalized.folder = n || undefined;
+    }
+    if ('fadeIn' in normalized) {
+      const v = Number((normalized as any).fadeIn);
+      normalized.fadeIn = Number.isFinite(v) ? Math.max(0, Math.min(60000, Math.round(v))) : undefined as any;
+      if (normalized.fadeIn === undefined) delete (normalized as any).fadeIn;
+    }
+    if ('fadeOut' in normalized) {
+      const v = Number((normalized as any).fadeOut);
+      normalized.fadeOut = Number.isFinite(v) ? Math.max(0, Math.min(60000, Math.round(v))) : undefined as any;
+      if (normalized.fadeOut === undefined) delete (normalized as any).fadeOut;
+    }
+    if ('duration' in normalized) {
+      const v = Number((normalized as any).duration);
+      normalized.duration = Number.isFinite(v) ? Math.max(0, Math.min(600000, Math.round(v))) : undefined as any;
+      if (normalized.duration === undefined) delete (normalized as any).duration;
+    }
     set((state) => ({
       scenes: state.scenes.map((s) =>
-        s.id === id ? { ...s, ...updates } : s
+        s.id === id ? { ...s, ...normalized } : s
       ),
     }));
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
@@ -758,12 +812,15 @@ export const useShowStore = create<ShowState>((set, get) => ({
   deleteScene: (id) => {
     set((state) => ({
       scenes: state.scenes.filter((s) => s.id !== id),
+      chasers: state.chasers.map((c) => ({ ...c, steps: c.steps.filter((st) => st.sceneId !== id) })),
+      cueLists: state.cueLists.map((cl) => ({ ...cl, cues: cl.cues.filter((cu) => cu.sceneId !== id) })),
     }));
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
   },
 
   getScene: (id) => {
-    return get().scenes.find((s) => s.id === id);
+    const s = get().scenes.find((s) => s.id === id);
+    return s ? { ...s, channels: { ...s.channels } } : undefined;
   },
 
   setScenes: (scenes) => {

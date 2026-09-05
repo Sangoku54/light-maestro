@@ -116,6 +116,7 @@
     "remote": "Remote",
     "simpleDesk": "Simple Desk",
     "stageView": "Vue Scène",
+    "stage2D": "Vue 2D",
     "cueList": "Cue List",
     "mtc": "Timecode",
     "osc": "OSC"
@@ -132,7 +133,17 @@
     "updateError": "Erreur de mise à jour",
     "newFixtures": "nouveaux",
     "newFixturesAvailable": "nouveaux projecteurs disponibles — cliquer pour charger",
-    "clickToLoad": "Cliquer pour charger les nouveaux projecteurs"
+    "clickToLoad": "Cliquer pour charger les nouveaux projecteurs",
+    "project": "Projet",
+    "preset": "Preset",
+    "new": "Nouveau",
+    "newTitle": "Nouveau Projet",
+    "open": "Ouvrir",
+    "openTitle": "Ouvrir un projet (.lmproj)",
+    "save": "Enregistrer",
+    "saveTitle": "Enregistrer le projet (.lmproj)",
+    "switchToEn": "Switch to English",
+    "switchToFr": "Passer en Français"
   },
   "modes": {
     "quick": "Show Auto",
@@ -273,7 +284,7 @@
   },
   "design": {
     "tabs": {
-      "fixtures": "map DMX",
+      "fixtures": "Projecteurs",
       "groups": "Groupes",
       "scenes": "Scènes",
       "chasers": "Chasers",
@@ -881,5 +892,52 @@
       "Wash G",
       "Wash D"
     ]
+  },
+  "stage3D": {
+    "title": "Scène 3D",
+    "directOn": "Direct ON",
+    "direct": "Direct",
+    "directOnTitle": "Mode direct : glisser sur la fixture = Pan/Tilt (programmer violet)",
+    "directOffTitle": "Activer le pilotage direct depuis la 3D",
+    "front": "Face",
+    "frontView": "Vue de face",
+    "top": "Dessus",
+    "topView": "Vue du dessus",
+    "side": "Côté",
+    "sideView": "Vue latérale",
+    "audience": "Salle",
+    "audienceView": "Vue salle",
+    "detach": "Détacher la vue 3D",
+    "hide": "Masquer la vue 3D",
+    "show": "Afficher la vue 3D",
+    "fixtures": "Projecteurs",
+    "close": "Fermer",
+    "dragToOrbit": "projecteurs · glisser pour orbiter · cliquer pour sélectionner"
+  },
+  "showManager": {
+    "play": "Lecture",
+    "pause": "Pause",
+    "resume": "Reprendre",
+    "stop": "Stop",
+    "loop": "Boucle",
+    "backToShows": "Retour aux shows",
+    "saveShow": "Sauvegarder le Show",
+    "loadShow": "Charger le Show",
+    "save": "Sauvegarder",
+    "load": "Charger"
+  },
+  "programmer": {
+    "save": "Enregistrer",
+    "clear": "Effacer",
+    "store": "Store",
+    "newScene": "Nouvelle scène",
+    "update": "Mise à jour",
+    "sceneNamePlaceholder": "Nom de la scène",
+    "chooseScene": "Choisir une scène…",
+    "hint": "valeurs en violet — pas encore enregistrées",
+    "storeTitle": "Store Programmer ({{count}} ch)"
+  },
+  "masterClock": {
+    "abletonLink": "Ableton Link — sync avec logiciel DJ"
   }
 }

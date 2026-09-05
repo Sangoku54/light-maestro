@@ -41,7 +41,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
   };
 
   return (
-    <header className="h-12 bg-[#0d0d14] border-b border-gray-800 grid grid-cols-[1fr_auto_1fr] items-center pl-3 pr-[150px] gap-2 select-none drag-region min-w-0">
+    <header className="h-10 bg-[var(--bg-2)] border-b border-[var(--border)] grid grid-cols-[1fr_auto_1fr] items-center pl-3 pr-[150px] gap-2 select-none drag-region min-w-0">
       {/* Left zone: logo + project/preset/audio context */}
       <div className="flex items-center gap-2 no-drag min-w-0 overflow-hidden">
         <div className="flex items-center gap-2">
@@ -52,7 +52,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
           <>
             <div className="w-px h-5 bg-gray-700" />
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-700/20 border border-purple-600/20">
-              <span className="text-[10px] text-purple-400/70 font-medium uppercase tracking-wider">Projet</span>
+              <span className="text-[10px] text-purple-400/70 font-medium uppercase tracking-wider">{t('topbar.project')}</span>
               <span className="text-xs text-purple-200 font-semibold truncate max-w-[26vw] md:max-w-[180px]">{projectName}</span>
             </div>
           </>
@@ -61,7 +61,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
           <>
             <div className="w-px h-5 bg-gray-700" />
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-700/15 border border-amber-600/15">
-              <span className="text-[10px] text-amber-400/70 font-medium uppercase tracking-wider">Preset</span>
+              <span className="text-[10px] text-amber-400/70 font-medium uppercase tracking-wider">{t('topbar.preset')}</span>
               <span className="text-xs text-amber-200 font-semibold truncate max-w-[22vw] md:max-w-[160px]">{presetName}</span>
             </div>
           </>
@@ -106,28 +106,28 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
       <button
         onClick={() => (window as any).__lm_new?.()}
         className="no-drag flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-gray-800/30 text-gray-400 hover:bg-purple-800/30 hover:text-purple-300 transition-all"
-        title="Nouveau Projet"
+        title={t('topbar.newTitle')}
       >
         <FilePlus size={12} />
-        <span className="hidden lg:inline">Nouveau</span>
+        <span className="hidden lg:inline">{t('topbar.new')}</span>
       </button>
       <div className="w-px h-4 bg-gray-700" />
       <button
         onClick={() => (window as any).__lm_open?.()}
         className="no-drag flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-gray-800/30 text-gray-400 hover:bg-gray-700/40 hover:text-gray-200 transition-all"
-        title="Ouvrir un projet (.lmproj)"
+        title={t('topbar.openTitle')}
       >
         <FolderOpen size={12} />
-        <span className="hidden lg:inline">Ouvrir</span>
+        <span className="hidden lg:inline">{t('topbar.open')}</span>
       </button>
       <div className="w-px h-4 bg-gray-700" />
       <button
         onClick={() => (window as any).__lm_save?.()}
         className="no-drag flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-gray-800/30 text-gray-400 hover:bg-gray-700/40 hover:text-gray-200 transition-all"
-        title="Enregistrer le projet (.lmproj)"
+        title={t('topbar.saveTitle')}
       >
         <Save size={12} />
-        <span className="hidden lg:inline">Enregistrer</span>
+        <span className="hidden lg:inline">{t('topbar.save')}</span>
       </button>
       <div className="w-px h-4 bg-gray-700" />
 
@@ -135,7 +135,8 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
       <button
         onClick={toggleLanguage}
         className="no-drag flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-gray-800/30 text-gray-400 hover:bg-gray-700/40 hover:text-gray-200 transition-all"
-        title={i18n.language === 'fr' ? 'Switch to English' : 'Passer en Français'}
+        title={i18n.language === 'fr' ? t('topbar.switchToEn') : t('topbar.switchToFr')}
+        aria-label={i18n.language === 'fr' ? t('topbar.switchToEn') : t('topbar.switchToFr')}
       >
         {i18n.language === 'fr' ? '🇫🇷 FR' : '🇬🇧 EN'}
       </button>

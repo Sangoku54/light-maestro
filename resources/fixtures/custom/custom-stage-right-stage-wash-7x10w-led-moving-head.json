@@ -1,0 +1,363 @@
+{
+  "id": "custom-stage-right-stage-wash-7x10w-led-moving-head",
+  "manufacturer": "stage-right",
+  "model": "Stage Wash 7x10W LED Moving Head",
+  "type": "Color Changer",
+  "modes": [
+    {
+      "name": "9-channel",
+      "channels": [
+        {
+          "name": "Pan",
+          "type": "Pan",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "Pan"
+            }
+          ]
+        },
+        {
+          "name": "Tilt",
+          "type": "Tilt",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "Tilt"
+            }
+          ]
+        },
+        {
+          "name": "Dimmer / Strobe",
+          "type": "Shutter",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 7,
+              "name": "ShutterStrobe"
+            },
+            {
+              "min": 8,
+              "max": 134,
+              "name": "Intensity"
+            },
+            {
+              "min": 135,
+              "max": 239,
+              "name": "ShutterStrobe"
+            },
+            {
+              "min": 240,
+              "max": 255,
+              "name": "ShutterStrobe"
+            }
+          ]
+        },
+        {
+          "name": "Red",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "ColorIntensity",
+              "color": "Red"
+            }
+          ]
+        },
+        {
+          "name": "Green",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "ColorIntensity",
+              "color": "Green"
+            }
+          ]
+        },
+        {
+          "name": "Blue",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "ColorIntensity",
+              "color": "Blue"
+            }
+          ]
+        },
+        {
+          "name": "White",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "ColorIntensity",
+              "color": "White"
+            }
+          ]
+        },
+        {
+          "name": "Pan/Tilt Speed",
+          "type": "Speed",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "PanTiltSpeed"
+            }
+          ]
+        },
+        {
+          "name": "Reset",
+          "type": "Nothing",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 149,
+              "name": "NoFunction"
+            },
+            {
+              "min": 150,
+              "max": 200,
+              "name": "Reset"
+            },
+            {
+              "min": 201,
+              "max": 255,
+              "name": "NoFunction"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "14-channel",
+      "channels": [
+        {
+          "name": "Pan",
+          "type": "Pan",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "Pan"
+            }
+          ]
+        },
+        {
+          "name": "Pan fine",
+          "type": "Nothing",
+          "defaultValue": 0
+        },
+        {
+          "name": "Tilt",
+          "type": "Tilt",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "Tilt"
+            }
+          ]
+        },
+        {
+          "name": "Tilt fine",
+          "type": "Nothing",
+          "defaultValue": 0
+        },
+        {
+          "name": "Pan/Tilt Speed",
+          "type": "Speed",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "PanTiltSpeed"
+            }
+          ]
+        },
+        {
+          "name": "Dimmer / Strobe",
+          "type": "Shutter",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 7,
+              "name": "ShutterStrobe"
+            },
+            {
+              "min": 8,
+              "max": 134,
+              "name": "Intensity"
+            },
+            {
+              "min": 135,
+              "max": 239,
+              "name": "ShutterStrobe"
+            },
+            {
+              "min": 240,
+              "max": 255,
+              "name": "ShutterStrobe"
+            }
+          ]
+        },
+        {
+          "name": "Red",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "ColorIntensity",
+              "color": "Red"
+            }
+          ]
+        },
+        {
+          "name": "Green",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "ColorIntensity",
+              "color": "Green"
+            }
+          ]
+        },
+        {
+          "name": "Blue",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "ColorIntensity",
+              "color": "Blue"
+            }
+          ]
+        },
+        {
+          "name": "White",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "ColorIntensity",
+              "color": "White"
+            }
+          ]
+        },
+        {
+          "name": "Color Presets",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 231,
+              "name": "ColorPreset"
+            },
+            {
+              "min": 232,
+              "max": 255,
+              "name": "Seven Colors"
+            }
+          ]
+        },
+        {
+          "name": "Color Effect Speed",
+          "type": "Speed",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "EffectSpeed"
+            }
+          ]
+        },
+        {
+          "name": "Auto / Sound Mode",
+          "type": "Nothing",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 7,
+              "name": "NoFunction"
+            },
+            {
+              "min": 8,
+              "max": 63,
+              "name": "Auto Mode"
+            },
+            {
+              "min": 64,
+              "max": 127,
+              "name": "Auto Mode"
+            },
+            {
+              "min": 128,
+              "max": 191,
+              "name": "Sound Mode 1"
+            },
+            {
+              "min": 192,
+              "max": 255,
+              "name": "Sound Mode 2"
+            }
+          ]
+        },
+        {
+          "name": "Reset",
+          "type": "Nothing",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 149,
+              "name": "NoFunction"
+            },
+            {
+              "min": 150,
+              "max": 200,
+              "name": "Reset"
+            },
+            {
+              "min": 201,
+              "max": 255,
+              "name": "NoFunction"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

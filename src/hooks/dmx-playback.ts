@@ -7,6 +7,11 @@
  * Architecture:
  *   Renderer → IPC setChannels → Engine writes SAB → Worker reads SAB
  *   Worker → frameSent → Engine dispatches to USB/ArtNet/sACN outputs
+ *
+ * NOTE-PROGRAMME (TODO): Exploitation maximale — chaque fixture doit exploiter
+ *   100% de ses canaux. Per-pixel chase (rgbSegments) + Effect/Speed/Beam
+ *   génériques ajoutés pour wall-washer/barres. À auditer fixture par fixture
+ *   (voir fixture-analyzer.ts NOTE-PROGRAMME).
  */
 
 import { useEffect, useRef } from 'react';
@@ -190,6 +195,19 @@ export interface ChaserTrackRef {
   name?: string;
 }
 
+export interface ShowTrackEntryRef {
+  id: string;
+  time: number;
+  endTime: number;
+  showId: string;
+  showName?: string;
+}
+export interface ShowTrackRef {
+  id: string;
+  entries: ShowTrackEntryRef[];
+  name?: string;
+}
+
 /**
  * Resolve chaser playback at an absolute time inside a block.
  * The chaser loops its steps (fadeIn → hold → fadeOut, exact ms) while the block is active,
@@ -206,11 +224,15 @@ export function computeChaserTrackOverrides(
 ): Map<string, Record<number, number>> {
   const controlled = new Map<string, Record<number, number>>();
   for (const tr of chaserTracks) {
-    if (!tr.entries || tr.entries.length === 0 || !tr.targetFixtures) continue;
-    const entry = tr.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
+    if (!tr.entries || tr.entries.length === 0) continue;
+    const entry = tr.entries.find(e => {
+      const s = Math.min(e.time, e.endTime), en = Math.max(e.time, e.endTime);
+      return currentTime >= s && currentTime < en;
+    });
     if (!entry) continue;
     const chaser = chasers.find(c => c.id === entry.chaserId);
-    if (!chaser || !chaser.steps || chaser.steps.length === 0) continue;
+    if (!chaser) continue;
+    if (!chaser.steps || chaser.steps.length === 0) continue;
 
     // A chaser plays its OWN fixtures: targets = fixtures whose address range is
     // covered by the channels of the scenes referenced by the chaser steps.
@@ -264,8 +286,102 @@ export function computeChaserTrackOverrides(
   return controlled;
 }
 
+export function computeShowTrackOverrides(
+  showTracks: ShowTrackRef[],
+  shows: Array<{ id: string; name?: string; duration: number; tracks: Array<{ type: string; items: Array<{ startTime: number; duration: number; resourceId: string; fadeIn?: number; fadeOut?: number }>; muted?: boolean }> }>,
+  scenes: Array<{ id: string; channels: Record<number, number> }>,
+  chasers: Array<{ id: string; steps: Array<{ sceneId: string; fadeIn?: number; hold?: number; fadeOut?: number }> }>,
+  currentTime: number,
+  patchedFixtures: PatchedFixture[],
+  fixtureGroups: { id: string; fixtureIds: string[] }[],
+): Map<string, Record<number, number>> {
+  const controlled = new Map<string, Record<number, number>>();
+  if (!showTracks || showTracks.length === 0 || !shows || shows.length === 0) return controlled;
+  for (const tr of showTracks) {
+    if (!tr.entries || tr.entries.length === 0) continue;
+    const entry = tr.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
+    if (!entry) continue;
+    const show = shows.find(s => s.id === entry.showId);
+    if (!show || !show.tracks) continue;
+    const elapsed = (currentTime - entry.time) * 1000; // show time in ms
+    const merged: Record<number, number> = {};
+    const mergeShow = (vals: Record<number, number>) => {
+      for (const [k,v] of Object.entries(vals)) {
+        const a = Number(k);
+        const prev = merged[a];
+        if (prev === undefined || v > prev) merged[a] = v;
+      }
+    };
+    for (const st of show.tracks) {
+      if ((st as any).muted) continue;
+      for (const item of (st as any).items as Array<{ startTime: number; duration: number; resourceId: string; fadeIn?: number; fadeOut?: number }>) {
+        if (elapsed < item.startTime || elapsed >= item.startTime + item.duration) continue;
+        const itemElapsed = elapsed - item.startTime;
+        let intensity = 1;
+        const fi = item.fadeIn ?? 0, fo = item.fadeOut ?? 0;
+        if (itemElapsed < fi && fi>0) intensity = itemElapsed/fi;
+        else if (itemElapsed > item.duration - fo && fo>0) intensity = 1 - (itemElapsed - (item.duration - fo))/fo;
+        if ((st as any).type === 'scene') {
+          const sc = scenes.find(s => s.id === item.resourceId);
+          if (!sc || !sc.channels) continue;
+          const faded: Record<number, number> = {};
+          for (const [addrStr,val] of Object.entries(sc.channels)) faded[Number(addrStr)] = Math.round(Number(val)*intensity);
+          mergeShow(faded);
+        } else if ((st as any).type === 'chaser') {
+          const chaser = chasers.find(c => c.id === item.resourceId);
+          if (!chaser || !chaser.steps.length) continue;
+          const total = chaser.steps.reduce((a,s)=>a+Math.max(1,(s.fadeIn||0)+(s.hold||0)+(s.fadeOut||0)),0);
+          if (total<=0) continue;
+          const cyclePos = itemElapsed % total;
+          let acc=0;
+          for (const step of chaser.steps) {
+            const sd = Math.max(1,(step.fadeIn||0)+(step.hold||0)+(step.fadeOut||0));
+            if (cyclePos>=acc && cyclePos<acc+sd) {
+              const stepElapsed = cyclePos-acc;
+              let si=1;
+              if (stepElapsed < (step.fadeIn||0) && (step.fadeIn||0)>0) si=stepElapsed/(step.fadeIn||0);
+              else if (stepElapsed > sd-(step.fadeOut||0) && (step.fadeOut||0)>0) si=1-(stepElapsed-(sd-(step.fadeOut||0)))/(step.fadeOut||0);
+              const sc = scenes.find(s=>s.id===step.sceneId);
+              if (sc && sc.channels) {
+                const faded: Record<number, number> = {};
+                for (const [addrStr,val] of Object.entries(sc.channels)) faded[Number(addrStr)] = Math.round(Number(val)*si*intensity);
+                mergeShow(faded);
+              }
+              break;
+            }
+            acc+=sd;
+          }
+        }
+      }
+    }
+    if (Object.keys(merged).length===0) continue;
+    // Determine fixtures touched by this show entry (HTP map to fixtures)
+    const addrs = new Set<number>(Object.keys(merged).map(Number));
+    const targets: string[] = [];
+    for (const pf of patchedFixtures) {
+      for (let a=pf.startAddress; a<pf.startAddress+pf.channelCount; a++) if (addrs.has(a)) { targets.push(pf.id); break; }
+    }
+    if (targets.length===0) {
+      // fallback to all fixtures if show has no channel overlap (e.g. virtual)
+      for (const pf of patchedFixtures) targets.push(pf.id);
+    }
+    for (const fid of targets) {
+      const pf = patchedFixtures.find(p=>p.id===fid);
+      if (!pf) continue;
+      const perFix: Record<number, number> = {};
+      for (const [addrStr,val] of Object.entries(merged)) {
+        const a = Number(addrStr);
+        if (a>=pf.startAddress && a<pf.startAddress+pf.channelCount) perFix[a]=val;
+      }
+      if (Object.keys(perFix).length>0) controlled.set(fid, perFix);
+    }
+  }
+  return controlled;
+}
+
 // Stage-aware pan/tilt clamping to keep beams on stage
 // ─── Extracted utilities (pure functions, no React) ──────
+import { evalEffect, toDmx, type EffectPattern } from '../engine/effect-engine';
 import type { RgbSegment } from '../engine/dmx-color';
 import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, findBestWheelCap } from '../engine/dmx-color';
 import type { ChannelAnalysis } from '../engine/fixture-analyzer';
@@ -369,6 +485,8 @@ export function useDmxPlayback(options: {
   chaserTracksRef?: React.MutableRefObject<ChaserTrackRef[] | null>; // Chaser track takeover (full control of target fixtures)
   chasersRef?: React.MutableRefObject<Array<{ id: string; steps: Array<{ sceneId: string; fadeIn?: number; hold?: number; fadeOut?: number }> }>>; // Saved chasers
   scenesRef?: React.MutableRefObject<Array<{ id: string; channels: Record<number, number> }>>; // Saved scenes (for chaser steps)
+  showTracksRef?: React.MutableRefObject<ShowTrackRef[] | null>; // Show track takeover (full show over autoscript)
+  showsRef?: React.MutableRefObject<Array<{ id: string; name?: string; duration: number; tracks: Array<{ type: string; items: Array<{ startTime: number; duration: number; resourceId: string; fadeIn?: number; fadeOut?: number }>; muted?: boolean }> }>>;
   disabledFixturesRef?: React.MutableRefObject<Set<string>>; // Disabled fixture IDs
   fixturePositionsRef?: React.MutableRefObject<Record<string, { x: number; y: number; h?: number }>>; // For stage-aware pan/tilt
   panTiltLimitsRef?: React.MutableRefObject<{ pan: number; tilt: number; perFixture?: Record<string, { pan: number; tilt: number }> }>; // DMX half-amplitude limits for autoscript movement (128 = full)
@@ -378,7 +496,7 @@ export function useDmxPlayback(options: {
   forceDropRef?: React.MutableRefObject<boolean>; // Force next tick to use drop parameters
   arbiterSource?: string; // Output-arbiter source id this engine writes as (default 'quickshow')
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,panTiltLimitsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,showTracksRef,showsRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,panTiltLimitsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource}=options;
   const arbSource = arbiterSource ?? 'quickshow';
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
@@ -395,6 +513,10 @@ export function useDmxPlayback(options: {
     api.stop().catch(()=>{});
   },[dryRunMode]);
   const lastChannelsRef=useRef<Map<number,Record<number,number>>>(new Map());
+  // Dernier pan/tilt émis par fixture : quand une chaser track gèle une fixture
+  // dont la scène ne porte pas le pan/tilt, on maintient la dernière position
+  // au lieu de laisser l'autoscript animer (exigence "rester fixe").
+  const chaserHoldRef=useRef<Map<string,{pan:number,tilt:number}>>(new Map());
   const freezerRef=useRef(frozenRef);freezerRef.current=frozenRef;
   const forceDropRefLocal=useRef(forceDropRef);forceDropRefLocal.current=forceDropRef;
   const patchedFixturesRef=useRef(patchedFixtures);patchedFixturesRef.current=patchedFixtures;
@@ -406,14 +528,44 @@ export function useDmxPlayback(options: {
     const uniIds=universes.map(u=>String(u.id));
     const analyses:ChannelAnalysis[]=[];
     for(const pf of patchedFixtures){
-      const def=fixtureDefs.get(pf.fixtureDefId);
+      let def=fixtureDefs.get(pf.fixtureDefId);
       if(!def){
-        // Ne PAS tuer tout le show pour une seule fixture sans définition :
-        // on l'ignore et on garde les autres. C'était le bail « tout ou rien »
-        // qui blackoutait la 3D entière dès qu'une def était perdue/renommée
-        // (le chargement de defs est déjà tolérant, mais ce point ne l'était pas).
-        console.warn(`[DMX-PLAYBACK] fixture "${pf.name}" sans définition (fixtureDefId="${pf.fixtureDefId}") — ignorée pour la lecture`);
-        continue;
+        const chCount=pf.channelCount||1;
+        // Fallback intelligent basé sur le nom du modèle quand la définition
+        // officielle n'existe pas. Cela permet à l'autoscript et au chaser de fonctionner.
+        const model=(pf.model||'').toLowerCase();
+        const channels: any[]=[];
+        // Canal 0 : Dimmer
+        channels.push({offset:0,name:'Dimmer',type:'Intensity'});
+        // Canaux RGB basés sur le nom
+        if(/rgbw|4in1|rwb/i.test(model)){
+          channels.push({offset:1,name:'Red',type:'Colour'});
+          channels.push({offset:2,name:'Green',type:'Colour'});
+          channels.push({offset:3,name:'Blue',type:'Colour'});
+          channels.push({offset:4,name:'White',type:'Colour'});
+        }else if(/rgb/i.test(model)){
+          channels.push({offset:1,name:'Red',type:'Colour'});
+          channels.push({offset:2,name:'Green',type:'Colour'});
+          channels.push({offset:3,name:'Blue',type:'Colour'});
+        }
+        // Pan/Tilt pour moving heads / beams
+        if(/moving.?head|beam|spot|wash/i.test(model)){
+          channels.push({offset:channels.length,name:'Pan',type:'Pan'});
+          channels.push({offset:channels.length,name:'Tilt',type:'Tilt'});
+        }
+        // Compléter avec des canaux génériques
+        while(channels.length<chCount){
+          channels.push({offset:channels.length,name:`CH ${channels.length+1}`});
+        }
+        // Le mode par défaut doit exister à l'index modeIndex : les patched
+        // fixtures utilisent ex. modeIndex=1 ("14-channel") et analyseChannels
+        // lit def.modes[pf.modeIndex]. Un tableau d'un seul mode rendait
+        // modes[1]/[2] undefined → canaux [] → analyse vide → aucune chaîne
+        // écrite (fixtures muettes en lecture). On duplique le mode construit
+        // jusqu'à couvrir l'index référencé par la fixture.
+        const modeObj={name:'Default',channelCount:chCount,channels};
+        const modes=new Array((pf.modeIndex||0)+1).fill(null).map(()=>({...modeObj,channels:[...channels]}));
+        def={id:pf.fixtureDefId,manufacturer:pf.manufacturer||'Unknown',model:pf.model||pf.name,fixtureType:pf.fixtureType||'Unknown',modes,wheels:[]} as any;
       }
       const fa=analyzeChannels(pf,def);
       fa.universeIndex=uniIds.indexOf(pf.universeId);
@@ -425,9 +577,17 @@ export function useDmxPlayback(options: {
       const list=byUniverse.get(fa.universeIndex)??[];
       list.push(fa);byUniverse.set(fa.universeIndex,list);
     }
-    // Only update if data actually changed to avoid RAF loop re-mounts
+    // Only update if data actually changed to avoid RAF loop re-mounts.
+    // Le key inclut une signature des définitions : quand loadFixtureDefinitions
+    // résout les vraies defs custom en async (après un premier passage en
+    // fallback), le key change et l'analyse est recalculée — sinon une analyse
+    // figée en fallback rendrait les fixtures muettes pour toute la lecture.
     const prev=analysisRef.current;
-    const newKey=JSON.stringify({uniIds,counts:analyses.map(a=>a.fixture.id)});
+    const defsSig=patchedFixtures.map(pf=>{
+      const d=fixtureDefs.get(pf.fixtureDefId);
+      return d?`${d.id}|${d.modes?.length ?? -1}|${(d.modes[pf.modeIndex]?.channels?.length ?? -1)}`:'-';
+    });
+    const newKey=JSON.stringify({uniIds,counts:analyses.map(a=>a.fixture.id),defsSig});
     if(prev?._key!==newKey){
       analysisRef.current={byUniverse,uniIds,_key:newKey};
     }
@@ -609,19 +769,7 @@ export function useDmxPlayback(options: {
         patchedFixturesRef.current,
         fixtureGroupsRef?.current || [],
       );
-      // Diagnostic: log color tracks once every 120 frames (~2s)
-      const _diagFrame2 = (tick as any)._ctDiagFrame ?? 0;
-      (tick as any)._ctDiagFrame = _diagFrame2 + 1;
-      if (_diagFrame2 % 120 === 0 && ctRefData.length > 0) {
-        for (const ctItem of ctRefData) {
-          const activeEntry = ctItem.entries.find(e => ct >= e.time && ct < e.endTime);
-          console.log(`[colorTrack] "${ctItem.name}" targets=${ctItem.targetFixtures?.type} entries=${ctItem.entries.length} activeAt=${ct.toFixed(1)}: ${activeEntry ? `${activeEntry.color}→${activeEntry.endColor || 'N/A'} [${activeEntry.time.toFixed(1)}-${activeEntry.endTime.toFixed(1)}]` : '∅'}`);
-        }
-        const armId = patchedFixturesRef.current.find(f => f.name?.includes('6 arm'))?.id;
-        if (armId) {
-          console.log(`[colorTrack] Tonio 6 arm (${armId}) hasColorTrack: ${colorTrackColors.has(armId)} → ${colorTrackColors.get(armId) || '∅'}`);
-        }
-      }
+      // (diag colorTrack retiré prod — gardé seulement si __DEBUG__)
 
       // Find active cue: direct latest-before-ct, NO section grouping
       let active:CuePlayback|null=null;
@@ -734,10 +882,10 @@ export function useDmxPlayback(options: {
       let efxActive:Record<number,number>|null=null;let efxTime=0;
       if(overrideCuesRef?.current){for(const oc of overrideCuesRef.current){if(oc.time<=ct&&oc.time>=efxTime){efxTime=oc.time;efxActive=oc.channelValues;}}}
 
-      // Pre-compute EFX track pan/tilt overrides for this frame
-      const efxPtOverrides = efxTracksRef?.current && effectsRef?.current && efxTracksRef.current.length > 0
-        ? computeEfxOverrides(efxTracksRef.current, ct, effectsRef.current, patchedFixturesRef.current, fixtureGroupsRef?.current || [])
-        : null;
+// Pre-compute EFX track pan/tilt overrides for this frame
+       const efxPtOverrides = efxTracksRef?.current && effectsRef?.current && efxTracksRef.current.some(t => t.entries.length > 0)
+         ? computeEfxOverrides(efxTracksRef.current, ct, effectsRef.current, patchedFixturesRef.current, fixtureGroupsRef?.current || [])
+         : null;
 
       // Debug: log if EFX tracks exist but no overrides computed
       if (!efxPtOverrides || efxPtOverrides.size === 0) {
@@ -769,6 +917,25 @@ export function useDmxPlayback(options: {
           fixtureTrackMap.get(fid)!.push(entry);
         }
       }
+
+      // Chaser takeover, computed ONCE per frame BEFORE the fixture loop so the
+      // autoscript movement/color below can yield to it. A chaser track entry
+      // freezes its fixtures: pan/tilt + color come from the chaser scene,
+      // not from the autoscript animation (which otherwise keeps moving).
+      let chaserCtlFrame = new Map<string, Record<number, number>>();
+      try {
+        if (chaserTracksRef?.current && chasersRef?.current && scenesRef?.current) {
+          chaserCtlFrame = computeChaserTrackOverrides(
+            chaserTracksRef.current,
+            chasersRef.current,
+            scenesRef.current,
+            ct,
+            patchedFixturesRef.current,
+            fixtureGroupsRef?.current || [],
+          );
+          // chaserCtlFrame ready
+        }
+      } catch { chaserCtlFrame = new Map<string, Record<number, number>>(); }
 
       for(const[uniIdx,fixtures]of analysis.byUniverse.entries()){
         const uid=analysis.uniIds[uniIdx];if(!uid)continue;
@@ -811,18 +978,21 @@ export function useDmxPlayback(options: {
           // Dimmer track: propagate to ALL intensity channels (LED heads 2..N)
           if(_dimmerTrackActive){for(const li of (fa.ledIntensityOffsets||[])){chVals[pf.startAddress+li]=dimmerVal;}}
 
-          // Densite par section (activeTiers) : les fixtures hors tiers actifs
-          // sont eteintes (dimmer 0 + shutter 0 + gates laser 0). Le show
-          // respire entre intro (primary seul) et drop (toutes les couches).
-          if (Array.isArray(active.activeTiers) && !active.activeTiers.includes(pf.tier) && !_dimmerTrackActive) {
-            if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = 0;
-            if (fa.shutterOffset !== null) chVals[pf.startAddress + fa.shutterOffset] = 0;
-            if (fa.strobeOffset !== null) chVals[pf.startAddress + fa.strobeOffset] = 0;
-            if (fa.isLaser) {
-              if (fa.rgbOffsets) for (const o of fa.rgbOffsets) chVals[pf.startAddress + o] = 0;
-              if (fa.laserColorGateOffset !== null) chVals[pf.startAddress + fa.laserColorGateOffset] = 0;
-            }
-          }
+// Densite par section (activeTiers) : les fixtures hors tiers actifs
+           // sont eteintes (dimmer 0 + shutter 0 + gates laser 0). Le show
+           // respire entre intro (primary seul) et drop (toutes les couches).
+           // Les fixtures de tier 'other' sont toujours considerees comme actives.
+           let _fixtureInactive = false;
+           if (Array.isArray(active.activeTiers) && !active.activeTiers.includes(pf.tier) && pf.tier !== 'other' && !_dimmerTrackActive) {
+             _fixtureInactive = true;
+             if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = 0;
+             if (fa.shutterOffset !== null) chVals[pf.startAddress + fa.shutterOffset] = 0;
+             if (fa.strobeOffset !== null) chVals[pf.startAddress + fa.strobeOffset] = 0;
+             if (fa.isLaser) {
+               if (fa.rgbOffsets) for (const o of fa.rgbOffsets) chVals[pf.startAddress + o] = 0;
+               if (fa.laserColorGateOffset !== null) chVals[pf.startAddress + fa.laserColorGateOffset] = 0;
+             }
+           }
 
           let paletteColor = (() => {
             // Color track override (highest priority)
@@ -861,7 +1031,26 @@ export function useDmxPlayback(options: {
           })();
 
           const isColorTrack = colorTrackColors.has(pf.id);
-          if(fa.rgbSegments.length>0&&paletteColor){
+          // Chaser takeover (couleur) : si le chaser pilote les canaux couleur
+          // de cette fixture, on n'écrit PAS la couleur autoscript (rouge du
+          // chaser conservé, pas de fuite blanc). Le merge chaser plus bas
+          // écrit les valeurs du chaser.
+          const chaserMapForColor = chaserCtlFrame.get(pf.id);
+          let chaserOwnsColor = false;
+          if (chaserMapForColor) {
+            const colorAddrs = new Set<number>();
+            for (const seg of fa.rgbSegments) {
+              colorAddrs.add(pf.startAddress + seg.r);
+              colorAddrs.add(pf.startAddress + seg.g);
+              if (seg.b !== null) colorAddrs.add(pf.startAddress + seg.b);
+              if (seg.w !== null) colorAddrs.add(pf.startAddress + seg.w);
+            }
+            if (fa.wheelOffset !== null) colorAddrs.add(pf.startAddress + fa.wheelOffset);
+            for (const addrStr in chaserMapForColor) {
+              if (colorAddrs.has(Number(addrStr))) { chaserOwnsColor = true; break; }
+            }
+          }
+          if(fa.rgbSegments.length>0&&paletteColor&&!chaserOwnsColor){
             let[r,g,b]=hexToRgb(paletteColor);
             // Only apply tier hue shift to cue colors, NOT to user-specified color track colors
             if (!isColorTrack) {
@@ -888,30 +1077,81 @@ export function useDmxPlayback(options: {
               }
             }
             for(const po of fa.presetOverrideOffsets){chVals[pf.startAddress+po]=0;}
-            // If intensityOffset was detected (including Dimmer/Shutter), set it
-            if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=dimmerVal;}
-            for(const seg of fa.rgbSegments){const key=pf.id+'_'+seg.r;let cur=fadeState.get(key);if(!cur){cur={r:r,g:g,b:b};fadeState.set(key,cur);}else{cur.r=Math.round(cur.r+(r-cur.r)*FADE_ALPHA);cur.g=Math.round(cur.g+(g-cur.g)*FADE_ALPHA);cur.b=Math.round(cur.b+(b-cur.b)*FADE_ALPHA);}chVals[pf.startAddress+seg.r]=cur.r;chVals[pf.startAddress+seg.g]=cur.g;if(seg.b!==null)chVals[pf.startAddress+seg.b]=cur.b;if(seg.w!==null)chVals[pf.startAddress+seg.w]=0;}
+            if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(_dimmerTrackActive){chVals[addr]=dimmerVal;}else if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=dimmerVal;}
+            // Per-pixel RGB: barre LED / wall wash multi-segments → chase color + wave
+            // Tous les canaux RGB de la fixture sont exploités (8×3=24 pour Wall Washer)
+            {
+              const segCount = fa.rgbSegments.length;
+              const isMultiPixel = segCount > 1;
+              for(let sIdx=0; sIdx<segCount; sIdx++){
+                const seg = fa.rgbSegments[sIdx];
+                let pr=r,pg=g,pb=b;
+                if(isMultiPixel && !isColorTrack){
+                  // Chase: décalage de teinte par pixel + propagation temporelle (beat)
+                  const hueStep = 360/segCount;
+                  const timeHue = (ct * 45 * (active.movementSpeed ?? 1)) % 360;
+                  const segHue = (sIdx * hueStep * 0.6 + timeHue) % 360; // 0.6 = moins que full rainbow, garde cohérence palette
+                  [pr,pg,pb] = applyHueShift([r,g,b], segHue * 0.35); // 35% du cercle = variation visible sans perdre teinte de section
+                  // Wave d'intensité par pixel (exploite les 24 canaux avec niveaux distincts)
+                  const wave = 0.75 + 0.25 * Math.sin((ct*2*Math.PI*0.8) + sIdx * (Math.PI*2/segCount));
+                  pr = Math.round(pr * wave); pg = Math.round(pg * wave); pb = Math.round(pb * wave);
+                }
+                const key=pf.id+'_'+seg.r;let cur=fadeState.get(key);if(!cur){cur={r:pr,g:pg,b:pb};fadeState.set(key,cur);}else{cur.r=Math.round(cur.r+(pr-cur.r)*FADE_ALPHA);cur.g=Math.round(cur.g+(pg-cur.g)*FADE_ALPHA);cur.b=Math.round(cur.b+(pb-cur.b)*FADE_ALPHA);}chVals[pf.startAddress+seg.r]=cur.r;chVals[pf.startAddress+seg.g]=cur.g;if(seg.b!==null)chVals[pf.startAddress+seg.b]=cur.b;if(seg.w!==null)chVals[pf.startAddress+seg.w]=0;
+                if(seg.a!==null) chVals[pf.startAddress+seg.a]=0;
+                if(seg.uv!==null) chVals[pf.startAddress+seg.uv]=0;
+              }
+            }
             // Apply dimmer track/cue dimmer to RGB when no dedicated intensity channel
             if(fa.intensityOffset===null){const dScale=dimmerVal/255;for(const seg of fa.rgbSegments){chVals[pf.startAddress+seg.r]=Math.round((chVals[pf.startAddress+seg.r]??0)*dScale);chVals[pf.startAddress+seg.g]=Math.round((chVals[pf.startAddress+seg.g]??0)*dScale);if(seg.b!==null)chVals[pf.startAddress+seg.b]=Math.round((chVals[pf.startAddress+seg.b]??0)*dScale);if(seg.w!==null)chVals[pf.startAddress+seg.w]=Math.round((chVals[pf.startAddress+seg.w]??0)*dScale);}}
+            // Exploit remaining generic channels (Effect / Speed / Beam / Zoom / Frost ...) pour exploitation maximale
+            // Wall Washer / LED Bar : Effect (macros Point-to-Point) et Speed doivent bouger, pas rester à 0
+            if(!fa.isLaser){
+              if(fa.effectOffset!==null){
+                const caps = fa.effectCaps;
+                if(caps.length>0){
+                  // Basse énergie → No function (0), haute énergie → cycle macros
+                  let effVal:number;
+                  if(effectiveEnergy < 0.3){
+                    const off = caps.find(c=>c.min===0) || caps[0];
+                    effVal = capMid(off);
+                  } else {
+                    const idx = Math.floor((ct*0.7) % caps.length);
+                    effVal = capMid(caps[idx]);
+                  }
+                  chVals[pf.startAddress+fa.effectOffset]=effVal;
+                } else {
+                  chVals[pf.startAddress+fa.effectOffset]=0;
+                }
+              }
+              if(fa.speedOffset!==null){
+                chVals[pf.startAddress+fa.speedOffset]= Math.max(0, Math.min(255, Math.round(50 + effectiveEnergy*150 + Math.sin(ct*3)*10)));
+              }
+              if(fa.beamOffset!==null){
+                // Beam générique : exploité comme zoom/focus léger si pas déjà géré par les FX dédiés
+                if(chVals[pf.startAddress+fa.beamOffset]===undefined) chVals[pf.startAddress+fa.beamOffset]= Math.round(100 + effectiveEnergy*80);
+              }
+            }
 
-          }else if(fa.wheelOffset!==null&&paletteColor){
+          }else if(fa.wheelOffset!==null){
             const caps=fa.wheelCaps;
-            let wheelVal:number;
-            if(caps.length>0){const bestCap=findBestWheelCap(caps,paletteColor);wheelVal=bestCap?Math.round((bestCap.min+bestCap.max)/2):(()=>{const[r,g,b]=hexToRgb(paletteColor);const cat2=classifyColor(r,g,b);const catMap:Record<string,number>={red:0.10,orange:0.20,yellow:0.30,green:0.42,cyan:0.55,blue:0.68,magenta:0.78,purple:0.78,white:0.02};const wPos=catMap[cat2]??0.5;const capIdx=Math.floor(wPos*caps.length)%caps.length;return Math.round((caps[capIdx].min+caps[capIdx].max)/2);})();}
-            else{const[r,g,b]=hexToRgb(paletteColor);const cat2=classifyColor(r,g,b);const catMap:Record<string,number>={red:0.10,orange:0.20,yellow:0.30,green:0.42,cyan:0.55,blue:0.68,magenta:0.78,purple:0.78,white:0.02};const wPos=catMap[cat2]??0.5;wheelVal=Math.round(wPos*255);}
-            chVals[pf.startAddress+fa.wheelOffset]=wheelVal;
+            if(paletteColor){
+              let wheelVal:number;
+              if(caps.length>0){const bestCap=findBestWheelCap(caps,paletteColor);wheelVal=bestCap?Math.round((bestCap.min+bestCap.max)/2):(()=>{const[r,g,b]=hexToRgb(paletteColor);const cat2=classifyColor(r,g,b);const catMap:Record<string,number>={red:0.10,orange:0.20,yellow:0.30,green:0.42,cyan:0.55,blue:0.68,magenta:0.78,purple:0.78,white:0.02};const wPos=catMap[cat2]??0.5;const capIdx=Math.floor(wPos*caps.length)%caps.length;return Math.round((caps[capIdx].min+caps[capIdx].max)/2);})();}
+              else{const[r,g,b]=hexToRgb(paletteColor);const cat2=classifyColor(r,g,b);const catMap:Record<string,number>={red:0.10,orange:0.20,yellow:0.30,green:0.42,cyan:0.55,blue:0.68,magenta:0.78,purple:0.78,white:0.02};const wPos=catMap[cat2]??0.5;wheelVal=Math.round(wPos*255);}
+              chVals[pf.startAddress+fa.wheelOffset]=wheelVal;
+            } else if (caps.length > 0) {
+              // Pas de couleur dans la cue : ramener la roue à la position
+              // « open / white » pour ne pas rester bloqué sur une couleur
+              // résiduelle (ex. jaune) laissée par une frame précédente.
+              const openCap = findBestWheelCap(caps, '#ffffff');
+              const idx = openCap
+                ? caps.indexOf(openCap)
+                : 0;
+              chVals[pf.startAddress+fa.wheelOffset] = capMid(caps[idx]);
+            }
           }
 
-          // Diagnostic: log actual RGB output for Tonio 6 arm after write
-          const _diagFrame = (tick as any)._armDiagFrame ?? 0;
-          (tick as any)._armDiagFrame = _diagFrame + 1;
-          if (_diagFrame % 120 === 0 && pf.name?.includes('6 arm')) {
-            const isCT = colorTrackColors.has(pf.id);
-            console.log(`[dmx-out] Tonio 6 arm | source=${isCT?'colorTrack':'cue'} palette=${paletteColor||'∅'} dimmer=${dimmerVal}`,
-              `| rgbSegments=${fa.rgbSegments.length>0?fa.rgbSegments.map(s=>`R${pf.startAddress+s.r}=${chVals[pf.startAddress+s.r]??0} G${pf.startAddress+s.g}=${chVals[pf.startAddress+s.g]??0} B${pf.startAddress+s.b}=${chVals[pf.startAddress+s.b]??0}`).join('; '):'∅'}`);
-          }
-
-          // Strobe decision (partagée shutter + canal strobe dédié)
+          // Strobe decision (partagée shutter + canal strobe dédié) — strobe track prioritaire même avec dimmer track
           const strobeTrackOverride = strobeOverrides ? (strobeOverrides.get(pf.id) || null) : null;
           const trackStrobe = (() => {
               const ftEntries3 = fixtureTrackMap.get(pf.id);
@@ -935,6 +1175,8 @@ export function useDmxPlayback(options: {
             ? strobeTrackOverride.active
             : trackStrobe
             ? trackStrobe.active
+            : _dimmerTrackActive
+            ? false
             : forcedStrobe !== undefined ? forcedStrobe : ((isDrop || isChorus || sec === 'build') && active.strobe && pf.tier === 'primary');
           const strobeSpeed = Math.min(strobeTrackOverride?.speed || trackStrobe?.speed || active.strobeSpeed || 10, strobeLimit);
 
@@ -989,6 +1231,8 @@ export function useDmxPlayback(options: {
               ? strobeTrackOverride.active
               : trackStrobeNoShutter
               ? trackStrobeNoShutter.active
+              : _dimmerTrackActive
+              ? false
               : forcedStrobe !== undefined ? forcedStrobe : ((isDrop || isChorus) && active.strobe && pf.tier === 'primary');
             if (useStrobeNoShutter && fa.intensityOffset !== null) {
               const baseSpeedNS = Math.min(strobeTrackOverride?.speed || trackStrobeNoShutter?.speed || active.strobeSpeed || 10, strobeLimit);
@@ -1000,9 +1244,50 @@ export function useDmxPlayback(options: {
             }
           }
 
-          // PAN/TILT — check EFX override first, fall back to auto pattern
+          // PAN/TILT — check EFX override first, then chaser freeze, fall back to auto pattern
           const panCount=fa.panOffsets.length;const tiltCount=fa.tiltOffsets.length;const motorCount=Math.max(panCount,tiltCount,1);
+          // Chaser takeover (mouvement) : si le chaser pilote le pan/tilt de
+          // cette fixture, on fige sur ses valeurs (focus fixe, pas d'autoscript).
+          // Le merge chaser plus bas réécrira ces mêmes valeurs.
+          const chaserMapForMove = chaserCtlFrame.get(pf.id);
+          const chaserOwnsFixture = !!chaserMapForMove;
+          let chaserMoveVals: { pan?: number; tilt?: number } | null = null;
+          if (chaserMapForMove) {
+            const panAddrs = new Set(fa.panOffsets.map(o => pf.startAddress + o));
+            const tiltAddrs = new Set(fa.tiltOffsets.map(o => pf.startAddress + o));
+            let cp: number | undefined; let ct2: number | undefined;
+            for (const addrStr in chaserMapForMove) {
+              const a = Number(addrStr);
+              if (cp === undefined && panAddrs.has(a)) cp = chaserMapForMove[addrStr];
+              if (ct2 === undefined && tiltAddrs.has(a)) ct2 = chaserMapForMove[addrStr];
+            }
+            if (cp !== undefined || ct2 !== undefined) {
+              chaserMoveVals = { pan: cp, tilt: ct2 };
+            }
+          }
           if(panCount>0||tiltCount>0){
+            if (chaserOwnsFixture) {
+              // Freeze total : la fixture est sous contrôle chaser.
+              // Si la scène définit pan/tilt, on les utilise ; sinon on maintient
+              // la dernière position connue (jamais le centre par défaut).
+              const held = chaserHoldRef.current.get(pf.id);
+              const pan = chaserMoveVals?.pan ?? held?.pan;
+              const tilt = chaserMoveVals?.tilt ?? held?.tilt;
+              if (pan !== undefined) {
+                for(let m=0;m<motorCount;m++){
+                  if(m<panCount) chVals[pf.startAddress+fa.panOffsets[m]]=pan;
+                }
+              }
+              if (tilt !== undefined) {
+                for(let m=0;m<motorCount;m++){
+                  if(m<tiltCount) chVals[pf.startAddress+fa.tiltOffsets[m]]=tilt;
+                }
+              }
+              chaserHoldRef.current.set(pf.id, {
+                pan: pan ?? chaserHoldRef.current.get(pf.id)?.pan ?? 128,
+                tilt: tilt ?? chaserHoldRef.current.get(pf.id)?.tilt ?? 128,
+              });
+            } else {
             let efxPan=NaN,efxTilt=NaN;
             if(panCount>0){const pa=pf.startAddress+fa.panOffsets[0];if(efxMap[pa]!==undefined)efxPan=efxMap[pa];}
             if(tiltCount>0){const ta=pf.startAddress+fa.tiltOffsets[0];if(efxMap[ta]!==undefined)efxTilt=efxMap[ta];}
@@ -1050,6 +1335,17 @@ export function useDmxPlayback(options: {
                       if (mobileIdx >= 0) return getSmartMovement(mobileIdx, totalMobile, cueMov, ct);
                       return cueMov;
                     }
+                    // Explicit pattern — distribue pour les tiers non-primaires pour éviter le mur uni
+                    if (pf.tier !== 'primary') {
+                      let mobileIdx = -1, totalMobile = 0;
+                      for (const ffa of fixtures) {
+                        if (ffa.panOffsets.length > 0 || ffa.tiltOffsets.length > 0) {
+                          if (ffa.fixture.id === pf.id) mobileIdx = totalMobile;
+                          totalMobile++;
+                        }
+                      }
+                      if (mobileIdx >= 0) return getSmartMovement(mobileIdx, totalMobile, cueMov, ct);
+                    }
                     return cueMov; // explicit pattern
                   }
                   // Fallback: smart distribution based on section
@@ -1076,21 +1372,20 @@ export function useDmxPlayback(options: {
                   }
                 }
               }
-              if(amplitude>0){for(let m=0;m<motorCount;m++){const motorPhase=m*(Math.PI*2/motorCount);const speedMult=active.movementSpeed??1;
-                // Crossfade movement params: blend toward next cue
+              if(amplitude>0){for(let m=0;m<motorCount;m++){const motorPhase=m*(Math.PI*2/motorCount);const speedMult=Math.max(0.1,Math.min(2.5,active.movementSpeed??1));
+                // Crossfade movement params: blend toward next cue (clamped)
                 const curAmp = amplitude; const curSpd = speedMult;
+                const nextSpdClamped = Math.max(0.1,Math.min(2.5,(nextCue as any)?.movementSpeed ?? curSpd));
                 const blendAmp = (crossfadeT>0&&nextCue&&!trackMovement)
                   ? Math.round(curAmp*(1-crossfadeT) + (nextCue.movementAmplitude!==undefined?Math.max(4,Math.min(128,Math.round(nextCue.movementAmplitude*tierAmpMult))):curAmp)*crossfadeT)
                   : curAmp;
                 const blendSpd = trackMovement
-                  ? (trackMovement.speed ?? curSpd)
+                  ? Math.max(0.1,Math.min(2.5,trackMovement.speed ?? curSpd))
                   : (crossfadeT>0&&nextCue
-                  ? curSpd*(1-crossfadeT) + (nextCue.movementSpeed??curSpd)*crossfadeT
+                  ? Math.max(0.1,Math.min(2.5,curSpd*(1-crossfadeT) + nextSpdClamped*crossfadeT))
                   : curSpd);
-                const phase=(ct*Math.PI*2*blendSpd)+motorPhase+(trackMovement?0:movementPhase)+(spatialPattern&&!trackMovement?spatialPhaseFor(fixturePositions?.[pf.id],spatialPattern,mobileIdx):0);let px=0,py=0;
-                switch(movPattern){case'intro':px=Math.sin(phase*.1)*.3;py=Math.cos(phase*.08+motorPhase)*.3;break;case'verse':px=Math.sin(phase*.25)*.5;py=Math.cos(phase*.2+motorPhase)*.4;break;case'chorus':px=Math.sin(phase*.5)*.7;py=Math.cos(phase*.5+motorPhase)*.7;break;case'bridge':px=Math.sin(phase*.3)*.5;py=Math.sin(phase*.6+motorPhase)*.5;break;case'drop':px=Math.sin(phase*.8)*.9;py=Math.cos(phase*1.2+motorPhase)*.6;break;case'outro':px=Math.sin(phase*.15)*.2;py=Math.cos(phase*.12+motorPhase)*.2;break;case'sweep':px=Math.sin(phase*.35+motorPhase)*.7;py=Math.cos(phase*.3+motorPhase)*.5;break;case'circle':px=Math.sin(phase*.5+motorPhase)*.7;py=Math.cos(phase*.5+motorPhase)*.7;break;case'bounce':px=Math.sin(phase*.4+motorPhase)*.5;py=Math.abs(Math.sin(phase*.8+motorPhase))*.8;break;case'wave':px=Math.sin(phase*.6+motorPhase)*.5;py=Math.sin(phase*.35+motorPhase*1.5)*.5;break;case'figure8':px=Math.sin(phase*.4+motorPhase)*.6;py=Math.sin(phase*.8+motorPhase)*.5;break;case'static':px=Math.sin(phase*.05+motorPhase)*.1;py=Math.cos(phase*.05+motorPhase)*.1;break;case'pulse':px=Math.sin(phase*.9+motorPhase)*.25;py=Math.abs(Math.sin(phase*1.8+motorPhase))*.85;break;
-                case'zigzag':{const saw=((phase/Math.PI)%2)-1;px=saw*.8;py=Math.sin(phase)>0?.5:-.5;}break;case'diamond':{px=(((phase/Math.PI)%2)-1)*.8;py=((((phase+Math.PI/2)/Math.PI)%2)-1)*.8;}break;case'spiral':{const r=.3+.7*Math.abs(Math.sin(phase*.3));px=Math.sin(phase*2)*r;py=Math.cos(phase*2)*r;}break;case'heartbeat':{const hp=((phase/(Math.PI*2))%1);const hb=hp<.15?1:hp<.3?.6:0;px=hb*Math.sin(phase*3);py=hb*Math.cos(phase*3);}break;case'randomWalk':px=Math.sin(phase*.7)*.5+Math.sin(phase*1.3)*.3+Math.cos(phase*2.1)*.2;py=Math.cos(phase*.6)*.5+Math.sin(phase*1.7)*.3+Math.sin(phase*2.3)*.2;break;case'panOnly':px=Math.sin(phase);py=0;break;case'tiltOnly':px=0;py=Math.sin(phase);break;
-      default:px=Math.sin(phase*.35)*.4;py=Math.cos(phase*.3+motorPhase)*.4;}
+                const phase=(ct*Math.PI*2*blendSpd)+motorPhase+(trackMovement?0:movementPhase)+(spatialPattern&&!trackMovement?spatialPhaseFor(fixturePositions?.[pf.id],spatialPattern,mobileIdx):0);
+                const [px, py] = evalEffect(movPattern as EffectPattern, phase, 0);
                 const pfl = panTiltLimits.perFixture?.[pf.id];
                 // Fixture-track movement blocks are user-authored (higher priority than autoscript): do not clamp them.
                 const panLimit = trackMovement ? 128 : (pfl?.pan ?? panTiltLimits.pan);
@@ -1101,6 +1396,7 @@ export function useDmxPlayback(options: {
                   let pv = fp ? clampPanToStage(raw, fp.x) : raw;
                   pv = Math.max(128 - panLimit, Math.min(128 + panLimit, pv));
                   chVals[pf.startAddress+fa.panOffsets[m]] = pv;
+                  if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: pv, tilt: 128 }), pan: pv });
                 }
                 if(m<tiltCount){
                   const raw = Math.max(0,Math.min(255,Math.round(128+py*blendAmp)));
@@ -1108,8 +1404,10 @@ export function useDmxPlayback(options: {
                   let tv = fp ? clampTiltToStage(raw, fp.y) : raw;
                   tv = Math.max(128 - tiltLimit, Math.min(128 + tiltLimit, tv));
                   chVals[pf.startAddress+fa.tiltOffsets[m]] = tv;
+                  if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: 128, tilt: tv }), tilt: tv });
                 }}
               }else{for(const po of fa.panOffsets)chVals[pf.startAddress+po]=128;for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=128;}
+            } // fin else autoscript (chaser freeze ci-dessus)
             }
           }
 
@@ -1161,15 +1459,28 @@ const _FXPROF: Record<string, [number, number, number, number]> = {
           // brève au crossfade » (le bloc n'existait que dans computeDmxForCue,
           // appelé uniquement lors des fondus < 0,3 s). Appliqué à chaque frame.
           if (fa.isLaser) {
-            computeLaserChannels(fa, pf, chVals, ct, effectiveEnergy, paletteColor);
+            if (_fixtureInactive) {
+              // Fixture hors tiers actifs : éteindre TOUS les canaux laser
+              // (mode, pattern, scan, rotation, blanking, gates couleur) pour
+              // que le laser ne reste pas allumé en intro/outro/bridge.
+              if (fa.laserModeOffset !== null) chVals[pf.startAddress + fa.laserModeOffset] = 0;
+              if (fa.patternOffset !== null) chVals[pf.startAddress + fa.patternOffset] = 0;
+              if (fa.scanXOffset !== null) chVals[pf.startAddress + fa.scanXOffset] = 0;
+              if (fa.scanYOffset !== null) chVals[pf.startAddress + fa.scanYOffset] = 0;
+              if (fa.laserSpeedScanOffset !== null) chVals[pf.startAddress + fa.laserSpeedScanOffset] = 0;
+              if (fa.laserSpeedPatternOffset !== null) chVals[pf.startAddress + fa.laserSpeedPatternOffset] = 0;
+              for (const off of fa.laserRotationOffsets) chVals[pf.startAddress + off] = 0;
+              if (fa.blankOffset !== null) chVals[pf.startAddress + fa.blankOffset] = 0;
+              if (fa.laserColorGateOffset !== null) chVals[pf.startAddress + fa.laserColorGateOffset] = 0;
+              if (fa.rgbOffsets) for (const o of fa.rgbOffsets) chVals[pf.startAddress + o] = 0;
+            } else {
+              computeLaserChannels(fa, pf, chVals, ct, effectiveEnergy, paletteColor);
+            }
           }
         }
 
-        // Chaser track takeover: fully controlled fixtures get the chaser scene state
+        // Chaser track: merge chaser-driven channels
         if (chaserTracksRef?.current && chasersRef?.current && scenesRef?.current) {
-          // Diagnostic: log chaser track state once every 120 frames (~2s)
-          const _diagC = (tick as any)._chDiagFrame ?? 0;
-          (tick as any)._chDiagFrame = _diagC + 1;
           try {
             const chaserCtl = computeChaserTrackOverrides(
               chaserTracksRef.current,
@@ -1179,20 +1490,12 @@ const _FXPROF: Record<string, [number, number, number, number]> = {
               patchedFixturesRef.current,
               fixtureGroupsRef?.current || [],
             );
-            if (_diagC % 120 === 0 && chaserTracksRef.current.length > 0) {
-              for (const tr of chaserTracksRef.current) {
-                const activeEntry = tr.entries.find(e => ct >= e.time && ct < e.endTime);
-                console.log(`[chaserTrack] "${tr.name}" entries=${tr.entries.length} activeAt=${ct.toFixed(1)}: ${activeEntry ? `chaser=${activeEntry.chaserName || activeEntry.chaserId} [${activeEntry.time.toFixed(1)}-${activeEntry.endTime.toFixed(1)}] controls=${chaserCtl.size} fixtures` : '∅'}`);
-              }
-            }
             if (chaserCtl.size > 0) {
               for (const fa of fixtures) {
                 const pfx = fa.fixture;
                 const cmap = chaserCtl.get(pfx.id);
                 if (!cmap) continue;
-                for (let a = pfx.startAddress; a < pfx.startAddress + pfx.channelCount; a++) {
-                  if (chVals[a] !== undefined) delete chVals[a];
-                }
+                // Merge chaser: only overwrite channels the chaser actually drives, keep dimmer/track elsewhere
                 for (const addrStr in cmap) {
                   const v = cmap[addrStr];
                   const addr = Number(addrStr);
@@ -1205,8 +1508,37 @@ const _FXPROF: Record<string, [number, number, number, number]> = {
           }
         }
 
-        // Crossfade blend: mix next cue values into current chVals
-        if(crossfadeT>0&&nextCueDmx){
+        // Show track: show complet qui prend le dessus sur l'autoscript (priorité la plus haute)
+        if (showTracksRef?.current && showsRef?.current && scenesRef?.current) {
+          try {
+            const showCtl = computeShowTrackOverrides(
+              showTracksRef.current as any,
+              showsRef.current as any,
+              scenesRef.current as any,
+              chasersRef?.current as any || [],
+              ct,
+              patchedFixturesRef.current,
+              fixtureGroupsRef?.current || [],
+            );
+            if (showCtl.size > 0) {
+              for (const fa of fixtures) {
+                const pfx = fa.fixture;
+                const cmap = showCtl.get(pfx.id);
+                if (!cmap) continue;
+                for (const addrStr in cmap) {
+                  const v = cmap[addrStr];
+                  const addr = Number(addrStr);
+                  if (addr >= pfx.startAddress && addr < pfx.startAddress + pfx.channelCount) chVals[addr] = v;
+                }
+              }
+            }
+          } catch (e) {
+            console.error('[showTrack] takeover error:', e);
+          }
+        }
+
+        // Crossfade blend — skip si EFX track actif (sinon l'EFX stutter à chaque cue)
+        if(crossfadeT>0&&nextCueDmx && !(efxPtOverrides && efxPtOverrides.size>0)){
           const nextUni=nextCueDmx.find(n=>n.universe===uniIdx);
           if(nextUni){
             const nextCh=nextUni.channelValues;
@@ -1235,15 +1567,16 @@ const _FXPROF: Record<string, [number, number, number, number]> = {
           let sig=uniIdx;
           for(const chStr in chVals){sig=(sig*31+Number(chStr)*17+chVals[chStr])|0;}
           if(sig!==lastSig){lastSig=sig;
-            // Throttle React store updates to ~30 FPS (P2.2 perf)
+            // Store update throttled 30fps, but always push to 3D mirror at 60fps via onVirtualDmx
             const now=performance.now();
-            if(now-lastStoreUpdate>33){
+            const doStore = now-lastStoreUpdate>33;
+            if(doStore){
               useAppStore.getState().setUniverseData(uniIdx, chVals);
               lastStoreUpdate=now;
             }
             // Arbitrated bridge — computes final buffer and flushes to hardware
             dmxBridge.push(uniIdx, chVals, arbSource);
-            if (onVirtualDmx) onVirtualDmx(uniIdx, chVals);
+            if (onVirtualDmx) onVirtualDmx(uniIdx, doStore ? chVals : {...chVals});
             // Save for pause fade-out
             lastChannelsRef.current.set(uniIdx, {...chVals});
           }
@@ -1455,11 +1788,24 @@ export function computeDmxForCue(
         }
         // Force Color Preset/Macro channels to 0 for raw RGB control
         for (const po of fa.presetOverrideOffsets) { chVals[pf.startAddress + po] = 0; }
-        for (const seg of fa.rgbSegments) {
-          chVals[pf.startAddress + seg.r] = r;
-          chVals[pf.startAddress + seg.g] = g;
-          if (seg.b !== null) chVals[pf.startAddress + seg.b] = b;
-          if (seg.w !== null) chVals[pf.startAddress + seg.w] = 0;
+        {
+          const segCount = fa.rgbSegments.length;
+          const isMulti = segCount > 1 && !colorTrackColors?.has(pf.id);
+          for(let sIdx=0; sIdx<segCount; sIdx++){
+            const seg = fa.rgbSegments[sIdx];
+            let pr=r,pg=g,pb=b;
+            if(isMulti){
+              const hueStep = 360/segCount;
+              const segHue = (sIdx * hueStep * 0.6) % 360;
+              [pr,pg,pb] = applyHueShift([r,g,b], segHue * 0.35);
+            }
+            chVals[pf.startAddress + seg.r] = pr;
+            chVals[pf.startAddress + seg.g] = pg;
+            if (seg.b !== null) chVals[pf.startAddress + seg.b] = pb;
+            if (seg.w !== null) chVals[pf.startAddress + seg.w] = 0;
+            if ((seg as any).a !== null && (seg as any).a !== undefined) chVals[pf.startAddress + (seg as any).a] = 0;
+            if ((seg as any).uv !== null && (seg as any).uv !== undefined) chVals[pf.startAddress + (seg as any).uv] = 0;
+          }
         }
         // Apply dimmer track/cue dimmer to RGB when no dedicated intensity channel
         if (fa.intensityOffset === null) {
@@ -1471,7 +1817,37 @@ export function computeDmxForCue(
             if (seg.w !== null) chVals[pf.startAddress + seg.w] = Math.round((chVals[pf.startAddress + seg.w] ?? 0) * dScale);
           }
         }
-      } else if (fa.wheelOffset !== null && paletteColor) {
+        // Exploit remaining generic channels pour snapshot (même logique que tick live, base cue.time)
+        if(!fa.isLaser){
+          if(fa.effectOffset!==null){
+            const caps = fa.effectCaps;
+            if(caps.length>0){
+              let effVal:number;
+              if(energy < 0.3){
+                const off = caps.find(c=>c.min===0) || caps[0];
+                effVal = capMid(off);
+              } else {
+                const idx = Math.floor(((cue as any).time*0.7) % caps.length);
+                effVal = capMid(caps[idx]);
+              }
+              chVals[pf.startAddress+fa.effectOffset]=effVal;
+            } else {
+              chVals[pf.startAddress+fa.effectOffset]=0;
+            }
+          }
+          if(fa.speedOffset!==null){
+            chVals[pf.startAddress+fa.speedOffset]= Math.max(0, Math.min(255, Math.round(50 + energy*150)));
+          }
+          if(fa.beamOffset!==null && chVals[pf.startAddress+fa.beamOffset]===undefined){
+            chVals[pf.startAddress+fa.beamOffset]= Math.round(100 + energy*80);
+          }
+        }
+      } else if (fa.wheelOffset !== null && paletteColor && (() => {
+        // Snapshot path : ne pas écraser la couleur du chaser (roue) par l'autoscript
+        const cmap = chaserTakeover?.get(pf.id);
+        if (!cmap) return true;
+        return cmap[pf.startAddress + fa.wheelOffset] === undefined;
+      })()) {
         const caps = fa.wheelCaps;
         let wheelVal: number;
         if (caps.length > 0) {
@@ -1672,15 +2048,12 @@ export function computeDmxForCue(
       }
     }
 
-    // Chaser track takeover: fully controlled fixtures get the chaser scene state
+    // Chaser track: merge only chaser-driven channels
     if (chaserTakeover && chaserTakeover.size > 0) {
       for (const fa of fixtures) {
         const pf = fa.fixture;
         const cmap = chaserTakeover.get(pf.id);
         if (!cmap) continue;
-        for (let a = pf.startAddress; a < pf.startAddress + pf.channelCount; a++) {
-          if (chVals[a] !== undefined) delete chVals[a];
-        }
         for (const addrStr in cmap) {
           const v = cmap[addrStr];
           const addr = Number(addrStr);

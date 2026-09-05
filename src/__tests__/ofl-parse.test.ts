@@ -121,6 +121,14 @@ describe('budget.json — matching bibliothèque (< 100 €)', () => {
 });
 
 describe('parseOFLFixture — robustesse', () => {
+  it('type laser prioritaire : impression-laser et ivl-carre restent « Laser » malgré les catégories Color Changer/Effect', () => {
+    const lib = new FixtureLibrary();
+    const imp = lib.parseOFLFixture(fs.readFileSync(path.join(OFL_DIR, 'glp', 'impression-laser.json'), 'utf8'), 'glp');
+    expect(imp?.type).toBe('Laser'); // categories: ["Laser","Moving Head","Color Changer"]
+    const ivl = lib.parseOFLFixture(fs.readFileSync(path.join(OFL_DIR, 'minuit-une', 'ivl-carre.json'), 'utf8'), 'minuit-une');
+    expect(ivl?.type).toBe('Laser'); // categories: ["Laser","Effect","Color Changer"]
+  });
+
   it('ne produit aucun canal sans nom et aucun mode vide sur la bibliothèque réelle', async () => {
     const lib = new FixtureLibrary();
     const r = await lib.loadOflDirectory(OFL_DIR);

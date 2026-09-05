@@ -14,6 +14,16 @@ export default defineConfig({
   build: {
     outDir: 'dist/renderer',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'zustand'],
+          three: ['three'],
+          dmx: ['sacn', 'artnet', 'dmxnet'],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

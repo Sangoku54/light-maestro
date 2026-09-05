@@ -6,6 +6,17 @@
  * ce module pour éviter la duplication et les bugs d'inconsistance.
  *
  * Correction du bug ch.offset : utilise ch.offset ?? i partout.
+ *
+ * NOTE-PROGRAMME (TODO): Exploitation maximale à auditer fixture par fixture.
+ *   Chaque fixture patchée doit voir TOUS ses canaux QXF/GDTF exploités à 100%
+ *   (RGB par pixel, W/A/UV, dimmer, shutter, strobe, effect, speed, beam,
+ *   zoom, frost, iris, focus, prism, gobo, pan/tilt, scan, pattern, blank,
+ *   rotations). Voir dmx-color.ts:buildRgbSegments (fix Red1..Blue8) et
+ *   dmx-playback.ts (per-pixel chase + Effect/Speed génériques).
+ *   À FAIRE: parcourir la bibliothèque (resources/fixtures/*.qxf) et vérifier
+ *   via tests unitaires que chaque mode (ex: UKing Wall Washer 24ch = 8×RGB)
+ *   produit le bon nombre de segments et que chaque offset est écrit chaque frame.
+ *   Réf: wall-washer 24×3W — 6/24 LEDs bug → fix 8 segments (2026-09).
  */
 
 import type { PatchedFixture } from '../stores/showStore';
@@ -385,7 +396,7 @@ export function analyzeFixtureChannels(
       } else if (/(dynamic|pattern).*speed|speed.*(dynamic|pattern)/i.test(chName)) {
         if (fa.laserSpeedPatternOffset === null) fa.laserSpeedPatternOffset = off;
         matched = true;
-      } else if (/rotat\w*[\s_-]*(x|y|z)|\b(x|y|z)[\s_-]*(axis[\s_-]*)?(rolling|spin|rotat\w*)/i.test(chName)) {
+      } else if (/rotat\w*(\s+over)?\s*[\s_-]*(x|y|z)|\b(x|y|z)[\s_-]*(axis[\s_-]*)?(rolling|spin|rotat\w*)/i.test(chName)) {
         fa.laserRotationOffsets.push(off);
         matched = true;
       } else if (/laser.*(rotat\w*|rolling|spin)|(red|green|blue|white|amber|yellow|color).*(rotat\w*|rolling|spin)|(rotat\w*|rolling|spin).*laser/i.test(chName)) {
@@ -399,6 +410,11 @@ export function analyzeFixtureChannels(
         // « X/Y Axis Moving » sont des axes de balayage, pas des rotations.
         if (chName[0].toLowerCase() === 'x' && fa.scanXOffset === null) fa.scanXOffset = off;
         else if (chName[0].toLowerCase() === 'y' && fa.scanYOffset === null) fa.scanYOffset = off;
+        matched = true;
+      } else if (/horizontal/i.test(chName) && /vertical/i.test(chName)) {
+        // Channel mixte "Horizontal / vertical movement" (Laserworld CS-1000RGB ch4) : Y d'abord
+        if (fa.scanYOffset === null) fa.scanYOffset = off;
+        else if (fa.scanXOffset === null) fa.scanXOffset = off;
         matched = true;
       } else if (/horizontal.*(angle|movement|position)/i.test(chName)) {
         if (fa.scanXOffset === null) fa.scanXOffset = off;
@@ -603,18 +619,7 @@ export function analyzeFixtureChannels(
     fa.patternCaps = synthPatternCaps(8);
   }
 
-  // Debug log (from dmx-channel.ts, once per fixture)
-  if (!_logged.has(pf.id)) {
-    _logged.add(pf.id);
-    console.log(`[analyzeFixtureChannels] ${pf.name} (${pf.fixtureType}, tier=${pf.tier}, addr=${pf.startAddress})`,
-      `| colourChannels: ${colourChannels.length} [${colourChannels.map(c => `${c.name}@${c.offset}`).join(', ')}]`,
-      `| rgbSegments: ${fa.rgbSegments.length > 0 ? fa.rgbSegments.map(s => `R${s.r}G${s.g}B${s.b}`).join('; ') : '∅'}`,
-      `| rgbOffsets: ${fa.rgbOffsets ? fa.rgbOffsets.join(',') : '∅'}`,
-      `| wheelOffset: ${fa.wheelOffset} (caps:${fa.wheelCaps.length})`,
-      `| intensityOffset: ${fa.intensityOffset} shutterOffset: ${fa.shutterOffset} strobeOffset: ${fa.strobeOffset}`,
-      `| panOffsets: [${fa.panOffsets.join(',')}] tiltOffsets: [${fa.tiltOffsets.join(',')}]`,
-      `| laser: ${fa.isLaser} (${fa.laserColorMode}) pattern:${fa.patternOffset} scanX:${fa.scanXOffset} scanY:${fa.scanYOffset} rot:[${fa.laserRotationOffsets.join(',')}] blank:${fa.blankOffset}`);
-  }
+  
 
   return fa;
 }

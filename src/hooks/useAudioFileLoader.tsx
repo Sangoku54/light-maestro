@@ -172,19 +172,24 @@ export function useAudioFileLoader() {
 
 interface AudioFileUploadProps {
   onFileLoaded?: (analysis: TrackAnalysis) => void;
+  onInsertColor?: (startTime: number, endTime: number, color: string) => void;
+  onInsertDimmer?: (startTime: number, endTime: number) => void;
+  onInsertStrobe?: (startTime: number, endTime: number) => void;
   compact?: boolean;
   externalState?: ReturnType<typeof useAudioFileLoader>;
   onSelectionChange?: (startTime: number, endTime: number, newType: string) => void;
   onSectionClick?: (idx: number) => void;
-  sections?: TrackSection[];
   onInsertEntity?: (startTime: number, endTime: number, entityType: 'scene' | 'chaser' | 'cuelist' | 'efx', entityId: string) => void;
+  sections?: TrackSection[];
+  onSections?: TrackSection[];
+  onSectionsChange?: (sections: TrackSection[]) => void;
   scenes?: { id: string; name: string }[];
   chasers?: { id: string; name: string }[];
   cueLists?: { id: string; name: string }[];
   effects?: { id: string; name: string }[];
 }
 
-export const AudioFileUpload: React.FC<AudioFileUploadProps> = ({ onFileLoaded, compact, externalState, onSelectionChange, onSectionClick, sections: sectionsOverride, onInsertEntity, scenes, chasers, cueLists, effects }) => {
+export const AudioFileUpload: React.FC<AudioFileUploadProps> = ({ onFileLoaded, onInsertColor, onInsertDimmer, onInsertStrobe, compact, externalState, onSelectionChange, onSectionClick, onInsertEntity, sections, onSectionsChange, scenes, chasers, cueLists, effects }) => {
   const internalState = useAudioFileLoader();
   const { file, analysis, isAnalyzing, isPlaying, currentTime, error, loadFile, play, pause, stop, seek, clear } = externalState || internalState;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -240,16 +245,16 @@ export const AudioFileUpload: React.FC<AudioFileUploadProps> = ({ onFileLoaded, 
   }
 
   const progress = analysis.duration > 0 ? currentTime / analysis.duration : 0;
-  const displaySections = sectionsOverride && sectionsOverride.length > 0 ? sectionsOverride : analysis.sections;
+  const displaySections = sections && sections.length > 0 ? sections : analysis.sections;
 
   return (
     <div className="space-y-3">
       {/* Waveform */}
       <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-2">
-        <WaveformDisplay waveform={analysis.waveform} beats={analysis.beats} sections={displaySections}
+        <WaveformDisplay waveform={analysis.waveform} beats={analysis.beats} sections={displaySections} onSectionsChange={onSectionsChange}
           duration={analysis.duration} currentTime={currentTime} onSeek={seek}
           onSelectionChange={onSelectionChange} onSectionClick={onSectionClick}
-          onInsertEntity={onInsertEntity} scenes={scenes} chasers={chasers} cueLists={cueLists} effects={effects}
+          onInsertEntity={onInsertEntity} onInsertColor={onInsertColor} onInsertDimmer={onInsertDimmer} onInsertStrobe={onInsertStrobe} scenes={scenes} chasers={chasers} cueLists={cueLists} effects={effects}
           energyCurve={analysis.energyCurve} lowCurve={analysis.lowCurve} />
       </div>
 
@@ -292,7 +297,11 @@ interface WaveformDisplayProps {
   duration: number; currentTime: number; onSeek: (time: number) => void;
   onSelectionChange?: (startTime: number, endTime: number, newType: string) => void;
   onSectionClick?: (idx: number) => void;
+  onSectionsChange?: (sections: TrackSection[]) => void;
   onInsertEntity?: (startTime: number, endTime: number, entityType: 'scene' | 'chaser' | 'cuelist' | 'efx', entityId: string) => void;
+  onInsertColor?: (startTime: number, endTime: number, color: string) => void;
+  onInsertDimmer?: (startTime: number, endTime: number) => void;
+  onInsertStrobe?: (startTime: number, endTime: number) => void;
   scenes?: { id: string; name: string }[];
   chasers?: { id: string; name: string }[];
   cueLists?: { id: string; name: string }[];
@@ -302,7 +311,7 @@ interface WaveformDisplayProps {
 
 const TYPE_KEYS: Record<string, string> = { Digit1: 'intro', Digit2: 'verse', Digit3: 'chorus', Digit4: 'bridge', Digit5: 'drop', Digit6: 'outro' };
 
-const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sections, duration, currentTime, onSeek, onSelectionChange, onSectionClick, onInsertEntity, scenes, chasers, cueLists, effects, energyCurve, lowCurve }) => {
+const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sections, duration, currentTime, onSeek, onSelectionChange, onSectionClick, onSectionsChange, onInsertEntity, onInsertColor, onInsertDimmer, onInsertStrobe, scenes, chasers, cueLists, effects, energyCurve, lowCurve }) => {
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
   const minimapCanvasRef = useRef<HTMLCanvasElement>(null);
   const mainContainerRef = useRef<HTMLDivElement>(null);
@@ -318,6 +327,7 @@ const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sect
   const dragRef = useRef({ startX: 0, startViewStart: 0 });
   const isDraggingRef = useRef(false);
   const isSelectingRef = useRef(false);
+  const sectionResizeRef = useRef<{ leftIdx: number; rightIdx: number; startX: number; startTime: number } | null>(null);
 
   const viewDuration = viewEnd - viewStart;
   const zoomLevel = duration / viewDuration;
@@ -410,6 +420,31 @@ const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sect
   // Mouse handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
+    // Séparatrice section : detection à 6px sur la piste audio (waveTop..h)
+    if (sections.length > 1 && onSectionsChange) {
+      const container = mainContainerRef.current;
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        const w = rect.width;
+        const px = e.clientX - rect.left;
+        // ne déclenche que si clic dans la zone waveform (sous le ruler)
+        const y = e.clientY - rect.top;
+        const rulerH = 20;
+        if (y >= rulerH - 4 && y <= rect.height) {
+          const sorted = [...sections].sort((a,b)=>a.startTime-b.startTime);
+          for (let i=0;i<sorted.length-1;i++) {
+            const bx = ((sorted[i].endTime - viewStart) / viewDuration) * w;
+            if (Math.abs(px - bx) < 6) {
+              const leftIdx = sections.indexOf(sorted[i]);
+              const rightIdx = sections.indexOf(sorted[i+1]);
+              sectionResizeRef.current = { leftIdx, rightIdx, startX: e.clientX, startTime: sorted[i].endTime };
+              e.preventDefault();
+              return;
+            }
+          }
+        }
+      }
+    }
     mouseMovedRef.current = false;
     // When zoomed: Shift+drag = pan, normal drag = select
     if (zoomLevel > 1.05 && e.shiftKey) {
@@ -421,9 +456,51 @@ const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sect
     const t = getTimeFromClientX(e.clientX);
     isSelectingRef.current = true;
     setSelStart(t); setSelEnd(t); setIsSelecting(true);
-  }, [zoomLevel, viewStart, getTimeFromClientX]);
+  }, [zoomLevel, viewStart, getTimeFromClientX, sections, onSectionsChange, viewDuration]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (sectionResizeRef.current) {
+      const dx = e.clientX - sectionResizeRef.current.startX;
+      const w = mainContainerRef.current?.getBoundingClientRect().width || 1;
+      const dt = (dx / w) * viewDuration;
+      const newTime = Math.max(0, Math.min(duration, sectionResizeRef.current.startTime + dt));
+      const { leftIdx, rightIdx } = sectionResizeRef.current;
+      const sorted = [...sections].sort((a,b)=>a.startTime-b.startTime);
+      // retrouve les index triés des deux sections adjacentes
+      const leftSorted = sorted.findIndex(s=>sections[leftIdx]===s);
+      const rightSorted = sorted.findIndex(s=>sections[rightIdx]===s);
+      if (leftSorted>=0 && rightSorted>=0 && onSectionsChange) {
+        const minLen = 0.05;
+        let next: typeof sorted = [];
+        for (let i=0;i<sorted.length;i++) {
+          const s = sorted[i];
+          if (i===leftSorted) {
+            const ns = { ...s, endTime: newTime };
+            if (ns.endTime - ns.startTime > minLen) next.push(ns);
+            continue;
+          }
+          if (i===rightSorted) {
+            const ns = { ...s, startTime: newTime };
+            if (ns.endTime - ns.startTime > minLen) next.push(ns);
+            continue;
+          }
+          if (i < leftSorted) {
+            if (s.endTime <= newTime + 1e-9) next.push(s);
+            else if (s.startTime < newTime - 1e-9) {
+              if (s.startTime < newTime - minLen) next.push({ ...s, endTime: newTime });
+            }
+          } else if (i > rightSorted) {
+            if (s.startTime >= newTime - 1e-9) next.push(s);
+            else if (s.endTime > newTime + 1e-9) {
+              if (newTime + minLen < s.endTime) next.push({ ...s, startTime: newTime });
+            }
+          }
+        }
+        next = next.filter(s=>s.endTime - s.startTime > minLen).sort((a,b)=>a.startTime-b.startTime);
+        onSectionsChange(next);
+      }
+      return;
+    }
     if (isDraggingRef.current) {
       const dx = e.clientX - dragRef.current.startX;
       const timeDelta = (dx / (mainContainerRef.current?.getBoundingClientRect().width || 1)) * viewDuration;
@@ -434,9 +511,10 @@ const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sect
       mouseMovedRef.current = true;
       setSelEnd(getTimeFromClientX(e.clientX));
     }
-  }, [viewDuration, duration, getTimeFromClientX]);
+  }, [viewDuration, duration, getTimeFromClientX, sections, onSectionsChange]);
 
   const handleMouseUp = useCallback(() => {
+    if (sectionResizeRef.current) { sectionResizeRef.current = null; return; }
     isDraggingRef.current = false;
     isSelectingRef.current = false;
     setIsDragging(false); setIsSelecting(false);
@@ -465,6 +543,7 @@ const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sect
   }, [hasSel, selStart, selEnd, duration, resetSelection, getTimeFromClientX, sections]);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
+    if (sectionResizeRef.current) return;
     if (mouseMovedRef.current) { mouseMovedRef.current = false; return; }
     if (isDraggingRef.current || isSelectingRef.current) return;
     const t = getTimeFromClientX(e.clientX);
@@ -542,6 +621,23 @@ const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sect
         ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 2;
         ctx.fillText(s.type.toUpperCase(), Math.max(0, x1) + sw / 2, waveTop + 14);
         ctx.shadowBlur = 0;
+      }
+    }
+
+    // Section separators (audio track) — trait vertical blanc déplaçable
+    {
+      const sorted = [...sections].sort((a,b)=>a.startTime-b.startTime);
+      for (let i=0;i<sorted.length-1;i++) {
+        const x = ((sorted[i].endTime - viewStart) / viewDuration) * w;
+        if (x < 0 || x > w) continue;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(Math.round(x)+0.5, waveTop); ctx.lineTo(Math.round(x)+0.5, h); ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(Math.round(x), waveTop + 7, 3.2, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 1; ctx.stroke();
+        ctx.restore();
       }
     }
 
@@ -889,7 +985,7 @@ const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sect
             ) : null
           )}
           {/* Color / Dimmer / Strobe insert (always available on selection) */}
-          {(window as any).__lm_insertColor && (
+          {(onInsertColor || (window as any).__lm_insertColor) && (
             <>
               <div className="border-t border-gray-800 my-0.5" />
               <button className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2"
@@ -905,9 +1001,10 @@ const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sect
                   const cp = popup.querySelector('#__cp') as HTMLInputElement;
                   const cv = popup.querySelector('#__cv')!;
                   cp.oninput = () => { cv.textContent = cp.value; };
+                  const insertColor = onInsertColor || (window as any).__lm_insertColor;
                   popup.querySelector('#__cc')!.addEventListener('click', () => {
                     document.body.removeChild(popup);
-                    (window as any).__lm_insertColor(st, et, cp.value);
+                    insertColor(st, et, cp.value);
                     resetSelection();
                   });
                   popup.querySelector('#__cx')!.addEventListener('click', () => document.body.removeChild(popup));
@@ -920,7 +1017,8 @@ const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sect
                   e.stopPropagation();
                   const st = Math.min(selectionRef.current.start, selectionRef.current.end);
                   const et = Math.max(selectionRef.current.start, selectionRef.current.end);
-                  (window as any).__lm_insertDimmer(st, et);
+                  const insertDimmer = onInsertDimmer || (window as any).__lm_insertDimmer;
+                  insertDimmer(st, et);
                   resetSelection();
                 }}
               >
@@ -931,7 +1029,8 @@ const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sect
                   e.stopPropagation();
                   const st = Math.min(selectionRef.current.start, selectionRef.current.end);
                   const et = Math.max(selectionRef.current.start, selectionRef.current.end);
-                  (window as any).__lm_insertStrobe(st, et);
+                  const insertStrobe = onInsertStrobe || (window as any).__lm_insertStrobe;
+                  insertStrobe(st, et);
                   resetSelection();
                 }}
               >

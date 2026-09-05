@@ -1,12 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import { generateAutoLoops, generateLoopLibrary, materializeAutoLoops, refreshAutoLoops, purgeAutoLoops, loopToRecipe, generateLoopFromRecipe, AUTO_LOOP_FOLDER, type AutoLoop, type AutoLoopStoreFacade } from '../engine/auto-loops';
 import type { PatchedFixture, SavedScene, SavedChaser } from '../stores/showStore';
-import type { DmxFixtureDefinition, DmxFixtureChannel } from '../hooks/dmx-cues';
+import type { DmxFixtureDefinition, DmxFixtureChannel, DmxFixtureCapability } from '../hooks/dmx-cues';
 
 const ch = (name: string, type: DmxFixtureChannel['type'], offset: number): DmxFixtureChannel => ({
   name,
   type,
   offset,
+});
+
+const cap = (min: number, max: number, name: string, color?: string): DmxFixtureCapability => ({ min, max, name, color });
+
+const chC = (name: string, type: DmxFixtureChannel['type'], offset: number, capabilities: DmxFixtureCapability[]): DmxFixtureChannel => ({
+  name,
+  type,
+  offset,
+  capabilities,
 });
 
 function def(id: string, channels: DmxFixtureChannel[]): DmxFixtureDefinition {
@@ -430,5 +439,150 @@ describe('loopToRecipe / generateLoopFromRecipe', () => {
     const defs = defsOf(par);
     const recipe = { kind: 'movement' as const, name: 'x', tier: 'primary' as const, speedBpm: 120, direction: 'forward' as const };
     expect(generateLoopFromRecipe(recipe, fixtures, defs)).toBeUndefined();
+  });
+});
+
+// ─── Capacités (sous-menus) des fixtures — roue couleur, gobo, effect, prism, beam ───
+
+const wheelHead = def('wheel-head', [
+  ch('Dimmer', 'Intensity', 0),
+  chC('Color Wheel', 'Colour', 1, [
+    cap(10, 20, 'Red', '#ff0000'), cap(30, 40, 'Green', '#00ff00'),
+    cap(50, 60, 'Blue', '#0000ff'), cap(70, 80, 'White', '#ffffff'),
+  ]),
+]);
+const goboHead = def('gobo-head', [
+  ch('Dimmer', 'Intensity', 0),
+  chC('Gobo', 'Gobo', 1, [cap(8, 15, 'Open'), cap(32, 47, 'Gobo 1'), cap(64, 79, 'Gobo 2'), cap(96, 111, 'Gobo 3')]),
+  ch('Gobo Speed', 'Speed', 2),
+]);
+const fxHead = def('fx-head', [
+  ch('Dimmer', 'Intensity', 0),
+  chC('Effect', 'Effect', 1, [cap(0, 0, 'No Effect'), cap(16, 31, 'Macro 1'), cap(48, 63, 'Macro 2')]),
+]);
+const prismHead = def('prism-head', [
+  ch('Dimmer', 'Intensity', 0),
+  ch('Prism', 'Prism', 1),
+]);
+const beamHead = def('beam-head', [
+  ch('Dimmer', 'Intensity', 0),
+  ch('Zoom', 'Zoom', 1),
+  ch('Frost', 'Frost', 2),
+  ch('Iris', 'Iris', 3),
+  ch('Focus', 'Focus', 4),
+]);
+const prismCapsHead = def('prism-caps-head', [
+  ch('Dimmer', 'Intensity', 0),
+  chC('Prism', 'Prism', 1, [cap(0, 10, 'Open'), cap(11, 255, '3-facet')]),
+]);
+const colorMacroHead = def('color-macro-head', [
+  ch('Dimmer', 'Intensity', 0),
+  chC('Color Macro', 'Colour', 1, [cap(10, 20, 'Red', '#ff0000'), cap(30, 40, 'Green', '#00ff00')]),
+]);
+
+describe('generateAutoLoops — capacités (sous-menus) des fixtures', () => {
+  it('génère un color-wheel et écrit le milieu de plage (jamais 0/255)', () => {
+    const fixtures = [pf({ id: 'f1', fixtureDefId: 'wheel-head', tier: 'primary', startAddress: 1 })];
+    const loops = generateAutoLoops(fixtures, defsOf(wheelHead));
+    const cw = loops.find((l) => l.kind === 'color-wheel');
+    expect(cw).toBeDefined();
+    expect(cw!.steps[0].channels[2]).toBe(15); // capMid(10,20)
+    expect(cw!.steps[1].channels[2]).toBe(35); // capMid(30,40)
+    for (const s of cw!.steps) {
+      const v = s.channels[2];
+      expect(v).toBeGreaterThan(0);
+      expect(v).toBeLessThan(255);
+    }
+  });
+
+  it('ne génère pas de color-wheel pour une fixture RGB pure', () => {
+    const fixtures = [pf({ id: 'f1', fixtureDefId: 'wash-rgb', tier: 'primary', startAddress: 1 })];
+    const loops = generateAutoLoops(fixtures, defsOf(rgbWash));
+    expect(loops.find((l) => l.kind === 'color-wheel')).toBeUndefined();
+  });
+
+  it('génère un gobo avec rotation speed progressive', () => {
+    const fixtures = [pf({ id: 'f1', fixtureDefId: 'gobo-head', tier: 'primary', startAddress: 1 })];
+    const loops = generateAutoLoops(fixtures, defsOf(goboHead));
+    const gb = loops.find((l) => l.kind === 'gobo');
+    expect(gb).toBeDefined();
+    expect(gb!.steps[0].channels[2]).toBe(12); // capMid(8,15) = 11.5 → 12
+    expect(gb!.steps[0].channels[3]).toBe(128); // speed step 0
+    expect(gb!.steps[3].channels[3]).toBe(223); // speed step 3
+  });
+
+  it('génère un effect qui saute le « No Effect » (min=0)', () => {
+    const fixtures = [pf({ id: 'f1', fixtureDefId: 'fx-head', tier: 'primary', startAddress: 1 })];
+    const loops = generateAutoLoops(fixtures, defsOf(fxHead));
+    const fx = loops.find((l) => l.kind === 'effect');
+    expect(fx).toBeDefined();
+    expect(fx!.steps[0].channels[2]).toBe(24); // capMid(16,31) = 23.5 → 24
+    expect(fx!.steps[1].channels[2]).toBe(56); // capMid(48,63) = 55.5 → 56
+    for (const s of fx!.steps) expect(s.channels[2]).not.toBe(0);
+  });
+
+  it('génère un prism sur 4 états conventionnels', () => {
+    const fixtures = [pf({ id: 'f1', fixtureDefId: 'prism-head', tier: 'primary', startAddress: 1 })];
+    const loops = generateAutoLoops(fixtures, defsOf(prismHead));
+    const pr = loops.find((l) => l.kind === 'prism');
+    expect(pr).toBeDefined();
+    expect(pr!.steps.map((s) => s.channels[2])).toEqual([128, 170, 255, 0]);
+  });
+
+  it('génère un prism à partir des capacités (capMid) quand elles existent', () => {
+    const fixtures = [pf({ id: 'f1', fixtureDefId: 'prism-caps-head', tier: 'primary', startAddress: 1 })];
+    const loops = generateAutoLoops(fixtures, defsOf(prismCapsHead));
+    const pr = loops.find((l) => l.kind === 'prism');
+    expect(pr).toBeDefined();
+    // off(0) puis capMid(0,10)=5, capMid(11,255)=133, capMid(0,10)=5
+    expect(pr!.steps.map((s) => s.channels[2])).toEqual([0, 5, 133, 5]);
+  });
+
+  it('exploite un canal « Color Macro » porteur de capacités (color-wheel)', () => {
+    const fixtures = [pf({ id: 'f1', fixtureDefId: 'color-macro-head', tier: 'primary', startAddress: 1 })];
+    const loops = generateAutoLoops(fixtures, defsOf(colorMacroHead));
+    expect(loops.find((l) => l.kind === 'color-wheel')).toBeDefined();
+  });
+
+  it('génère les 4 beam-* avec un balayage borné 0..255', () => {
+    const fixtures = [pf({ id: 'f1', fixtureDefId: 'beam-head', tier: 'primary', startAddress: 1 })];
+    const loops = generateAutoLoops(fixtures, defsOf(beamHead));
+    const addrOf = { 'beam-zoom': 2, 'beam-frost': 3, 'beam-iris': 4, 'beam-focus': 5 } as const;
+    for (const kind of ['beam-zoom', 'beam-frost', 'beam-iris', 'beam-focus'] as const) {
+      const bl = loops.find((l) => l.kind === kind);
+      expect(bl, kind).toBeDefined();
+      const vals = bl!.steps.map((s) => s.channels[addrOf[kind]]);
+      expect(vals.length).toBe(8);
+      expect(Math.min(...vals)).toBeLessThan(64);
+      expect(Math.max(...vals)).toBeGreaterThan(191);
+    }
+  });
+
+  it('round-trip la recette gobo (variant rotate)', () => {
+    const fixtures = [pf({ id: 'f1', fixtureDefId: 'gobo-head', tier: 'primary', startAddress: 1 })];
+    const defs = defsOf(goboHead);
+    const original = generateAutoLoops(fixtures, defs).find((l) => l.kind === 'gobo')!;
+    const recipe = loopToRecipe(original);
+    expect(recipe.variant).toBe('rotate');
+    const rebuilt = generateLoopFromRecipe(recipe, fixtures, defs)!;
+    expect(rebuilt.kind).toBe('gobo');
+    expect(rebuilt.steps.length).toBe(original.steps.length);
+    expect(rebuilt.steps[0].channels).toEqual(original.steps[0].channels);
+  });
+
+  it('le catalogue (generateLoopLibrary) couvre les nouveaux kinds', () => {
+    const fixtures = [
+      pf({ id: 'f1', fixtureDefId: 'wheel-head', tier: 'primary', startAddress: 1 }),
+      pf({ id: 'f2', fixtureDefId: 'gobo-head', tier: 'primary', startAddress: 9 }),
+      pf({ id: 'f3', fixtureDefId: 'fx-head', tier: 'primary', startAddress: 21 }),
+      pf({ id: 'f4', fixtureDefId: 'prism-head', tier: 'primary', startAddress: 31 }),
+      pf({ id: 'f5', fixtureDefId: 'beam-head', tier: 'primary', startAddress: 41 }),
+    ];
+    const defs = defsOf(wheelHead, goboHead, fxHead, prismHead, beamHead);
+    const lib = generateLoopLibrary(fixtures, defs, { count: 20, seed: 0 });
+    const kinds = new Set(lib.map((l) => l.kind));
+    for (const kind of ['color-wheel', 'gobo', 'effect', 'prism', 'beam-zoom', 'beam-frost', 'beam-iris', 'beam-focus'] as const) {
+      expect(kinds.has(kind), kind).toBe(true);
+    }
   });
 });

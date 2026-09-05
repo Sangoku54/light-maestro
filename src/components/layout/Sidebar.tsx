@@ -29,7 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mode, collapsed }) => {
 
   if (collapsed) {
     return (
-      <aside className="w-12 bg-[#0d0d14] border-r border-gray-800 flex flex-col items-center py-2 gap-1 shrink-0">
+      <aside className="w-12 bg-[var(--bg-2)] border-r border-[var(--border)] flex flex-col items-center py-2 gap-1 shrink-0">
         {items.map((item, i) => (
           <SidebarIconButton key={i} item={item} mode={mode} collapsed />
         ))}
@@ -38,7 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mode, collapsed }) => {
   }
 
   return (
-    <aside className="w-56 bg-[#0d0d14] border-r border-gray-800 flex flex-col shrink-0 overflow-hidden">
+    <aside className="w-52 bg-[var(--bg-2)] border-r border-[var(--border)] flex flex-col shrink-0 overflow-hidden">
       <nav className="flex-1 py-2 px-1.5 space-y-0.5 overflow-y-auto">
         {items.map((item, i) => (
           <SidebarFullButton key={i} item={item} mode={mode} />
@@ -136,13 +136,13 @@ function getSidebarItems(mode: AppMode, t: (key: string) => string): SidebarItem
       return [
         { key: 'autoscript', label: t('sidebar.autoScript'), icon: <Mic size={16} /> },
         { key: 'colors', label: t('sidebar.colorPresets'), icon: <Palette size={16} /> },
-        { key: 'loops', label: t('sidebar.autoLoops') || 'Loops auto', icon: <Sparkles size={16} /> },
+        { key: 'loops', label: t('sidebar.autoLoops'), icon: <Sparkles size={16} /> },
       ];
 
     case 'design':
       return [
         { key: 'fixtures', label: t('sidebar.fixtures'), icon: <LayoutGrid size={16} /> },
-        { key: 'stage', label: 'Vue 2D', icon: <Eye size={16} /> },
+        { key: 'stage', label: t('sidebar.stage2D'), icon: <Eye size={16} /> },
         { key: 'groups', label: t('sidebar.groups'), icon: <Users size={16} /> },
         { key: 'scenes', label: t('sidebar.scenes'), icon: <ListMusic size={16} /> },
         { key: 'chasers', label: t('sidebar.chasers'), icon: <Radio size={16} /> },

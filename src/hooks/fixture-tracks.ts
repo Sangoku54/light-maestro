@@ -48,6 +48,9 @@ export interface MovementBlock {
   endTime: number;
   pattern: 'static' | 'sweep' | 'circle' | 'bounce' | 'wave' | 'figure8' | 'zigzag' | 'diamond' | 'spiral' | 'heartbeat' | 'randomWalk' | 'panOnly' | 'tiltOnly';
   amplitude: number; // 0-255
+  /** Vitesse du pattern (Hz). Absente = vitesse audio-reactive de l'autoscript. */
+  speed?: number;
+  endSpeed?: number; // end speed for gradient ramp
   endPattern?: string; // end pattern for gradient transition
   endAmplitude?: number; // end amplitude for gradient transition
 }
@@ -78,7 +81,7 @@ export interface FixtureTrackDMX {
   /** Per-fixture forced strobe at current time */
   forcedStrobes: Map<string, { active: boolean; speed: number }>;
   /** Per-fixture movement override */
-  forcedMovements: Map<string, { pattern: string; amplitude: number }>;
+  forcedMovements: Map<string, { pattern: string; amplitude: number; speed?: number }>;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -120,7 +123,7 @@ export function computeFixtureTrackOverrides(
   const forcedColors = new Map<string, string>();
   const forcedDimmers = new Map<string, number>();
   const forcedStrobes = new Map<string, { active: boolean; speed: number }>();
-  const forcedMovements = new Map<string, { pattern: string; amplitude: number }>();
+  const forcedMovements = new Map<string, { pattern: string; amplitude: number; speed?: number }>();
 
   for (const track of tracks) {
     if (!track.enabled) continue;
@@ -147,17 +150,20 @@ export function computeFixtureTrackOverrides(
           const rr = Math.round(sr + (er - sr) * t);
           const rg = Math.round(sg + (eg - sg) * t);
           const rb = Math.round(sb + (eb - sb) * t);
-          const interp = '#' + [rr, rg, rb].map(v => v.toString(16).padStart(2,'0')).join('');
+          const clampedRr = Math.max(0, Math.min(255, rr));
+          const clampedRg = Math.max(0, Math.min(255, rg));
+          const clampedRb = Math.max(0, Math.min(255, rb));
+          const interp = '#' + [clampedRr, clampedRg, clampedRb].map(v => v.toString(16).padStart(2,'0')).join('');
           forcedColors.set(fid, interp);
         } else {
           forcedColors.set(fid, activeColor.color);
         }
       }
       if (activeDimmer) forcedDimmers.set(fid, activeDimmer.value);
-      if (activeStrobe) forcedStrobes.set(fid, { active: true, speed: activeStrobe.speed });
-      if (activeMovement) forcedMovements.set(fid, { pattern: activeMovement.pattern, amplitude: activeMovement.amplitude });
+      if (activeStrobe && !forcedStrobes.has(fid)) forcedStrobes.set(fid, { active: true, speed: activeStrobe.speed });
+      if (activeMovement) forcedMovements.set(fid, { pattern: activeMovement.pattern, amplitude: activeMovement.amplitude, speed: activeMovement.speed });
 
-      // Channel-level overrides
+      // Channel-level overrides — statiques pour le track entier (toujours actifs si track enabled)
       if (Object.keys(track.channelOverrides).length > 0) {
         const existing = overrides.get(fid) || {};
         Object.assign(existing, track.channelOverrides);
@@ -280,57 +286,39 @@ function generateEfxPanTilt(
   t: number,        // relative time in cycles (0 = start, scales with speed)
   width: number,     // 0-1
   height: number,    // 0-1
-  rotation: number,  // radians
+  rotation: number,  // degrees (SavedEffect.rotation est en degrés)
   xOffset: number,
   yOffset: number,
 ): { pan: number; tilt: number } {
   const twoPi = Math.PI * 2;
+  const seg = ((t % 1) + 1) % 1;
+  const phase = t * twoPi;
   let rawPan = 0;
   let rawTilt = 0;
 
   switch (pattern) {
-    case 'Circle':
-      rawPan = Math.sin(t * twoPi);
-      rawTilt = Math.cos(t * twoPi);
-      break;
-    case 'Line':
-      rawPan = Math.sin(t * twoPi);
-      rawTilt = Math.sin(t * twoPi);
-      break;
-    case 'Eight':
-      rawPan = Math.sin(t * twoPi);
-      rawTilt = Math.sin(t * twoPi * 2);
-      break;
-    case 'Square': {
-      // Discrete: snap to corners of a square
-      const phase = ((t % 1) + 1) % 1;
-      const corner = Math.round(phase * 4) % 4;
-      rawPan = corner === 0 || corner === 1 ? 1 : -1;
-      rawTilt = corner === 1 || corner === 2 ? 1 : -1;
-      break;
-    }
-    case 'Triangle': {
-      // Triangle wave (zigzag)
-      const p = ((t % 1) + 1) % 1;
-      rawPan = p < 0.5 ? 4 * p - 1 : 3 - 4 * p;
-      rawTilt = ((t + 0.25) % 1 < 0.5) ? 4 * ((t + 0.25) % 1) - 1 : 3 - 4 * ((t + 0.25) % 1);
-      break;
-    }
-    default:
-      rawPan = Math.sin(t * twoPi);
-      rawTilt = Math.cos(t * twoPi);
+    case 'Circle': rawPan = Math.cos(phase); rawTilt = Math.sin(phase); break;
+    case 'Line': { const lp = seg; const lx = lp < 0.5 ? (lp * 2) * 2 - 1 : (1 - (lp - 0.5) * 2) * 2 - 1; rawPan = lx; rawTilt = 0; break; }
+    case 'Eight': rawPan = Math.sin(phase); rawTilt = Math.sin(phase * 2) * 0.5; break;
+    case 'Square': { const s = seg * 4; const sIdx = Math.floor(s) % 4; const sFrac = s - Math.floor(s); const cs: [number, number][] = [[1,1],[-1,1],[-1,-1],[1,-1]]; const ce: [number, number][] = [[-1,1],[-1,-1],[1,-1],[1,1]]; rawPan = cs[sIdx][0] + (ce[sIdx][0] - cs[sIdx][0]) * sFrac; rawTilt = cs[sIdx][1] + (ce[sIdx][1] - cs[sIdx][1]) * sFrac; break; }
+    case 'Triangle': { const ta = seg * 3; const ti = Math.floor(ta) % 3; const tf = ta - Math.floor(ta); const tv: [number, number][] = [[0,-1],[-0.866,0.5],[0.866,0.5]]; const tn = tv[(ti+1)%3]; rawPan = tv[ti][0] + (tn[0]-tv[ti][0])*tf; rawTilt = tv[ti][1] + (tn[1]-tv[ti][1])*tf; break; }
+    case 'Infinity': rawPan = Math.cos(phase); rawTilt = Math.sin(phase * 2) * 0.5; break;
+    case 'Zigzag': { const z = seg * 2 - 1; rawPan = z; const zs = seg * 8; const zi = Math.floor(zs); const zf = zs - zi; rawTilt = zi % 2 === 0 ? -1 + zf * 2 : 1 - zf * 2; break; }
+    case 'Spiral': { const sr = 0.2 + seg * 0.8; rawPan = Math.cos(phase) * sr; rawTilt = Math.sin(phase) * sr; break; }
+    case 'DoubleCircle': { const dc = Math.cos(phase), ds = Math.sin(phase); const dc2 = Math.cos(phase + Math.PI) * 0.5, ds2 = Math.sin(phase + Math.PI) * 0.5; const b = (Math.sin(phase*3)+1)/2; rawPan = dc*(1-b)+dc2*b; rawTilt = ds*(1-b)+ds2*b; break; }
+    case 'Heart': { const hx = 16*Math.pow(Math.sin(phase),3); const hy = 13*Math.cos(phase)-5*Math.cos(2*phase)-2*Math.cos(3*phase)-Math.cos(4*phase); rawPan = hx/16; rawTilt = -hy/16; break; }
+    default: rawPan = Math.cos(phase); rawTilt = Math.sin(phase); break;
   }
 
-  // Apply rotation matrix
-  const cosR = Math.cos(rotation);
-  const sinR = Math.sin(rotation);
+  // rotation est en degrés → radians
+  const rotRad = rotation * Math.PI / 180;
+  const cosR = Math.cos(rotRad);
+  const sinR = Math.sin(rotRad);
   const rx = rawPan * cosR - rawTilt * sinR;
   const ry = rawPan * sinR + rawTilt * cosR;
 
   // Scale and offset → DMX 0-255
-  const w = width || 1;       // fallback: full amplitude if not set
-  const h = height || 1;      // fallback: full amplitude if not set
-  // xOffset/yOffset are in DMX range [-255, 255]; normalize to [-1, 1]
+  const w = width ?? 1; const h = height ?? 1;
   const ox = (xOffset || 0) / 255;
   const oy = (yOffset || 0) / 255;
   const prePan = Math.round(128 + rx * w * 127 + ox * 127);
@@ -352,6 +340,7 @@ export function computeEfxOverrides(
   effects: SavedEffect[],
   patchedFixtures: PatchedFixture[],
   fixtureGroups: { id: string; fixtureIds: string[] }[],
+  fixturePositions?: Record<string, { x: number; y: number; h: number }>,
 ): Map<string, { pan: number; tilt: number }> {
   const result = new Map<string, { pan: number; tilt: number }>();
   const effectMap = new Map(effects.map(e => [e.id, e]));
@@ -368,19 +357,25 @@ export function computeEfxOverrides(
       targetIds = patchedFixtures.map(f => f.id);
     }
 
-    // Find active EFX entry
-    const activeEntry = track.entries.find(
-      e => currentTime >= e.time && currentTime < e.endTime
-    );
+    // Find active EFX entry — dernier entré gagne si chevauchement
+    // Normalise les bornes (certains blocs créés par drag ont endTime <= time)
+    const actives = track.entries.filter(e => {
+      const s = Math.min(e.time, e.endTime);
+      const en = Math.max(e.time, e.endTime);
+      return currentTime >= s && currentTime < en;
+    });
+    const activeEntry = actives.length > 0 ? actives[actives.length - 1] : undefined;
     if (!activeEntry) continue;
+    const s = Math.min(activeEntry.time, activeEntry.endTime);
+    const en = Math.max(activeEntry.time, activeEntry.endTime);
+    const dur = Math.max(0.1, en - s);
 
     // Look up the effect definition
     const effect = effectMap.get(activeEntry.effectId);
     if (!effect) continue;
 
-    // Compute relative time: how far into the effect we are (in cycles)
-    const speed = effect.speed || 0.5; // fallback: 0.5 Hz if speed not set
-    const relTime = (currentTime - activeEntry.time) * speed;
+    const speed = effect.speed || 0.5;
+    const relTime = ((currentTime - s) / dur) * speed;
 
     // Generate pan/tilt for this effect
     const pt = generateEfxPanTilt(

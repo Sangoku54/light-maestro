@@ -184,6 +184,7 @@ interface LightMaestroAPI {
     getDefinition: (id: string) => Promise<any>;
     addCustom: (def: any) => Promise<void>;
     importQLC: (filePath: string) => Promise<any>;
+    importGDTF: (filePath: string) => Promise<any>;
     getAll: () => Promise<any[]>;
     getBudgetList: () => Promise<{ entries: { manufacturer: string; model: string; priceMin?: number; priceMax?: number; priceLabel?: string; type?: string; tags?: string[] }[] }>;
     reloadLibrary: () => Promise<{ count: number }>;

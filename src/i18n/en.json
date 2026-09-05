@@ -116,6 +116,7 @@
     "remote": "Remote",
     "simpleDesk": "Simple Desk",
     "stageView": "Stage View",
+    "stage2D": "2D View",
     "cueList": "Cue List",
     "mtc": "Timecode",
     "osc": "OSC"
@@ -132,7 +133,17 @@
     "updateError": "Update error",
     "newFixtures": "new",
     "newFixturesAvailable": "new fixtures available — click to load",
-    "clickToLoad": "Click to load new fixtures"
+    "clickToLoad": "Click to load new fixtures",
+    "project": "Project",
+    "preset": "Preset",
+    "new": "New",
+    "newTitle": "New Project",
+    "open": "Open",
+    "openTitle": "Open project (.lmproj)",
+    "save": "Save",
+    "saveTitle": "Save project (.lmproj)",
+    "switchToEn": "Switch to English",
+    "switchToFr": "Passer en Français"
   },
   "modes": {
     "quick": "Show Auto",
@@ -881,5 +892,52 @@
       "Wash L",
       "Wash R"
     ]
+  },
+  "stage3D": {
+    "title": "3D Stage",
+    "directOn": "Direct ON",
+    "direct": "Direct",
+    "directOnTitle": "Direct mode: drag on fixture = Pan/Tilt (programmer violet)",
+    "directOffTitle": "Enable direct control from 3D",
+    "front": "Front",
+    "frontView": "Front View",
+    "top": "Top",
+    "topView": "Top View",
+    "side": "Side",
+    "sideView": "Side View",
+    "audience": "Audience",
+    "audienceView": "Audience View",
+    "detach": "Detach 3D view",
+    "hide": "Hide 3D view",
+    "show": "Show 3D view",
+    "fixtures": "Fixtures",
+    "close": "Close",
+    "dragToOrbit": "fixtures · drag to orbit · click to select"
+  },
+  "showManager": {
+    "play": "Play",
+    "pause": "Pause",
+    "resume": "Resume",
+    "stop": "Stop",
+    "loop": "Loop",
+    "backToShows": "Back to shows",
+    "saveShow": "Save Show",
+    "loadShow": "Load Show",
+    "save": "Save",
+    "load": "Load"
+  },
+  "programmer": {
+    "save": "Save",
+    "clear": "Clear",
+    "store": "Store",
+    "newScene": "New scene",
+    "update": "Update",
+    "sceneNamePlaceholder": "Scene name",
+    "chooseScene": "Choose a scene…",
+    "hint": "values in violet — not yet stored",
+    "storeTitle": "Store Programmer ({{count}} ch)"
+  },
+  "masterClock": {
+    "abletonLink": "Ableton Link — sync with DJ software"
   }
 }

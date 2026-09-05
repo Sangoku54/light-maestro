@@ -443,9 +443,19 @@ function colorNameMatchScore(capName: string, targetCat: string): number {
   return 0;
 }
 
-// ABSOLUTE minimum DMX intensity for any fixture on any section.
-// SoundSwitch principle: every patched fixture always receives dimmer >= 50% (128).
-const ABSOLUTE_MIN_INTENSITY = 60;
+// Section-aware absolute minimum DMX intensity.
+// Lower values for dynamic sections (drop, build, outro) to allow more dramatic contrast,
+// higher values for stable sections (chorus, verse) to maintain energy.
+// Values are DMX 0-255 (≈% of full: 60≈23%, 128≈50%, 179≈70%).
+const SECTION_MIN_INTENSITY: Record<string, number> = {
+  intro: 70, // garder une lumière douce en début de morceau
+  verse: 45, // énergie modérée pour les couplets
+  chorus: 80, // plein énergie pour le refrain
+  bridge: 40, // contraste pour le pont
+  drop: 25, // très dramatique, presque coupé
+  build: 35, // montée progressive
+  outro: 45 // fin en douceur
+};
 
 // Safe shutter-open value: 255 is universally open on >95% of fixtures.
 
@@ -476,9 +486,11 @@ const LASER_COLOR_BARS = 2; // un cran de roue couleur toutes les 2 bars
 const LASER_ROT_BEATS = 16; // période de base des rotations (lente)
 
 // SoundSwitch: map intensity level + energy -> DMX value within level range
-function mapIntensity(level: string, energy: number): number {
+function mapIntensity(level: string, energy: number, section?: string): number {
   if (level === 'dynamic') {
-    return Math.round(Math.max(ABSOLUTE_MIN_INTENSITY, 20 + energy * 235));
+    // Floor section-aware: utiliser SECTION_MIN_INTENSITY si une section est fournie
+    const sectionMin = section ? (SECTION_MIN_INTENSITY[section.toLowerCase()] ?? 60) : 60;
+    return Math.round(Math.max(sectionMin, 20 + energy * 235));
   }
   let lo: number, hi: number;
   switch (level) {
@@ -490,7 +502,9 @@ function mapIntensity(level: string, energy: number): number {
     default: lo = 120; hi = 200; break;
   }
   const clamped = Math.max(0, Math.min(1, energy));
-  return Math.round(Math.max(ABSOLUTE_MIN_INTENSITY, lo + clamped * (hi - lo)));
+  // Floor section-aware: utiliser SECTION_MIN_INTENSITY si une section est fournie
+  const sectionMin = section ? (SECTION_MIN_INTENSITY[section.toLowerCase()] ?? 60) : 60;
+  return Math.round(Math.max(sectionMin, lo + clamped * (hi - lo)));
 }
 export interface TierMultipliers {
   primary: number;    // 0-100 percentage
@@ -680,7 +694,7 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
         // Sections differ by movement pattern and strobe, NOT by going dark.
         let computedIntensity = 0;
         {
-          let val = mapIntensity(cue.intensity, energy);
+          let val = mapIntensity(cue.intensity, energy, cue.section);
 
           // Dimmer pulse: alternate high/low or use beat-synced pump
           if (useDimmerPulse) {
@@ -696,10 +710,11 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
             }
           }
 
-          val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
-          // ABSOLUTE floor: never below 128 (50%) for ANY fixture on ANY section
-          val = Math.max(val, ABSOLUTE_MIN_INTENSITY);
-          computedIntensity = val;
+val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
+// Section-aware floor: each section has its own minimum intensity for dramatic contrast
+  const sectionMin = SECTION_MIN_INTENSITY[cue.section.toLowerCase()] ?? 60;
+  val = Math.max(val, sectionMin);
+  computedIntensity = val;
         }
 
         if (fa.intensityOffset !== null) {

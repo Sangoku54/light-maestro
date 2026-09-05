@@ -6,8 +6,10 @@ import { usePerformStore } from './stores/performStore';
 import { TopBar } from './components/layout/TopBar';
 import { Sidebar } from './components/layout/Sidebar';
 import { QuickShowView } from './views/QuickShowView';
+import { ToastHost } from './components/Toast';
 import { DesignView } from './views/DesignView';
 import { PerformanceView } from './views/PerformanceView';
+import { MasterClockBar } from './components/MasterClockBar';
 import { AudioCaptureProvider } from './hooks/useAudioCapture';
 import { useAudioFileLoader } from './hooks/useAudioFileLoader';
 import { useRgbMatrixPlayback } from './hooks/rgb-matrix-playback';
@@ -456,7 +458,12 @@ const App: React.FC = () => {
     if (newMode !== 'design') {
       dmxBridge.release('design-test');
       dmxBridge.release('design-efx');
+      dmxBridge.release('scene-efx');
       dmxBridge.release('fixture-onoff');
+      // Le menu scène / panneau design écrit via la source 'default' (LTP 50).
+      // Sans release, ces valeurs persistent et écrasent le HTP du quickshow
+      // (prio 40) → l'autoscript joue mais la 3D reste figée sur la scène.
+      dmxBridge.release('default');
     }
     setMode(newMode);
   }, [setMode]);
@@ -472,6 +479,7 @@ const App: React.FC = () => {
           onModeChange={handleModeChange}
         />
 
+        <MasterClockBar />
         {/* Main Content */}
         <div className="flex-1 flex overflow-hidden">
           {/* Sidebar */}
@@ -493,6 +501,7 @@ const App: React.FC = () => {
 
         {/* Status Bar */}
         <StatusBar />
+        <ToastHost />
 
         {/* ─── Close Guard Modal ──────────────────────────── */}
         {showCloseModal && (

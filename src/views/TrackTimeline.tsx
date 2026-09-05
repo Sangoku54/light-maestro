@@ -15,6 +15,7 @@ import type { TrackSection } from '../hooks/audio-analysis';
 import type { DmxCue } from '../hooks/dmx-cues';
 import type { PatchedFixture } from '../stores/showStore';
 import type { FixtureTrack, ColorBlock, DimmerBlock, StrobeBlock, MovementBlock } from '../hooks/fixture-tracks';
+import { useTranslation } from 'react-i18next';
 import { resolveTrackTargets, createFixtureTrack } from '../hooks/fixture-tracks';
 import { useAppStore } from '../stores/appStore';
 
@@ -179,6 +180,40 @@ export interface ChaserTrack {
   };
 }
 
+// ── Show Track types (comme chaser mais pour un show complet) ──
+
+export interface ShowTrackEntry {
+  id: string;
+  time: number;
+  endTime: number;
+  showId: string;
+  showName?: string;
+}
+
+export interface ShowTrack {
+  id: string;
+  name: string;
+  entries: ShowTrackEntry[];
+}
+
+// ── Scene Track types (scène directe : prend le dessus sur l'autoscript) ──
+// Contrairement à la chaser track (scène via un chaser), la scene track joue
+// les canaux statiques d'une scène telle quelle — idéal pour un focus fixe.
+
+export interface SceneTrackEntry {
+  id: string;
+  time: number;
+  endTime: number;
+  sceneId: string;
+  sceneName?: string;
+}
+
+export interface SceneTrack {
+  id: string;
+  name: string;
+  entries: SceneTrackEntry[];
+}
+
 interface TrackTimelineProps {
   cues: Cue[];
   dmxCues?: DmxCue[];
@@ -238,6 +273,22 @@ interface TrackTimelineProps {
   onChaserEntryContextMenu?: (trackId: string, entry: ChaserTrackEntry, clientX: number, clientY: number) => void;
   /** Called when user drag-resizes or drag-moves a chaser entry */
   onChaserEntryChange?: (trackId: string, entryIndex: number, newTime: number, newEndTime: number) => void;
+  /** Scene tracks to render below show tracks */
+  sceneTracks?: SceneTrack[];
+  /** Called when user right-clicks on a scene track row */
+  onSceneTrackContextMenu?: (trackId: string, time: number, clientX: number, clientY: number) => void;
+  /** Called when user left-clicks a scene entry */
+  onSceneEntryClick?: (trackId: string, entry: SceneTrackEntry) => void;
+  /** Called when user right-clicks a scene entry */
+  onSceneEntryContextMenu?: (trackId: string, entry: SceneTrackEntry, clientX: number, clientY: number) => void;
+  /** Called when user drag-resizes or drag-moves a scene entry */
+  onSceneEntryChange?: (trackId: string, entryIndex: number, newTime: number, newEndTime: number) => void;
+  /** Show tracks — prennent le dessus sur l'autoscript (comme chaser) */
+  showTracks?: ShowTrack[];
+  onShowTrackContextMenu?: (trackId: string, time: number, clientX: number, clientY: number) => void;
+  onShowEntryClick?: (trackId: string, entry: ShowTrackEntry) => void;
+  onShowEntryContextMenu?: (trackId: string, entry: ShowTrackEntry, clientX: number, clientY: number) => void;
+  onShowEntryChange?: (trackId: string, entryIndex: number, newTime: number, newEndTime: number) => void;
   /** Called when user drags a section boundary to resize */
   onSectionsChange?: (sections: TrackSection[]) => void;
   /** Called when user right-clicks on the AutoScript track to insert a section */
@@ -276,6 +327,8 @@ const COLOR_TRACK_HEIGHT = 26;
 const STROBE_TRACK_HEIGHT = 26;
 const DIMMER_TRACK_HEIGHT = 26;
 const CHASER_TRACK_HEIGHT = 26;
+const SHOW_TRACK_HEIGHT = 26;
+const SCENE_TRACK_HEIGHT = 26;
 const LABEL_WIDTH = 90;
 
 const fmt = (s: number) =>
@@ -469,6 +522,46 @@ function findChaserEntryAt(
   return best;
 }
 
+function findShowEntryAt(
+  track: ShowTrack,
+  timeAtX: number,
+  duration: number,
+): ShowTrackEntry | null {
+  const threshold = Math.min(2, duration * 0.05);
+  let best: ShowTrackEntry | null = null;
+  let bestDist = Infinity;
+  for (const entry of track.entries) {
+    const entryMid = (entry.time + entry.endTime) / 2;
+    const halfLen = (entry.endTime - entry.time) / 2 + 0.1;
+    const d = Math.abs(entryMid - timeAtX);
+    if (d < halfLen + threshold && d < bestDist) {
+      best = entry;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
+function findSceneEntryAt(
+  track: SceneTrack,
+  timeAtX: number,
+  duration: number,
+): SceneTrackEntry | null {
+  const threshold = Math.min(2, duration * 0.05);
+  let best: SceneTrackEntry | null = null;
+  let bestDist = Infinity;
+  for (const entry of track.entries) {
+    const entryMid = (entry.time + entry.endTime) / 2;
+    const halfLen = (entry.endTime - entry.time) / 2 + 0.1;
+    const d = Math.abs(entryMid - timeAtX);
+    if (d < halfLen + threshold && d < bestDist) {
+      best = entry;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
 // ─── Component ────────────────────────────────────────────
 
 const TrackTimeline: React.FC<TrackTimelineProps> = ({
@@ -505,6 +598,16 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   onChaserEntryClick,
   onChaserEntryContextMenu,
   onChaserEntryChange,
+  showTracks,
+  onShowTrackContextMenu,
+  onShowEntryClick,
+  onShowEntryContextMenu,
+  onShowEntryChange,
+  sceneTracks,
+  onSceneTrackContextMenu,
+  onSceneEntryClick,
+  onSceneEntryContextMenu,
+  onSceneEntryChange,
   onSectionsChange,
   onAutoScriptContextMenu,
   fixtureTracks,
@@ -523,6 +626,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   energyCurve,
   cueMarkers,
 }) => {
+  const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // Refs for stale-closure-safe access in callbacks
@@ -578,6 +682,8 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const numStrobeTracks = strobeTracks?.length ?? 0;
   const numDimmerTracks = dimmerTracks?.length ?? 0;
   const numChaserTracks = chaserTracks?.length ?? 0;
+  const numShowTracks = showTracks?.length ?? 0;
+  const numSceneTracks = sceneTracks?.length ?? 0;
   const TIER_ORDER: Record<string, number> = { primary: 0, secondary: 1, tertiary: 2, other: 3 };
   const [collapsedTiers, setCollapsedTiers] = useState<Set<string>>(new Set());
   // Sort fixtures by tier, compute header positions
@@ -592,7 +698,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
     }
     return { sorted: sorted, list, count: list.length };
   }, [patchedFixtures, collapsedTiers]);
-  const totalHeight = HEADER_HEIGHT + tieredLayout.count * TRACK_HEIGHT + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT + numDimmerTracks * DIMMER_TRACK_HEIGHT + numChaserTracks * CHASER_TRACK_HEIGHT;
+  const totalHeight = HEADER_HEIGHT + tieredLayout.count * TRACK_HEIGHT + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT + numDimmerTracks * DIMMER_TRACK_HEIGHT + numChaserTracks * CHASER_TRACK_HEIGHT + numShowTracks * SHOW_TRACK_HEIGHT + numSceneTracks * SCENE_TRACK_HEIGHT;
 
   // Helper: resolve Y position to display row (header or fixture)
   const resolveDisplayRow = useCallback((y: number) => {
@@ -748,6 +854,26 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
 
   // ── Chaser entry drag state (parallel to EFX drag) ──
   const chaserDragRef = useRef<{
+    trackId: string;
+    entryIndex: number;
+    mode: 'move' | 'resize-left' | 'resize-right';
+    startX: number;
+    entryTime: number;
+    entryEndTime: number;
+  } | null>(null);
+
+  // ── Show entry drag state ──
+  const showDragRef = useRef<{
+    trackId: string;
+    entryIndex: number;
+    mode: 'move' | 'resize-left' | 'resize-right';
+    startX: number;
+    entryTime: number;
+    entryEndTime: number;
+  } | null>(null);
+
+  // ── Scene entry drag state (parallel to chaser/show drag) ──
+  const sceneDragRef = useRef<{
     trackId: string;
     entryIndex: number;
     mode: 'move' | 'resize-left' | 'resize-right';
@@ -1005,7 +1131,51 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         return;
       }
 
-      // Section resize in progress
+      // Show entry drag/resize
+      if (showDragRef.current) {
+        const c = containerRef.current; if (!c) return;
+        const rect = c.getBoundingClientRect();
+        const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
+        if (drawW <= 0) return;
+        const dx = (e.clientX - showDragRef.current.startX) / drawW * duration;
+        const drag = showDragRef.current;
+        if (drag.mode === 'move') {
+          const newTime = Math.max(0, drag.entryTime + dx);
+          const newEnd = drag.entryEndTime + dx;
+          onShowEntryChange?.(drag.trackId, drag.entryIndex, newTime, newEnd);
+        } else if (drag.mode === 'resize-left') {
+          const newTime = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          onShowEntryChange?.(drag.trackId, drag.entryIndex, newTime, drag.entryEndTime);
+        } else if (drag.mode === 'resize-right') {
+          const newEnd = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          onShowEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
+        }
+        return;
+      }
+
+      // Scene entry drag/resize (parallel to show)
+      if (sceneDragRef.current) {
+        const c = containerRef.current; if (!c) return;
+        const rect = c.getBoundingClientRect();
+        const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
+        if (drawW <= 0) return;
+        const dx = (e.clientX - sceneDragRef.current.startX) / drawW * duration;
+        const drag = sceneDragRef.current;
+        if (drag.mode === 'move') {
+          const newTime = Math.max(0, drag.entryTime + dx);
+          const newEnd = drag.entryEndTime + dx;
+          onSceneEntryChange?.(drag.trackId, drag.entryIndex, newTime, newEnd);
+        } else if (drag.mode === 'resize-left') {
+          const newTime = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          onSceneEntryChange?.(drag.trackId, drag.entryIndex, newTime, drag.entryEndTime);
+        } else if (drag.mode === 'resize-right') {
+          const newEnd = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          onSceneEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
+        }
+        return;
+      }
+
+      // Section resize in progress — déplace séparatrice et efface partie chevauchée
       if (sectionResizeRef.current) {
         const resize = sectionResizeRef.current;
         const c = containerRef.current;
@@ -1015,20 +1185,58 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         if (drawW <= 0) return;
         const dx = e.clientX - resize.startX;
         const dt = (dx / drawW) * duration;
-        const newTime = Math.max(0, Math.min(duration, resize.startTime + dt));
-
-        // Don't let edge cross the other edge
-        const minSep = 0.1; // minimum section width
-        const clamped = resize.edge === 'left'
-          ? Math.min(newTime, resize.otherEdgeTime - minSep)
-          : Math.max(newTime, resize.otherEdgeTime + minSep);
-
-        sections[resize.sectionIndex] = {
-          ...sections[resize.sectionIndex],
-          [resize.edge === 'left' ? 'startTime' : 'endTime']: clamped,
-        };
-        // Trigger re-render by updating the prop
-        onSectionsChange?.([...sections]);
+        const rawTime = Math.max(0, Math.min(duration, resize.startTime + dt));
+        const newTime = rawTime;
+        const sorted = [...sections].sort((a,b)=>a.startTime-b.startTime);
+        // retrouve l'index trié correspondant à sectionIndex (sections peut ne pas être trié, on map par id/start)
+        const target = sections[resize.sectionIndex];
+        let leftIdx = -1, rightIdx = -1;
+        // cherche dans sorted l'élément correspondant (par référence start/end/type)
+        for (let i=0;i<sorted.length;i++) if (sorted[i]===target) { if (resize.edge==='left') { leftIdx=i-1; rightIdx=i; } else { leftIdx=i; rightIdx=i+1; } break; }
+        // fallback par proximité si non trouvé (sections non triés)
+        if (leftIdx===-1 && rightIdx===-1) {
+          if (resize.edge==='left') { rightIdx = sorted.findIndex(s=>Math.abs(s.startTime - resize.startTime)<1e-6); leftIdx = rightIdx-1; }
+          else { leftIdx = sorted.findIndex(s=>Math.abs(s.endTime - resize.startTime)<1e-6); rightIdx = leftIdx+1; }
+        }
+        if (leftIdx < -1) leftIdx = -1;
+        if (rightIdx >= sorted.length) { /* bord extrême : simple trim */ }
+        const minLen = 0.05;
+        let next: typeof sorted = [];
+        for (let i=0;i<sorted.length;i++) {
+          const s = sorted[i];
+          if (i===leftIdx) {
+            const ns = { ...s, endTime: newTime };
+            if (ns.endTime - ns.startTime > minLen) next.push(ns);
+            continue;
+          }
+          if (i===rightIdx) {
+            const ns = { ...s, startTime: newTime };
+            if (ns.endTime - ns.startTime > minLen) next.push(ns);
+            continue;
+          }
+          if (leftIdx>=0 && rightIdx>=0 && rightIdx<sorted.length) {
+            // left side clipped to [0,newTime), right side to [newTime,dur)
+            if (i < leftIdx) {
+              if (s.endTime <= newTime + 1e-9) next.push(s);
+              else if (s.startTime < newTime - 1e-9) {
+                if (s.startTime < newTime - minLen) next.push({ ...s, endTime: newTime });
+              }
+              // else fully beyond -> effacé
+            } else if (i > rightIdx) {
+              if (s.startTime >= newTime - 1e-9) next.push(s);
+              else if (s.endTime > newTime + 1e-9) {
+                if (newTime + minLen < s.endTime) next.push({ ...s, startTime: newTime });
+              }
+            }
+          } else {
+            // bord extrême sans voisin : simple clamp déjà fait
+            next.push(s);
+          }
+        }
+        // si séparatrice en bord (leftIdx -1 ou rightIdx out of range), on a déjà traité via left/right
+        // nettoie et trie
+        next = next.filter(s=>s.endTime - s.startTime > minLen).sort((a,b)=>a.startTime-b.startTime);
+        onSectionsChange?.(next);
         return;
       }
 
@@ -1047,7 +1255,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         setTooltip(null);
       }
     },
-    [getCueAtPosition, duration, sections, onSectionsChange, energyCurve, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange],
+    [getCueAtPosition, duration, sections, onSectionsChange, energyCurve, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange, onChaserEntryChange, onShowEntryChange, onSceneEntryChange],
   );
 
   const handleClick = useCallback(
@@ -1299,10 +1507,39 @@ if (editBlock) { setEditBlock(null); return; }
         }
       }
 
+      // Scene entry hit test (left-click selects + seeks)
+      if (sceneTracks && sceneTracks.length > 0) {
+        const scT = sceneTracks;
+        const eT = efxTracks || [];
+        const sT = strobeTracks || [];
+        const dT = dimmerTracks || [];
+        const cT = chaserTracks || [];
+        const shT = showTracks || [];
+        const efxBase = HEADER_HEIGHT + fixtureAreaHeight + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT;
+        const colorBase = efxBase + eT.length * EFX_TRACK_HEIGHT;
+        const strobeBase = colorBase + (colorTracks?.length ?? 0) * COLOR_TRACK_HEIGHT;
+        const dimmerBase = strobeBase + sT.length * STROBE_TRACK_HEIGHT;
+        const chaserBase = dimmerBase + dT.length * DIMMER_TRACK_HEIGHT;
+        const showBase = chaserBase + cT.length * CHASER_TRACK_HEIGHT;
+        const sceneBase = showBase + shT.length * SHOW_TRACK_HEIGHT;
+        if (y >= sceneBase && y < sceneBase + scT.length * SCENE_TRACK_HEIGHT) {
+          const sIdx = Math.floor((y - sceneBase) / SCENE_TRACK_HEIGHT);
+          if (sIdx >= 0 && sIdx < scT.length) {
+            const sTrack = scT[sIdx];
+            const entry = sTrack.entries.find(en => timeAtX >= en.time && timeAtX <= en.endTime);
+            if (entry && onSceneEntryClick) {
+              onSceneEntryClick(sTrack.id, entry);
+              onSeek(entry.time);
+              return;
+            }
+          }
+        }
+      }
+
       // Seek to position
       onSeek(Math.max(0, Math.min(duration, timeAtX)));
     },
-    [duration, getCueAtPosition, onSeek, efxTracks, onEfxEntryClick, dimmerTracks, onDimmerEntryClick],
+    [duration, getCueAtPosition, onSeek, efxTracks, onEfxEntryClick, dimmerTracks, onDimmerEntryClick, chaserTracks, onChaserEntryClick, sceneTracks, onSceneEntryClick, showTracks, colorTracks, strobeTracks, fixtureAreaHeight, energyCurve],
   );
 
   const handleContextMenu = useCallback(
@@ -1443,11 +1680,48 @@ if (editBlock) { setEditBlock(null); return; }
             } else {
               onChaserTrackContextMenu?.(cTrack.id, Math.max(0, Math.min(duration, timeAtX4)), e.clientX, e.clientY);
             }
+            return;
+          }
+        }
+        // Check show tracks (below chaser)
+        const showTrackBaseY = chaserTrackBaseY + chTracks.length * CHASER_TRACK_HEIGHT;
+        const shTracks = showTracks || [];
+        if (y >= showTrackBaseY && shTracks.length > 0) {
+          const sIdx = Math.floor((y - showTrackBaseY) / SHOW_TRACK_HEIGHT);
+          if (sIdx >= 0 && sIdx < shTracks.length) {
+            e.preventDefault();
+            const timeAtX5 = (x / drawW) * duration;
+            const sTrack = shTracks[sIdx];
+            const sEntry = findShowEntryAt(sTrack, timeAtX5, duration);
+            if (sEntry && onShowEntryContextMenu) {
+              onShowEntryContextMenu(sTrack.id, sEntry, e.clientX, e.clientY);
+            } else {
+              onShowTrackContextMenu?.(sTrack.id, Math.max(0, Math.min(duration, timeAtX5)), e.clientX, e.clientY);
+            }
+            return;
+          }
+        }
+        // Check scene tracks (below show)
+        const sceneTrackBaseY = showTrackBaseY + shTracks.length * SHOW_TRACK_HEIGHT;
+        const scTracks = sceneTracks || [];
+        if (y >= sceneTrackBaseY && scTracks.length > 0) {
+          const scIdx = Math.floor((y - sceneTrackBaseY) / SCENE_TRACK_HEIGHT);
+          if (scIdx >= 0 && scIdx < scTracks.length) {
+            e.preventDefault();
+            const timeAtX6 = (x / drawW) * duration;
+            const scTrack = scTracks[scIdx];
+            const scEntry = findSceneEntryAt(scTrack, timeAtX6, duration);
+            if (scEntry && onSceneEntryContextMenu) {
+              onSceneEntryContextMenu(scTrack.id, scEntry, e.clientX, e.clientY);
+            } else {
+              onSceneTrackContextMenu?.(scTrack.id, Math.max(0, Math.min(duration, timeAtX6)), e.clientX, e.clientY);
+            }
+            return;
           }
         }
       }
     },
-    [duration, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, tieredLayout, energyCurve, onAutoScriptContextMenu, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu, onDimmerTrackContextMenu, onDimmerEntryContextMenu, onChaserTrackContextMenu, onChaserEntryContextMenu],
+    [duration, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, tieredLayout, energyCurve, onAutoScriptContextMenu, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu, onDimmerTrackContextMenu, onDimmerEntryContextMenu, onChaserTrackContextMenu, onChaserEntryContextMenu, onShowTrackContextMenu, onShowEntryContextMenu, onSceneTrackContextMenu, onSceneEntryContextMenu],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -1738,6 +2012,104 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
+    // -- Show entry drag detection --
+    {
+      const c7 = containerRef.current;
+      if (c7 && onShowEntryChange) {
+        const rect7 = c7.getBoundingClientRect();
+        const x7 = e.clientX - rect7.left - LABEL_WIDTH;
+        const y7 = e.clientY - rect7.top;
+        const drawW7 = rect7.width - LABEL_WIDTH;
+        const eT7 = efxTracks || [];
+        const sT7 = strobeTracks || [];
+        const dT7 = dimmerTracks || [];
+        const cT7 = chaserTracks || [];
+        const shT = showTracks || [];
+        if (shT.length > 0 && drawW7 > 0 && x7 >= 0 && y7 >= HEADER_HEIGHT) {
+          const efxBase7 = HEADER_HEIGHT + fixtureAreaHeight + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT;
+          const colorBase7 = efxBase7 + eT7.length * EFX_TRACK_HEIGHT;
+          const strobeBase7 = colorBase7 + (colorTracks?.length ?? 0) * COLOR_TRACK_HEIGHT;
+          const dimmerBase7 = strobeBase7 + sT7.length * STROBE_TRACK_HEIGHT;
+          const chaserBase7 = dimmerBase7 + dT7.length * DIMMER_TRACK_HEIGHT;
+          const showBase7 = chaserBase7 + cT7.length * CHASER_TRACK_HEIGHT;
+          if (y7 >= showBase7 && y7 < showBase7 + shT.length * SHOW_TRACK_HEIGHT) {
+            const sIdx = Math.floor((y7 - showBase7) / SHOW_TRACK_HEIGHT);
+            if (sIdx >= 0 && sIdx < shT.length) {
+              const sTrack = shT[sIdx];
+              for (let ei = 0; ei < sTrack.entries.length; ei++) {
+                const entry = sTrack.entries[ei];
+                const ex1 = (entry.time / duration) * drawW7;
+                const ex2 = (entry.endTime / duration) * drawW7;
+                const EDGE = 5;
+                if (Math.abs(x7 - ex1) < EDGE) {
+                  showDragRef.current = { trackId: sTrack.id, entryIndex: ei, mode: 'resize-left', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (Math.abs(x7 - ex2) < EDGE) {
+                  showDragRef.current = { trackId: sTrack.id, entryIndex: ei, mode: 'resize-right', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (x7 > ex1 + EDGE && x7 < ex2 - EDGE) {
+                  showDragRef.current = { trackId: sTrack.id, entryIndex: ei, mode: 'move', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // -- Scene entry drag detection (below show) --
+    {
+      const c8 = containerRef.current;
+      if (c8 && onSceneEntryChange) {
+        const rect8 = c8.getBoundingClientRect();
+        const x8 = e.clientX - rect8.left - LABEL_WIDTH;
+        const y8 = e.clientY - rect8.top;
+        const drawW8 = rect8.width - LABEL_WIDTH;
+        const eT8 = efxTracks || [];
+        const sT8 = strobeTracks || [];
+        const dT8 = dimmerTracks || [];
+        const cT8 = chaserTracks || [];
+        const shT8 = showTracks || [];
+        const scT = sceneTracks || [];
+        if (scT.length > 0 && drawW8 > 0 && x8 >= 0 && y8 >= HEADER_HEIGHT) {
+          const efxBase8 = HEADER_HEIGHT + fixtureAreaHeight + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT;
+          const colorBase8 = efxBase8 + eT8.length * EFX_TRACK_HEIGHT;
+          const strobeBase8 = colorBase8 + (colorTracks?.length ?? 0) * COLOR_TRACK_HEIGHT;
+          const dimmerBase8 = strobeBase8 + sT8.length * STROBE_TRACK_HEIGHT;
+          const chaserBase8 = dimmerBase8 + dT8.length * DIMMER_TRACK_HEIGHT;
+          const showBase8 = chaserBase8 + cT8.length * CHASER_TRACK_HEIGHT;
+          const sceneBase8 = showBase8 + shT8.length * SHOW_TRACK_HEIGHT;
+          if (y8 >= sceneBase8 && y8 < sceneBase8 + scT.length * SCENE_TRACK_HEIGHT) {
+            const scIdx = Math.floor((y8 - sceneBase8) / SCENE_TRACK_HEIGHT);
+            if (scIdx >= 0 && scIdx < scT.length) {
+              const scTrack = scT[scIdx];
+              for (let ei = 0; ei < scTrack.entries.length; ei++) {
+                const entry = scTrack.entries[ei];
+                const ex1 = (entry.time / duration) * drawW8;
+                const ex2 = (entry.endTime / duration) * drawW8;
+                const EDGE = 5;
+                if (Math.abs(x8 - ex1) < EDGE) {
+                  sceneDragRef.current = { trackId: scTrack.id, entryIndex: ei, mode: 'resize-left', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (Math.abs(x8 - ex2) < EDGE) {
+                  sceneDragRef.current = { trackId: scTrack.id, entryIndex: ei, mode: 'resize-right', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (x8 > ex1 + EDGE && x8 < ex2 - EDGE) {
+                  sceneDragRef.current = { trackId: scTrack.id, entryIndex: ei, mode: 'move', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     if (!onSectionsChange) return;
     const c = containerRef.current;
     if (!c) return;
@@ -1770,7 +2142,7 @@ if (editBlock) { setEditBlock(null); return; }
         return;
       }
     }
-  }, [sections, duration, onSectionsChange, efxTracks, colorTracks, strobeTracks, dimmerTracks, energyCurve, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange]);
+  }, [sections, duration, onSectionsChange, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, energyCurve, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange, onChaserEntryChange, onShowEntryChange, onSceneEntryChange, fixtureAreaHeight]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Clear EFX drag
@@ -1800,6 +2172,18 @@ if (editBlock) { setEditBlock(null); return; }
     // Chaser entry drag end
     if (chaserDragRef.current) {
       chaserDragRef.current = null;
+      return;
+    }
+
+    // Show entry drag end
+    if (showDragRef.current) {
+      showDragRef.current = null;
+      return;
+    }
+
+    // Scene entry drag end
+    if (sceneDragRef.current) {
+      sceneDragRef.current = null;
       return;
     }
 
@@ -3053,21 +3437,142 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
-    // ── Playhead ─────────────────────────────────────
+    // ── Show tracks — prennent le dessus sur l'autoscript ──
+    if (numShowTracks > 0) {
+      const eT = efxTracks || [];
+      const cT = colorTracks || [];
+      const sT = strobeTracks || [];
+      const dT = dimmerTracks || [];
+      const cChT = chaserTracks || [];
+      const efxBase = autoY + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT;
+      const colorBase = efxBase + cT.length * COLOR_TRACK_HEIGHT;
+      const strobeBase = colorBase + sT.length * STROBE_TRACK_HEIGHT;
+      const dimmerBase = strobeBase + dT.length * DIMMER_TRACK_HEIGHT;
+      const chaserBase = dimmerBase + cChT.length * CHASER_TRACK_HEIGHT;
+      const showTrackBaseY = chaserBase;
+      for (let si = 0; si < numShowTracks; si++) {
+        const sTrack = showTracks![si];
+        const trackY = showTrackBaseY + si * SHOW_TRACK_HEIGHT;
+        ctx.fillStyle = si % 2 === 0 ? 'rgba(245, 158, 11, 0.07)' : 'rgba(245, 158, 11, 0.03)';
+        ctx.fillRect(LABEL_WIDTH, trackY, drawW, SHOW_TRACK_HEIGHT);
+        ctx.strokeStyle = 'rgba(245, 158, 11, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(LABEL_WIDTH, trackY); ctx.lineTo(w, trackY); ctx.stroke();
+        ctx.fillStyle = '#f59e0b';
+        ctx.font = '9px -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+        const sLabel = sTrack.name.length > 11 ? sTrack.name.substring(0, 10) + '\u2026' : sTrack.name;
+        ctx.fillText('SHOW: ' + sLabel, 6, trackY + 12);
+        const sEntry0 = sTrack.entries[0];
+        let sTargetLabel = sEntry0 ? ('🎬 ' + (sEntry0.showName || '').slice(0, 10)) : 'clic droit pour importer';
+        if (sTargetLabel) { ctx.fillStyle = '#6b7280'; ctx.font = '8px -apple-system, sans-serif'; ctx.fillText(sTargetLabel, 72, trackY + 12); }
+        ctx.strokeStyle = 'rgba(75, 85, 99, 0.1)'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.moveTo(LABEL_WIDTH, trackY + SHOW_TRACK_HEIGHT); ctx.lineTo(w, trackY + SHOW_TRACK_HEIGHT); ctx.stroke();
+        for (const entry of sTrack.entries) {
+          const ex = LABEL_WIDTH + (entry.time / duration) * drawW;
+          const endX = LABEL_WIDTH + (entry.endTime / duration) * drawW;
+          const entryW = Math.max(4, endX - ex);
+          if (ex < LABEL_WIDTH - 10 || ex > w + 10) continue;
+          const pad = 3; const barY = trackY + pad; const barH = SHOW_TRACK_HEIGHT - pad * 2;
+          ctx.fillStyle = '#f59e0b'; ctx.globalAlpha = 0.88; ctx.beginPath(); ctx.roundRect(ex, barY, entryW, barH, 3); ctx.fill(); ctx.globalAlpha = 1;
+          ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.roundRect(ex, barY, 3, barH, [3, 0, 0, 3]); ctx.fill(); ctx.beginPath(); ctx.roundRect(endX - 3, barY, 3, barH, [0, 3, 3, 0]); ctx.fill();
+          if (entryW > 44) { ctx.fillStyle = '#ffffff'; ctx.font = 'bold 7px -apple-system, sans-serif'; ctx.textAlign = 'center'; const nameLabel = (entry.showName || 'show').length > 14 ? (entry.showName || 'show').substring(0, 13) + '…' : (entry.showName || 'show'); ctx.fillText(nameLabel, ex + entryW / 2, trackY + SHOW_TRACK_HEIGHT / 2 + 3); }
+          ctx.fillStyle = '#fbbf24'; const diamondSize = 3; ctx.beginPath(); ctx.moveTo(ex, barY + barH / 2 - diamondSize); ctx.lineTo(ex + diamondSize, barY + barH / 2); ctx.lineTo(ex, barY + barH / 2 + diamondSize); ctx.lineTo(ex - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(endX, barY + barH / 2 - diamondSize); ctx.lineTo(endX + diamondSize, barY + barH / 2); ctx.lineTo(endX, barY + barH / 2 + diamondSize); ctx.lineTo(endX - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill();
+        }
+      }
+    }
+
+    // ── Scene tracks — scène directe, prend le dessus sur l'autoscript ──
+    if (numSceneTracks > 0) {
+      const eT = efxTracks || [];
+      const cT = colorTracks || [];
+      const sT = strobeTracks || [];
+      const dT = dimmerTracks || [];
+      const cChT = chaserTracks || [];
+      const shT = showTracks || [];
+      const efxBase = autoY + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT;
+      const colorBase = efxBase + cT.length * COLOR_TRACK_HEIGHT;
+      const strobeBase = colorBase + sT.length * STROBE_TRACK_HEIGHT;
+      const dimmerBase = strobeBase + dT.length * DIMMER_TRACK_HEIGHT;
+      const chaserBase = dimmerBase + cChT.length * CHASER_TRACK_HEIGHT;
+      const showTrackBaseY = chaserBase;
+      const sceneTrackBaseY = showTrackBaseY + shT.length * SHOW_TRACK_HEIGHT;
+      for (let ci = 0; ci < numSceneTracks; ci++) {
+        const cTrack = sceneTracks![ci];
+        const trackY = sceneTrackBaseY + ci * SCENE_TRACK_HEIGHT;
+        ctx.fillStyle = ci % 2 === 0 ? 'rgba(168, 85, 247, 0.06)' : 'rgba(168, 85, 247, 0.03)';
+        ctx.fillRect(LABEL_WIDTH, trackY, drawW, SCENE_TRACK_HEIGHT);
+        ctx.strokeStyle = 'rgba(168, 85, 247, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY);
+        ctx.lineTo(w, trackY);
+        ctx.stroke();
+        ctx.fillStyle = '#a78bfa';
+        ctx.font = '9px -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+        const cLabel = cTrack.name.length > 11 ? cTrack.name.substring(0, 10) + '…' : cTrack.name;
+        ctx.fillText('SCN: ' + cLabel, 6, trackY + 12);
+        const cEntry0 = cTrack.entries[0];
+        let cTargetLabel = '';
+        if (cEntry0) {
+          cTargetLabel = '🎭 ' + (cEntry0.sceneName || '').slice(0, 10);
+        } else {
+          cTargetLabel = 'clic droit pour importer';
+        }
+        if (cTargetLabel) {
+          ctx.fillStyle = '#6b7280';
+          ctx.font = '8px -apple-system, sans-serif';
+          ctx.fillText(cTargetLabel, 72, trackY + 12);
+        }
+        ctx.strokeStyle = 'rgba(75, 85, 99, 0.1)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY + SCENE_TRACK_HEIGHT);
+        ctx.lineTo(w, trackY + SCENE_TRACK_HEIGHT);
+        ctx.stroke();
+        for (const entry of cTrack.entries) {
+          const ex = LABEL_WIDTH + (entry.time / duration) * drawW;
+          const endX = LABEL_WIDTH + (entry.endTime / duration) * drawW;
+          const entryW = Math.max(4, endX - ex);
+          if (ex < LABEL_WIDTH - 10 || ex > w + 10) continue;
+          const pad = 3;
+          const barY = trackY + pad;
+          const barH = SCENE_TRACK_HEIGHT - pad * 2;
+          ctx.fillStyle = '#8b5cf6';
+          ctx.globalAlpha = 0.85;
+          ctx.beginPath();
+          ctx.roundRect(ex, barY, entryW, barH, 3);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = '#c4b5fd';
+          ctx.beginPath();
+          ctx.roundRect(ex, barY, 3, barH, [3, 0, 0, 3]);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.roundRect(endX - 3, barY, 3, barH, [0, 3, 3, 0]);
+          ctx.fill();
+          if (entryW > 44) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 7px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            const nameLabel = (entry.sceneName || 'scene').length > 14 ? (entry.sceneName || 'scene').substring(0, 13) + '…' : (entry.sceneName || 'scene');
+            ctx.fillText(nameLabel, ex + entryW / 2, trackY + SCENE_TRACK_HEIGHT / 2 + 3);
+          }
+          ctx.fillStyle = '#c4b5fd'; const diamondSize = 3; ctx.beginPath(); ctx.moveTo(ex, barY + barH / 2 - diamondSize); ctx.lineTo(ex + diamondSize, barY + barH / 2); ctx.lineTo(ex, barY + barH / 2 + diamondSize); ctx.lineTo(ex - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(endX, barY + barH / 2 - diamondSize); ctx.lineTo(endX + diamondSize, barY + barH / 2); ctx.lineTo(endX, barY + barH / 2 + diamondSize); ctx.lineTo(endX - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill();
+        }
+      }
+    }
+
+    // ── Playhead — un seul trait vertical blanc (1px, sans ombre ni doublon)
     if (currentTime >= 0 && currentTime <= duration) {
-      const px = LABEL_WIDTH + (currentTime / duration) * drawW;
+      const px = Math.round(LABEL_WIDTH + (currentTime / duration) * drawW) + 0.5;
       if (px >= LABEL_WIDTH && px <= w) {
-        // Glow
-        ctx.save();
-        ctx.shadowColor = '#ffffff';
-        ctx.shadowBlur = 6;
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(px, HEADER_HEIGHT);
         ctx.lineTo(px, h);
         ctx.stroke();
-        ctx.restore();
 
         // Triangle at top
         ctx.fillStyle = '#ffffff';
@@ -3082,7 +3587,7 @@ if (editBlock) { setEditBlock(null); return; }
         ctx.fillStyle = '#ffffff';
         ctx.font = '9px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(fmt(currentTime), px, h - 2);
+        ctx.fillText(fmt(currentTime), Math.round(px), h - 2);
       }
     }
   }, [
@@ -3107,6 +3612,8 @@ if (editBlock) { setEditBlock(null); return; }
     numDimmerTracks,
     chaserTracks,
     numChaserTracks,
+    sceneTracks,
+    numSceneTracks,
     fixtureTracks,
     disabledFixtures,
     ftSelStart,
@@ -3114,74 +3621,7 @@ if (editBlock) { setEditBlock(null); return; }
     ftSelFixture,
   ]);
 
-  // ── RAF playhead — draws ONLY the moving playhead line, never clears the canvas
-  const currentTimeRef = useRef(currentTime);
-  currentTimeRef.current = currentTime;
-  const rafRef = useRef(0);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container || duration <= 0) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    let prevX = -1;
-
-    const animate = () => {
-      const ct = currentTimeRef.current;
-      if (ct < 0 || ct > duration) { rafRef.current = requestAnimationFrame(animate); return; }
-
-      const rect = container.getBoundingClientRect();
-      const w = rect.width;
-      const drawW = (w - LABEL_WIDTH) * zoomLevel;
-      if (drawW <= 0) { rafRef.current = requestAnimationFrame(animate); return; }
-
-      const px = Math.round(LABEL_WIDTH + (ct / duration) * drawW);
-      if (px === prevX) { rafRef.current = requestAnimationFrame(animate); return; }
-
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { rafRef.current = requestAnimationFrame(animate); return; }
-
-      // Clear previous playhead position only
-      if (prevX >= 0) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(Math.max(0, prevX - 2), 0, 4, totalHeight);
-        ctx.clip();
-        ctx.fillStyle = '#0a0a0f';
-        ctx.fillRect(Math.max(0, prevX - 2), 0, 4, totalHeight);
-        ctx.restore();
-      }
-
-      prevX = px;
-
-      ctx.save();
-      ctx.scale(dpr, dpr);
-
-      // Playhead line
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(px, 0);
-      ctx.lineTo(px, totalHeight);
-      ctx.stroke();
-
-      // Triangle at top
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.moveTo(px, 0);
-      ctx.lineTo(px - 5, -6);
-      ctx.lineTo(px + 5, -6);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.restore();
-
-      rafRef.current = requestAnimationFrame(animate);
-    };
-    rafRef.current = requestAnimationFrame(animate);
-    return () => { cancelAnimationFrame(rafRef.current); prevX = -1; };
-  }, [totalHeight, duration]);
+  // (RAF playhead supprimé — doublon + ombre noire : le trait unique est dessiné dans le canvas principal)
 
   return (
     <div className="relative">
@@ -3477,7 +3917,7 @@ if (editBlock) { setEditBlock(null); return; }
 </div>
 
             <div className="flex justify-end gap-2">
-              <button onClick={() => setGradientPicker(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
+              <button onClick={() => setGradientPicker(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">{t('common.cancel')}</button>
               <button onClick={() => {
                 if (!gradientPicker) return;
                 const { endColor, startColor } = gradientPicker;
@@ -3527,7 +3967,7 @@ if (editBlock) { setEditBlock(null); return; }
                 Couleur constante (départ = arrivée)
               </label>
               <div className="flex justify-end gap-2">
-                <button onClick={() => setEditBlock(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
+                <button onClick={() => setEditBlock(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">{t('common.cancel')}</button>
                 <button onClick={() => {
                   const cs = (document.getElementById('__edit_cs') as HTMLInputElement).value;
                   const ce = (document.getElementById('__edit_ce') as HTMLInputElement).value;
@@ -3559,16 +3999,24 @@ if (editBlock) { setEditBlock(null); return; }
                 <div className="flex-1 text-center">
                   <div className="text-[10px] text-gray-500 mb-1">Départ</div>
                   <div id="__ed_dim_v1" className="text-cyan-300 text-lg font-bold mb-2">{db.value}</div>
-                  <input type="range" id="__ed_dim_s1" min="0" max="255" defaultValue={db.value} onChange={e => { document.getElementById('__ed_dim_v1')!.textContent = e.target.value; }} style={{ width: '100%', accentColor: '#22d3ee' }} />
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => { const el = document.getElementById('__ed_dim_s1') as HTMLInputElement; if (!el) return; const v = Math.max(0, Math.min(255, Number(el.value) - 1)); el.value = String(v); document.getElementById('__ed_dim_v1')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                    <input type="range" id="__ed_dim_s1" min="0" max="255" defaultValue={db.value} onChange={e => { document.getElementById('__ed_dim_v1')!.textContent = e.target.value; }} style={{ flex: 1, accentColor: '#22d3ee' }} />
+                    <button onClick={() => { const el = document.getElementById('__ed_dim_s1') as HTMLInputElement; if (!el) return; const v = Math.max(0, Math.min(255, Number(el.value) + 1)); el.value = String(v); document.getElementById('__ed_dim_v1')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                  </div>
                 </div>
                 <div className="flex-1 text-center">
                   <div className="text-[10px] text-gray-500 mb-1">Arrivée</div>
                   <div id="__ed_dim_v2" className="text-cyan-300 text-lg font-bold mb-2">{db.endValue ?? db.value}</div>
-                  <input type="range" id="__ed_dim_s2" min="0" max="255" defaultValue={db.endValue ?? db.value} onChange={e => { document.getElementById('__ed_dim_v2')!.textContent = e.target.value; }} style={{ width: '100%', accentColor: '#22d3ee' }} />
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => { const el = document.getElementById('__ed_dim_s2') as HTMLInputElement; if (!el) return; const v = Math.max(0, Math.min(255, Number(el.value) - 1)); el.value = String(v); document.getElementById('__ed_dim_v2')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                    <input type="range" id="__ed_dim_s2" min="0" max="255" defaultValue={db.endValue ?? db.value} onChange={e => { document.getElementById('__ed_dim_v2')!.textContent = e.target.value; }} style={{ flex: 1, accentColor: '#22d3ee' }} />
+                    <button onClick={() => { const el = document.getElementById('__ed_dim_s2') as HTMLInputElement; if (!el) return; const v = Math.max(0, Math.min(255, Number(el.value) + 1)); el.value = String(v); document.getElementById('__ed_dim_v2')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                  </div>
                 </div>
               </div>
               <div className="flex justify-end gap-2 mt-5">
-                <button onClick={() => setEditBlock(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
+                <button onClick={() => setEditBlock(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">{t('common.cancel')}</button>
                 <button onClick={() => {
                   const v1 = Number((document.getElementById('__ed_dim_s1') as HTMLInputElement).value);
                   const v2 = Number((document.getElementById('__ed_dim_s2') as HTMLInputElement).value);
@@ -3599,16 +4047,24 @@ if (editBlock) { setEditBlock(null); return; }
                 <div className="flex-1 text-center">
                   <div className="text-[10px] text-gray-500 mb-1">Départ (Hz)</div>
                   <div id="__ed_sb_v1" className="text-yellow-400 text-lg font-bold mb-2">{sb.speed}</div>
-                  <input type="range" id="__ed_sb_s1" min="1" max="30" step="0.5" defaultValue={sb.speed} onChange={e => { document.getElementById('__ed_sb_v1')!.textContent = e.target.value; }} style={{ width: '100%', accentColor: '#facc15' }} />
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => { const el = document.getElementById('__ed_sb_s1') as HTMLInputElement; if (!el) return; const v = Math.max(1, Math.min(30, Number(el.value) - 1)); el.value = String(v); document.getElementById('__ed_sb_v1')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                    <input type="range" id="__ed_sb_s1" min="1" max="30" step="0.5" defaultValue={sb.speed} onChange={e => { document.getElementById('__ed_sb_v1')!.textContent = e.target.value; }} style={{ flex: 1, accentColor: '#facc15' }} />
+                    <button onClick={() => { const el = document.getElementById('__ed_sb_s1') as HTMLInputElement; if (!el) return; const v = Math.max(1, Math.min(30, Number(el.value) + 1)); el.value = String(v); document.getElementById('__ed_sb_v1')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                  </div>
                 </div>
                 <div className="flex-1 text-center">
                   <div className="text-[10px] text-gray-500 mb-1">Arrivée (Hz)</div>
                   <div id="__ed_sb_v2" className="text-yellow-400 text-lg font-bold mb-2">{sb.endSpeed ?? sb.speed}</div>
-                  <input type="range" id="__ed_sb_s2" min="1" max="30" step="0.5" defaultValue={sb.endSpeed ?? sb.speed} onChange={e => { document.getElementById('__ed_sb_v2')!.textContent = e.target.value; }} style={{ width: '100%', accentColor: '#facc15' }} />
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => { const el = document.getElementById('__ed_sb_s2') as HTMLInputElement; if (!el) return; const v = Math.max(1, Math.min(30, Number(el.value) - 1)); el.value = String(v); document.getElementById('__ed_sb_v2')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                    <input type="range" id="__ed_sb_s2" min="1" max="30" step="0.5" defaultValue={sb.endSpeed ?? sb.speed} onChange={e => { document.getElementById('__ed_sb_v2')!.textContent = e.target.value; }} style={{ flex: 1, accentColor: '#facc15' }} />
+                    <button onClick={() => { const el = document.getElementById('__ed_sb_s2') as HTMLInputElement; if (!el) return; const v = Math.max(1, Math.min(30, Number(el.value) + 1)); el.value = String(v); document.getElementById('__ed_sb_v2')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                  </div>
                 </div>
               </div>
               <div className="flex justify-end gap-2 mt-5">
-                <button onClick={() => setEditBlock(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
+                <button onClick={() => setEditBlock(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">{t('common.cancel')}</button>
                 <button onClick={() => {
                   const s1 = Number((document.getElementById('__ed_sb_s1') as HTMLInputElement).value);
                   const s2 = Number((document.getElementById('__ed_sb_s2') as HTMLInputElement).value);
@@ -3643,7 +4099,11 @@ if (editBlock) { setEditBlock(null); return; }
                     {patterns.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
                   <div id="__ed_mv_v1" className="text-green-400 text-lg font-bold mb-2">{mb.amplitude}</div>
-                  <input type="range" id="__ed_mv_a1" min="20" max="200" defaultValue={mb.amplitude} onChange={e => { document.getElementById('__ed_mv_v1')!.textContent = e.target.value; }} style={{ width: '100%', accentColor: '#22c55e' }} />
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => { const el = document.getElementById('__ed_mv_a1') as HTMLInputElement; if (!el) return; const v = Math.max(20, Math.min(200, Number(el.value) - 1)); el.value = String(v); document.getElementById('__ed_mv_v1')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                    <input type="range" id="__ed_mv_a1" min="20" max="200" defaultValue={mb.amplitude} onChange={e => { document.getElementById('__ed_mv_v1')!.textContent = e.target.value; }} style={{ flex: 1, accentColor: '#22c55e' }} />
+                    <button onClick={() => { const el = document.getElementById('__ed_mv_a1') as HTMLInputElement; if (!el) return; const v = Math.max(20, Math.min(200, Number(el.value) + 1)); el.value = String(v); document.getElementById('__ed_mv_v1')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                  </div>
                 </div>
                 <div className="flex-1 text-center">
                   <div className="text-[10px] text-gray-500 mb-1">Arrivée</div>
@@ -3651,11 +4111,15 @@ if (editBlock) { setEditBlock(null); return; }
                     {patterns.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
                   <div id="__ed_mv_v2" className="text-green-400 text-lg font-bold mb-2">{mb.endAmplitude ?? mb.amplitude}</div>
-                  <input type="range" id="__ed_mv_a2" min="20" max="200" defaultValue={mb.endAmplitude ?? mb.amplitude} onChange={e => { document.getElementById('__ed_mv_v2')!.textContent = e.target.value; }} style={{ width: '100%', accentColor: '#22c55e' }} />
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => { const el = document.getElementById('__ed_mv_a2') as HTMLInputElement; if (!el) return; const v = Math.max(20, Math.min(200, Number(el.value) - 1)); el.value = String(v); document.getElementById('__ed_mv_v2')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                    <input type="range" id="__ed_mv_a2" min="20" max="200" defaultValue={mb.endAmplitude ?? mb.amplitude} onChange={e => { document.getElementById('__ed_mv_v2')!.textContent = e.target.value; }} style={{ flex: 1, accentColor: '#22c55e' }} />
+                    <button onClick={() => { const el = document.getElementById('__ed_mv_a2') as HTMLInputElement; if (!el) return; const v = Math.max(20, Math.min(200, Number(el.value) + 1)); el.value = String(v); document.getElementById('__ed_mv_v2')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                  </div>
                 </div>
               </div>
               <div className="flex justify-end gap-2 mt-5">
-                <button onClick={() => setEditBlock(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
+                <button onClick={() => setEditBlock(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">{t('common.cancel')}</button>
                 <button onClick={() => {
                   const p1 = (document.getElementById('__ed_mv_p1') as HTMLSelectElement).value as MovementBlock['pattern'];
                   const p2 = (document.getElementById('__ed_mv_p2') as HTMLSelectElement).value as MovementBlock['pattern'];

@@ -36,6 +36,7 @@ export const DEFAULT_SOURCES: Record<string, ArbiterSourceSpec> = {
   'simple-desk': { mode: 'ltp', priority: 100 },
   'fixture-test': { mode: 'ltp', priority: 90 },
   'vc': { mode: 'ltp', priority: 80 },
+  'scene-efx': { mode: 'ltp', priority: 75 },
   'design-efx': { mode: 'ltp', priority: 70 },
   'design-test': { mode: 'ltp', priority: 60 },
   'fixture-onoff': { mode: 'ltp', priority: 60 },

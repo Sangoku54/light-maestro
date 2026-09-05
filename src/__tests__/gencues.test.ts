@@ -258,7 +258,7 @@ describe('genCues', () => {
   // ── Movement ─────────────────────────────────────────
 
   it('cues have movement-related fields', () => {
-    const validMovements = ['static', 'sweep', 'circle', 'pulse', 'wave', 'bounce', 'figure8', 'spiral', 'zigzag', 'heartbeat', 'randomWalk', 'diamond', 'panOnly', 'tiltOnly'];
+    const validMovements = ['static', 'sweep', 'circle', 'pulse', 'wave', 'bounce', 'figure8', 'spiral', 'zigzag', 'heartbeat', 'randomWalk', 'diamond', 'square', 'panOnly', 'tiltOnly'];
     const cues = genCues(makeSections(), 128, 4, defaultCfg(), [], undefined, makeAnalysis());
     for (const cue of cues) {
       if (cue.movement) {

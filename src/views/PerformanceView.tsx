@@ -1119,6 +1119,10 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                           strobeTracks: p.strobeTracks || [],
                           dimmerTracks: p.dimmerTracks || [],
                           chaserTracks: p.chaserTracks || [],
+                          disabledFixtures: p.disabledFixtures || [],
+                          musicians: p.musicians,
+                          stageScene: p.stageScene,
+                          view3D: p.view3D,
                         };
                         // Update-in-place by name (keeps a stable id so widget songId refs stay live)
                         const existing = store.songPresets.find((s) => s.name === name);
