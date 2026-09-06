@@ -41,7 +41,7 @@ import batteurImg from '../assets/musicians/batteur.png';
 import bassisteImg from '../assets/musicians/bassiste.png';
 import guitaristeImg from '../assets/musicians/guitariste.png';
 import cuivreImg from '../assets/musicians/cuivre.png';
-import { sendFixtureOn, sendFixtureOff } from '../utils/dmx-helpers';
+import { sendFixtureOn, sendFixtureOff, sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
 import { fixtureTestState } from '../utils/fixture-test-state';
 import { generateAllThumbnails, getVariantsForCategory } from '../utils/fixtureThumbnails';
 import { useProgrammerStore } from '../stores/programmerStore';
@@ -2624,7 +2624,7 @@ export const Stage3D: React.FC<{
         store.updateScene(sceneId, { name: sc.name.includes('[EFX:') ? sc.name : sc.name + tag, channels: merged, efxId: efx.id } as any);
         // Push immédiat + flag pour que l'aperçu EFX ne blackout pas ces fixtures dans les 2s qui suivent
         (window as any).__lm_efxSnapshotApplied = { sceneId, efxId: efx.id, at: Date.now() };
-        try { const { sendChannelsToHardwareAndStore } = await import('../utils/dmx-helpers'); await sendChannelsToHardwareAndStore(merged, store.patchedFixtures, store.universes); } catch {}
+        try { await sendChannelsToHardwareAndStore(merged, store.patchedFixtures, store.universes); } catch {}
       }
     } else {
       // Nouvelle scène : reprend la durée courante de l'éditeur si dispo, sinon 0 = infini (l'EFX ne doit pas s'arrêter seul)
@@ -2634,7 +2634,7 @@ export const Stage3D: React.FC<{
       store.updateScene(newId, { name: `Scene + ${efx.name}`, channels: snapshot, efxId: efx.id, duration: dur } as any);
       (window as any).__lm_selectedSceneId = newId;
       (window as any).__lm_efxSnapshotApplied = { sceneId: newId, efxId: efx.id, at: Date.now() };
-      try { const { sendChannelsToHardwareAndStore } = await import('../utils/dmx-helpers'); await sendChannelsToHardwareAndStore(snapshot, store.patchedFixtures, store.universes); } catch {}
+      try { await sendChannelsToHardwareAndStore(snapshot, store.patchedFixtures, store.universes); } catch {}
     }
     try { (window as any).__lm_toast?.(`EFX "${efx.name}" appliqué à la scène — prévisualisation 3D à jour`, 'success'); } catch {}
   }, [effects, selectedEfxId, selectedFixtureId]);

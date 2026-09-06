@@ -20,7 +20,6 @@ export default defineConfig({
         manualChunks: {
           vendor: ['react', 'react-dom', 'zustand'],
           three: ['three'],
-          dmx: ['sacn', 'artnet', 'dmxnet'],
         },
       },
     },

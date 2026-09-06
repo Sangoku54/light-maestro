@@ -3754,7 +3754,7 @@ const EFXEditor: React.FC = () => {
   useEffect(() => {
     if (!isPreviewVisible) {
       // Quitte l'onglet / mode → purge design-efx immédiatement (sinon LTP 70 masque quickshow HTP 40)
-      try { const { dmxBridge } = require('../utils/dmx-bridge'); dmxBridge.release('design-efx'); } catch {}
+      try { dmxBridge.release('design-efx'); } catch {}
       return;
     }
     if (selectedFixtureIds.size === 0 || fixtureDefs.size === 0) return;
