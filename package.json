@@ -1,9 +1,12 @@
 {
   "name": "light-maestro",
-  "version": "1.0.33",
+  "version": "1.0.34",
   "description": "Fusion QLC+ & SoundSwitch — DMX lighting control + audio-reactive automation",
+  "author": "Light Maestro",
   "main": "dist/electron/main.js",
   "scripts": {
+    "check": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && vitest run",
+    "release": "npm run check && npm run dist",
     "dev": "concurrently \"npm run dev:renderer\" \"npm run dev:electron\"",
     "dev:renderer": "vite",
     "dev:electron": "tsc -p tsconfig.electron.json && electron .",

@@ -2615,7 +2615,7 @@ export const Stage3D: React.FC<{
     }
     // Applique l'EFX à la scène : snapshot + lien dynamique (efxId) pour rejouer l'EFX en continu pendant la durée de la scène
     // Libère d'abord l'aperçu design-efx (LTP 70) sinon il masque scene-efx (LTP 75) pendant 3s
-    try { const { dmxBridge } = await import('../utils/dmx-bridge'); dmxBridge.release('design-efx'); } catch {}
+    try { dmxBridge.release('design-efx'); } catch {}
     if (sceneId) {
       const sc = store.getScene(sceneId);
       if (sc) {

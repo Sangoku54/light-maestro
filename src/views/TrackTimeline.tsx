@@ -75,6 +75,8 @@ interface Cue {
 
 /** A single entry on an EFX track — one effect placed at a time position. */
 export interface EfxTrackEntry {
+  /** Stable entry id (generated on creation; old saves may lack it). */
+  id?: string;
   time: number;
   endTime: number;
   effectId: string;

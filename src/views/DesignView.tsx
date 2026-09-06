@@ -1091,7 +1091,7 @@ const SceneEditor: React.FC = () => {
         }
         for (const [uniId, vals] of byUniverse) {
           const uniNum = Math.max(0, (parseInt(uniId.replace(/\D/g, ''), 10) || 1) - 1);
-          try { const { dmxBridge } = await import('../utils/dmx-bridge'); dmxBridge.writeTransient('scene-efx', uniNum, vals); } catch {}
+          try { dmxBridge.writeTransient('scene-efx', uniNum, vals); } catch {}
         }
       })();
       lastSceneEfxRef.current = null;
@@ -1193,7 +1193,6 @@ const SceneEditor: React.FC = () => {
                 }
                 for (const [uniId, vals] of byUniverse) {
                   const uniNum = Math.max(0, (parseInt(uniId.replace(/\D/g, ''), 10) || 1) - 1);
-                  const { dmxBridge } = await import('../utils/dmx-bridge');
                   dmxBridge.writeTransient('scene-efx', uniNum, vals);
                 }
               } catch {}
@@ -1235,7 +1234,7 @@ const SceneEditor: React.FC = () => {
             }
             for (const [uniId, vals] of byUniverse) {
               const uniNum = Math.max(0, (parseInt(uniId.replace(/\D/g, ''), 10) || 1) - 1);
-              try { const { dmxBridge } = await import('../utils/dmx-bridge'); dmxBridge.write('scene-efx', uniNum, vals); } catch {}
+              try { dmxBridge.write('scene-efx', uniNum, vals); } catch {}
             }
             raf = requestAnimationFrame(tick);
             sceneEfxLoopRef.current = raf;

@@ -1140,6 +1140,10 @@ const Chip: React.FC<{
 
 const COLOR_PALETTE = ['#FF0000','#FF6600','#FFCC00','#00FF00','#00FFFF','#0066FF','#9900FF','#FF00FF','#FFFFFF','#FF9999','#99FF99','#99CCFF','#FFB366','#FF66B2','#66FFB2','#B266FF'];
 
+/** Identifie une entrée EFX par son id stable quand elle existe, sinon par time+endTime (anciens saves). */
+export const sameEfxEntry = (a: EfxTrackEntry, b: EfxTrackEntry): boolean =>
+  (a.id && b.id) ? a.id === b.id : (a.time === b.time && a.endTime === b.endTime);
+
 /* ─── QuickShowView wrapper ─────────────────────────── */
 
 export const QuickShowView: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoader> }> = ({ audioFile }) => {
@@ -2478,7 +2482,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
 
   // Cibles « Modifier » : quand non nul, les modales éditent la section existante
   // au lieu de créer une nouvelle piste (Renommer/Modifier au clic droit).
-  const [efxEditTarget, setEfxEditTarget] = useState<{ trackId: string; time: number; endTime: number } | null>(null);
+  const [efxEditTarget, setEfxEditTarget] = useState<{ trackId: string; entryId?: string; time: number; endTime: number } | null>(null);
   const [colorEditTarget, setColorEditTarget] = useState<{ trackId: string; entryId: string } | null>(null);
   const [strobeEditTarget, setStrobeEditTarget] = useState<{ trackId: string; entryId: string } | null>(null);
   const [dimmerEditTarget, setDimmerEditTarget] = useState<{ trackId: string; entryId: string } | null>(null);
@@ -2584,9 +2588,10 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         pushHistory();
         setEfxTracks(prev => prev.map(t => {
           if (t.id !== efxEditTarget.trackId) return t;
+          const target: EfxTrackEntry = { id: efxEditTarget.entryId, time: efxEditTarget.time, endTime: efxEditTarget.endTime, effectId: '', effectName: '', pattern: '', fixtureNames: [] };
           return {
             ...t,
-            entries: t.entries.map(e => (e.time === efxEditTarget.time && e.endTime === efxEditTarget.endTime)
+            entries: t.entries.map(e => sameEfxEntry(e, target)
               ? { ...e, effectId: efx.id, effectName: efx.name, pattern: efx.pattern || 'Custom' }
               : e),
           };
@@ -2605,6 +2610,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     // dispos) est posé d'office sur la piste avec une durée par défaut de 10 s.
     const efx = effectEntities.find((e: any) => e.id === efxCustomEffectId) || effectEntities[0];
     const entries: EfxTrackEntry[] = efx ? [{
+      id: `efxe-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       time: 0,
       endTime: 10,
       effectId: efx.id,
@@ -2653,10 +2659,10 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setEfxEntryMenu({ trackId, entry, x: clientX, y: clientY });
   }, []);
 
-  const handleRemoveEfxEntry = useCallback((trackId: string, entryTime: number) => {
+  const handleRemoveEfxEntry = useCallback((trackId: string, entry: EfxTrackEntry) => {
     setEfxTracks(prev => prev.map(t => {
       if (t.id !== trackId) return t;
-      return { ...t, entries: t.entries.filter(e => e.time !== entryTime) };
+      return { ...t, entries: t.entries.filter(e => !sameEfxEntry(e, entry)) };
     }));
     setEfxEntryMenu(null);
   }, []);
@@ -2666,13 +2672,13 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     const trimmed = label.trim();
     setEfxTracks(prev => prev.map(t => {
       if (t.id !== trackId) return t;
-      return { ...t, entries: t.entries.map(e => (e.time === entry.time && e.endTime === entry.endTime) ? { ...e, label: trimmed || undefined } : e) };
+      return { ...t, entries: t.entries.map(e => sameEfxEntry(e, entry) ? { ...e, label: trimmed || undefined } : e) };
     }));
     setEfxEntryMenu(null);
   }, [pushHistory]);
 
   const handleModifyEfxEntry = useCallback((trackId: string, entry: EfxTrackEntry) => {
-    setEfxEditTarget({ trackId, time: entry.time, endTime: entry.endTime });
+    setEfxEditTarget({ trackId, entryId: entry.id, time: entry.time, endTime: entry.endTime });
     setEfxCustomEffectId(entry.effectId);
     setEfxEntryMenu(null);
     setEfxTrackModal(true);
@@ -4101,7 +4107,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
                 if (idx >= 0) { pushHistory(); setEfxTracks(prev => prev.map(t => t.id === efxEntryMenu.trackId ? { ...t, entries: t.entries.map((e,i) => i===idx ? { ...e, time: st, endTime: en } : e) } : t)); }
                 setEfxEntryMenu(null);
               }} className="flex-1 py-1.5 rounded bg-cyan-600 text-white text-xs hover:bg-cyan-500">Appliquer</button>
-              <button onClick={() => handleRemoveEfxEntry(efxEntryMenu.trackId, efxEntryMenu.entry.time)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs hover:bg-red-600/30">Supprimer</button>
+              <button onClick={() => handleRemoveEfxEntry(efxEntryMenu.trackId, efxEntryMenu.entry)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs hover:bg-red-600/30">Supprimer</button>
             </div>
             <button onClick={() => setEfxEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">Fermer</button>
           </div>
