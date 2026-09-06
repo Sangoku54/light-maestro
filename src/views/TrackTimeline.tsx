@@ -81,6 +81,8 @@ export interface EfxTrackEntry {
   effectName: string;
   pattern: string;
   fixtureNames: string[];
+  /** Custom display label (renamed section); falls back to effectName. */
+  label?: string;
 }
 
 /** An EFX track — a dedicated lane for placing saved effects on the timeline. */
@@ -104,6 +106,8 @@ export interface ColorTrackEntry {
   endTime: number;
   color: string;       // start color
   endColor?: string;   // end color (defaults to color if not set)
+  /** Custom display label (renamed section). */
+  label?: string;
 }
 
 export interface ColorTrack {
@@ -125,6 +129,8 @@ export interface StrobeTrackEntry {
   endTime: number;
   speed: number;       // strobe speed (Hz, 1-25)
   endSpeed?: number;   // end speed for gradient (defaults to speed)
+  /** Custom display label (renamed section). */
+  label?: string;
 }
 
 export interface StrobeTrack {
@@ -146,6 +152,8 @@ export interface DimmerTrackEntry {
   endTime: number;
   value: number;       // dimmer value (0-100%)
   endValue?: number;   // end value for gradient (defaults to value)
+  /** Custom display label (renamed section). */
+  label?: string;
 }
 
 export interface DimmerTrack {
@@ -2936,9 +2944,10 @@ if (editBlock) { setEditBlock(null); return; }
             const maxLabel = Math.floor(entryW / 6);
             let label = entry.pattern.substring(0, 3);
             if (maxLabel > 8) {
-              label = entry.effectName.length > maxLabel - 4
-                ? entry.effectName.substring(0, maxLabel - 5) + '\u2026'
-                : entry.effectName;
+              const src = entry.label || entry.effectName;
+              label = src.length > maxLabel - 4
+                ? src.substring(0, maxLabel - 5) + '\u2026'
+                : src;
             }
             ctx.fillText(label, ex + entryW / 2, trackY + EFX_TRACK_HEIGHT / 2 + 3);
           }
@@ -3065,7 +3074,7 @@ if (editBlock) { setEditBlock(null); return; }
             ctx.fillStyle = '#ffffff';
             ctx.font = '7px -apple-system, sans-serif';
             ctx.textAlign = 'center';
-            const lbl = entry.color === endColor ? entry.color : entry.color + ' → ' + endColor;
+            const lbl = entry.label || (entry.color === endColor ? entry.color : entry.color + ' → ' + endColor);
             ctx.fillText(lbl, ex + entryW / 2, trackY + COLOR_TRACK_HEIGHT / 2 + 3);
           }
 
@@ -3182,7 +3191,7 @@ if (editBlock) { setEditBlock(null); return; }
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 7px -apple-system, sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(entry.speed + ' Hz', ex + entryW / 2, trackY + STROBE_TRACK_HEIGHT / 2 + 3);
+            ctx.fillText(entry.label || (entry.speed + ' Hz'), ex + entryW / 2, trackY + STROBE_TRACK_HEIGHT / 2 + 3);
           }
 
           // Start/end diamonds
@@ -3299,7 +3308,7 @@ if (editBlock) { setEditBlock(null); return; }
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 7px -apple-system, sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(entry.value + '%', ex + entryW / 2, trackY + DIMMER_TRACK_HEIGHT / 2 + 3);
+            ctx.fillText(entry.label || (entry.value + '%'), ex + entryW / 2, trackY + DIMMER_TRACK_HEIGHT / 2 + 3);
           }
 
           // Start/end diamonds
@@ -3796,7 +3805,7 @@ if (editBlock) { setEditBlock(null); return; }
               </div>
               <div className="flex items-center gap-2 mb-1">
                 <span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#06b6d4' }} />
-                <span className="text-gray-300 font-medium">{tooltip.efxEntry.effectName}</span>
+                <span className="text-gray-300 font-medium">{tooltip.efxEntry.label || tooltip.efxEntry.effectName}</span>
               </div>
               <div className="flex items-center gap-3 text-[10px] text-gray-500">
                 <span className="font-mono">{fmt(tooltip.efxEntry.time)} → {fmt(tooltip.efxEntry.endTime)}</span>

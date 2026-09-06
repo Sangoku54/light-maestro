@@ -5579,20 +5579,25 @@ const DmxAddressMap: React.FC<DmxAddressMapProps> = ({
             const cellStep = CELL_SIZE + CELL_GAP;
             const startRow = Math.floor((dragPreview.addr - 1) / CHANNELS_PER_ROW);
             const startCol = (dragPreview.addr - 1) % CHANNELS_PER_ROW;
-            // How many cells wide in a single row (clamp to row boundary)
+            // Combien de cellules tient sur la 1re ligne (clampée à la fin de ligne)
             const cellsInFirstRow = Math.min(dragPreview.count, CHANNELS_PER_ROW - startCol);
+            // La grille de cellules commence APRÈS le label de ligne (24px) et la
+            // ligne d'en-tête de colonnes (hauteur 14px) + marges (mb-0.5 2px et
+            // gap flex-col 2px). Sans ces décalages le preview se dessinait décalé
+            // du bloc réel (ombre fantôme pendant le drag).
+            const headerOffY = 14 + 2 + CELL_GAP;
             const remainingCells = dragPreview.count - cellsInFirstRow;
             const fullRows = remainingCells > 0 ? Math.floor(remainingCells / CHANNELS_PER_ROW) : 0;
             const lastRowCells = remainingCells > 0 ? remainingCells % CHANNELS_PER_ROW : 0;
 
             return (
-              <div className="absolute inset-0 pointer-events-none z-10" style={{ top: 0, left: 0 }}>
+              <div className="absolute pointer-events-none z-10" style={{ top: 0, left: ROW_LABEL_WIDTH + CELL_GAP }}>
                 {/* First row */}
                 <div
                   className={`absolute rounded-sm border-2 ${dragPreview.valid ? 'border-emerald-400 bg-emerald-400/20' : 'border-red-400 bg-red-400/20'}`}
                   style={{
                     left: startCol * cellStep,
-                    top: startRow * cellStep,
+                    top: headerOffY + startRow * cellStep,
                     width: cellsInFirstRow * cellStep - CELL_GAP,
                     height: CELL_SIZE,
                   }}
@@ -5604,7 +5609,7 @@ const DmxAddressMap: React.FC<DmxAddressMapProps> = ({
                     className={`absolute rounded-sm border-2 ${dragPreview.valid ? 'border-emerald-400 bg-emerald-400/20' : 'border-red-400 bg-red-400/20'}`}
                     style={{
                       left: 0,
-                      top: (startRow + 1 + ri) * cellStep,
+                      top: headerOffY + (startRow + 1 + ri) * cellStep,
                       width: CHANNELS_PER_ROW * cellStep - CELL_GAP,
                       height: CELL_SIZE,
                     }}
@@ -5616,7 +5621,7 @@ const DmxAddressMap: React.FC<DmxAddressMapProps> = ({
                     className={`absolute rounded-sm border-2 ${dragPreview.valid ? 'border-emerald-400 bg-emerald-400/20' : 'border-red-400 bg-red-400/20'}`}
                     style={{
                       left: 0,
-                      top: (startRow + 1 + fullRows) * cellStep,
+                      top: headerOffY + (startRow + 1 + fullRows) * cellStep,
                       width: lastRowCells * cellStep - CELL_GAP,
                       height: CELL_SIZE,
                     }}

@@ -21,6 +21,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { useShowStore, getFixtureColor, type PatchedFixture, type FixturePos, type StageScene, type View3DState } from '../stores/showStore';
 import { analyzeFixtureChannels, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
+import { solvePanTilt, solveTiltForFixedPan } from '../engine/aim-target';
 import { useAppStore } from '../stores/appStore';
 import { dmxBridge } from '../utils/dmx-bridge';
 import {
@@ -53,6 +54,7 @@ const TRUSS_HEIGHT = 3;  // meters
 const STAGE_HEIGHT = 1.5;  // meters — stage elevation above ground
 const STAGE_THICKNESS = 0.3;  // meters — stage platform thickness
 const DMX_POLL_INTERVAL = 1000 / 60; // 60fps — smooth pan/tilt update every render frame
+const PREVIEW_INTENSITY = 0.45;       // fixtures sélectionnées : niveau de prévisualisation des faisceaux
 const MAX_TRAIL_POINTS = 80;
 const TRAIL_ADD_INTERVAL = 100; // ms between trail samples
 const GRID_SIZE = 1; // 1m grid squares
@@ -106,7 +108,7 @@ const MUSICIAN_HEIGHTS: Record<MusicianKind, number> = {
 
 // Beam cone length (m) — petit cône de lumière : s'arrête à la scène depuis la poutre (TRUSS_HEIGHT),
 // au lieu de l'ancien 12.5 m qui traversait le sol et descendait ~9 m sous la scène.
-const BEAM_LENGTH = 3.0;
+const BEAM_LENGTH = 4.5; // +50 % par rapport à 3.0 (demande utilisateur)
 
 // Horizontal spacing between two instances of the same kind (fraction of stage).
 const MUSICIAN_SPREAD = 0.16;
@@ -449,6 +451,36 @@ export const Stage3D: React.FC<{
   }, [musicians]);
   const trussBeamsRef = useRef<{ back: THREE.Object3D | null; front: THREE.Object3D | null; left: THREE.Object3D | null; right: THREE.Object3D | null; poles: THREE.Object3D[] }>({ back: null, front: null, left: null, right: null, poles: [] });
   const [selectedFixtureId, setSelectedFixtureId] = useState<string | null>(null);
+  // ── Sélection multiple 3D + mode Target ─────────────────
+  const selectedFixtureIdRef = useRef<string | null>(null);
+  const [multiSelectedIds, setMultiSelectedIds] = useState<Set<string>>(new Set());
+  const multiSelectedIdsRef = useRef<Set<string>>(new Set());
+  const [targetMode, setTargetMode] = useState(false);
+  const targetModeRef = useRef(false);
+  const targetMarkerRef = useRef<THREE.Group | null>(null);
+
+  // Miroirs du sélection courante pour les callbacks (pas de re-création).
+  useEffect(() => { selectedFixtureIdRef.current = selectedFixtureId; }, [selectedFixtureId]);
+  useEffect(() => {
+    targetModeRef.current = targetMode;
+    if (!targetMode && targetMarkerRef.current) targetMarkerRef.current.visible = false;
+  }, [targetMode]);
+
+  const selectSingleFixture = useCallback((fid: string) => {
+    selectedFixtureIdRef.current = fid;
+    multiSelectedIdsRef.current = new Set([fid]);
+    setMultiSelectedIds(new Set([fid]));
+    setSelectedFixtureId(fid);
+  }, []);
+
+  const clearFixtureSelection = useCallback(() => {
+    selectedFixtureIdRef.current = null;
+    multiSelectedIdsRef.current = new Set();
+    setMultiSelectedIds(new Set());
+    setSelectedFixtureId(null);
+    setTargetMode(false);
+    if (targetMarkerRef.current) targetMarkerRef.current.visible = false;
+  }, []);
   const [showFixtureList, setShowFixtureList] = useState(false);
   const [fixtureSearch, setFixtureSearch] = useState('');
   const [leftDockCollapsed, setLeftDockCollapsed] = useState(true);
@@ -1896,6 +1928,11 @@ export const Stage3D: React.FC<{
       }
       const normIntensity = intensity / 255;
 
+      // Fixtures sélectionnées : allume un niveau de prévisualisation pour
+      // voir où pointe le faisceau (indispensable pour vérifier le Target).
+      const isAimSelected = selectedFixtureIdRef.current === f3d.id || multiSelectedIdsRef.current.has(f3d.id);
+      const visIntensity = isAimSelected ? Math.max(normIntensity, PREVIEW_INTENSITY) : normIntensity;
+
       // --- Color ---
       let color = new THREE.Color(0xffffff);
       if (cm.rgbOffsets && cm.rgbOffsets.length >= 3) {
@@ -1944,13 +1981,13 @@ export const Stage3D: React.FC<{
         eh.headGroup.rotation.x += Math.max(-ehMaxStep, Math.min(ehMaxStep, ehDelta));
         if (eh.pointLight) {
           eh.pointLight.color.copy(color);
-          eh.pointLight.intensity = normIntensity * 25;
+          eh.pointLight.intensity = visIntensity * 25;
         }
         if (eh.beamCone) {
           const m = eh.beamCone.material as THREE.MeshBasicMaterial;
           m.color.copy(color);
-          m.opacity = normIntensity * 0.35;
-          eh.beamCone.visible = showBeams && normIntensity > 0.005;
+          m.opacity = visIntensity * 0.35;
+          eh.beamCone.visible = showBeams && visIntensity > 0.005;
         }
       }
 
@@ -2006,15 +2043,15 @@ export const Stage3D: React.FC<{
       // --- Update PointLight ---
       if (f3d.pointLight) {
         f3d.pointLight.color.copy(color);
-        f3d.pointLight.intensity = normIntensity * 25;
+        f3d.pointLight.intensity = visIntensity * 25;
       }
 
       // --- Update beam cone ---
       if (f3d.beamCone) {
         const mat = f3d.beamCone.material as THREE.MeshBasicMaterial;
         mat.color.copy(color);
-        mat.opacity = normIntensity * 0.35;
-        f3d.beamCone.visible = showBeams && normIntensity > 0.005;
+        mat.opacity = visIntensity * 0.35;
+        f3d.beamCone.visible = showBeams && visIntensity > 0.005;
       }
 
       // --- Floor spot disabled: only beam cones from lens are shown ---
@@ -2022,13 +2059,13 @@ export const Stage3D: React.FC<{
       if (f3d.floorSpot) f3d.floorSpot.visible = false;
 
       // --- Body visibility: always show geometry so mount rotation is visible
-    if (normIntensity > 0.01) {
+    if (visIntensity > 0.01) {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
         if (Array.isArray(bodyMat)) {
-          for (const m of bodyMat) { m.emissive = color; m.emissiveIntensity = normIntensity * 0.8; }
+          for (const m of bodyMat) { m.emissive = color; m.emissiveIntensity = visIntensity * 0.8; }
         } else {
           bodyMat.emissive = color;
-          bodyMat.emissiveIntensity = normIntensity * 0.8;
+          bodyMat.emissiveIntensity = visIntensity * 0.8;
         }
       } else {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
@@ -2136,12 +2173,205 @@ export const Stage3D: React.FC<{
     requestAnimationFrame(animateCamera);
   }, [fixturePositions]);
 
+  // ── Mode Target : pick du point visé (raycast décor complet) ────
+  const pickTargetPoint = useCallback((e: React.MouseEvent<HTMLDivElement>): THREE.Vector3 | null => {
+    const container = containerRef.current;
+    const camera = cameraRef.current;
+    const scene = sceneRef.current;
+    if (!container || !camera || !scene) return null;
+    const rect = container.getBoundingClientRect();
+    mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouseRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycasterRef.current.setFromCamera(mouseRef.current, camera);
+    // Tout ce qui est pickable : meshes + sprites de la scène, en excluant
+    // les fixtures (et le ciel : gridHelper est une Line, déjà exclue).
+    const pick: THREE.Object3D[] = [];
+    scene.traverse((obj) => {
+      let p: THREE.Object3D | null = obj;
+      while (p) {
+        if (p.userData?.fixtureId) return;
+        p = p.parent;
+      }
+      if (obj instanceof THREE.Mesh || obj instanceof THREE.Sprite) pick.push(obj);
+    });
+    const hits = raycasterRef.current.intersectObjects(pick, false);
+    if (hits.length === 0) return null;
+    return hits[0].point.clone();
+  }, []);
+
+  const ensureTargetMarker = useCallback(() => {
+    const scene = sceneRef.current;
+    if (!scene) return null;
+    let mk = targetMarkerRef.current;
+    if (!mk) {
+      mk = new THREE.Group();
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.16, 0.23, 36),
+        new THREE.MeshBasicMaterial({ color: 0x00ffd0, transparent: true, opacity: 0.9, side: THREE.DoubleSide }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      mk.add(ring);
+      mk.add(new THREE.Mesh(
+        new THREE.SphereGeometry(0.05, 12, 8),
+        new THREE.MeshBasicMaterial({ color: 0x00ffd0 }),
+      ));
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.008, 0.008, 0.3, 6),
+        new THREE.MeshBasicMaterial({ color: 0x00ffd0, transparent: true, opacity: 0.6 }),
+      );
+      pole.position.y = 0.15;
+      mk.add(pole);
+      mk.visible = false;
+      targetMarkerRef.current = mk;
+    }
+    if (!mk.parent) scene.add(mk);
+    return mk;
+  }, []);
+
+  // ── Vise toutes les fixtures sélectionnées vers un point (pan/tilt DMX) ──
+  const aimFixturesAtPoint = useCallback((point: THREE.Vector3) => {
+    const ids: string[] = multiSelectedIdsRef.current.size > 0
+      ? [...multiSelectedIdsRef.current]
+      : (selectedFixtureIdRef.current ? [selectedFixtureIdRef.current] : []);
+    if (ids.length === 0) return;
+    const prog = useProgrammerStore.getState().channels;
+    const setCh = useProgrammerStore.getState().setChannel;
+    for (const fid of ids) {
+      const f3d = fixturesRef.current.get(fid);
+      const pf = patchedFixtures.find((f) => f.id === fid);
+      // Seules les fixtures qui tournent réellement en 3D (arm = pan) sont visées.
+      if (!f3d || !pf || !f3d.armGroup) continue;
+      const cm = f3d.channelMap;
+      const panCh = cm.panOffset ?? cm.panOffsets?.[0] ?? null;
+      const tiltCh = cm.tiltOffset ?? cm.tiltOffsets?.[0] ?? null;
+      if (panCh === null || tiltCh === null) continue;
+      const panAddr = pf.startAddress + panCh;
+      const curPan = prog[panAddr] ?? 128;
+      const exitPos = new THREE.Vector3();
+      f3d.lightTarget.getWorldPosition(exitPos);
+      const solved = solvePanTilt(
+        { x: exitPos.x, y: exitPos.y, z: exitPos.z },
+        { x: point.x, y: point.y, z: point.z },
+        {
+          headingRad: f3d.group.rotation.y,
+          mountTilt: f3d._mountTilt ?? 0,
+          staticTilt: f3d._staticTilt ?? 0,
+          armRotX: f3d.armGroup.rotation.x ?? 0,
+          panCurrent: curPan,
+        },
+      );
+      if (!solved) continue;
+      // Écriture programmeur (LTP 85) — même signature que le drag Direct.
+      const writePan = (v: number) => {
+        for (const off of (cm.panOffsets ?? [])) setCh(pf.startAddress + off, v);
+        if (cm.panOffset !== null && !(cm.panOffsets ?? []).includes(cm.panOffset)) setCh(pf.startAddress + cm.panOffset, v);
+      };
+      const writeTilt = (v: number) => {
+        for (const off of (cm.tiltOffsets ?? [])) setCh(pf.startAddress + off, v);
+        if (cm.tiltOffset !== null && !(cm.tiltOffsets ?? []).includes(cm.tiltOffset)) setCh(pf.startAddress + cm.tiltOffset, v);
+      };
+      writePan(solved.pan);
+      writeTilt(solved.tilt);
+      // Capture « look » : dimmer, couleur, strobe/shutter depuis le live
+      // (dmxBridge arbitré) — défauts visibles (dimmer 255, couleur blanche,
+      // shutter ouvert) si le live est éteint, pour que la scène enregistrée
+      // montre le faisceau visé, pas une tête éteinte.
+      const liveCh = dmxBridge.getChannels(f3d.universeIndex);
+      const readLive = (off: number): number | undefined => {
+        const v = liveCh?.[pf.startAddress + off];
+        return typeof v === 'number' ? v : undefined;
+      };
+      // Dimmer
+      if (cm.intensityOffset !== null && cm.intensityOffset >= 0) {
+        const v = readLive(cm.intensityOffset) ?? 0;
+        setCh(pf.startAddress + cm.intensityOffset, v > 0 ? v : 255);
+      }
+      // Couleur : segments RGB(A/W/UV) sinon rgbOffsets sinon roue
+      const segs = cm.rgbSegments ?? [];
+      if (segs.length > 0) {
+        const any = segs.some((s) =>
+          (readLive(s.r) ?? 0) > 0 || (s.g !== null && (readLive(s.g) ?? 0) > 0) || (s.b !== null && (readLive(s.b) ?? 0) > 0));
+        for (const s of segs) {
+          setCh(pf.startAddress + s.r, any ? (readLive(s.r) ?? 0) : 255);
+          if (s.g !== null) setCh(pf.startAddress + s.g, any ? (readLive(s.g) ?? 0) : 255);
+          if (s.b !== null) setCh(pf.startAddress + s.b, any ? (readLive(s.b) ?? 0) : 255);
+          if (s.w !== null) setCh(pf.startAddress + s.w, any ? (readLive(s.w) ?? 0) : 255);
+          if (s.a !== null && s.a !== undefined) setCh(pf.startAddress + s.a, any ? (readLive(s.a) ?? 0) : 255);
+          if (s.uv !== null && s.uv !== undefined) setCh(pf.startAddress + s.uv, any ? (readLive(s.uv) ?? 0) : 255);
+        }
+      } else if (cm.rgbOffsets && cm.rgbOffsets.length > 0) {
+        const any = cm.rgbOffsets.some((o) => (readLive(o) ?? 0) > 0);
+        for (const o of cm.rgbOffsets) setCh(pf.startAddress + o, any ? (readLive(o) ?? 0) : 255);
+      } else if (cm.wheelOffset !== null && cm.wheelOffset >= 0) {
+        const v = readLive(cm.wheelOffset) ?? 0;
+        let wv = v;
+        if (v <= 2) {
+          const white = cm.wheelCaps?.find((c) => {
+            const n = (c.color ?? '').toLowerCase();
+            return n === 'white' || n === 'open' || /^#fff/i.test(n);
+          }) ?? cm.wheelCaps?.[0];
+          wv = white ? Math.round((white.min + white.max) / 2) : 255;
+        }
+        setCh(pf.startAddress + cm.wheelOffset, wv);
+      }
+      // Strobe dédié : copie du live (0 si aucun)
+      if (cm.strobeOffset !== null && cm.strobeOffset >= 0) {
+        setCh(pf.startAddress + cm.strobeOffset, readLive(cm.strobeOffset) ?? 0);
+      }
+      // Shutter : garantit l'ouverture (jamais fermé à 0-31) tout en gardant
+      // un éventuel strobe shutter live (32-255).
+      if (cm.shutterOffset !== null && cm.shutterOffset >= 0) {
+        const v = readLive(cm.shutterOffset) ?? 255;
+        setCh(pf.startAddress + cm.shutterOffset, v > 31 ? v : 255);
+      }
+      // Bras complémentaires (Tonio 6 arm) : même pan, tilt propre par tête.
+      for (const eh of f3d.extraHeads ?? []) {
+        const ehPos = new THREE.Vector3();
+        eh.lightTarget.getWorldPosition(ehPos);
+        const sub = solveTiltForFixedPan(
+          { x: ehPos.x, y: ehPos.y, z: ehPos.z },
+          { x: point.x, y: point.y, z: point.z },
+          solved.phi,
+          {
+            headingRad: f3d.group.rotation.y,
+            mountTilt: eh._mountTilt ?? f3d._mountTilt ?? 0,
+            staticTilt: f3d._staticTilt ?? 0,
+            armRotX: f3d.armGroup.rotation.x ?? 0,
+          },
+        );
+        if (sub) setCh(pf.startAddress + eh.tiltOffset, sub.tilt);
+      }
+    }
+  }, [patchedFixtures]);
+
   // ── Canvas click handler (raycasting) ─────────────────
   const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     const container = containerRef.current;
     const camera = cameraRef.current;
     if (!container || !camera) return;
+
+    // Mode Target : un clic vise TOUTES les fixtures sélectionnées.
+    // Agit uniquement sur le clic (pas le mousedown) pour laisser OrbitControls
+    // dragger librement sans re-viser pendant l'orbite.
+    if (targetModeRef.current) {
+      if (e.type !== 'click') return;
+      const pt = pickTargetPoint(e);
+      if (pt) {
+        aimFixturesAtPoint(pt);
+        const mk = ensureTargetMarker();
+        if (mk) {
+          mk.position.copy(pt);
+          mk.visible = true;
+        }
+      }
+      return;
+    }
+
+    // La sélection/direct-drag est traitée UNE fois, sur mousedown : le
+    // conteneur est aussi bindé sur onClick → les deux événements (mousedown
+    // puis click) déclencheraient un double toggle avec Ctrl+clic.
+    if (e.type !== 'mousedown') return;
 
     const rect = container.getBoundingClientRect();
     mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -2163,7 +2393,20 @@ export const Stage3D: React.FC<{
       while (obj && !obj.userData?.fixtureId) obj = obj.parent;
       if (obj?.userData?.fixtureId) {
         const fid = obj.userData.fixtureId as string;
-        if (fid !== selectedFixtureId) setSelectedFixtureId(fid);
+        const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+        if (additive) {
+          selectedFixtureIdRef.current = fid;
+          const next = new Set(multiSelectedIdsRef.current);
+          if (next.has(fid)) next.delete(fid); else next.add(fid);
+          multiSelectedIdsRef.current = next;
+          setMultiSelectedIds(new Set(next));
+          if (fid !== selectedFixtureId) setSelectedFixtureId(fid);
+        } else {
+          selectedFixtureIdRef.current = fid;
+          multiSelectedIdsRef.current = new Set([fid]);
+          setMultiSelectedIds(new Set([fid]));
+          if (fid !== selectedFixtureId) setSelectedFixtureId(fid);
+        }
         // Direct mode : init pan/tilt drag on mousedown over selected fixture
         if (directMode && fid === selectedFixtureId) {
           const f3d = fixturesRef.current.get(fid);
@@ -2181,10 +2424,11 @@ export const Stage3D: React.FC<{
         }
       }
     } else {
-      // Clicked empty space → deselect (no auto-rotate)
-      setSelectedFixtureId(null);
+      // Clic à côté du panneau : on ne désélectionne PAS — la modale reste
+      // ouverte (fermeture via le X du panneau). Sinon le moindre clic sur le
+      // canvas faisait disparaître la modale en cours d'édition.
     }
-  }, [selectedFixtureId, directMode, patchedFixtures]);
+  }, [selectedFixtureId, directMode, patchedFixtures, pickTargetPoint, aimFixturesAtPoint, ensureTargetMarker]);
 
   // ── Hover handler ────────────────────────────────────
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -2636,15 +2880,18 @@ export const Stage3D: React.FC<{
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             {filteredFixtures.length === 0 ? (
               <div className="text-xs text-gray-600 text-center py-8">Aucun projecteur</div>
-            ) : filteredFixtures.map((f) => (
-              <button key={f.id} onClick={() => { setSelectedFixtureId(f.id); focusFixture(f.id); }} className={`w-full text-left px-2.5 py-2 rounded-lg border flex items-center gap-2 transition-all ${selectedFixtureId===f.id ? 'bg-purple-600/15 border-purple-500/40 text-purple-200' : 'bg-black/20 border-gray-800/50 text-gray-400 hover:bg-white/[0.04] hover:border-gray-700'}`}>
+            ) : filteredFixtures.map((f) => {
+              const isSel = selectedFixtureId === f.id || multiSelectedIds.has(f.id);
+              return (
+              <button key={f.id} onClick={() => { selectSingleFixture(f.id); focusFixture(f.id); }} className={`w-full text-left px-2.5 py-2 rounded-lg border flex items-center gap-2 transition-all ${isSel ? 'bg-purple-600/15 border-purple-500/40 text-purple-200' : 'bg-black/20 border-gray-800/50 text-gray-400 hover:bg-white/[0.04] hover:border-gray-700'}`}>
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: getFixtureColor(patchedFixtures.findIndex(p=>p.id===f.id)) }} />
                 <span className="flex-1 min-w-0 truncate text-xs font-medium">{f.name}</span>
                 <span className="text-[10px] text-gray-500 font-mono">{f.startAddress}</span>
               </button>
-            ))}
+              );
+            })}
           </div>
-          <div className="p-2 border-t border-gray-800/50 text-[10px] text-gray-600">Glisser sur le canvas pour orbiter • Clic = sélectionner</div>
+          <div className="p-2 border-t border-gray-800/50 text-[10px] text-gray-600">Glisser sur le canvas pour orbiter • Clic = sélectionner • Ctrl+clic = multi • Target = viser</div>
         </div>
         ) : (
           <div className="w-8 shrink-0 border-r border-gray-800/50 bg-[#0d0d14]/60 flex flex-col items-center py-2 gap-2">
@@ -2683,6 +2930,17 @@ export const Stage3D: React.FC<{
           </div>
         )}
 
+        {/* Mode Target beacon */}
+        {targetMode && selectedFixture && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-cyan-500/50 bg-cyan-600/20 text-[11px] font-semibold text-cyan-200 pointer-events-none shadow-xl">
+            <Crosshair size={12} />
+            Mode cible — cliquez un point de la scène
+            <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-100 font-mono">
+              {multiSelectedIds.size > 0 ? multiSelectedIds.size : 1}
+            </span>
+          </div>
+        )}
+
         {/* Fixture quick-select list — search + click to select & zoom */}
         {showFixtureList && (
           <div
@@ -2716,16 +2974,17 @@ export const Stage3D: React.FC<{
               ) : (
                 filteredFixtures.map((f, idx) => {
                   const uniIdx = universeIndexMap.get(f.universeId);
+                  const isSel = selectedFixtureId === f.id || multiSelectedIds.has(f.id);
                   return (
                     <button
                       key={f.id}
-                      onClick={() => { setSelectedFixtureId(f.id); setShowFixtureList(false); focusFixture(f.id); }}
+                      onClick={() => { selectSingleFixture(f.id); setShowFixtureList(false); focusFixture(f.id); }}
                       className={`w-full text-left px-3 py-1.5 flex items-center gap-2.5 transition-colors ${
-                        selectedFixtureId === f.id ? 'bg-purple-600/15' : 'hover:bg-gray-800/30'
+                        isSel ? 'bg-purple-600/15' : 'hover:bg-gray-800/30'
                       }`}
                     >
                       <span className={`w-6 h-6 shrink-0 rounded-md border flex items-center justify-center text-[10px] font-mono ${
-                        selectedFixtureId === f.id ? 'bg-purple-600/20 border-purple-500/40 text-purple-300' : 'bg-gray-800 border-gray-700/50 text-gray-400'
+                        isSel ? 'bg-purple-600/20 border-purple-500/40 text-purple-300' : 'bg-gray-800 border-gray-700/50 text-gray-400'
                       }`}>{idx + 1}</span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-xs text-gray-200 truncate">{f.name}</span>
@@ -2795,7 +3054,7 @@ export const Stage3D: React.FC<{
                 </button>
               </div>
               <button
-                onClick={() => setSelectedFixtureId(null)}
+                onClick={clearFixtureSelection}
                 className="text-gray-500 hover:text-gray-300 transition-colors"
               >
                 <X size={14} />
@@ -3017,6 +3276,9 @@ export const Stage3D: React.FC<{
                     for (const seg of f3d.channelMap.rgbSegments ?? []) { setCh(pf.startAddress+seg.r,r); setCh(pf.startAddress+seg.g,g); if(seg.b!==null) setCh(pf.startAddress+seg.b,b); }
                   }} className="w-6 h-6 rounded border border-gray-700 cursor-pointer p-0" />
                 </div>
+                <button onClick={() => setTargetMode((v) => !v)} className={`mt-1 w-full px-2.5 py-1.5 rounded-md text-[10px] font-bold flex items-center justify-center gap-1.5 border transition-all ${targetMode ? 'bg-cyan-600/30 text-cyan-200 border-cyan-500/50 shadow' : 'bg-gray-800/50 text-gray-400 border-gray-700 hover:text-gray-200 hover:border-gray-600'}`} title={targetMode ? 'Quitter le mode cible' : 'Viser un point : sélectionne 1+ projecteurs (Ctrl+clic en 3D), puis cliquez un point de la scène → pan/tilt DMX en direct'}>
+                  <Crosshair size={12} /> {targetMode ? 'Cible active — cliquez la 3D' : 'Target (viser un point)'}
+                </button>
                 <div className="text-[9px] text-gray-500">Drag sur la fixture en mode Direct = Pan/Tilt. Store pour créer Scene/EFX/Show.</div>
                 <div className="flex gap-1.5">
                   <button onClick={()=>{
@@ -3181,7 +3443,7 @@ export const Stage3D: React.FC<{
             {/* Close button */}
             <div className="px-4 py-2 border-t border-gray-800/50">
               <button
-                onClick={() => setSelectedFixtureId(null)}
+                onClick={clearFixtureSelection}
                 className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-700/50 transition-colors"
               >
                 Fermer
@@ -3228,7 +3490,7 @@ export const Stage3D: React.FC<{
         <span>{patchedFixtures.length} fixtures</span>
         {selectedFixture && <><span className="w-px h-3 bg-gray-800" /><span className="text-purple-300">{selectedFixture.name}</span></>}
         <span className="flex-1" />
-        <span className="hidden md:inline">Glisser = orbiter • Clic = sélectionner • `−/+` = pas de 1</span>
+        <span className="hidden md:inline">Glisser = orbiter • Clic = sélectionner • Ctrl+clic = multi • Target = viser un point</span>
       </div>
     </div>
   );

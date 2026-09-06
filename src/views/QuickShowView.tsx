@@ -1140,211 +1140,6 @@ const Chip: React.FC<{
 
 const COLOR_PALETTE = ['#FF0000','#FF6600','#FFCC00','#00FF00','#00FFFF','#0066FF','#9900FF','#FF00FF','#FFFFFF','#FF9999','#99FF99','#99CCFF','#FFB366','#FF66B2','#66FFB2','#B266FF'];
 
-const ColorTrackInsertMenu: React.FC<{
-  onInsert: (startColor: string, endColor: string) => void;
-  onCancel: () => void;
-}> = ({ onInsert, onCancel }) => {
-  const [startColor, setStartColor] = useState('#FF0000');
-  const [endColor, setEndColor] = useState('#FF0000');
-
-  return (
-    <div className="px-2 py-1.5">
-      {/* Start Color */}
-      <div className="mb-2">
-        <div className="text-[9px] text-gray-500 uppercase mb-1">Start Color</div>
-        <div className="flex gap-1 flex-wrap max-w-[320px]">
-          {COLOR_PALETTE.map(c => (
-            <button key={'s'+c}
-              onClick={() => setStartColor(c)}
-              className={`w-5 h-5 rounded border transition-all ${startColor === c ? 'border-white scale-110' : 'border-gray-600 hover:border-gray-400'}`}
-              style={{ backgroundColor: c }}
-              title={c}
-            />
-          ))}
-        </div>
-        <div className="text-[9px] text-gray-500 mt-0.5">{startColor}</div>
-      </div>
-
-      <div className="border-t border-gray-800 my-1" />
-
-      {/* End Color */}
-      <div className="mb-2">
-        <div className="text-[9px] text-gray-500 uppercase mb-1">End Color</div>
-        <div className="flex gap-1 flex-wrap max-w-[320px]">
-          {COLOR_PALETTE.map(c => (
-            <button key={'e'+c}
-              onClick={() => setEndColor(c)}
-              className={`w-5 h-5 rounded border transition-all ${endColor === c ? 'border-white scale-110' : 'border-gray-600 hover:border-gray-400'}`}
-              style={{ backgroundColor: c }}
-              title={c}
-            />
-          ))}
-        </div>
-        <div className="text-[9px] text-gray-500 mt-0.5">{endColor}</div>
-      </div>
-
-      {/* Preview gradient */}
-      <div className="flex items-center gap-2 mb-2">
-        <div className="flex-1 h-4 rounded" style={{ background: `linear-gradient(to right, ${startColor}, ${endColor})` }} />
-        <span className="text-[9px] text-gray-500">preview</span>
-      </div>
-
-      <div className="flex gap-2">
-        <button
-          onClick={() => onInsert(startColor, endColor)}
-          className="flex-1 px-3 py-1.5 text-xs bg-pink-600 hover:bg-pink-500 text-white rounded"
-        >
-          Insert
-        </button>
-        <button
-          onClick={onCancel}
-          className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800 rounded"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-};
-
-/* ═══ StrobeTrackInsertMenu ═══════════════════════════ */
-const StrobeTrackInsertMenu: React.FC<{
-  onInsert: (speed: number, endSpeed: number) => void;
-  onCancel: () => void;
-}> = ({ onInsert, onCancel }) => {
-  const [speed, setSpeed] = useState(4);
-  const [endSpeed, setEndSpeed] = useState(4);
-
-  return (
-    <div className="px-2 py-1.5">
-      {/* Speed slider */}
-      <div className="mb-2">
-        <div className="text-[9px] text-gray-500 uppercase mb-1">Speed (Hz)</div>
-        <div className="flex items-center gap-2">
-          <input
-            type="range"
-            min={1}
-            max={25}
-            value={speed}
-            onChange={e => setSpeed(Number(e.target.value))}
-            className="flex-1 accent-purple-500 h-1"
-          />
-          <span className="text-xs text-purple-300 font-mono w-8 text-right">{speed}</span>
-        </div>
-      </div>
-
-      <div className="border-t border-gray-800 my-1" />
-
-      {/* End speed slider */}
-      <div className="mb-2">
-        <div className="text-[9px] text-gray-500 uppercase mb-1">End Speed (Hz, optional)</div>
-        <div className="flex items-center gap-2">
-          <input
-            type="range"
-            min={1}
-            max={25}
-            value={endSpeed}
-            onChange={e => setEndSpeed(Number(e.target.value))}
-            className="flex-1 accent-purple-500 h-1"
-          />
-          <span className="text-xs text-purple-300 font-mono w-8 text-right">{endSpeed}</span>
-        </div>
-      </div>
-
-      {/* Preview */}
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-[10px] text-purple-300 font-mono">{speed} Hz → {endSpeed} Hz</span>
-        <span className="text-[9px] text-gray-500">preview</span>
-      </div>
-
-      <div className="flex gap-2">
-        <button
-          onClick={() => onInsert(speed, endSpeed)}
-          className="flex-1 px-3 py-1.5 text-xs bg-purple-600 hover:bg-purple-500 text-white rounded"
-        >
-          Insert
-        </button>
-        <button
-          onClick={onCancel}
-          className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800 rounded"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-};
-
-/* ═══ DimmerTrackInsertMenu ═══════════════════════════ */
-const DimmerTrackInsertMenu: React.FC<{
-  onInsert: (value: number, endValue: number) => void;
-  onCancel: () => void;
-}> = ({ onInsert, onCancel }) => {
-  const [value, setValue] = useState(100);
-  const [endValue, setEndValue] = useState(100);
-
-  return (
-    <div className="px-2 py-1.5">
-      {/* Dimmer Value slider */}
-      <div className="mb-2">
-        <div className="text-[9px] text-gray-500 uppercase mb-1">Dimmer Value</div>
-        <div className="flex items-center gap-2">
-          <input
-            type="range"
-            min={0}
-            max={100}
-            step={1}
-            value={value}
-            onChange={e => setValue(Number(e.target.value))}
-            className="flex-1 accent-orange-500 h-1"
-          />
-          <span className="text-xs text-orange-300 font-mono w-10 text-right">{value}%</span>
-        </div>
-      </div>
-
-      <div className="border-t border-gray-800 my-1" />
-
-      {/* End value slider */}
-      <div className="mb-2">
-        <div className="text-[9px] text-gray-500 uppercase mb-1">End Value (optional)</div>
-        <div className="flex items-center gap-2">
-          <input
-            type="range"
-            min={0}
-            max={100}
-            step={1}
-            value={endValue}
-            onChange={e => setEndValue(Number(e.target.value))}
-            className="flex-1 accent-orange-500 h-1"
-          />
-          <span className="text-xs text-orange-300 font-mono w-10 text-right">{endValue}%</span>
-        </div>
-      </div>
-
-      {/* Preview */}
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-[10px] text-orange-300 font-mono">{value}% → {endValue}%</span>
-        <span className="text-[9px] text-gray-500">preview</span>
-      </div>
-
-      <div className="flex gap-2">
-        <button
-          onClick={() => onInsert(value, endValue)}
-          className="flex-1 px-3 py-1.5 text-xs bg-orange-600 hover:bg-orange-500 text-white rounded"
-        >
-          Insert
-        </button>
-        <button
-          onClick={onCancel}
-          className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800 rounded"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-};
-
 /* ─── QuickShowView wrapper ─────────────────────────── */
 
 export const QuickShowView: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoader> }> = ({ audioFile }) => {
@@ -2030,16 +1825,17 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   useEffect(() => {
     if (resolvedAnalysis?.genre && resolvedAnalysis.genre !== lastAnalysisGenreRef.current) {
       lastAnalysisGenreRef.current = resolvedAnalysis.genre;
-      if (qs.colorScheme === 'auto' || !qs.colorScheme) {
-        try {
-          const g = JSON.parse(resolvedAnalysis.genre);
-          if (g.palette) {
-            setQs({ colorScheme: g.palette });
-          }
-        } catch {}
+      try {
+        const g = JSON.parse(resolvedAnalysis.genre);
+        // Chaque nouvel audio (nouveau genre détecté) re-synchronise la palette
+        // sur l'ambiance déterminée. Un choix manuel persiste tant qu'on garde
+        // le même genre ; dès qu'un nouvel audio change d'ambiance, on le suit.
+        setQs({ colorScheme: g.palette || 'auto' });
+      } catch {
+        setQs({ colorScheme: 'auto' });
       }
     }
-  }, [resolvedAnalysis, qs.colorScheme]);
+  }, [resolvedAnalysis]);
 
   const [customPal, setCustomPal] = useState<CustomPalette>(() => qs.customPalette || {
     intro: [], verse: [], chorus: [], bridge: [], drop: [], outro: [], build: [],
@@ -2666,6 +2462,27 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [efxPattern, setEfxPattern] = useState<'static' | 'sweep' | 'circle' | 'pulse' | 'wave' | 'bounce' | 'figure8' | 'spiral' | 'zigzag' | 'heartbeat' | 'randomWalk' | 'diamond' | 'custom'>('static');
   const [efxCustomEffectId, setEfxCustomEffectId] = useState('');
 
+  // Valeurs par défaut des choix « track » (implémentées automatiquement à 10 s)
+  const [colorTrackStartColor, setColorTrackStartColor] = useState<string>(() => {
+    const pal = resolvePaletteColors(qs.colorScheme || 'auto', qs);
+    return pal[0] || '#ff0064';
+  });
+  const [colorTrackEndColor, setColorTrackEndColor] = useState<string>(() => {
+    const pal = resolvePaletteColors(qs.colorScheme || 'auto', qs);
+    return pal[pal.length > 1 ? 1 : 0] || '#ff0064';
+  });
+  const [strobeTrackSpeed, setStrobeTrackSpeed] = useState(10);
+  const [strobeTrackEndSpeed, setStrobeTrackEndSpeed] = useState(10);
+  const [dimmerTrackValue, setDimmerTrackValue] = useState(100);
+  const [dimmerTrackEndValue, setDimmerTrackEndValue] = useState(100);
+
+  // Cibles « Modifier » : quand non nul, les modales éditent la section existante
+  // au lieu de créer une nouvelle piste (Renommer/Modifier au clic droit).
+  const [efxEditTarget, setEfxEditTarget] = useState<{ trackId: string; time: number; endTime: number } | null>(null);
+  const [colorEditTarget, setColorEditTarget] = useState<{ trackId: string; entryId: string } | null>(null);
+  const [strobeEditTarget, setStrobeEditTarget] = useState<{ trackId: string; entryId: string } | null>(null);
+  const [dimmerEditTarget, setDimmerEditTarget] = useState<{ trackId: string; entryId: string } | null>(null);
+
   // Color track modal state
   const [colorTrackName, setColorTrackName] = useState('');
   const [colorTargetType, setColorTargetType] = useState<'all' | 'group' | 'fixture'>('all');
@@ -2760,13 +2577,45 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   }, [float3DPos]);
 
   const handleAddEfxTrack = useCallback(() => {
+    if (efxEditTarget) {
+      // Mode « Modifier » : on met à jour la section existante, sans créer de piste.
+      const efx = effectEntities.find((e: any) => e.id === efxCustomEffectId) || effectEntities[0];
+      if (efx) {
+        pushHistory();
+        setEfxTracks(prev => prev.map(t => {
+          if (t.id !== efxEditTarget.trackId) return t;
+          return {
+            ...t,
+            entries: t.entries.map(e => (e.time === efxEditTarget.time && e.endTime === efxEditTarget.endTime)
+              ? { ...e, effectId: efx.id, effectName: efx.name, pattern: efx.pattern || 'Custom' }
+              : e),
+          };
+        }));
+      }
+      setEfxEditTarget(null);
+      setEfxTrackModal(false);
+      setEfxCustomEffectId('');
+      return;
+    }
     const name = efxTrackName.trim();
     if (!name) return;
     pushHistory();
+    const trackId = `efxt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    // Auto-implémentation : l'effet choisi dans la modale (sinon le premier
+    // dispos) est posé d'office sur la piste avec une durée par défaut de 10 s.
+    const efx = effectEntities.find((e: any) => e.id === efxCustomEffectId) || effectEntities[0];
+    const entries: EfxTrackEntry[] = efx ? [{
+      time: 0,
+      endTime: 10,
+      effectId: efx.id,
+      effectName: efx.name,
+      pattern: efx.pattern || 'Custom',
+      fixtureNames: [],
+    }] : [];
     const newTrack: EfxTrack = {
-      id: `efxt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: trackId,
       name,
-      entries: [],
+      entries,
       targetFixtures: {
         type: efxTargetType,
         ...(efxTargetType === 'group' ? { groupId: efxTargetGroupId } : {}),
@@ -2780,7 +2629,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setEfxTargetGroupId('');
     setEfxTargetFixtureIds([]);
     setEfxCustomEffectId('');
-  }, [pushHistory, efxTrackName, efxTargetType, efxTargetGroupId, efxTargetFixtureIds, efxCustomEffectId]);
+  }, [pushHistory, efxTrackName, efxTargetType, efxTargetGroupId, efxTargetFixtureIds, efxCustomEffectId, effectEntities, efxEditTarget, resolvedAnalysis]);
 
   const openEfxTrackModal = useCallback(() => {
     setEfxTrackName('');
@@ -2795,23 +2644,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     pushHistory();
     setEfxTracks(prev => prev.filter(t => t.id !== trackId));
   }, [pushHistory]);
-
-  const handleInsertEfxToTrack = useCallback((trackId: string, time: number, effectId: string, effectName: string, pattern: string) => {
-    setEfxTracks(prev => prev.map(t => {
-      if (t.id !== trackId) return t;
-      return {
-        ...t,
-        entries: [...t.entries, {
-          time,
-          endTime: Math.min(time + 4, resolvedAnalysis?.duration || 120),
-          effectId,
-          effectName,
-          pattern,
-          fixtureNames: [],
-        }].sort((a, b) => a.time - b.time),
-      };
-    }));
-  }, [resolvedAnalysis]);
 
   const handleEfxTrackContextMenu = useCallback((trackId: string, time: number, clientX: number, clientY: number) => {
     setEfxContextMenu({ trackId, time, x: clientX, y: clientY });
@@ -2829,15 +2661,58 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setEfxEntryMenu(null);
   }, []);
 
+  const handleRenameEfxEntry = useCallback((trackId: string, entry: EfxTrackEntry, label: string) => {
+    pushHistory();
+    const trimmed = label.trim();
+    setEfxTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      return { ...t, entries: t.entries.map(e => (e.time === entry.time && e.endTime === entry.endTime) ? { ...e, label: trimmed || undefined } : e) };
+    }));
+    setEfxEntryMenu(null);
+  }, [pushHistory]);
+
+  const handleModifyEfxEntry = useCallback((trackId: string, entry: EfxTrackEntry) => {
+    setEfxEditTarget({ trackId, time: entry.time, endTime: entry.endTime });
+    setEfxCustomEffectId(entry.effectId);
+    setEfxEntryMenu(null);
+    setEfxTrackModal(true);
+  }, []);
+
   // ─── Color Track handlers ─────────────────────────
   const handleAddColorTrack = useCallback(() => {
+    if (colorEditTarget) {
+      // Mode « Modifier » : on met à jour la section existante, sans créer de piste.
+      pushHistory();
+      setColorTracks(prev => prev.map(t => {
+        if (t.id !== colorEditTarget.trackId) return t;
+        return {
+          ...t,
+          entries: t.entries.map(e => e.id === colorEditTarget.entryId
+            ? { ...e, color: colorTrackStartColor, endColor: colorTrackEndColor !== colorTrackStartColor ? colorTrackEndColor : colorTrackStartColor }
+            : e),
+        };
+      }));
+      setColorEditTarget(null);
+      setColorTrackModal(false);
+      setColorTrackStartColor('#FF0000');
+      setColorTrackEndColor('#FF0000');
+      return;
+    }
     const name = colorTrackName.trim();
     if (!name) return;
     pushHistory();
     const newTrack: ColorTrack = {
       id: `clrt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       name,
-      entries: [],
+      // Auto-implémentation : la couleur début → fin choisie dans la modale
+      // est posée d'office sur la piste avec une durée par défaut de 10 s.
+      entries: [{
+        id: `clre-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        time: 0,
+        endTime: 10,
+        color: colorTrackStartColor,
+        endColor: colorTrackEndColor !== colorTrackStartColor ? colorTrackEndColor : colorTrackStartColor,
+      }],
       targetFixtures: {
         type: colorTargetType,
         ...(colorTargetType === 'group' ? { groupId: colorTargetGroupId } : {}),
@@ -2850,37 +2725,26 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setColorTargetType('all');
     setColorTargetGroupId('');
     setColorTargetFixtureIds([]);
-  }, [pushHistory, colorTrackName, colorTargetType, colorTargetGroupId, colorTargetFixtureIds]);
+    const nextPal = resolvePaletteColors(qs.colorScheme || 'auto', qs);
+    setColorTrackStartColor(nextPal[0] || '#ff0064');
+    setColorTrackEndColor(nextPal[nextPal.length > 1 ? 1 : 0] || '#ff0064');
+  }, [pushHistory, colorTrackName, colorTargetType, colorTargetGroupId, colorTargetFixtureIds, colorTrackStartColor, colorTrackEndColor, qs, colorEditTarget]);
 
   const openColorTrackModal = useCallback(() => {
     setColorTrackName('');
     setColorTargetType('all');
     setColorTargetGroupId('');
     setColorTargetFixtureIds([]);
+    const pal = resolvePaletteColors(qs.colorScheme || 'auto', qs);
+    setColorTrackStartColor(pal[0] || '#ff0064');
+    setColorTrackEndColor(pal[pal.length > 1 ? 1 : 0] || '#ff0064');
     setColorTrackModal(true);
-  }, []);
+  }, [qs]);
 
   const handleRemoveColorTrack = useCallback((trackId: string) => {
     pushHistory();
     setColorTracks(prev => prev.filter(t => t.id !== trackId));
   }, [pushHistory]);
-
-  const handleInsertColorToTrack = useCallback((trackId: string, time: number, color: string, endColor?: string) => {
-    setColorTracks(prev => prev.map(t => {
-      if (t.id !== trackId) return t;
-      return {
-        ...t,
-        entries: [...t.entries, {
-          id: `clre-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          time,
-          endTime: Math.min(time + 4, resolvedAnalysis?.duration || 120),
-          color,
-          endColor: endColor || undefined,
-        }].sort((a, b) => a.time - b.time),
-      };
-    }));
-    setColorContextMenu(null);
-  }, [resolvedAnalysis]);
 
   const handleColorEntryChange = useCallback((trackId: string, entryIndex: number, newTime: number, newEndTime: number) => {
     setColorTracks(prev => prev.map(t => {
@@ -2909,15 +2773,59 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setColorEntryMenu(null);
   }, []);
 
+  const handleRenameColorEntry = useCallback((trackId: string, entry: ColorTrackEntry, label: string) => {
+    pushHistory();
+    const trimmed = label.trim();
+    setColorTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      return { ...t, entries: t.entries.map(e => e.id === entry.id ? { ...e, label: trimmed || undefined } : e) };
+    }));
+    setColorEntryMenu(null);
+  }, [pushHistory]);
+
+  const handleModifyColorEntry = useCallback((trackId: string, entry: ColorTrackEntry) => {
+    setColorEditTarget({ trackId, entryId: entry.id });
+    setColorTrackStartColor(entry.color);
+    setColorTrackEndColor(entry.endColor || entry.color);
+    setColorEntryMenu(null);
+    setColorTrackModal(true);
+  }, []);
+
   // ─── Strobe Track handlers ─────────────────────────
   const handleAddStrobeTrack = useCallback(() => {
+    if (strobeEditTarget) {
+      // Mode « Modifier » : on met à jour la section existante, sans créer de piste.
+      pushHistory();
+      setStrobeTracks(prev => prev.map(t => {
+        if (t.id !== strobeEditTarget.trackId) return t;
+        return {
+          ...t,
+          entries: t.entries.map(e => e.id === strobeEditTarget.entryId
+            ? { ...e, speed: strobeTrackSpeed, endSpeed: strobeTrackEndSpeed !== strobeTrackSpeed ? strobeTrackEndSpeed : strobeTrackSpeed }
+            : e),
+        };
+      }));
+      setStrobeEditTarget(null);
+      setStrobeTrackModal(false);
+      setStrobeTrackSpeed(10);
+      setStrobeTrackEndSpeed(10);
+      return;
+    }
     const name = strobeTrackName.trim();
     if (!name) return;
     pushHistory();
     const newTrack: StrobeTrack = {
       id: `strobe-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       name,
-      entries: [],
+      // Auto-implémentation : la vitesse début → fin choisie dans la modale
+      // est posée d'office sur la piste avec une durée par défaut de 10 s.
+      entries: [{
+        id: `strobe-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        time: 0,
+        endTime: 10,
+        speed: strobeTrackSpeed,
+        endSpeed: strobeTrackEndSpeed !== strobeTrackSpeed ? strobeTrackEndSpeed : strobeTrackSpeed,
+      }],
       targetFixtures: {
         type: strobeTargetType,
         ...(strobeTargetType === 'group' ? { groupId: strobeTargetGroupId } : {}),
@@ -2930,13 +2838,17 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setStrobeTargetType('all');
     setStrobeTargetGroupId('');
     setStrobeTargetFixtureIds([]);
-  }, [pushHistory, strobeTrackName, strobeTargetType, strobeTargetGroupId, strobeTargetFixtureIds]);
+    setStrobeTrackSpeed(10);
+    setStrobeTrackEndSpeed(10);
+  }, [pushHistory, strobeTrackName, strobeTargetType, strobeTargetGroupId, strobeTargetFixtureIds, strobeTrackSpeed, strobeTrackEndSpeed, strobeEditTarget]);
 
   const openStrobeTrackModal = useCallback(() => {
     setStrobeTrackName('');
     setStrobeTargetType('all');
     setStrobeTargetGroupId('');
     setStrobeTargetFixtureIds([]);
+    setStrobeTrackSpeed(10);
+    setStrobeTrackEndSpeed(10);
     setStrobeTrackModal(true);
   }, []);
 
@@ -2945,27 +2857,29 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setStrobeTracks(prev => prev.filter(t => t.id !== trackId));
   }, [pushHistory]);
 
-  const handleInsertStrobeToTrack = useCallback((trackId: string, time: number, speed: number, endSpeed?: number) => {
-    pushHistory();
-    setStrobeTracks(prev => prev.map(t => {
-      if (t.id !== trackId) return t;
-      const entry: StrobeTrackEntry = {
-        id: `strobe-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        time,
-        endTime: time + 10,
-        speed,
-        endSpeed: endSpeed || speed,
-      };
-      return { ...t, entries: [...t.entries, entry] };
-    }));
-    setScmPos(null);
-  }, [pushHistory]);
-
   const handleRemoveStrobeEntry = useCallback((trackId: string, entryId: string) => {
     pushHistory();
     setStrobeTracks(prev => prev.map(t => t.id === trackId ? { ...t, entries: t.entries.filter(e => e.id !== entryId) } : t));
     setStrobeEntryMenu(null);
   }, [pushHistory]);
+
+  const handleRenameStrobeEntry = useCallback((trackId: string, entry: StrobeTrackEntry, label: string) => {
+    pushHistory();
+    const trimmed = label.trim();
+    setStrobeTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      return { ...t, entries: t.entries.map(e => e.id === entry.id ? { ...e, label: trimmed || undefined } : e) };
+    }));
+    setStrobeEntryMenu(null);
+  }, [pushHistory]);
+
+  const handleModifyStrobeEntry = useCallback((trackId: string, entry: StrobeTrackEntry) => {
+    setStrobeEditTarget({ trackId, entryId: entry.id });
+    setStrobeTrackSpeed(entry.speed);
+    setStrobeTrackEndSpeed(entry.endSpeed ?? entry.speed);
+    setStrobeEntryMenu(null);
+    setStrobeTrackModal(true);
+  }, []);
 
   const handleStrobeEntryChange = useCallback((trackId: string, entryIndex: number, newTime: number, newEndTime: number) => {
     pushHistory();
@@ -2988,40 +2902,9 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   }, []);
 
   // ─── Dimmer Track handlers ─────────────────────────
-  const handleAddDimmerTrack = useCallback((name: string, targetType: 'all' | 'group' | 'fixture', groupId?: string, fixtureIds?: string[]) => {
-    pushHistory();
-    const newTrack: DimmerTrack = {
-      id: `dimmer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      name,
-      entries: [],
-      targetFixtures: {
-        type: targetType,
-        ...(targetType === 'group' && groupId ? { groupId } : {}),
-        ...(targetType === 'fixture' && fixtureIds ? { fixtureIds } : {}),
-      },
-    };
-    setDimmerTracks(prev => [...prev, newTrack]);
-  }, [pushHistory]);
-
   const handleDeleteDimmerTrack = useCallback((trackId: string) => {
     pushHistory();
     setDimmerTracks(prev => prev.filter(t => t.id !== trackId));
-  }, [pushHistory]);
-
-  const handleInsertDimmerToTrack = useCallback((trackId: string, time: number, value: number, endValue?: number) => {
-    pushHistory();
-    setDimmerTracks(prev => prev.map(t => {
-      if (t.id !== trackId) return t;
-      const entry: DimmerTrackEntry = {
-        id: `dimmer-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        time,
-        endTime: time + 10,
-        value,
-        endValue: endValue ?? value,
-      };
-      return { ...t, entries: [...t.entries, entry] };
-    }));
-    setDimmerInsertMenu(null);
   }, [pushHistory]);
 
   const handleRemoveDimmerEntry = useCallback((trackId: string, entryId: string) => {
@@ -3029,6 +2912,24 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setDimmerTracks(prev => prev.map(t => t.id === trackId ? { ...t, entries: t.entries.filter(e => e.id !== entryId) } : t));
     setDimmerEntryMenu(null);
   }, [pushHistory]);
+
+  const handleRenameDimmerEntry = useCallback((trackId: string, entry: DimmerTrackEntry, label: string) => {
+    pushHistory();
+    const trimmed = label.trim();
+    setDimmerTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      return { ...t, entries: t.entries.map(e => e.id === entry.id ? { ...e, label: trimmed || undefined } : e) };
+    }));
+    setDimmerEntryMenu(null);
+  }, [pushHistory]);
+
+  const handleModifyDimmerEntry = useCallback((trackId: string, entry: DimmerTrackEntry) => {
+    setDimmerEditTarget({ trackId, entryId: entry.id });
+    setDimmerTrackValue(entry.value);
+    setDimmerTrackEndValue(entry.endValue ?? entry.value);
+    setDimmerEntryMenu(null);
+    setDimmerTrackModal(true);
+  }, []);
 
   const handleDimmerEntryChange = useCallback((trackId: string, entryIndex: number, newTime: number, newEndTime: number) => {
     pushHistory();
@@ -3055,21 +2956,62 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   }, []);
 
   const handleAddDimmerTrackFromModal = useCallback(() => {
+    if (dimmerEditTarget) {
+      // Mode « Modifier » : on met à jour la section existante, sans créer de piste.
+      pushHistory();
+      setDimmerTracks(prev => prev.map(t => {
+        if (t.id !== dimmerEditTarget.trackId) return t;
+        return {
+          ...t,
+          entries: t.entries.map(e => e.id === dimmerEditTarget.entryId
+            ? { ...e, value: dimmerTrackValue, endValue: dimmerTrackEndValue !== dimmerTrackValue ? dimmerTrackEndValue : dimmerTrackValue }
+            : e),
+        };
+      }));
+      setDimmerEditTarget(null);
+      setDimmerTrackModal(false);
+      setDimmerTrackValue(100);
+      setDimmerTrackEndValue(100);
+      return;
+    }
     const name = dimmerTrackName.trim();
     if (!name) return;
-    handleAddDimmerTrack(name, dimmerTargetType, dimmerTargetGroupId || undefined, dimmerTargetFixtureIds);
+    pushHistory();
+    const newTrack: DimmerTrack = {
+      id: `dimmer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name,
+      // Auto-implémentation : la valeur début → fin choisie dans la modale
+      // est posée d'office sur la piste avec une durée par défaut de 10 s.
+      entries: [{
+        id: `dimmer-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        time: 0,
+        endTime: 10,
+        value: dimmerTrackValue,
+        endValue: dimmerTrackEndValue !== dimmerTrackValue ? dimmerTrackEndValue : dimmerTrackValue,
+      }],
+      targetFixtures: {
+        type: dimmerTargetType,
+        ...(dimmerTargetType === 'group' && dimmerTargetGroupId ? { groupId: dimmerTargetGroupId } : {}),
+        ...(dimmerTargetType === 'fixture' && dimmerTargetFixtureIds ? { fixtureIds: dimmerTargetFixtureIds } : {}),
+      },
+    };
+    setDimmerTracks(prev => [...prev, newTrack]);
     setDimmerTrackModal(false);
     setDimmerTrackName('');
     setDimmerTargetType('all');
     setDimmerTargetGroupId('');
     setDimmerTargetFixtureIds([]);
-  }, [handleAddDimmerTrack, dimmerTrackName, dimmerTargetType, dimmerTargetGroupId, dimmerTargetFixtureIds]);
+    setDimmerTrackValue(100);
+    setDimmerTrackEndValue(100);
+  }, [pushHistory, dimmerTrackName, dimmerTargetType, dimmerTargetGroupId, dimmerTargetFixtureIds, dimmerTrackValue, dimmerTrackEndValue, dimmerEditTarget]);
 
   const openDimmerTrackModal = useCallback(() => {
     setDimmerTrackName('');
     setDimmerTargetType('all');
     setDimmerTargetGroupId('');
     setDimmerTargetFixtureIds([]);
+    setDimmerTrackValue(100);
+    setDimmerTrackEndValue(100);
     setDimmerTrackModal(true);
   }, []);
 
@@ -3506,27 +3448,35 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
 
         <div className="h-5 border-l border-gray-700 mx-1" />
 
-        {/* Color scheme */}
-        <select
-          value={qs.colorScheme || 'auto'}
-          onChange={e => setQs({ colorScheme: e.target.value })}
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300"
-        >
-          {['auto', 'warm', 'cool', 'party', 'monochrome', 'neon', 'pastel', 'dance', 'disco', 'techno', 'rock', 'rnb', 'reggaeton', 'latino', 'electro', 'house', 'dubstep', 'hiphop', 'funk'].map(s => (
-            <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
-          ))}
-        </select>
+        {/* Color scheme — Palette : les couleurs émises (gamme visuelle) */}
+        <div className="flex items-center gap-1">
+          <span className="text-[9px] text-gray-500 font-semibold uppercase tracking-wider select-none">Palette</span>
+          <select
+            value={qs.colorScheme || 'auto'}
+            onChange={e => setQs({ colorScheme: e.target.value })}
+            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300"
+            title="Palette de couleurs : seule la gamme visuelle (roues couleur / RGB) change. « Auto » détecte la couleur dominante de l'analyse audio."
+          >
+            {['auto', 'warm', 'cool', 'party', 'monochrome', 'neon', 'pastel', 'dance', 'disco', 'techno', 'rock', 'rnb', 'reggaeton', 'latino', 'electro', 'house', 'dubstep', 'hiphop', 'funk'].map(s => (
+              <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+            ))}
+          </select>
+        </div>
 
-        {/* Genre */}
-        <select
-          value={qs.musicStyle || 'dance'}
-          onChange={e => setQs({ musicStyle: e.target.value })}
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300"
-        >
-          {['dance','techno','house','hiphop','dubstep','drum_and_bass','trance','disco','electro','pop','rock','rnb','reggaeton','latino','funk','ballad','reggae','trap','jazz','blues','latin','lo_fi','ambient'].map(s => (
-            <option key={s} value={s}>{(s.charAt(0).toUpperCase() + s.slice(1)).replace(/_/g, ' ')}</option>
-          ))}
-        </select>
+        {/* Genre — Style/Rythme : la grammaire du show (mouvements, strobe, énergie) */}
+        <div className="flex items-center gap-1">
+          <span className="text-[9px] text-gray-500 font-semibold uppercase tracking-wider select-none">Style</span>
+          <select
+            value={qs.musicStyle || 'dance'}
+            onChange={e => setQs({ musicStyle: e.target.value })}
+            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300"
+            title="Style musical : structure rythmique du show (patterns de mouvement, strobe, intensité par section). « Auto » suit le genre détecté de l'analyse audio."
+          >
+            {['dance','techno','house','hiphop','dubstep','drum_and_bass','trance','disco','electro','pop','rock','rnb','reggaeton','latino','funk','ballad','reggae','trap','jazz','blues','latin','lo_fi','ambient'].map(s => (
+              <option key={s} value={s}>{(s.charAt(0).toUpperCase() + s.slice(1)).replace(/_/g, ' ')}</option>
+            ))}
+          </select>
+        </div>
 
         {/* Beat division */}
         <select
@@ -4089,29 +4039,12 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         <div
           ref={efxContextRef}
           className="fixed z-50 bg-[#1a1a2e] border border-cyan-700/50 rounded-lg shadow-xl py-1 min-w-[160px]"
-          style={{ ...clampRect(efxContextMenu.x, efxContextMenu.y, 200, 240, window.innerWidth, window.innerHeight) }}
+          style={{ ...clampRect(efxContextMenu.x, efxContextMenu.y, 200, 120, window.innerWidth, window.innerHeight) }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-1.5 text-[10px] text-cyan-400 uppercase tracking-wider border-b border-gray-800">
-            Insert EFX at {efxContextMenu.time.toFixed(1)}s
+            EFX Track
           </div>
-          {effectEntities.length === 0 ? (
-            <div className="px-3 py-2 text-[10px] text-gray-500 italic">Aucun effet custom. Créez un effet de mouvement dans l'onglet EFX d'abord.</div>
-          ) : (
-            effectEntities.map(efx => (
-              <button key={efx.id}
-                onClick={() => {
-                  handleInsertEfxToTrack(efxContextMenu.trackId, efxContextMenu.time, efx.id, efx.name, efx.pattern || 'Circle');
-                  setEfxContextMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2"
-              >
-                <span className="text-[14px]">⚡</span>
-                {efx.name}
-              </button>
-            ))
-          )}
-          <div className="border-t border-gray-800 my-0.5" />
           <button
             onClick={() => handleRemoveEfxTrack(efxContextMenu.trackId)}
             className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
@@ -4136,11 +4069,26 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 py-1.5 text-[11px] text-cyan-400 uppercase tracking-wider border-b border-gray-800">
-              {efxEntryMenu.entry.effectName} ({efxEntryMenu.entry.pattern})
+              {efxEntryMenu.entry.label || `${efxEntryMenu.entry.effectName} (${efxEntryMenu.entry.pattern})`}
+            </div>
+            <div className="px-4 pt-3">
+              <label className="text-[10px] text-gray-500 block mb-1">Nom de la section</label>
+              <input type="text"
+                defaultValue={efxEntryMenu.entry.label || ''}
+                placeholder={efxEntryMenu.entry.effectName}
+                id="__efx_label"
+                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
             </div>
             <div className="grid grid-cols-2 gap-3 px-4 py-3">
               <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={efxEntryMenu.entry.time} id="__efx_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
               <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={efxEntryMenu.entry.endTime} id="__efx_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+            </div>
+            <div className="flex gap-2 px-4 pb-2">
+              <button onClick={() => {
+                const label = (document.getElementById('__efx_label') as HTMLInputElement).value;
+                handleRenameEfxEntry(efxEntryMenu.trackId, efxEntryMenu.entry, label);
+              }} className="flex-1 py-1.5 rounded bg-cyan-600/20 text-cyan-300 text-xs hover:bg-cyan-600/30">Renommer</button>
+              <button onClick={() => handleModifyEfxEntry(efxEntryMenu.trackId, efxEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Modifier</button>
             </div>
             <div className="flex gap-2 px-4 pb-2">
               <button onClick={() => {
@@ -4160,32 +4108,30 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         </div>
       )}
 
-      {/* Color Track context menu - insert entry with start+end colors */}
+      {/* Color Track context menu - via +* Color Track (en mode simple) */}
       {colorContextMenu && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setColorContextMenu(null)} />
           <div
             ref={colorContextRef}
-            className="fixed z-50 bg-[#1a1a2e] border border-pink-700/50 rounded-lg shadow-xl py-1 min-w-[360px]"
-            style={{ ...clampRect(colorContextMenu.x, colorContextMenu.y, 380, 300, window.innerWidth, window.innerHeight) }}
+            className="fixed z-50 bg-[#1a1a2e] border border-pink-700/50 rounded-lg shadow-xl py-1 min-w-[160px]"
+            style={{ ...clampRect(colorContextMenu.x, colorContextMenu.y, 200, 120, window.innerWidth, window.innerHeight) }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-1.5 text-[10px] text-pink-400 uppercase tracking-wider border-b border-gray-800">
-              Insert Color at {colorContextMenu.time.toFixed(1)}s
+              Color Track
             </div>
-            <ColorTrackInsertMenu
-              onInsert={(startColor, endColor) => {
-                handleInsertColorToTrack(colorContextMenu.trackId, colorContextMenu.time, startColor, endColor);
-                setColorContextMenu(null);
-              }}
-              onCancel={() => setColorContextMenu(null)}
-            />
-            <div className="border-t border-gray-800" />
             <button
               onClick={() => handleRemoveColorTrack(colorContextMenu.trackId)}
               className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
             >
               Delete track
+            </button>
+            <button
+              onClick={() => setColorContextMenu(null)}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
+            >
+              Cancel
             </button>
           </div>
         </>
@@ -4200,12 +4146,31 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 py-1.5 text-[11px] text-pink-400 uppercase tracking-wider border-b border-gray-800">
-              <span className="w-3 h-3 rounded inline-block mr-1 align-middle" style={{ backgroundColor: colorEntryMenu.entry.color }} />
-              {colorEntryMenu.entry.color}
+              {colorEntryMenu.entry.label || (
+                <><span className="w-3 h-3 rounded inline-block mr-1 align-middle" style={{ backgroundColor: colorEntryMenu.entry.color }} />
+                {colorEntryMenu.entry.endColor && colorEntryMenu.entry.endColor !== colorEntryMenu.entry.color
+                  ? `${colorEntryMenu.entry.color} → ${colorEntryMenu.entry.endColor}`
+                  : colorEntryMenu.entry.color}</>
+              )}
+            </div>
+            <div className="px-4 pt-3">
+              <label className="text-[10px] text-gray-500 block mb-1">Nom de la section</label>
+              <input type="text"
+                defaultValue={colorEntryMenu.entry.label || ''}
+                placeholder={`${colorEntryMenu.entry.color}${colorEntryMenu.entry.endColor && colorEntryMenu.entry.endColor !== colorEntryMenu.entry.color ? ` → ${colorEntryMenu.entry.endColor}` : ''}`}
+                id="__color_label"
+                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
             </div>
             <div className="grid grid-cols-2 gap-3 px-4 py-3">
               <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={colorEntryMenu.entry.time} id="__color_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
               <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={colorEntryMenu.entry.endTime} id="__color_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+            </div>
+            <div className="flex gap-2 px-4 pb-2">
+              <button onClick={() => {
+                const label = (document.getElementById('__color_label') as HTMLInputElement).value;
+                handleRenameColorEntry(colorEntryMenu.trackId, colorEntryMenu.entry, label);
+              }} className="flex-1 py-1.5 rounded bg-pink-600/20 text-pink-300 text-xs hover:bg-pink-600/30">Renommer</button>
+              <button onClick={() => handleModifyColorEntry(colorEntryMenu.trackId, colorEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Modifier</button>
             </div>
             <div className="flex gap-2 px-4 pb-2">
               <button onClick={() => {
@@ -4279,11 +4244,12 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
             <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-semibold text-gray-200">New EFX Track</span>
-                <button onClick={() => setEfxTrackModal(false)} className="text-gray-500 hover:text-white">✕</button>
+                <span className="text-sm font-semibold text-gray-200">{efxEditTarget ? 'Modifier la section EFX' : 'New EFX Track'}</span>
+                <button onClick={() => { setEfxTrackModal(false); setEfxEditTarget(null); }} className="text-gray-500 hover:text-white">✕</button>
               </div>
 
               {/* Track name */}
+              {!efxEditTarget && (<>
               <label className="block text-[10px] text-gray-400 mb-1">Track Name</label>
               <input
                 autoFocus
@@ -4366,6 +4332,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
                   </span>
                 </div>
               )}
+              </>)}
 
               {/* Custom effects */}
               <label className="block text-[10px] text-gray-400 mb-1">Custom Effect</label>
@@ -4392,21 +4359,21 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
               })()}
               {/* Actions */}
               <div className="flex justify-end gap-2">
-                <button onClick={() => setEfxTrackModal(false)}
+                <button onClick={() => { setEfxTrackModal(false); setEfxEditTarget(null); }}
                   className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
                   Cancel
                 </button>
                 <button
                   onClick={handleAddEfxTrack}
-                  disabled={!efxTrackName.trim()}
+                  disabled={!efxEditTarget && !efxTrackName.trim()}
                   className="px-4 py-1.5 rounded-lg text-xs font-medium bg-cyan-600 text-white hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  Add Track
+                  {efxEditTarget ? 'Appliquer' : 'Add Track'}
                 </button>
               </div>
             </div>
           </div>
-          <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setEfxTrackModal(false)} />
+          <div className="fixed inset-0 z-40 bg-black/50" onClick={() => { setEfxTrackModal(false); setEfxEditTarget(null); }} />
         </>
       )}
 
@@ -4417,24 +4384,23 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           <div
             ref={scmRef}
             className="fixed z-50 bg-[#1a1a2e] border border-purple-700/50 rounded-lg shadow-xl py-1 min-w-[160px]"
-            style={{ ...clampRect(scmPos.x, scmPos.y, 220, 280, window.innerWidth, window.innerHeight) }}
+            style={{ ...clampRect(scmPos.x, scmPos.y, 200, 120, window.innerWidth, window.innerHeight) }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-1.5 text-[10px] text-purple-400 uppercase tracking-wider border-b border-gray-800">
-              Insert Strobe at {(scmPos.time ?? 0).toFixed(1)}s
+              Strobe Track
             </div>
-            <StrobeTrackInsertMenu
-              onInsert={(speed, endSpeed) => {
-                handleInsertStrobeToTrack(scmPos.trackId, scmPos.time ?? 0, speed, endSpeed);
-              }}
-              onCancel={() => setScmPos(null)}
-            />
-            <div className="border-t border-gray-800" />
             <button
               onClick={() => { handleDeleteStrobeTrack(scmPos.trackId); setScmPos(null); }}
               className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
             >
               Delete track
+            </button>
+            <button
+              onClick={() => setScmPos(null)}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
+            >
+              Cancel
             </button>
           </div>
         </>
@@ -4449,14 +4415,31 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 py-1.5 text-[11px] text-purple-400 uppercase tracking-wider border-b border-gray-800">
-              <span className="text-purple-300 font-mono">{strobeEntryMenu.entry.speed} Hz</span>
-              {strobeEntryMenu.entry.endSpeed !== undefined && strobeEntryMenu.entry.endSpeed !== strobeEntryMenu.entry.speed && (
-                <span className="text-purple-400"> → {strobeEntryMenu.entry.endSpeed} Hz</span>
+              {strobeEntryMenu.entry.label || (
+                <><span className="text-purple-300 font-mono">{strobeEntryMenu.entry.speed} Hz</span>
+                {strobeEntryMenu.entry.endSpeed !== undefined && strobeEntryMenu.entry.endSpeed !== strobeEntryMenu.entry.speed && (
+                  <span className="text-purple-400"> → {strobeEntryMenu.entry.endSpeed} Hz</span>
+                )}</>
               )}
+            </div>
+            <div className="px-4 pt-3">
+              <label className="text-[10px] text-gray-500 block mb-1">Nom de la section</label>
+              <input type="text"
+                defaultValue={strobeEntryMenu.entry.label || ''}
+                placeholder={`${strobeEntryMenu.entry.speed} Hz${strobeEntryMenu.entry.endSpeed !== undefined && strobeEntryMenu.entry.endSpeed !== strobeEntryMenu.entry.speed ? ` → ${strobeEntryMenu.entry.endSpeed} Hz` : ''}`}
+                id="__strobe_label"
+                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
             </div>
             <div className="grid grid-cols-2 gap-3 px-4 py-3">
               <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={strobeEntryMenu.entry.time} id="__strobe_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
               <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={strobeEntryMenu.entry.endTime} id="__strobe_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+            </div>
+            <div className="flex gap-2 px-4 pb-2">
+              <button onClick={() => {
+                const label = (document.getElementById('__strobe_label') as HTMLInputElement).value;
+                handleRenameStrobeEntry(strobeEntryMenu.trackId, strobeEntryMenu.entry, label);
+              }} className="flex-1 py-1.5 rounded bg-purple-600/20 text-purple-300 text-xs hover:bg-purple-600/30">Renommer</button>
+              <button onClick={() => handleModifyStrobeEntry(strobeEntryMenu.trackId, strobeEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Modifier</button>
             </div>
             <div className="flex gap-2 px-4 pb-2">
               <button onClick={() => {
@@ -4475,31 +4458,30 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         </div>
       )}
 
-      {/* Dimmer insert menu */}
+      {/* Dimmer track context menu — via +* Dimmer Track */}
       {dimmerInsertMenu && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setDimmerInsertMenu(null)} />
           <div
             ref={dimmerInsertMenuRef}
-            className="fixed z-50 bg-[#1a1a2e] border border-orange-700/50 rounded-lg shadow-xl py-1 min-w-[180px]"
-            style={{ ...clampRect(dimmerInsertMenu.x, dimmerInsertMenu.y, 220, 240, window.innerWidth, window.innerHeight) }}
+            className="fixed z-50 bg-[#1a1a2e] border border-orange-700/50 rounded-lg shadow-xl py-1 min-w-[160px]"
+            style={{ ...clampRect(dimmerInsertMenu.x, dimmerInsertMenu.y, 200, 120, window.innerWidth, window.innerHeight) }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-1.5 text-[10px] text-orange-400 uppercase tracking-wider border-b border-gray-800">
-              Insert Dimmer at {(dimmerInsertMenu.time ?? 0).toFixed(1)}s
+              Dimmer Track
             </div>
-            <DimmerTrackInsertMenu
-              onInsert={(value, endValue) => {
-                handleInsertDimmerToTrack(dimmerInsertMenu.trackId, dimmerInsertMenu.time ?? 0, value, endValue);
-              }}
-              onCancel={() => setDimmerInsertMenu(null)}
-            />
-            <div className="border-t border-gray-800" />
             <button
               onClick={() => { handleDeleteDimmerTrack(dimmerInsertMenu.trackId); setDimmerInsertMenu(null); }}
               className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
             >
               Delete track
+            </button>
+            <button
+              onClick={() => setDimmerInsertMenu(null)}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
+            >
+              Cancel
             </button>
           </div>
         </>
@@ -4514,14 +4496,31 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 py-1.5 text-[11px] text-orange-400 uppercase tracking-wider border-b border-gray-800">
-              <span className="text-orange-300 font-mono">{dimmerEntryMenu.entry.value}%</span>
-              {dimmerEntryMenu.entry.endValue !== undefined && dimmerEntryMenu.entry.endValue !== dimmerEntryMenu.entry.value && (
-                <span className="text-orange-400"> → {dimmerEntryMenu.entry.endValue}%</span>
+              {dimmerEntryMenu.entry.label || (
+                <><span className="text-orange-300 font-mono">{dimmerEntryMenu.entry.value}%</span>
+                {dimmerEntryMenu.entry.endValue !== undefined && dimmerEntryMenu.entry.endValue !== dimmerEntryMenu.entry.value && (
+                  <span className="text-orange-400"> → {dimmerEntryMenu.entry.endValue}%</span>
+                )}</>
               )}
+            </div>
+            <div className="px-4 pt-3">
+              <label className="text-[10px] text-gray-500 block mb-1">Nom de la section</label>
+              <input type="text"
+                defaultValue={dimmerEntryMenu.entry.label || ''}
+                placeholder={`${dimmerEntryMenu.entry.value}%${dimmerEntryMenu.entry.endValue !== undefined && dimmerEntryMenu.entry.endValue !== dimmerEntryMenu.entry.value ? ` → ${dimmerEntryMenu.entry.endValue}%` : ''}`}
+                id="__dimmer_label"
+                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
             </div>
             <div className="grid grid-cols-2 gap-3 px-4 py-3">
               <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={dimmerEntryMenu.entry.time} id="__dimmer_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
               <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={dimmerEntryMenu.entry.endTime} id="__dimmer_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+            </div>
+            <div className="flex gap-2 px-4 pb-2">
+              <button onClick={() => {
+                const label = (document.getElementById('__dimmer_label') as HTMLInputElement).value;
+                handleRenameDimmerEntry(dimmerEntryMenu.trackId, dimmerEntryMenu.entry, label);
+              }} className="flex-1 py-1.5 rounded bg-orange-600/20 text-orange-300 text-xs hover:bg-orange-600/30">Renommer</button>
+              <button onClick={() => handleModifyDimmerEntry(dimmerEntryMenu.trackId, dimmerEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Modifier</button>
             </div>
             <div className="flex gap-2 px-4 pb-2">
               <button onClick={() => {
@@ -4613,10 +4612,11 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
             <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-semibold text-gray-200">New Color Track</span>
-                <button onClick={() => setColorTrackModal(false)} className="text-gray-500 hover:text-white">✕</button>
+                <span className="text-sm font-semibold text-gray-200">{colorEditTarget ? 'Modifier la section Color' : 'New Color Track'}</span>
+                <button onClick={() => { setColorTrackModal(false); setColorEditTarget(null); }} className="text-gray-500 hover:text-white">✕</button>
               </div>
 
+              {!colorEditTarget && (<>
               <label className="block text-[10px] text-gray-400 mb-1">Track Name</label>
               <input
                 autoFocus
@@ -4686,23 +4686,46 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
                   </select>
                 </div>
               )}
+              </>)}
+
+              <label className="block text-[10px] text-gray-400 mb-1">Couleur de début (posée à 10 s)</label>
+              <div className="flex gap-1 flex-wrap mb-2">
+                {COLOR_PALETTE.map(c => (
+                  <button key={'s'+c} onClick={() => setColorTrackStartColor(c)}
+                    className={`w-6 h-6 rounded border transition-all ${colorTrackStartColor === c ? 'border-white scale-110' : 'border-gray-600 hover:border-gray-400'}`}
+                    style={{ backgroundColor: c }} title={c} />
+                ))}
+              </div>
+              <label className="block text-[10px] text-gray-400 mb-1">Couleur de fin</label>
+              <div className="flex gap-1 flex-wrap mb-2">
+                {COLOR_PALETTE.map(c => (
+                  <button key={'e'+c} onClick={() => setColorTrackEndColor(c)}
+                    className={`w-6 h-6 rounded border transition-all ${colorTrackEndColor === c ? 'border-white scale-110' : 'border-gray-600 hover:border-gray-400'}`}
+                    style={{ backgroundColor: c }} title={c} />
+                ))}
+              </div>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="flex-1 h-4 rounded"
+                  style={{ background: `linear-gradient(to right, ${colorTrackStartColor}, ${colorTrackEndColor})` }} />
+                <span className="text-[9px] text-gray-500">aperçu dégradé ({colorTrackStartColor} → {colorTrackEndColor})</span>
+              </div>
 
               <div className="flex justify-end gap-2">
-                <button onClick={() => setColorTrackModal(false)}
+                <button onClick={() => { setColorTrackModal(false); setColorEditTarget(null); }}
                   className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
                   Cancel
                 </button>
                 <button
                   onClick={handleAddColorTrack}
-                  disabled={!colorTrackName.trim()}
+                  disabled={!colorEditTarget && !colorTrackName.trim()}
                   className="px-4 py-1.5 rounded-lg text-xs font-medium bg-pink-600 text-white hover:bg-pink-500 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  Add Track
+                  {colorEditTarget ? 'Appliquer' : 'Add Track'}
                 </button>
               </div>
             </div>
           </div>
-          <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setColorTrackModal(false)} />
+          <div className="fixed inset-0 z-40 bg-black/50" onClick={() => { setColorTrackModal(false); setColorEditTarget(null); }} />
         </>
       )}
 
@@ -4712,10 +4735,11 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
             <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-semibold text-gray-200">New Strobe Track</span>
-                <button onClick={() => setStrobeTrackModal(false)} className="text-gray-500 hover:text-white">✕</button>
+                <span className="text-sm font-semibold text-gray-200">{strobeEditTarget ? 'Modifier la section Strobe' : 'New Strobe Track'}</span>
+                <button onClick={() => { setStrobeTrackModal(false); setStrobeEditTarget(null); }} className="text-gray-500 hover:text-white">✕</button>
               </div>
 
+              {!strobeEditTarget && (<>
               <label className="block text-[10px] text-gray-400 mb-1">Track Name</label>
               <input
                 autoFocus
@@ -4785,23 +4809,39 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
                   </select>
                 </div>
               )}
+              </>)}
+
+              <label className="block text-[10px] text-gray-400 mb-1">Frég. de début (Hz)</label>
+              <input type="number" min={1} max={25} value={strobeTrackSpeed}
+                onChange={e => setStrobeTrackSpeed(Math.max(1, Math.min(25, Number(e.target.value) || 10)))}
+                className="w-24 mb-2 bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none" />
+              <label className="block text-[10px] text-gray-400 mb-1">Frég. de fin (Hz)</label>
+              <input type="number" min={1} max={25} value={strobeTrackEndSpeed}
+                onChange={e => setStrobeTrackEndSpeed(Math.max(1, Math.min(25, Number(e.target.value) || 10)))}
+                className="w-24 mb-2 bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none" />
+              <div className="flex items-center gap-2 mb-4 text-[10px] text-gray-500">
+                <span>Début {strobeTrackSpeed} Hz</span>
+                <span>→</span>
+                <span>Fin {strobeTrackEndSpeed} Hz</span>
+                <span className="text-gray-400">(accumulé sur 10 s)</span>
+              </div>
 
               <div className="flex justify-end gap-2">
-                <button onClick={() => setStrobeTrackModal(false)}
+                <button onClick={() => { setStrobeTrackModal(false); setStrobeEditTarget(null); }}
                   className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
                   Cancel
                 </button>
                 <button
                   onClick={handleAddStrobeTrack}
-                  disabled={!strobeTrackName.trim()}
+                  disabled={!strobeEditTarget && !strobeTrackName.trim()}
                   className="px-4 py-1.5 rounded-lg text-xs font-medium bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  Add Track
+                  {strobeEditTarget ? 'Appliquer' : 'Add Track'}
                 </button>
               </div>
             </div>
           </div>
-          <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setStrobeTrackModal(false)} />
+          <div className="fixed inset-0 z-40 bg-black/50" onClick={() => { setStrobeTrackModal(false); setStrobeEditTarget(null); }} />
         </>
       )}
 
@@ -4811,10 +4851,11 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
             <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-semibold text-gray-200">New Dimmer Track</span>
-                <button onClick={() => setDimmerTrackModal(false)} className="text-gray-500 hover:text-white">✕</button>
+                <span className="text-sm font-semibold text-gray-200">{dimmerEditTarget ? 'Modifier la section Dimmer' : 'New Dimmer Track'}</span>
+                <button onClick={() => { setDimmerTrackModal(false); setDimmerEditTarget(null); }} className="text-gray-500 hover:text-white">✕</button>
               </div>
 
+              {!dimmerEditTarget && (<>
               <label className="block text-[10px] text-gray-400 mb-1">Track Name</label>
               <input
                 autoFocus
@@ -4884,23 +4925,39 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
                   </select>
                 </div>
               )}
+              </>)}
+
+              <label className="block text-[10px] text-gray-400 mb-1">Valeur de début (%)</label>
+              <input type="number" min={0} max={100} value={dimmerTrackValue}
+                onChange={e => setDimmerTrackValue(Math.max(0, Math.min(100, Number(e.target.value) || 100)))}
+                className="w-24 mb-2 bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none" />
+              <label className="block text-[10px] text-gray-400 mb-1">Valeur de fin (%)</label>
+              <input type="number" min={0} max={100} value={dimmerTrackEndValue}
+                onChange={e => setDimmerTrackEndValue(Math.max(0, Math.min(100, Number(e.target.value) || 100)))}
+                className="w-24 mb-2 bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none" />
+              <div className="flex items-center gap-2 mb-4 text-[10px] text-gray-500">
+                <span>Début {dimmerTrackValue} %</span>
+                <span>→</span>
+                <span>Fin {dimmerTrackEndValue} %</span>
+                <span className="text-gray-400">(fondu sur 10 s)</span>
+              </div>
 
               <div className="flex justify-end gap-2">
-                <button onClick={() => setDimmerTrackModal(false)}
+                <button onClick={() => { setDimmerTrackModal(false); setDimmerEditTarget(null); }}
                   className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
                   Cancel
                 </button>
                 <button
                   onClick={handleAddDimmerTrackFromModal}
-                  disabled={!dimmerTrackName.trim()}
+                  disabled={!dimmerEditTarget && !dimmerTrackName.trim()}
                   className="px-4 py-1.5 rounded-lg text-xs font-medium bg-orange-600 text-white hover:bg-orange-500 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  Add Track
+                  {dimmerEditTarget ? 'Appliquer' : 'Add Track'}
                 </button>
               </div>
             </div>
           </div>
-          <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setDimmerTrackModal(false)} />
+          <div className="fixed inset-0 z-40 bg-black/50" onClick={() => { setDimmerTrackModal(false); setDimmerEditTarget(null); }} />
         </>
       )}
 

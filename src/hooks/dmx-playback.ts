@@ -385,7 +385,7 @@ import { evalEffect, toDmx, type EffectPattern } from '../engine/effect-engine';
 import type { RgbSegment } from '../engine/dmx-color';
 import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, findBestWheelCap } from '../engine/dmx-color';
 import type { ChannelAnalysis } from '../engine/fixture-analyzer';
-import { analyzeChannels, capMid, pickLaserModeCap, laserGateValue, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
+import { analyzeChannels, capMid, pickLaserModeCap, laserGateValue, mapIntensityVal, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
 import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSmartMovement, spatialPhaseFor } from '../engine/dmx-movement';
 import { useAppStore } from '../stores/appStore';
 import { dmxBridge } from '../utils/dmx-bridge';
@@ -974,7 +974,7 @@ export function useDmxPlayback(options: {
             }
           }
           const _dimmerTrackActive = !!(dimmerOverrides && dimmerOverrides.get(pf.id));
-          if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(_dimmerTrackActive){chVals[addr]=dimmerVal;}else if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=dimmerVal;}
+          if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(_dimmerTrackActive){chVals[addr]=mapIntensityVal(dimmerVal,fa);}else if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=mapIntensityVal(dimmerVal,fa);}
           // Dimmer track: propagate to ALL intensity channels (LED heads 2..N)
           if(_dimmerTrackActive){for(const li of (fa.ledIntensityOffsets||[])){chVals[pf.startAddress+li]=dimmerVal;}}
 
@@ -985,12 +985,24 @@ export function useDmxPlayback(options: {
            let _fixtureInactive = false;
            if (Array.isArray(active.activeTiers) && !active.activeTiers.includes(pf.tier) && pf.tier !== 'other' && !_dimmerTrackActive) {
              _fixtureInactive = true;
-             if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = 0;
+             if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = mapIntensityVal(0, fa);
              if (fa.shutterOffset !== null) chVals[pf.startAddress + fa.shutterOffset] = 0;
              if (fa.strobeOffset !== null) chVals[pf.startAddress + fa.strobeOffset] = 0;
              if (fa.isLaser) {
                if (fa.rgbOffsets) for (const o of fa.rgbOffsets) chVals[pf.startAddress + o] = 0;
                if (fa.laserColorGateOffset !== null) chVals[pf.startAddress + fa.laserColorGateOffset] = 0;
+             }
+             // RGB-only sans canal intensité (LED bars / wall washers) : on
+             // éteint les segments (sinon le bloc palette les rallumerait —
+             // la respiration des tiers doit les éteindre aussi).
+             if (!fa.isLaser) {
+               for (const o of (fa.rgbOffsets || [])) chVals[pf.startAddress + o] = 0;
+               for (const seg of fa.rgbSegments) {
+                 chVals[pf.startAddress + seg.r] = 0;
+                 chVals[pf.startAddress + seg.g] = 0;
+                 if (seg.b !== null) chVals[pf.startAddress + seg.b] = 0;
+                 if (seg.w !== null) chVals[pf.startAddress + seg.w] = 0;
+               }
              }
            }
 
@@ -1031,6 +1043,14 @@ export function useDmxPlayback(options: {
           })();
 
           const isColorTrack = colorTrackColors.has(pf.id);
+          // RGB-only sans canal intensité (LED bars / wall washers, mobiles mal
+          // patchés...) : une piste dimmer active doit RENDRE le dimmer visible.
+          // Sans couleur de cue, on matérialise du blanc — le scaling dimmer
+          // ci-dessous l'atténue ensuite. La piste dimmer surpasse la respiration.
+          let effPaletteColor = paletteColor;
+          if (!effPaletteColor && _dimmerTrackActive && fa.intensityOffset === null && fa.rgbSegments.length > 0) {
+            effPaletteColor = '#ffffff';
+          }
           // Chaser takeover (couleur) : si le chaser pilote les canaux couleur
           // de cette fixture, on n'écrit PAS la couleur autoscript (rouge du
           // chaser conservé, pas de fuite blanc). Le merge chaser plus bas
@@ -1050,8 +1070,8 @@ export function useDmxPlayback(options: {
               if (colorAddrs.has(Number(addrStr))) { chaserOwnsColor = true; break; }
             }
           }
-          if(fa.rgbSegments.length>0&&paletteColor&&!chaserOwnsColor){
-            let[r,g,b]=hexToRgb(paletteColor);
+          if(fa.rgbSegments.length>0&&effPaletteColor&&!chaserOwnsColor&&!_fixtureInactive){
+            let[r,g,b]=hexToRgb(effPaletteColor);
             // Only apply tier hue shift to cue colors, NOT to user-specified color track colors
             if (!isColorTrack) {
               [r,g,b] = applyHueShift([r,g,b], TIER_HUE[pf.tier]);
@@ -1077,7 +1097,7 @@ export function useDmxPlayback(options: {
               }
             }
             for(const po of fa.presetOverrideOffsets){chVals[pf.startAddress+po]=0;}
-            if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(_dimmerTrackActive){chVals[addr]=dimmerVal;}else if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=dimmerVal;}
+            if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(_dimmerTrackActive){chVals[addr]=mapIntensityVal(dimmerVal,fa);}else if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=mapIntensityVal(dimmerVal,fa);}
             // Per-pixel RGB: barre LED / wall wash multi-segments → chase color + wave
             // Tous les canaux RGB de la fixture sont exploités (8×3=24 pour Wall Washer)
             {
@@ -1240,7 +1260,7 @@ export function useDmxPlayback(options: {
               const adaptedSpeedNS = Math.min(baseSpeedNS * sectionMultNS, strobeLimit);
               const strobePhaseNS = Math.sin(ct * Math.PI * 2 * adaptedSpeedNS);
               const iAddrNS = pf.startAddress + fa.intensityOffset;
-              chVals[iAddrNS] = strobePhaseNS >= 0 ? dimmerVal : 0;
+              chVals[iAddrNS] = strobePhaseNS >= 0 ? mapIntensityVal(dimmerVal, fa) : mapIntensityVal(0, fa);
             }
           }
 
@@ -1762,12 +1782,12 @@ export function computeDmxForCue(
       }
       if (fa.intensityOffset !== null) {
         const addr = pf.startAddress + fa.intensityOffset;
-        if (!chVals[addr] || dimmerVal > chVals[addr]) chVals[addr] = dimmerVal;
+        if (!chVals[addr] || dimmerVal > chVals[addr]) chVals[addr] = mapIntensityVal(dimmerVal, fa);
       }
       // Dimmer track: force-write the main intensity channel and propagate to
       // ALL intensity channels (LED heads 2..N) — the track outranks cues.
       if (dimmerOverride) {
-        if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = dimmerVal;
+        if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = mapIntensityVal(dimmerVal, fa);
         for (const li of (fa.ledIntensityOffsets || [])) chVals[pf.startAddress + li] = dimmerVal;
       }
 
@@ -1780,8 +1800,15 @@ export function computeDmxForCue(
           return (cue as any).forcedColor || cue.color || cue.colors?.[0] || undefined;
         })();
 
-      if (fa.rgbSegments.length > 0 && paletteColor) {
-        let [r, g, b] = hexToRgb(paletteColor);
+      // RGB-only sans canal intensité : une piste dimmer visible exige une
+      // couleur à scaler — fallback blanc quand la cue n'en fournit pas.
+      let effPaletteColor = paletteColor;
+      if (!effPaletteColor && dimmerOverride && fa.intensityOffset === null && fa.rgbSegments.length > 0) {
+        effPaletteColor = '#ffffff';
+      }
+
+      if (fa.rgbSegments.length > 0 && effPaletteColor) {
+        let [r, g, b] = hexToRgb(effPaletteColor);
         // Skip tier hue shift for user-specified color track colors
         if (!colorTrackColors?.has(pf.id)) {
           [r, g, b] = applyHueShift([r, g, b], TIER_HUE[pf.tier]);

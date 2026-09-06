@@ -16,7 +16,7 @@
 
 import type { PatchedFixture, FixtureTier } from '../stores/showStore';
 import { useShowStore, type FixtureGroup } from '../stores/showStore';
-import { analyzeFixture, type FixtureChannelAnalysis, capMid, pickLaserModeCap, laserGateValue } from '../engine/fixture-analyzer';
+import { analyzeFixture, capMid, pickLaserModeCap, laserGateValue, mapIntensityVal, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
 
 // ─── Inline fixture definition types (mirrors electron/fixtures/library.ts) ──
 
@@ -720,7 +720,7 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
         if (fa.intensityOffset !== null) {
           const dmxAddr = pf.startAddress + fa.intensityOffset;
           if (!channelValues[dmxAddr] || computedIntensity > channelValues[dmxAddr]) {
-            channelValues[dmxAddr] = computedIntensity;
+            channelValues[dmxAddr] = mapIntensityVal(computedIntensity, fa);
 
           }
         }
@@ -1071,7 +1071,7 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
         for (const fa of activeList) {
           const pf = fa.fixture;
           if (fa.intensityOffset !== null) {
-            channelValues[pf.startAddress + fa.intensityOffset] = 128;
+            channelValues[pf.startAddress + fa.intensityOffset] = mapIntensityVal(128, fa);
           } else if (fa.shutterOffset !== null) {
             channelValues[pf.startAddress + fa.shutterOffset] = SHUTTER_OPEN_SAFE;
           } else if (fa.strobeOffset !== null) {

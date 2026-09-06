@@ -84,6 +84,11 @@ export interface FixtureChannelAnalysis {
   // Intensity
   intensityOffset: number | null;
   ledIntensityOffsets: number[];
+  /** Plage d'une courbe d'intensité sur un canal hybride « Dimmer/Strobe »
+   *  (type Shutter, caps « Intensity »). Si non-nulle, la valeur 0-255 du
+   *  dimmer doit être re-mappée dans [min,max] pour rester en zone intensité
+   *  (jamais en zone strobe). */
+  intensityCapRange: { min: number; max: number } | null;
 
   // Shutter / Effect
   shutterOffset: number | null;
@@ -261,6 +266,7 @@ export function analyzeFixtureChannels(
     fixture: pf,
     intensityOffset: null,
     ledIntensityOffsets: [],
+    intensityCapRange: null,
     shutterOffset: null,
     strobeOffset: null,
     strobeCaps: null,
@@ -333,6 +339,17 @@ export function analyzeFixtureChannels(
     const isShutterDimmer = /\bdimmer\b/i.test(chName) && ch.type === 'Shutter';
     if (isShutterDimmer && fa.intensityOffset === null) {
       fa.intensityOffset = off;
+      // Canal « Dimmer / Strobe » (ex. Stage Wash 7x10W) : un seul canal encode
+      // la courbe d'intensité (cap nommée « Intensity », ici 8-134) ET le strobe
+      // (135-255). Traitement EXCLUSIF en intensité : le canal ne doit jamais
+      // être re-déclaré shutter/strobe (double écriture 0-255 → strobe) ni
+      // recevoir une valeur hors zone intensité. On mémorise la courbe pour
+      // re-mapper la valeur dimmer, et on SAUTE le switch générique.
+      const intCap = (ch.capabilities ?? []).find(c => /intensity|dimm/i.test(c.name ?? ''));
+      if (intCap) {
+        fa.intensityCapRange = { min: Math.max(0, Math.min(255, intCap.min)), max: Math.max(0, Math.min(255, intCap.max)) };
+      }
+      continue;
     }
 
     // Auto-detect RGB by name (from dmx-cues.ts — broader pattern)
@@ -641,4 +658,19 @@ export function analyzeChannels(pf: PatchedFixture, def: DmxFixtureDefinition | 
  */
 export function analyzeFixture(pf: PatchedFixture, def: DmxFixtureDefinition | undefined): FixtureChannelAnalysis {
   return analyzeFixtureChannels(pf, def);
+}
+
+/**
+ * Remappe une valeur dimmer 0-255 dans la courbe d'intensité d'un canal
+ * hybride « Dimmer/Strobe » (intensityCapRange non-nul). Reste en zone
+ * intensité, jamais en zone strobe. Sans courbe : clamp simple 0-255.
+ */
+export function mapIntensityVal(raw: number, fa: FixtureChannelAnalysis): number {
+  const v = Math.max(0, Math.min(255, raw));
+  if (fa.intensityCapRange) {
+    const { min, max } = fa.intensityCapRange;
+    if (max <= min) return min;
+    return min + Math.round((v / 255) * (max - min));
+  }
+  return v;
 }

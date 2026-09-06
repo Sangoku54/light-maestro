@@ -786,11 +786,38 @@ export function classifySections(
     }
   }
 
-  // ── Garde-fou temporel : intro toujours au début, outro toujours à la fin ──
-  for (let i = 1; i < N; i++) if (result[i].type === 'intro') result[i].type = result[i].isRepeated ? 'verse' : 'bridge';
-  for (let i = 0; i < N - 1; i++) if (result[i].type === 'outro') result[i].type = result[i].isRepeated ? 'verse' : 'bridge';
-  // Un seul outro : si les deux derniers sont outro (cas 2 outros), garde le dernier
-  if (N >= 2 && result[N - 2].type === 'outro' && result[N - 1].type === 'outro') result[N - 2].type = 'bridge';
+  // ── Garde-fou structural : intro GARANTIE au tout début ──
+  // Le premier segment est toujours une intro : une génération d'autoscript
+  // doit démarrer sur une section calme, même si le morceau démarre fort
+  // (drop d'ouverture, attaque immédiate…). On prolonge ce bloc intro tant
+  // que le calme persiste (bloc contigu, critère strict), puis on interdit
+  // toute intro tardive/parasite.
+  result[0].type = 'intro';
+  let introRunEnd = 1;
+  for (let i = 1; i < N; i++) {
+    const introMid = (segments[i].startT + segments[i].endT) / 2 / duration;
+    if (introMid >= 0.3) break;
+    const introQuiet = segments[i].energy < globalMeanEnergy * 0.85 && energyZ(i) < 0.5;
+    if (!introQuiet) break;
+    result[i].type = 'intro';
+    introRunEnd = i + 1;
+  }
+  for (let i = introRunEnd; i < N; i++) {
+    if (result[i].type === 'intro') result[i].type = result[i].isRepeated ? 'verse' : 'bridge';
+  }
+
+  // ── Garde-fou temporel : pas d'outro au milieu de la piste ──
+  // Un bloc outro contigu en fin de morceau (longue sortie calme) est
+  // conservé intégralement ; seuls les outros isolés en plein milieu sont
+  // reclassés (verse/bridge), pour garder une sortie propre et longue.
+  let outroRunStart = N;
+  for (let j = N - 1; j >= 0; j--) {
+    if (result[j].type === 'outro') outroRunStart = j;
+    else break;
+  }
+  for (let i = 0; i < N; i++) {
+    if (result[i].type === 'outro' && i < outroRunStart) result[i].type = result[i].isRepeated ? 'verse' : 'bridge';
+  }
 
   // ── Lissage contextuel ──
   // Un drop isolé coincé entre deux chorus n'est pas un drop → chorus.
@@ -1836,7 +1863,6 @@ export async function analyzeAudioBuffer(
   for (let i = 1; i < classified.length; i++) {
     const wouldBeDuration = segments[i].endT - mergedSegs[mergedSegs.length - 1].startT;
     if (classified[i].type === mergedTypes[mergedTypes.length - 1] &&
-        structuralLabels[i] === mergedLabels[mergedLabels.length - 1] &&
         wouldBeDuration < maxMergeDuration) {
       mergedSegs[mergedSegs.length - 1] = {
         ...mergedSegs[mergedSegs.length - 1],

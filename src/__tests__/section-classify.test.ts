@@ -151,6 +151,62 @@ describe('classifySections — drop et build', () => {
   });
 });
 
+describe('classifySections — structure narrative garantie', () => {
+  it('un morceau qui démarre fort commence quand même par une intro', () => {
+    // Démarrage énergique (drop d'ouverture / attaque immédiate) : le tout
+    // premier segment est fort, mais la génération doit TOUJOURS démarrer
+    // par une intro calme côté lightshow.
+    const { segments, labels } = makeSegments([
+      { t0: 0, t1: 10, e: 0.9, l: 'X' },  // démarrage chaud
+      { t0: 10, t1: 30, e: 0.5, l: 'A' },
+      { t0: 30, t1: 50, e: 0.8, l: 'B' },
+      { t0: 50, t1: 70, e: 0.5, l: 'A' },
+      { t0: 70, t1: 80, e: 0.15, l: 'O' },
+    ]);
+    const r = classifySections(segments, 80, labels);
+    expect(r[0].type).toBe('intro');
+  });
+
+  it('une intro longue calme reste un bloc intro contigu (pas découpée en verse)', () => {
+    // 3 segments calmes consécutifs en début de piste (intro de ~24 s sur 80 s)
+    const { segments, labels } = makeSegments([
+      { t0: 0, t1: 10, e: 0.10, l: 'I' },
+      { t0: 10, t1: 18, e: 0.12, l: 'I' },
+      { t0: 18, t1: 24, e: 0.11, l: 'I' },
+      { t0: 24, t1: 40, e: 0.45, l: 'A' },
+      { t0: 40, t1: 56, e: 0.75, l: 'B' },
+      { t0: 56, t1: 64, e: 0.12, l: 'O' },
+      { t0: 64, t1: 80, e: 0.10, l: 'O' },
+    ]);
+    const r = classifySections(segments, 80, labels);
+    expect(r[0].type).toBe('intro');
+    expect(r[1].type).toBe('intro');
+    expect(r[2].type).toBe('intro');
+    // Aucune intro parasite plus tard dans la piste.
+    for (let i = 3; i < r.length; i++) {
+      expect(r[i].type).not.toBe('intro');
+    }
+  });
+
+  it('un outro long et calme reste un bloc outro contigu', () => {
+    const { segments, labels } = makeSegments([
+      { t0: 0, t1: 8, e: 0.15, l: 'I' },
+      { t0: 8, t1: 24, e: 0.5, l: 'A' },
+      { t0: 24, t1: 40, e: 0.75, l: 'B' },
+      { t0: 40, t1: 56, e: 0.5, l: 'A' },
+      { t0: 61, t1: 67, e: 0.12, l: 'O' },
+      { t0: 67, t1: 72, e: 0.10, l: 'O' },
+    ]);
+    const r = classifySections(segments, 72, labels);
+    expect(r[r.length - 1].type).toBe('outro');
+    expect(r[r.length - 2].type).toBe('outro');
+    // Aucun outro parasite au milieu de la piste.
+    for (let i = 0; i < r.length - 2; i++) {
+      expect(r[i].type).not.toBe('outro');
+    }
+  });
+});
+
 describe('detectSectionBoundaries — extraction de frontières', () => {
   it('sépare des blocs d’énergie bien distincts', async () => {
     const { detectSectionBoundaries } = await import('../hooks/audio-analysis');
