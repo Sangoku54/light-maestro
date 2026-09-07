@@ -208,6 +208,33 @@ export interface ShowTrackRef {
   name?: string;
 }
 
+export interface SceneTrackEntryRef {
+  id: string;
+  time: number;
+  endTime: number;
+  sceneId: string;
+  sceneName?: string;
+}
+export interface SceneTrackRef {
+  id: string;
+  entries: SceneTrackEntryRef[];
+  name?: string;
+}
+
+/**
+ * Log de diagnostic de priorité (dev) : actif uniquement lorsque
+ * window.__LM_DEBUG_PRIO__ === true dans la console du renderer.
+ * Ne fait rien (et ne coûte rien) dans les autres contextes/tests.
+ */
+function prioLog(...args: any[]) {
+  if (typeof window !== 'undefined' &&
+      ((window as any).__LM_DEBUG_PRIO__ === true ||
+        (typeof localStorage !== 'undefined' && localStorage.getItem('lmPrio') === '1'))) {
+    // eslint-disable-next-line no-console
+    console.info('[priorité]', ...args);
+  }
+}
+
 /**
  * Resolve chaser playback at an absolute time inside a block.
  * The chaser loops its steps (fadeIn → hold → fadeOut, exact ms) while the block is active,
@@ -231,8 +258,8 @@ export function computeChaserTrackOverrides(
     });
     if (!entry) continue;
     const chaser = chasers.find(c => c.id === entry.chaserId);
-    if (!chaser) continue;
-    if (!chaser.steps || chaser.steps.length === 0) continue;
+    if (!chaser) { prioLog('chaser-track: chaser introuvable', entry.chaserId, 'lib=', chasers.length, 'ct=', currentTime.toFixed(2)); continue; }
+    if (!chaser.steps || chaser.steps.length === 0) { prioLog('chaser-track: chaser sans steps', entry.chaserId, 'ct=', currentTime.toFixed(2)); continue; }
 
     // A chaser plays its OWN fixtures: targets = fixtures whose address range is
     // covered by the channels of the scenes referenced by the chaser steps.
@@ -274,7 +301,7 @@ export function computeChaserTrackOverrides(
     else if (within >= sd - fo) scale = Math.max(0, 1 - (within - (sd - fo)) / fo);
     else scale = 1;
     const scene = scenes.find(s => s.id === step.sceneId);
-    if (!scene || !scene.channels) continue;
+    if (!scene || !scene.channels) { prioLog('chaser-track: étape -> scène introuvable', step.sceneId, 'scenes='+scenes.length, 'chaser='+entry.chaserId); continue; }
     const addrMap: Record<number, number> = {};
     for (const addrStr in scene.channels) {
       const addr = Number(addrStr);
@@ -302,7 +329,7 @@ export function computeShowTrackOverrides(
     const entry = tr.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
     if (!entry) continue;
     const show = shows.find(s => s.id === entry.showId);
-    if (!show || !show.tracks) continue;
+    if (!show || !show.tracks) { prioLog('show-track: show introuvable', entry.showId, 'lib=', shows.length, 'ct=', currentTime.toFixed(2)); continue; }
     const elapsed = (currentTime - entry.time) * 1000; // show time in ms
     const merged: Record<number, number> = {};
     const mergeShow = (vals: Record<number, number>) => {
@@ -374,6 +401,56 @@ export function computeShowTrackOverrides(
         if (a>=pf.startAddress && a<pf.startAddress+pf.channelCount) perFix[a]=val;
       }
       if (Object.keys(perFix).length>0) controlled.set(fid, perFix);
+    }
+  }
+  return controlled;
+}
+
+/**
+ * Scene track override — joue les canaux statiques d'une scène telle quelle
+ * (prend le dessus sur l'autoscript). Pour chaque entrée active, les fixtures
+ * qui couvrent au moins un canal de la scène sont forcées sur la valeur de la
+ * scène pendant la plage [time, endTime[.
+ */
+export function computeSceneTrackOverrides(
+  sceneTracks: SceneTrackRef[],
+  scenes: Array<{ id: string; channels: Record<number, number> }>,
+  currentTime: number,
+  patchedFixtures: PatchedFixture[],
+  fixtureGroups: { id: string; fixtureIds: string[] }[],
+): Map<string, Record<number, number>> {
+  const controlled = new Map<string, Record<number, number>>();
+  if (!sceneTracks || sceneTracks.length === 0 || !scenes || scenes.length === 0) return controlled;
+  for (const tr of sceneTracks) {
+    if (!tr.entries || tr.entries.length === 0) continue;
+    const entry = tr.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
+    if (!entry) continue;
+    const scene = scenes.find(sc => sc.id === entry.sceneId);
+    if (!scene || !scene.channels) { prioLog('scene-track: scène introuvable', entry.sceneId, 'lib=', scenes.length, 'ct=', currentTime.toFixed(2)); continue; }
+    const addrs = new Set<number>(Object.keys(scene.channels).map(Number));
+    const targets: string[] = [];
+    for (const pf of patchedFixtures) {
+      for (let a = pf.startAddress; a < pf.startAddress + pf.channelCount; a++) {
+        if (addrs.has(a)) { targets.push(pf.id); break; }
+      }
+    }
+    if (targets.length === 0) {
+      // Aucun recouvrement de canaux (scène virtuelle) : on ne force rien,
+      // contrairement à un show qui pilote tout son contenu.
+      continue;
+    }
+    for (const fid of targets) {
+      const pf = patchedFixtures.find(p => p.id === fid);
+      if (!pf) continue;
+      const perFix: Record<number, number> = {};
+      for (const [addrStr, raw] of Object.entries(scene.channels)) {
+        const a = Number(addrStr);
+        if (a >= pf.startAddress && a < pf.startAddress + pf.channelCount) {
+          const v = Number(raw);
+          perFix[a] = Math.max(0, Math.min(255, Math.round(Number.isFinite(v) ? v : 0)));
+        }
+      }
+      if (Object.keys(perFix).length > 0) controlled.set(fid, perFix);
     }
   }
   return controlled;
@@ -487,6 +564,7 @@ export function useDmxPlayback(options: {
   scenesRef?: React.MutableRefObject<Array<{ id: string; channels: Record<number, number> }>>; // Saved scenes (for chaser steps)
   showTracksRef?: React.MutableRefObject<ShowTrackRef[] | null>; // Show track takeover (full show over autoscript)
   showsRef?: React.MutableRefObject<Array<{ id: string; name?: string; duration: number; tracks: Array<{ type: string; items: Array<{ startTime: number; duration: number; resourceId: string; fadeIn?: number; fadeOut?: number }>; muted?: boolean }> }>>;
+  sceneTracksRef?: React.MutableRefObject<SceneTrackRef[] | null>; // Scene track takeover (static scene config on its fixtures)
   disabledFixturesRef?: React.MutableRefObject<Set<string>>; // Disabled fixture IDs
   fixturePositionsRef?: React.MutableRefObject<Record<string, { x: number; y: number; h?: number }>>; // For stage-aware pan/tilt
   panTiltLimitsRef?: React.MutableRefObject<{ pan: number; tilt: number; perFixture?: Record<string, { pan: number; tilt: number }> }>; // DMX half-amplitude limits for autoscript movement (128 = full)
@@ -496,7 +574,7 @@ export function useDmxPlayback(options: {
   forceDropRef?: React.MutableRefObject<boolean>; // Force next tick to use drop parameters
   arbiterSource?: string; // Output-arbiter source id this engine writes as (default 'quickshow')
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,showTracksRef,showsRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,panTiltLimitsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,showTracksRef,showsRef,sceneTracksRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,panTiltLimitsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource}=options;
   const arbSource = arbiterSource ?? 'quickshow';
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
@@ -857,10 +935,61 @@ export function useDmxPlayback(options: {
             patchedFixturesRef.current,
             fixtureGroupsRef?.current || [],
           );
-          nextCueDmx=computeDmxForCue(
-            nextCue,patchedFixturesRef.current,fixtureDefs,universes as any,tierMultipliers,ftoSnap,
-            colorTrackColors,strobeOverridesEarly,dimmerOverrides,disabledFixturesRef?.current,fixturePositions,choSnap
-          );
+          // Show + Scene takeovers included in the crossfade snapshot too, so the
+          // blended frame keeps the section channels instead of popping. Same
+          // priority as the live engine on shared fixtures: chaser < show < scene.
+          let mergedSnap: Map<string, Record<number, number>> | null =
+            choSnap.size > 0 ? new Map(choSnap) : null;
+          const mergeSnapCtl = (src: Map<string, Record<number, number>>) => {
+            if (src.size === 0) return;
+            if (!mergedSnap) mergedSnap = new Map();
+            for (const [fid, cmap] of src.entries()) {
+              const existing = mergedSnap.get(fid);
+              if (!existing) { mergedSnap.set(fid, cmap); continue; }
+              const out: Record<number, number> = { ...existing };
+              for (const [a, v] of Object.entries(cmap)) out[Number(a)] = v;
+              mergedSnap.set(fid, out);
+            }
+          };
+          if (showTracksRef?.current && showsRef?.current && scenesRef?.current) {
+            try {
+              const showSnap = computeShowTrackOverrides(
+                showTracksRef.current as any,
+                showsRef.current as any,
+                scenesRef.current as any,
+                chasersRef?.current as any || [],
+                ct,
+                patchedFixturesRef.current,
+                fixtureGroupsRef?.current || [],
+              );
+              mergeSnapCtl(showSnap);
+            } catch (e) { /* show snapshot failed; keep the previous snapshot */ }
+          }
+          if (sceneTracksRef?.current && scenesRef?.current) {
+            try {
+              const sceneSnap = computeSceneTrackOverrides(
+                sceneTracksRef.current,
+                scenesRef.current as any,
+                ct,
+                patchedFixturesRef.current,
+                fixtureGroupsRef?.current || [],
+              );
+              if (sceneSnap.size > 0) {
+                // Scene runs last in the live tick → it wins on shared channels.
+                mergeSnapCtl(sceneSnap);
+                nextCueDmx=computeDmxForCue(
+                  nextCue,patchedFixturesRef.current,fixtureDefs,universes as any,tierMultipliers,ftoSnap,
+                  colorTrackColors,strobeOverridesEarly,dimmerOverrides,disabledFixturesRef?.current,fixturePositions,mergedSnap
+                );
+              }
+            } catch (e) { /* scene snapshot failed; keep the previous snapshot */ }
+          }
+          if (nextCueDmx===null) {
+            nextCueDmx=computeDmxForCue(
+              nextCue,patchedFixturesRef.current,fixtureDefs,universes as any,tierMultipliers,ftoSnap,
+              colorTrackColors,strobeOverridesEarly,dimmerOverrides,disabledFixturesRef?.current,fixturePositions,mergedSnap ?? choSnap
+            );
+          }
         }catch(e){crossfadeT=0;nextCueDmx=null;console.warn('[crossfade] computeDmxForCue failed, skipping:',e);}
       }
 
@@ -936,6 +1065,78 @@ export function useDmxPlayback(options: {
           // chaserCtlFrame ready
         }
       } catch { chaserCtlFrame = new Map<string, Record<number, number>>(); }
+
+      // Show + Scene takeovers, also computed ONCE per frame. They are re-applied
+      // as the FINAL write per universe (after blend/fade) so the sections take
+      // precedence over the autoscript on every channel they define.
+      let showCtlFrame = new Map<string, Record<number, number>>();
+      try {
+        if (showTracksRef?.current && showsRef?.current && scenesRef?.current) {
+          showCtlFrame = computeShowTrackOverrides(
+            showTracksRef.current as any,
+            showsRef.current as any,
+            scenesRef.current as any,
+            chasersRef?.current as any || [],
+            ct,
+            patchedFixturesRef.current,
+            fixtureGroupsRef?.current || [],
+          );
+        }
+      } catch { showCtlFrame = new Map<string, Record<number, number>>(); }
+      let sceneCtlFrame = new Map<string, Record<number, number>>();
+      try {
+        if (sceneTracksRef?.current && scenesRef?.current) {
+          sceneCtlFrame = computeSceneTrackOverrides(
+            sceneTracksRef.current,
+            scenesRef.current as any,
+            ct,
+            patchedFixturesRef.current,
+            fixtureGroupsRef?.current || [],
+          );
+        }
+      } catch { sceneCtlFrame = new Map<string, Record<number, number>>(); }
+
+      // Debug périodique : dump ~4/s avec le flag (window.__LM_DEBUG_PRIO__=true ou
+      // localStorage lmPrio=1), et automatiquement ~1/2s (sans flag) dès qu'il y a
+      // des entrées de pistes ou un takeover actif — pour que le test soit toujours
+      // observable. Sans pistes ni takeover : silence total.
+      const debugPrioOn =
+        (window as any).__LM_DEBUG_PRIO__ === true ||
+        (typeof localStorage !== 'undefined' && localStorage.getItem('lmPrio') === '1');
+      const every = (tick as any)._dlog = ((tick as any)._dlog ?? 0) + 1;
+      const trackEntries = (ref: any) => (ref?.current ?? []).reduce((n: number, t: any) => n + (t.entries?.length || 0), 0);
+      const hasTrackActivity =
+        trackEntries(sceneTracksRef) + trackEntries(chaserTracksRef) + trackEntries(showTracksRef) > 0 ||
+        chaserCtlFrame.size + showCtlFrame.size + sceneCtlFrame.size > 0;
+      if ((debugPrioOn && every % 15 === 0) || (hasTrackActivity && every % 120 === 0)) {
+        const sample = (map: Map<string, Record<number, number>>) => {
+          if (map.size === 0) return '-';
+          let out = '';
+          let n = 0;
+          for (const [fid, vals] of map.entries()) {
+            const chs = Object.keys(vals).map(Number).sort((a, b) => a - b);
+            out += (out ? ' | ' : '') + fid + ':[' + chs.slice(0, 6).join(',') + (chs.length > 6 ? '…+' + (chs.length - 6) : '') + ']';
+            if (++n >= 3) break;
+          }
+          return out;
+        };
+        console.info(
+          '[priorité] ct=' + ct.toFixed(2) +
+          ' | tracks(chaser=' + (chaserTracksRef?.current?.length ?? '?') +
+          ' scene=' + (sceneTracksRef?.current?.length ?? '?') +
+          ' show=' + (showTracksRef?.current?.length ?? '?') + ')' +
+          ' | entries(chaser=' + (trackEntries(chaserTracksRef)) +
+          ' scene=' + (trackEntries(sceneTracksRef)) + ')' +
+          ' | lib(scenes=' + (scenesRef?.current?.length ?? '?') +
+          ' chasers=' + (chasersRef?.current?.length ?? '?') +
+          ' shows=' + (showsRef?.current?.length ?? '?') + ')' +
+          ' | active(chaser=' + chaserCtlFrame.size +
+          ' show=' + showCtlFrame.size +
+          ' scene=' + sceneCtlFrame.size + ')',
+          sceneCtlFrame.size ? 'scene=' + sample(sceneCtlFrame) : '',
+          showCtlFrame.size ? 'show=' + sample(showCtlFrame) : '',
+        );
+      }
 
       for(const[uniIdx,fixtures]of analysis.byUniverse.entries()){
         const uid=analysis.uniIds[uniIdx];if(!uid)continue;
@@ -1499,64 +1700,6 @@ const _FXPROF: Record<string, [number, number, number, number]> = {
           }
         }
 
-        // Chaser track: merge chaser-driven channels
-        if (chaserTracksRef?.current && chasersRef?.current && scenesRef?.current) {
-          try {
-            const chaserCtl = computeChaserTrackOverrides(
-              chaserTracksRef.current,
-              chasersRef.current,
-              scenesRef.current,
-              ct,
-              patchedFixturesRef.current,
-              fixtureGroupsRef?.current || [],
-            );
-            if (chaserCtl.size > 0) {
-              for (const fa of fixtures) {
-                const pfx = fa.fixture;
-                const cmap = chaserCtl.get(pfx.id);
-                if (!cmap) continue;
-                // Merge chaser: only overwrite channels the chaser actually drives, keep dimmer/track elsewhere
-                for (const addrStr in cmap) {
-                  const v = cmap[addrStr];
-                  const addr = Number(addrStr);
-                  if (addr >= pfx.startAddress && addr < pfx.startAddress + pfx.channelCount) chVals[addr] = v;
-                }
-              }
-            }
-          } catch (e) {
-            console.error('[chaserTrack] takeover error:', e);
-          }
-        }
-
-        // Show track: show complet qui prend le dessus sur l'autoscript (priorité la plus haute)
-        if (showTracksRef?.current && showsRef?.current && scenesRef?.current) {
-          try {
-            const showCtl = computeShowTrackOverrides(
-              showTracksRef.current as any,
-              showsRef.current as any,
-              scenesRef.current as any,
-              chasersRef?.current as any || [],
-              ct,
-              patchedFixturesRef.current,
-              fixtureGroupsRef?.current || [],
-            );
-            if (showCtl.size > 0) {
-              for (const fa of fixtures) {
-                const pfx = fa.fixture;
-                const cmap = showCtl.get(pfx.id);
-                if (!cmap) continue;
-                for (const addrStr in cmap) {
-                  const v = cmap[addrStr];
-                  const addr = Number(addrStr);
-                  if (addr >= pfx.startAddress && addr < pfx.startAddress + pfx.channelCount) chVals[addr] = v;
-                }
-              }
-            }
-          } catch (e) {
-            console.error('[showTrack] takeover error:', e);
-          }
-        }
-
         // Crossfade blend — skip si EFX track actif (sinon l'EFX stutter à chaque cue)
         if(crossfadeT>0&&nextCueDmx && !(efxPtOverrides && efxPtOverrides.size>0)){
           const nextUni=nextCueDmx.find(n=>n.universe===uniIdx);
@@ -1576,6 +1719,62 @@ const _FXPROF: Record<string, [number, number, number, number]> = {
         if (fadeFactor < 1.0) {
           for (const chStr in chVals) {
             chVals[Number(chStr)] = Math.round(chVals[Number(chStr)] * fadeFactor);
+          }
+        }
+
+        // ── Takeover final (dernière écriture, après blend + fade) ──
+        // Les sections (chaser < show < scene) reçoivent leurs canaux en dernier :
+        // rien ne peut ré-injecter l'autoscript par-dessus.
+        const mergeFrame = (map: Map<string, Record<number, number>>) => {
+          if (map.size === 0) return;
+          for (const fa of fixtures) {
+            const pfx = fa.fixture;
+            const cmap = map.get(pfx.id);
+            if (!cmap) continue;
+            const base = pfx.startAddress, limit = base + pfx.channelCount;
+            for (const addrStr in cmap) {
+              const addr = Number(addrStr);
+              if (addr >= base && addr < limit) chVals[addr] = cmap[addrStr];
+            }
+          }
+        };
+        mergeFrame(chaserCtlFrame);
+        mergeFrame(showCtlFrame);
+        mergeFrame(sceneCtlFrame);
+
+        // ── Freeze pan/tilt non couverts ──
+        // Une scène ne fige que les canaux qu'elle contient : sans ça, les axes
+        // pan/tilt que la section n'a pas capturés continuent d'être animés par
+        // l'autoscript (→ « la couleur se pose mais ça bouge toujours »). Dès
+        // qu'une section contrôle une fixture, on verrouille donc ses pan/tilt :
+        // valeur de la section si elle les définit, sinon valeur d'entrée figée
+        // pendant toute la durée de la section (latch relâché à la fin).
+        if (chaserCtlFrame.size + showCtlFrame.size + sceneCtlFrame.size > 0) {
+          const takeFids = new Set<string>();
+          for (const m of [chaserCtlFrame, showCtlFrame, sceneCtlFrame]) for (const k of m.keys()) takeFids.add(k);
+          if (takeFids.size > 0) {
+            let lock = (tick as any)._ptLock as Map<string, Map<number, number>> | undefined;
+            if (!lock) { lock = new Map(); (tick as any)._ptLock = lock; }
+            for (const k of lock.keys()) if (!takeFids.has(k)) lock.delete(k);
+            for (const fa of fixtures) {
+              const fid = fa.fixture.id;
+              if (!takeFids.has(fid)) continue;
+              const base = fa.fixture.startAddress;
+              const pmC = chaserCtlFrame.get(fid), pmS = showCtlFrame.get(fid), pmN = sceneCtlFrame.get(fid);
+              const ctrl = (pmC || pmS || pmN) ? { ...(pmC || {}), ...(pmS || {}), ...(pmN || {}) } : undefined;
+              const addrs: number[] = [];
+              for (const o of fa.panOffsets) addrs.push(base + o);
+              if (fa.panOffset !== null && !addrs.includes(base + fa.panOffset)) addrs.push(base + fa.panOffset);
+              for (const o of fa.tiltOffsets) addrs.push(base + o);
+              if (fa.tiltOffset !== null && !addrs.includes(base + fa.tiltOffset)) addrs.push(base + fa.tiltOffset);
+              for (const addr of addrs) {
+                if (ctrl && ctrl[addr] !== undefined) continue; // la section pilote cet axe
+                let fm = lock.get(fid);
+                if (!fm) { fm = new Map(); lock.set(fid, fm); }
+                if (!fm.has(addr)) fm.set(addr, chVals[addr] ?? 128);
+                chVals[addr] = fm.get(addr)!;
+              }
+            }
           }
         }
 

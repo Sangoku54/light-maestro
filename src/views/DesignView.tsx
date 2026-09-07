@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { clampRect } from '../components/clampedpopup';
 import { generateAllThumbnails, getVariantsForCategory, type ThumbnailVariant } from '../utils/fixtureThumbnails';
 import { useTranslation } from 'react-i18next';
-import { Plus, Play, Pause, Square, Trash2, GripVertical, Search, X, Edit2, Check, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Zap, Save, FolderPlus, Maximize2 } from 'lucide-react';
+import { Plus, Play, Pause, Square, Trash2, GripVertical, Search, X, Edit2, Check, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Zap, Save, FolderPlus, Maximize2, Type } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { useShowStore, getFixtureColor, type PatchedFixture, type FixtureGroup, type SavedScene, type SavedChaser, type ChaserStep, type SavedCueList, type CueListCue, type ShowUniverse, type StageScene } from '../stores/showStore';
 import { normalizeRoster, rosterFromBandConfig, type MusicianRoster } from '../utils/musicians';
@@ -230,7 +230,7 @@ const ShowWith3D: React.FC = () => {
       </div>
       {show3D && !showFloating3D && (
         <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-0 h-full relative ml-2">
-          <Stage3D musicians={showMusicians} stageScene={showStageScene} onMusiciansChange={handleShowMusiciansChange} onStageSceneChange={handleShowStageSceneChange} />
+          <Stage3D hideFixturePanel musicians={showMusicians} stageScene={showStageScene} onMusiciansChange={handleShowMusiciansChange} onStageSceneChange={handleShowStageSceneChange} />
           <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1">
             <button onClick={() => setShowFloating3D(true)} title={t('stage3D.detach')} className="flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white text-[11px] font-medium shadow-lg transition-all"><Maximize2 size={12} /> Détacher</button>
             <button onClick={() => setShow3D(false)} title={t('stage3D.hide')} className="w-7 h-7 rounded-md bg-gray-700/80 hover:bg-gray-600 text-white flex items-center justify-center"><X size={12} /></button>
@@ -246,7 +246,7 @@ const ShowWith3D: React.FC = () => {
               <button onClick={() => setShowFloating3D(false)} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
             </div>
           </div>
-          <div className="flex-1 min-h-0 relative"><Stage3D musicians={showMusicians} stageScene={showStageScene} onMusiciansChange={handleShowMusiciansChange} onStageSceneChange={handleShowStageSceneChange} /><div className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize" onMouseDown={handleFloat3DResizeStart} style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }} /></div>
+          <div className="flex-1 min-h-0 relative"><Stage3D hideFixturePanel musicians={showMusicians} stageScene={showStageScene} onMusiciansChange={handleShowMusiciansChange} onStageSceneChange={handleShowStageSceneChange} /><div className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize" onMouseDown={handleFloat3DResizeStart} style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }} /></div>
         </div>
       )}
       {!show3D && (
@@ -905,6 +905,26 @@ const SceneList: React.FC = () => {
           <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider truncate">
             {ctxMenu.sceneName}
           </div>
+          <button
+            onClick={() => {
+              (window as any).__lm_renameScene = true;
+              setSelectedSceneId(ctxMenu.sceneId);
+              setCtxMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-200 transition-colors flex items-center gap-2"
+          >
+            <Type size={12} /> {t('design.scenes.rename')}
+          </button>
+          <button
+            onClick={() => {
+              setSelectedSceneId(ctxMenu.sceneId);
+              setCtxMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-200 transition-colors flex items-center gap-2"
+          >
+            <Edit2 size={12} /> {t('design.scenes.editScene')}
+          </button>
+          <div className="my-1 border-t border-gray-800" />
           <div className="px-3 py-1 text-[10px] text-gray-600">{t('design.scenes.moveToFolder')}</div>
           {folderOptions.map((fo) => (
             <button
@@ -1000,6 +1020,9 @@ const SceneEditor: React.FC = () => {
   // Get selected scene ID from the SceneList via window hack
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
 
+  // Ref for auto-focus on the scene name input when renaming via context menu
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
   // Listen for scene selection
   useEffect(() => {
     const check = () => {
@@ -1009,6 +1032,15 @@ const SceneEditor: React.FC = () => {
     const interval = setInterval(check, 100);
     return () => clearInterval(interval);
   }, [selectedSceneId]);
+
+  // Auto-focus the scene name input when a rename is triggered from the context menu
+  useEffect(() => {
+    if ((window as any).__lm_renameScene) {
+      (window as any).__lm_renameScene = false;
+      const timer = setTimeout(() => renameInputRef.current?.focus(), 100);
+      return () => clearTimeout(timer);
+    }
+  });
 
   const scene = scenes.find((s) => s.id === selectedSceneId) || null;
   const sceneFolders = useShowStore((s) => s.sceneFolders);
@@ -1387,14 +1419,24 @@ const SceneEditor: React.FC = () => {
 
   const activeChannelCount = Object.values(editChannels).filter((v) => v > 0).length;
 
+  // Project avec 150 fixtures : n'afficher que les fixtures de la scène par
+  // défaut (involvedOnly), avec un bouton pour tout montrer quand on veut en
+  // ajouter une.
+  const [involvedOnly, setInvolvedOnly] = useState(true);
+  const touchedSet = useMemo(() => {
+    if (!scene) return new Set<string>();
+    return new Set<string>(patchedFixtures.filter((pf) => sceneTouchesFixture(scene, pf)).map((f) => f.id));
+  }, [scene, patchedFixtures]);
+
   // Group fixtures by tier, sorted by name
   const fixturesByTier = React.useMemo(() => {
-    const map = groupByTier(patchedFixtures);
+    const base = (involvedOnly && scene && touchedSet.size > 0) ? patchedFixtures.filter((f) => touchedSet.has(f.id)) : patchedFixtures;
+    const map = groupByTier(base);
     for (const tierGroup of Object.keys(map)) {
       map[tierGroup].sort((a, b) => a.name.localeCompare(b.name));
     }
     return map;
-  }, [patchedFixtures]);
+  }, [patchedFixtures, involvedOnly, scene, touchedSet]);
 
   const TIER_SECTION_META: Record<string, { icon: string }> = {
     primary: { icon: '🎯' },
@@ -1422,6 +1464,7 @@ const SceneEditor: React.FC = () => {
       <div className="flex items-center gap-3">
         <input
           type="text"
+          ref={renameInputRef}
           value={editName}
           onChange={(e) => { setEditName(e.target.value); if (scene) updateScene(scene.id, { name: e.target.value }); }}
           className="flex-1 bg-transparent text-xl font-bold text-white outline-none border-b border-transparent hover:border-gray-700 focus:border-purple-500/50 transition-colors pb-0.5"
@@ -1511,7 +1554,36 @@ const SceneEditor: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4">
-          {TIER_ORDER.map((tierGroup) => {
+          {/* Filter: only the scene's fixtures, or everything (to add one) */}
+          <div className="flex items-center gap-2 text-[10px] text-gray-500">
+            <span>Fixtures de la scène : {touchedSet.size}/{patchedFixtures.length}</span>
+            <button
+              onClick={() => setInvolvedOnly((v) => !v)}
+              className={`px-2 py-0.5 rounded border transition-colors ${
+                involvedOnly ? 'bg-purple-600/20 border-purple-500/40 text-purple-300' : 'bg-gray-800/50 border-gray-700 text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              {involvedOnly ? 'Scène seule' : 'Toutes'}
+            </button>
+            {involvedOnly && scene && (
+              <select
+                value=""
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (!id) return;
+                  setInvolvedOnly(false);
+                  setExpandedFixtures((prev) => new Set(prev).add(id));
+                }}
+                className="bg-gray-800/60 border border-gray-700 rounded text-[10px] text-gray-300 px-1.5 py-0.5 outline-none focus:border-purple-500/50"
+              >
+                <option value="" disabled>+ Ajouter une fixture…</option>
+                {patchedFixtures.filter((pf) => !touchedSet.has(pf.id)).sort((a, b) => a.name.localeCompare(b.name)).map((pf) => (
+                  <option key={pf.id} value={pf.id}>{pf.name}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        {TIER_ORDER.map((tierGroup) => {
             const tierFixtures = fixturesByTier[tierGroup] || [];
             if (tierFixtures.length === 0) return null;
             return (
@@ -1537,6 +1609,7 @@ const SceneEditor: React.FC = () => {
         <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-0 h-full relative">
           <Stage3D
             enableEfxApply
+            hideFixturePanel
             musicians={musicians}
             stageScene={stageScene}
             onMusiciansChange={(roster) => {
@@ -1583,6 +1656,7 @@ const SceneEditor: React.FC = () => {
           <div className="flex-1 min-h-0 relative">
             <Stage3D
               enableEfxApply
+              hideFixturePanel
               musicians={musicians}
               stageScene={stageScene}
               onMusiciansChange={(roster) => {
@@ -2771,6 +2845,9 @@ const ChaserEditor: React.FC = () => {
                       <span className="text-[10px] text-gray-500 font-mono w-5 shrink-0">{idx + 1}</span>
                       <span className="text-xs text-gray-200 truncate flex-1 min-w-0" title={scn?.name || 'N/A'}>
                         {scn?.name || '(no scene)'}
+                      </span>
+                      <span className="text-[9px] text-gray-500 shrink-0" title="Fixtures incluses dans cette scène">
+                        {scn ? patchedFixtures.filter((pf) => sceneTouchesFixture(scn, pf)).length : 0} fx
                       </span>
                       <div className="flex gap-0.5 shrink-0">
                         <button
@@ -4488,7 +4565,7 @@ const EFXEditor: React.FC = () => {
       </div>
       {show3D && !showFloating3D && (
         <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-0 h-full relative ml-2">
-          <Stage3D />
+          <Stage3D hideFixturePanel />
           <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1">
             <button onClick={() => setShowFloating3D(true)} title={t('stage3D.detach')} className="flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white text-[11px] font-medium shadow-lg transition-all"><Maximize2 size={12} /> Détacher</button>
             <button onClick={() => setShow3D(false)} title={t('stage3D.hide')} className="w-7 h-7 rounded-md bg-gray-700/80 hover:bg-gray-600 text-white flex items-center justify-center"><X size={12} /></button>
@@ -4504,7 +4581,7 @@ const EFXEditor: React.FC = () => {
               <button onClick={() => setShowFloating3D(false)} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
             </div>
           </div>
-          <div className="flex-1 min-h-0 relative"><Stage3D /><div className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize" onMouseDown={handleFloat3DResizeStart} style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }} /></div>
+          <div className="flex-1 min-h-0 relative"><Stage3D hideFixturePanel /><div className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize" onMouseDown={handleFloat3DResizeStart} style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }} /></div>
         </div>
       )}
       {!show3D && (

@@ -323,6 +323,101 @@ interface Fixture3D {
 
 // ─── Component ────────────────────────────────────────────────
 
+/**
+ * Snapshot de pose complète pour « Rec Scene » / « Rec Show » : fusionne les
+ * canaux touchés du programmer (prioritaires) avec l'état DMX RÉEL en cours de
+ * chaque fixture (dernier buffer poussé → pan/tilt/dimmer/couleurs actuels).
+ * Sans ça, une scène ne figeait que les canaux TOUCHÉS (faders actionnés) :
+ * le tilt/l'axe non enregistré continuait d'être animé par l'autoscript.
+ * Une fixture entièrement éteinte (tout à 0) n'est pas capturée → la section
+ * la laisse dans son état par ailleurs (évite un black-out forcé).
+ */
+function livePoseChannels(prog: Record<number, number>, f3dMap: Map<string, any> | undefined): Record<number, number> {
+  const channels = { ...prog };
+  const state = useShowStore.getState();
+  const fixtures = state.patchedFixtures;
+  const universes = state.universes;
+  const positions = state.fixturePositions as Record<string, { heading?: number; tilt?: number }> | undefined;
+  // 1. Pose visuelle (tare fixturePositions) → DMX pour les axes non touchés au
+  //    programmer. Le drag « normal » et les sliders Pan/Tilt tare sont VISUELS
+  //    uniquement (ne touchent pas le programmer) : c'est ici qu'ils deviennent
+  //    réellement capturables. Conversion inverse du rendu 3D
+  //    (tilt : DMX 0..255 = −90°..+90° relatif, pan : DMX 128 = centre sur 360°).
+  for (const pf of fixtures ?? []) {
+    const pos = positions?.[pf.id];
+    const cm = f3dMap?.get(pf.id)?.channelMap;
+    if (!pos || !cm) continue;
+    const panOffsets: number[] = cm.panOffsets?.length ? cm.panOffsets : (cm.panOffset !== null && cm.panOffset !== undefined ? [cm.panOffset] : []);
+    const tiltOffsets: number[] = cm.tiltOffsets?.length ? cm.tiltOffsets : (cm.tiltOffset !== null && cm.tiltOffset !== undefined ? [cm.tiltOffset] : []);
+    if (Number.isFinite(pos.heading) && pos.heading !== 0 && panOffsets.length > 0) {
+      const pan = Math.max(0, Math.min(255, Math.round(128 + ((pos.heading - 180) / 270) * 128)));
+      for (const off of panOffsets) if (channels[pf.startAddress + off] === undefined) channels[pf.startAddress + off] = pan;
+    }
+    if (Number.isFinite(pos.tilt) && pos.tilt !== 0 && tiltOffsets.length > 0) {
+      const tilt = Math.max(0, Math.min(255, Math.round(128 + (pos.tilt / 90) * 128)));
+      for (const off of tiltOffsets) if (channels[pf.startAddress + off] === undefined) channels[pf.startAddress + off] = tilt;
+    }
+  }
+  // 2. État DMX RÉEL (dernier buffer poussé) pour compléter le reste des canaux.
+  const channelData = useAppStore.getState().dmx?.channelData as Record<number, Uint8Array> | undefined;
+  for (const pf of fixtures ?? []) {
+    const uniIdx = universes.findIndex((u) => String(u.id) === String(pf.universeId));
+    if (uniIdx < 0) continue;
+    const buf = channelData?.[uniIdx];
+    if (!buf) continue;
+    const range: Record<number, number> = {};
+    let anyVal = false;
+    for (let a = pf.startAddress; a < pf.startAddress + pf.channelCount && a <= 512; a++) {
+      const v = buf[a - 1] ?? 0;
+      if (v > 0) anyVal = true;
+      range[a] = v;
+    }
+    if (!anyVal) continue;
+    for (const aStr of Object.keys(range)) {
+      const addr = Number(aStr);
+      if (channels[addr] === undefined) channels[addr] = range[addr];
+    }
+  }
+  return channels;
+}
+
+/**
+ * Faders Pan/Tilt réels de la modale 3D : écrivent DIRECTEMENT sur le
+ * programmer, aux adresses DMX réelles de la fixture (panOffset/panOffsets
+ * et tiltOffset/tiltOffsets), comme le drag « mode Direct ». C'est ce qui
+ * permet à « Rec Scene » / « Rec Show » de capturer la position réelle.
+ * Souscrit réactivement au programmer → valeurs à jour en direct.
+ */
+function DirectPTFaders({ panAddrs, tiltAddrs }: { panAddrs: number[]; tiltAddrs: number[] }) {
+  const chans = useProgrammerStore((s) => s.channels);
+  const setCh = useProgrammerStore((s) => s.setChannel);
+  const hasPan = panAddrs.length > 0;
+  const hasTilt = tiltAddrs.length > 0;
+  if (!hasPan && !hasTilt) return null;
+  const pan = hasPan ? (chans[panAddrs[0]] ?? 128) : 128;
+  const tilt = hasTilt ? (chans[tiltAddrs[0]] ?? 128) : 128;
+  const setAll = (addrs: number[], v: number) => {
+    const unique = Array.from(new Set(addrs));
+    for (const a of unique) setCh(a, Math.max(0, Math.min(255, Math.round(v))));
+  };
+  const row = (label: string, val: number, addrs: number[]) => (
+    <div className="space-y-1">
+      <div className="flex justify-between text-[10px]"><span className="text-gray-500">{label}</span><span className="text-violet-300 font-mono">{val}</span></div>
+      <div className="flex items-center gap-1">
+        <button onClick={() => setAll(addrs, val - 1)} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+        <input type="range" min={0} max={255} value={val} onChange={(e) => setAll(addrs, Number(e.target.value))} className="flex-1 h-1 accent-violet-500 cursor-pointer" />
+        <button onClick={() => setAll(addrs, val + 1)} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+      </div>
+    </div>
+  );
+  return (
+    <>
+      {hasPan && row('Pan', pan, panAddrs)}
+      {hasTilt && row('Tilt', tilt, tiltAddrs)}
+    </>
+  );
+}
+
 export const Stage3D: React.FC<{
   disabledFixtures?: Set<string>;
   musicians?: MusicianRoster;
@@ -338,7 +433,12 @@ export const Stage3D: React.FC<{
   onView3DChange?: (state: View3DState) => void;
   /** N'affiche l'option EFX Snapshot que si true — uniquement onglet Scènes (Design) */
   enableEfxApply?: boolean;
-}> = ({ disabledFixtures, musicians: musiciansProp, stageScene: stageSceneProp, onMusiciansChange, onStageSceneChange, view3D: view3DProp, onView3DChange, enableEfxApply }) => {
+  /** Cache le panneau modal d'édition de fixture (fixé au centre, recouvre la
+   *  vue) pendant une modification de scène/show/chaser — seul l'aperçu 3D
+   *  reste visible pour suivre les changements en direct. La sauvegarde se
+   *  fait alors via le bouton de la page, pas via la 3D. */
+  hideFixturePanel?: boolean;
+}> = ({ disabledFixtures, musicians: musiciansProp, stageScene: stageSceneProp, onMusiciansChange, onStageSceneChange, view3D: view3DProp, onView3DChange, enableEfxApply, hideFixturePanel }) => {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const disabledRef = useRef<Set<string>>(new Set());
@@ -2639,6 +2739,48 @@ export const Stage3D: React.FC<{
     try { (window as any).__lm_toast?.(`EFX "${efx.name}" appliqué à la scène — prévisualisation 3D à jour`, 'success'); } catch {}
   }, [effects, selectedEfxId, selectedFixtureId]);
 
+  // ── Rec Scène / Rec EFX / Rec Show — extraits du panneau modal pour être
+  //    réutilisables par la barre compacte affichée en mode édition
+  //    (hideFixturePanel) où l'on garde la vue 3D seule. ──
+  const handleRecSceneCb = useCallback(() => {
+    const prog = useProgrammerStore.getState().channels;
+    if (Object.keys(prog).length === 0) return;
+    const s = useShowStore.getState();
+    const scId = s.createScene(`Scene 3D ${s.scenes.length + 1}`);
+    s.updateScene(scId, { name: `Scene 3D ${s.scenes.length}`, channels: livePoseChannels(prog, fixturesRef.current), fadeIn: 0, fadeOut: 0, duration: 5000 });
+  }, []);
+
+  const handleRecEfxCb = useCallback(() => {
+    const prog = useProgrammerStore.getState().channels;
+    if (Object.keys(prog).length === 0) return;
+    if (!selectedFixture) return;
+    const f3d = fixturesRef.current.get(selectedFixture.id);
+    const pf = patchedFixtures.find((f) => f.id === selectedFixture.id);
+    const s = useShowStore.getState();
+    const panAddr = pf ? pf.startAddress + (f3d?.channelMap.panOffset ?? f3d?.channelMap.panOffsets?.[0] ?? 0) : 0;
+    const tiltAddr = pf ? pf.startAddress + (f3d?.channelMap.tiltOffset ?? f3d?.channelMap.tiltOffsets?.[0] ?? 0) : 0;
+    const pan = prog[panAddr] ?? 128; const tilt = prog[tiltAddr] ?? 128;
+    const xOff = Math.round(((pan - 128) / 128) * 120);
+    const yOff = Math.round(((tilt - 128) / 128) * 120);
+    const id = s.createEffect(`EFX 3D ${s.effects.length + 1}`);
+    s.updateEffect(id, { name: `EFX 3D ${s.effects.length}`, pattern: 'Circle', width: 1, height: 1, rotation: 0, speed: 0.5, xOffset: xOff, yOffset: yOff, fixtureIds: selectedFixture ? [selectedFixture.id] : [] });
+  }, [selectedFixture, patchedFixtures]);
+
+  const handleRecShowCb = useCallback(() => {
+    const prog = useProgrammerStore.getState().channels;
+    if (Object.keys(prog).length === 0) return;
+    const s = useShowStore.getState();
+    const scId = s.createScene(`Scene 3D ${s.scenes.length + 1}`);
+    s.updateScene(scId, { name: `Scene 3D ${s.scenes.length}`, channels: livePoseChannels(prog, fixturesRef.current), fadeIn: 0, fadeOut: 0, duration: 5000 });
+    const shId = s.createShow(`Show 3D ${s.shows.length + 1}`);
+    // getState() ci-dessus est un snapshot AVANT createShow : les
+    // références s.shows/s.scenes sont périmées. Re-snapshoter pour
+    // retrouver le show créé et lui attacher sa piste.
+    const fresh = useShowStore.getState();
+    const show = fresh.shows.find((sh) => sh.id === shId);
+    if (show) fresh.updateShow(shId, { tracks: [{ id: `trk-${Date.now()}`, name: 'Scene Track', type: 'scene', items: [{ id: `tmi-${Date.now()}`, startTime: 0, duration: 5000, resourceId: scId, fadeIn: 0, fadeOut: 0, name: fresh.scenes.find((sc) => sc.id === scId)?.name || 'Scene 3D' }], muted: false, solo: false }] as any });
+  }, []);
+
   // ── Render ──────────────────────────────────────────
   const filteredFixtures = fixtureSearch.trim()
     ? patchedFixtures.filter((f) =>
@@ -3001,8 +3143,13 @@ export const Stage3D: React.FC<{
           </div>
         )}
 
+        {/* Barre compacte Rec — mode édition (hideFixturePanel) : aucune modale
+            au centre, la vue 3D reste seule pour suivre les modifications. Les
+            boutons Rec restent accessibles pour capturer la pose affichée.
+            → déplacés dans la status bar pour ne pas recouvrir la scène. */}
+
         {/* Selected fixture editor - floating panel, draggable by header only */}
-        {selectedFixture && selectedPos && (
+        {selectedFixture && selectedPos && !hideFixturePanel && (
           <div
             className="fixed bg-[#12121a] border border-purple-500/30 rounded-xl shadow-2xl min-w-[240px] max-h-[85vh] overflow-y-auto"
             style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
@@ -3242,6 +3389,17 @@ export const Stage3D: React.FC<{
                     }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
                   </div>
                 </div>
+                {selectedFixture && (() => {
+                  const f3d = fixturesRef.current.get(selectedFixture.id);
+                  const pf = patchedFixtures.find(f=>f.id===selectedFixture.id);
+                  if (!f3d || !pf) return null;
+                  const cm = f3d.channelMap;
+                  const panAddrs: number[] = (cm.panOffsets ?? []).map(o => pf.startAddress + o);
+                  if (cm.panOffset !== null && !panAddrs.includes(pf.startAddress + cm.panOffset)) panAddrs.push(pf.startAddress + cm.panOffset);
+                  const tiltAddrs: number[] = (cm.tiltOffsets ?? []).map(o => pf.startAddress + o);
+                  if (cm.tiltOffset !== null && !tiltAddrs.includes(pf.startAddress + cm.tiltOffset)) tiltAddrs.push(pf.startAddress + cm.tiltOffset);
+                  return <DirectPTFaders panAddrs={panAddrs} tiltAddrs={tiltAddrs} />;
+                })()}
                 <div className="flex gap-1">
                   {['#ff0000','#00ff00','#0000ff','#ffff00','#ffffff'].map(hex=>(
                     <button key={hex} onClick={()=>{
@@ -3281,30 +3439,9 @@ export const Stage3D: React.FC<{
                 </button>
                 <div className="text-[9px] text-gray-500">Drag sur la fixture en mode Direct = Pan/Tilt. Store pour créer Scene/EFX/Show.</div>
                 <div className="flex gap-1.5">
-                  <button onClick={()=>{
-                    const prog = useProgrammerStore.getState().channels;
-                    if (Object.keys(prog).length===0) return;
-                    const f3d = fixturesRef.current.get(selectedFixture!.id);
-                    const pf = patchedFixtures.find(f=>f.id===selectedFixture!.id);
-                    const s = useShowStore.getState();
-                    const panAddr = pf ? pf.startAddress + (f3d?.channelMap.panOffset ?? f3d?.channelMap.panOffsets?.[0] ?? 0) : 0;
-                    const tiltAddr = pf ? pf.startAddress + (f3d?.channelMap.tiltOffset ?? f3d?.channelMap.tiltOffsets?.[0] ?? 0) : 0;
-                    const pan = prog[panAddr] ?? 128; const tilt = prog[tiltAddr] ?? 128;
-                    const xOff = Math.round(((pan-128)/128)*120);
-                    const yOff = Math.round(((tilt-128)/128)*120);
-                    const id = s.createEffect(`EFX 3D ${s.effects.length+1}`);
-                    s.updateEffect(id, { name:`EFX 3D ${s.effects.length}`, pattern:'Circle', width:1, height:1, rotation:0, speed:0.5, xOffset:xOff, yOffset:yOff, fixtureIds: selectedFixture ? [selectedFixture.id] : [] });
-                  }} className="flex-1 py-1 rounded bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-medium hover:bg-cyan-600/30">Rec EFX</button>
-                  <button onClick={()=>{
-                    const prog = useProgrammerStore.getState().channels;
-                    if (Object.keys(prog).length===0) return;
-                    const s = useShowStore.getState();
-                    const scId = s.createScene(`Scene 3D ${s.scenes.length+1}`);
-                    s.updateScene(scId, { name:`Scene 3D ${s.scenes.length}`, channels:{...prog}, fadeIn:0, fadeOut:0, duration:0 });
-                    const shId = s.createShow(`Show 3D ${s.shows.length+1}`);
-                    const show = s.shows.find(sh=>sh.id===shId);
-                    if (show) s.updateShow(shId, { tracks:[{ id:`trk-${Date.now()}`, name:'Scene Track', type:'scene', items:[{ id:`tmi-${Date.now()}`, startTime:0, duration:5000, resourceId:scId, fadeIn:0, fadeOut:0, name:s.scenes.find(sc=>sc.id===scId)?.name || 'Scene 3D' }], muted:false, solo:false }] as any });
-                  }} className="flex-1 py-1 rounded bg-amber-600/20 text-amber-300 border border-amber-500/30 text-[10px] font-medium hover:bg-amber-600/30">Rec Show</button>
+                  <button onClick={handleRecSceneCb} className="flex-1 py-1 rounded bg-yellow-600/20 text-yellow-300 border border-yellow-500/30 text-[10px] font-medium hover:bg-yellow-600/30">Rec Scène</button>
+                  <button onClick={handleRecEfxCb} className="flex-1 py-1 rounded bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-medium hover:bg-cyan-600/30">Rec EFX</button>
+                  <button onClick={handleRecShowCb} className="flex-1 py-1 rounded bg-amber-600/20 text-amber-300 border border-amber-500/30 text-[10px] font-medium hover:bg-amber-600/30">Rec Show</button>
                 </div>
               </div>
 
@@ -3489,6 +3626,14 @@ export const Stage3D: React.FC<{
         <span className="w-px h-3 bg-gray-800" />
         <span>{patchedFixtures.length} fixtures</span>
         {selectedFixture && <><span className="w-px h-3 bg-gray-800" /><span className="text-purple-300">{selectedFixture.name}</span></>}
+        {hideFixturePanel && enableEfxApply && (
+          <>
+            <span className="w-px h-3 bg-gray-800" />
+            <button onClick={handleRecSceneCb} className="px-2 py-0.5 rounded bg-yellow-600/20 text-yellow-300 border border-yellow-500/30 text-[10px] font-medium hover:bg-yellow-600/30 transition-colors">Rec Scène</button>
+            <button onClick={handleRecEfxCb} className="px-2 py-0.5 rounded bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-medium hover:bg-cyan-600/30 transition-colors">Rec EFX</button>
+            <button onClick={handleRecShowCb} className="px-2 py-0.5 rounded bg-amber-600/20 text-amber-300 border border-amber-500/30 text-[10px] font-medium hover:bg-amber-600/30 transition-colors">Rec Show</button>
+          </>
+        )}
         <span className="flex-1" />
         <span className="hidden md:inline">Glisser = orbiter • Clic = sélectionner • Ctrl+clic = multi • Target = viser un point</span>
       </div>

@@ -10,6 +10,7 @@ import { useShowStore, type ShowData, type ShowTrack, type ShowTrackItem } from 
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from '../hooks/dmx-cues';
 import { sendChannelsToHardware } from '../utils/dmx-helpers';
 import { collectCustomFixtureDefs, importCustomFixtureDefs } from '../utils/custom-fixtures';
+import { sceneTouchesFixture } from '../utils/scene-fixtures';
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -1177,6 +1178,25 @@ export const ShowManager: React.FC = () => {
                       return item.name;
                     })();
 
+                    const fxCount = (() => {
+                      if (track.type === 'scene') {
+                        const sc = scenes.find((s) => s.id === item.resourceId);
+                        return sc ? patchedFixtures.filter((pf) => sceneTouchesFixture(sc, pf)).length : 0;
+                      }
+                      if (track.type === 'chaser') {
+                        const ch = chasers.find((c) => c.id === item.resourceId);
+                        if (!ch) return 0;
+                        const ids = new Set<string>();
+                        for (const st of ch.steps ?? []) {
+                          const sc = scenes.find((s) => s.id === st.sceneId);
+                          if (!sc) continue;
+                          for (const pf of patchedFixtures) if (sceneTouchesFixture(sc, pf)) ids.add(pf.id);
+                        }
+                        return ids.size;
+                      }
+                      return 0;
+                    })();
+
                     return (
                       <div
                         key={item.id}
@@ -1226,6 +1246,7 @@ export const ShowManager: React.FC = () => {
                         </div>
                         <div className="px-2 text-[8px] text-gray-500 select-none">
                           {fmtTime(item.fadeIn)} / {fmtTime(item.fadeOut)}
+                          {widthPx > 1 && fxCount > 0 ? ` · ${fxCount} fx` : ''}
                         </div>
 
                         {/* Resize handles */}

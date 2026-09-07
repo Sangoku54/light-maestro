@@ -517,6 +517,8 @@
       "confirm": "Delete",
       "cancel": "Cancel",
       "moveToFolder": "Move to folder",
+      "editScene": "Edit",
+      "rename": "Rename",
       "noFolderOption": "Uncategorized (remove from folder)",
       "newFolderOption": "New folder…",
       "contextMenuHint": "Right-click: move to a folder",

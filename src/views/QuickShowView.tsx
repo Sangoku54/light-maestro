@@ -11,7 +11,7 @@ import { TrackAnalysis, TrackSection, SECTION_COLORS, keyToPalette, SectionAnaly
 import type { GenreProfile } from '../hooks/audio-analysis';
 import { computeFixtureTrackOverrides, computeEfxOverrides, type FixtureTrack } from '../hooks/fixture-tracks';
 import { loadFixtureDefinitions, clearFixtureDefCache, type DmxCue, type DmxFixtureDefinition } from '../hooks/dmx-cues';
-import { useDmxPlayback, computeDmxForCue, computeColorTrackColors, type ColorTrackRef, type DimmerTrackRef, computeDimmerTrackOverrides, computeStrobeTrackOverrides, computeChaserTrackOverrides, type ChaserTrackRef } from '../hooks/dmx-playback';
+import { useDmxPlayback, computeDmxForCue, computeColorTrackColors, type ColorTrackRef, type DimmerTrackRef, computeDimmerTrackOverrides, computeStrobeTrackOverrides, computeChaserTrackOverrides, type ChaserTrackRef, computeSceneTrackOverrides, computeShowTrackOverrides } from '../hooks/dmx-playback';
 import { analyzeChannels } from '../engine/fixture-analyzer';
 import { halfDegToDmxOffset, SPATIAL_BY_SECTION } from '../engine/dmx-movement';
 import { DEFAULT_ROSTER, normalizeRoster, type MusicianRoster } from '../utils/musicians';
@@ -106,6 +106,9 @@ function buildPresetDmxCues(
   chaserTracksRef: React.MutableRefObject<ChaserTrackRef[]>,
   chasersRef: React.MutableRefObject<any[]>,
   scenesRef: React.MutableRefObject<any[]>,
+  showTracksRef: React.MutableRefObject<any[]>,
+  showsRef: React.MutableRefObject<any[]>,
+  sceneTracksRef: React.MutableRefObject<any[]>,
 ): DmxCue[] {
   const out: DmxCue[] = [];
   if (!(currentCues.length > 0 && pf.length > 0 && fDefs.size > 0)) return out;
@@ -135,6 +138,22 @@ function buildPresetDmxCues(
       const sto = computeStrobeTrackOverrides(strobeTracksRef.current as any, cue.time, pf, fg);
       const dto = computeDimmerTrackOverrides(dimmerTracksRef.current as any, cue.time, pf, fg);
       const cho = computeChaserTrackOverrides(chaserTracksRef.current as any, chasersRef.current as any, scenesRef.current as any, cue.time, pf, fg);
+      // Show + Scene takeovers baked into the snapshot too, with the same priority
+      // as the live engine on shared fixtures: chaser < show < scene. Merge is
+      // channel-level so unrelated chaser/show channels survive the takeover.
+      const mergeCtl = (src: Map<string, Record<number, number>>) => {
+        for (const [fid, cmap] of src.entries()) {
+          const existing = cho.get(fid);
+          if (!existing) { cho.set(fid, cmap); continue; }
+          const out: Record<number, number> = { ...existing };
+          for (const [a, v] of Object.entries(cmap)) out[Number(a)] = v;
+          cho.set(fid, out);
+        }
+      };
+      const showCtl = computeShowTrackOverrides(showTracksRef.current as any, showsRef.current as any, scenesRef.current as any, chasersRef.current as any, cue.time, pf, fg);
+      mergeCtl(showCtl);
+      const sceneCtl = computeSceneTrackOverrides(sceneTracksRef.current as any, scenesRef.current as any, cue.time, pf, fg);
+      mergeCtl(sceneCtl);
       const efxPt = hasEfx
         ? computeEfxOverrides(efxTracksRef.current as any, cue.time, effectsRef.current, pf, fg)
         : null;
@@ -1646,7 +1665,6 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const scenesRef = useRef<any[]>([]);
   scenesRef.current = useShowStore.getState().scenes;
   const showsRef = useRef<any[]>([]);
-  showsRef.current = useShowStore.getState().shows;
   const efxTracksRef = useRef<EfxTrack[]>([]);
   efxTracksRef.current = efxTracks;
   const panTiltLimitsRef = useRef<{ pan: number; tilt: number; perFixture?: Record<string, { pan: number; tilt: number }> }>({ pan: 128, tilt: 128, perFixture: {} });
@@ -1684,6 +1702,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
 
   const sceneEntities = useShowStore(s => s.scenes);
   const chaserEntities = useShowStore(s => s.chasers);
+  const showEntities = useShowStore(s => s.shows);
+  showsRef.current = showEntities;
   const cueListEntities = useShowStore(s => s.cueLists);
   const effectEntities = useShowStore(s => s.effects).filter((e: any) => !e.id.startsWith('builtin-efx-'));
   const entitySceneList = useMemo(() => sceneEntities.map(s => ({ id: s.id, name: s.name })), [sceneEntities]);
@@ -2049,7 +2069,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           currentCues, pf, uni, fDefs, tierMultipliers,
           fixtureTracksRef, colorTracksRef, strobeTracksRef, dimmerTracksRef,
           efxTracksRef, effectsRef, fixtureGroupsRef,
-          chaserTracksRef, chasersRef, scenesRef,
+          chaserTracksRef, chasersRef, scenesRef, showTracksRef, showsRef, sceneTracksRef,
         );
 
         // Sync to showStore.songPresets (for VC widget) — update in place on re-save
@@ -2142,7 +2162,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           currentCues, pf, uni, fDefs, tierMultipliers,
           fixtureTracksRef, colorTracksRef, strobeTracksRef, dimmerTracksRef,
           efxTracksRef, effectsRef, fixtureGroupsRef,
-          chaserTracksRef, chasersRef, scenesRef,
+          chaserTracksRef, chasersRef, scenesRef, showTracksRef, showsRef, sceneTracksRef,
         );
         const exportData = { version: 1, name, createdAt: new Date().toISOString(), quickShow: { ...qs, regenSeed: key }, analysis: resolvedAnalysis, sections, manualCues, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, fixtureTracks, dmxCues: dmxCuesArray, disabledFixtures: [...disabledFixtures], musicians: normalizeRoster(qsMusicians), stageScene: qsStageScene, view3D: qsView3D, audioDataBase64 };
         const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
@@ -2154,7 +2174,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         URL.revokeObjectURL(url);
       } catch (e) { console.error('Failed to export preset:', e); }
     })();
-  }, [qs, resolvedAnalysis, sections, manualCues, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, fixtureTracks, disabledFixtures, audioFile, effectiveBpm, key, qsMusicians, qsStageScene, qsView3D]);
+  }, [qs, resolvedAnalysis, sections, manualCues, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, fixtureTracks, disabledFixtures, audioFile, effectiveBpm, key, qsMusicians, qsStageScene, qsView3D]);
 
   const handleLoadPreset = useCallback(async (preset: typeof savedPresets[number]) => {
     // Support both legacy format {data:{quickShow,analysis,...}} and flat SongPreset format
@@ -2376,6 +2396,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     scenesRef,
     showTracksRef: showTracksRef as any,
     showsRef,
+    sceneTracksRef: sceneTracksRef as any,
     disabledFixturesRef: disabledFixturesRef as any,
     panTiltLimitsRef,
     fixturePositionsRef,
@@ -2460,7 +2481,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [colorTrackModal, setColorTrackModal] = useState(false);
   const [fadeModal, setFadeModal] = useState(false);
   const [efxTrackName, setEfxTrackName] = useState('');
-  const [efxTargetType, setEfxTargetType] = useState<'all' | 'group' | 'fixture'>('all');
+  const [efxTargetType, setEfxTargetType] = useState<'group' | 'fixture'>('group');
   const [efxTargetGroupId, setEfxTargetGroupId] = useState('');
   const [efxTargetFixtureIds, setEfxTargetFixtureIds] = useState<string[]>([]);
   const [efxPattern, setEfxPattern] = useState<'static' | 'sweep' | 'circle' | 'pulse' | 'wave' | 'bounce' | 'figure8' | 'spiral' | 'zigzag' | 'heartbeat' | 'randomWalk' | 'diamond' | 'custom'>('static');
@@ -2528,22 +2549,43 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [dimmerTargetFixtureIds, setDimmerTargetFixtureIds] = useState<string[]>([]);
   const [chaserInsertMenu, setChaserInsertMenu] = useState<{ trackId: string; time: number; x: number; y: number } | null>(null);
   const [chaserEntryMenu, setChaserEntryMenu] = useState<{ trackId: string; entry: ChaserTrackEntry; x: number; y: number } | null>(null);
-  const [chaserPickModal, setChaserPickModal] = useState<{ trackId: string } | null>(null);
+  const [chaserPickModal, setChaserPickModal] = useState<{ trackId: string; entryId?: string } | null>(null);
   const [showInsertMenu, setShowInsertMenu] = useState<{ trackId: string; time: number; x: number; y: number } | null>(null);
   const [showEntryMenu, setShowEntryMenu] = useState<{ trackId: string; entry: ShowTrackEntry; x: number; y: number } | null>(null);
-  const [showPickModal, setShowPickModal] = useState<{ trackId: string } | null>(null);
+  const [showPickModal, setShowPickModal] = useState<{ trackId: string; entryId?: string } | null>(null);
+  const [sceneInsertMenu, setSceneInsertMenu] = useState<{ trackId: string; time: number; x: number; y: number } | null>(null);
+  const [sceneEntryMenu, setSceneEntryMenu] = useState<{ trackId: string; entry: SceneTrackEntry; x: number; y: number } | null>(null);
+  const [scenePickModal, setScenePickModal] = useState<{ trackId: string; entryId?: string } | null>(null);
 
   // Resolve target fixture names for display + DMX filtering
   const efxTargetFixtureNames = useMemo(() => {
     const fixtures = useShowStore.getState().patchedFixtures;
     const groups = useShowStore.getState().fixtureGroups;
-    if (efxTargetType === 'all') return fixtures.map(f => f.name);
     if (efxTargetType === 'group') {
       const g = groups.find(g => g.id === efxTargetGroupId);
       return g ? fixtures.filter(f => g.fixtureIds.includes(f.id)).map(f => f.name) : [];
     }
     return fixtures.filter(f => efxTargetFixtureIds.includes(f.id)).map(f => f.name);
   }, [efxTargetType, efxTargetGroupId, efxTargetFixtureIds]);
+
+  // Effets custom correspondant au groupe / à la fixture choisis (aucun filtre en
+  // mode édition d'une section pour un simple swap).
+  const efxFilteredEffects = useMemo(() => {
+    if (efxEditTarget) return effectEntities;
+    const targetFixtureIds: Set<string> = new Set();
+    if (efxTargetType === 'group' && efxTargetGroupId) {
+      const grp = fixtureGroups.find(g => g.id === efxTargetGroupId);
+      if (grp) for (const fid of grp.fixtureIds) targetFixtureIds.add(fid);
+    } else if (efxTargetType === 'fixture' && efxTargetFixtureIds[0]) {
+      targetFixtureIds.add(efxTargetFixtureIds[0]);
+    }
+    if (targetFixtureIds.size === 0) return effectEntities;
+    return effectEntities.filter((efx: any) => {
+      const ids = efx.fixtureIds || [];
+      if (!Array.isArray(ids) || ids.length === 0) return true; // effet générique
+      return ids.some((id: string) => targetFixtureIds.has(id));
+    });
+  }, [efxEditTarget, efxTargetType, efxTargetGroupId, efxTargetFixtureIds, effectEntities, fixtureGroups]);
 
   // ── Floating 3D view ──
   const [showFloating3D, setShowFloating3D] = useState(false);
@@ -2583,7 +2625,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const handleAddEfxTrack = useCallback(() => {
     if (efxEditTarget) {
       // Mode « Modifier » : on met à jour la section existante, sans créer de piste.
-      const efx = effectEntities.find((e: any) => e.id === efxCustomEffectId) || effectEntities[0];
+const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || efxFilteredEffects[0];
       if (efx) {
         pushHistory();
         setEfxTracks(prev => prev.map(t => {
@@ -2631,15 +2673,15 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setEfxTracks(prev => [...prev, newTrack]);
     setEfxTrackModal(false);
     setEfxTrackName('');
-    setEfxTargetType('all');
+    setEfxTargetType('group');
     setEfxTargetGroupId('');
     setEfxTargetFixtureIds([]);
     setEfxCustomEffectId('');
-  }, [pushHistory, efxTrackName, efxTargetType, efxTargetGroupId, efxTargetFixtureIds, efxCustomEffectId, effectEntities, efxEditTarget, resolvedAnalysis]);
+  }, [pushHistory, efxTrackName, efxTargetType, efxTargetGroupId, efxTargetFixtureIds, efxCustomEffectId, efxFilteredEffects, efxEditTarget, resolvedAnalysis]);
 
   const openEfxTrackModal = useCallback(() => {
     setEfxTrackName('');
-    setEfxTargetType('all');
+    setEfxTargetType('group');
     setEfxTargetGroupId('');
     setEfxTargetFixtureIds([]);
     setEfxCustomEffectId('');
@@ -3041,7 +3083,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setChaserTracks(prev => prev.filter(t => t.id !== trackId));
   }, [pushHistory]);
 
-  const handleInsertChaserToTrack = useCallback((trackId: string, time: number, chaserId: string, chaserName?: string) => {
+  const handleInsertChaserToTrack = useCallback((trackId: string, time: number, chaserId: string, chaserName?: string, modifyEntryId?: string) => {
     pushHistory();
     // Default block length = the chaser's total cycle (plays once), clamped to a sane range
     const chaser = useShowStore.getState().chasers.find((c: any) => c.id === chaserId);
@@ -3052,6 +3094,13 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     }
     setChaserTracks(prev => prev.map(t => {
       if (t.id !== trackId) return t;
+      if (modifyEntryId) {
+        // Modifier : on remplace seulement le chaser (plage inchangée)
+        const entries = t.entries.map(e => e.id === modifyEntryId
+          ? { ...e, chaserId, chaserName: chaserName || chaser?.name }
+          : e);
+        return { ...t, entries };
+      }
       const entry: ChaserTrackEntry = {
         id: `chaser-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         time,
@@ -3094,10 +3143,21 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setChaserEntryMenu({ trackId, entry, x: clientX, y: clientY });
   }, []);
 
-  const handlePickChaserForTrack = useCallback((trackId: string, chaserId: string, chaserName?: string) => {
-    handleInsertChaserToTrack(trackId, 0, chaserId, chaserName);
+  const handlePickChaserForTrack = useCallback((trackId: string, chaserId: string, chaserName?: string, entryId?: string) => {
+    handleInsertChaserToTrack(trackId, 0, chaserId, chaserName, entryId);
     setChaserPickModal(null);
   }, [handleInsertChaserToTrack]);
+
+  const handleRenameChaserEntry = useCallback((trackId: string, entry: ChaserTrackEntry, label: string) => {
+    pushHistory();
+    setChaserTracks(prev => prev.map(t => t.id === trackId ? { ...t, entries: t.entries.map(e => e.id === entry.id ? { ...e, label: (label || '').trim() || undefined } : e) } : t));
+    setChaserEntryMenu(null);
+  }, [pushHistory]);
+
+  const handleModifyChaserEntry = useCallback((trackId: string, entry: ChaserTrackEntry) => {
+    setChaserEntryMenu(null);
+    setChaserPickModal({ trackId, entryId: entry.id });
+  }, []);
 
   const handleAddShowTrack = useCallback(() => {
     pushHistory();
@@ -3109,13 +3169,17 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     pushHistory();
     setShowTracks(prev => prev.filter(t => t.id !== trackId));
   }, [pushHistory]);
-  const handleInsertShowToTrack = useCallback((trackId: string, time: number, showId: string, showName?: string) => {
+  const handleInsertShowToTrack = useCallback((trackId: string, time: number, showId: string, showName?: string, modifyEntryId?: string) => {
     pushHistory();
     const show = useShowStore.getState().shows.find((s: any) => s.id === showId);
     let defDur = 30;
     if (show && show.duration > 0) defDur = Math.min(120, Math.max(2, show.duration / 1000));
     setShowTracks(prev => prev.map(t => {
       if (t.id !== trackId) return t;
+      if (modifyEntryId) {
+        const entries = t.entries.map(e => e.id === modifyEntryId ? { ...e, showId, showName: showName || show?.name } : e);
+        return { ...t, entries };
+      }
       const entry: ShowTrackEntry = { id: `show-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, time, endTime: time + defDur, showId, showName: showName || show?.name };
       return { ...t, entries: [...t.entries, entry] };
     }));
@@ -3142,10 +3206,82 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const handleShowEntryContextMenu = useCallback((trackId: string, entry: ShowTrackEntry, clientX: number, clientY: number) => {
     setShowEntryMenu({ trackId, entry, x: clientX, y: clientY });
   }, []);
-  const handlePickShowForTrack = useCallback((trackId: string, showId: string, showName?: string) => {
-    handleInsertShowToTrack(trackId, 0, showId, showName);
+  const handlePickShowForTrack = useCallback((trackId: string, showId: string, showName?: string, entryId?: string) => {
+    handleInsertShowToTrack(trackId, 0, showId, showName, entryId);
     setShowPickModal(null);
   }, [handleInsertShowToTrack]);
+
+  const handleRenameShowEntry = useCallback((trackId: string, entry: ShowTrackEntry, label: string) => {
+    pushHistory();
+    setShowTracks(prev => prev.map(t => t.id === trackId ? { ...t, entries: t.entries.map(e => e.id === entry.id ? { ...e, label: (label || '').trim() || undefined } : e) } : t));
+    setShowEntryMenu(null);
+  }, [pushHistory]);
+
+  const handleModifyShowEntry = useCallback((trackId: string, entry: ShowTrackEntry) => {
+    setShowEntryMenu(null);
+    setShowPickModal({ trackId, entryId: entry.id });
+  }, []);
+
+  /* ─── Scene Track handlers (scène directe : prend le dessus sur l'autoscript) ─── */
+  const handleAddSceneTrack = useCallback(() => {
+    pushHistory();
+    const trackId = `scene-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setSceneTracks(prev => [...prev, { id: trackId, name: `Scene Track ${prev.length + 1}`, entries: [] }]);
+    setScenePickModal({ trackId });
+  }, [pushHistory]);
+  const handleDeleteSceneTrack = useCallback((trackId: string) => {
+    pushHistory();
+    setSceneTracks(prev => prev.filter(t => t.id !== trackId));
+  }, [pushHistory]);
+  const handleInsertSceneToTrack = useCallback((trackId: string, time: number, sceneId: string, sceneName?: string, modifyEntryId?: string) => {
+    pushHistory();
+    const scene = useShowStore.getState().scenes.find((s: any) => s.id === sceneId);
+    const defDur = 10;
+    setSceneTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      if (modifyEntryId) {
+        const entries = t.entries.map(e => e.id === modifyEntryId ? { ...e, sceneId, sceneName: sceneName || scene?.name } : e);
+        return { ...t, entries };
+      }
+      const entry: SceneTrackEntry = { id: `scene-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, time, endTime: time + defDur, sceneId, sceneName: sceneName || scene?.name };
+      return { ...t, entries: [...t.entries, entry] };
+    }));
+    setSceneInsertMenu(null);
+  }, [pushHistory]);
+  const handleRemoveSceneEntry = useCallback((trackId: string, entryId: string) => {
+    pushHistory();
+    setSceneTracks(prev => prev.map(t => t.id === trackId ? { ...t, entries: t.entries.filter(e => e.id !== entryId) } : t));
+    setSceneEntryMenu(null);
+  }, [pushHistory]);
+  const handleSceneEntryChange = useCallback((trackId: string, entryIndex: number, newTime: number, newEndTime: number) => {
+    pushHistory();
+    setSceneTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      const entries = [...t.entries];
+      if (entryIndex >= 0 && entryIndex < entries.length) entries[entryIndex] = { ...entries[entryIndex], time: newTime, endTime: newEndTime };
+      return { ...t, entries };
+    }));
+  }, [pushHistory]);
+  const handleSceneTrackContextMenu = useCallback((trackId: string, time: number, clientX: number, clientY: number) => {
+    setSceneInsertMenu({ trackId, time, x: clientX, y: clientY });
+  }, []);
+  const handleSceneEntryClick = useCallback((trackId: string, entry: SceneTrackEntry) => {}, []);
+  const handleSceneEntryContextMenu = useCallback((trackId: string, entry: SceneTrackEntry, clientX: number, clientY: number) => {
+    setSceneEntryMenu({ trackId, entry, x: clientX, y: clientY });
+  }, []);
+  const handlePickSceneForTrack = useCallback((trackId: string, sceneId: string, sceneName?: string, entryId?: string) => {
+    handleInsertSceneToTrack(trackId, 0, sceneId, sceneName, entryId);
+    setScenePickModal(null);
+  }, [handleInsertSceneToTrack]);
+  const handleRenameSceneEntry = useCallback((trackId: string, entry: SceneTrackEntry, label: string) => {
+    pushHistory();
+    setSceneTracks(prev => prev.map(t => t.id === trackId ? { ...t, entries: t.entries.map(e => e.id === entry.id ? { ...e, label: (label || '').trim() || undefined } : e) } : t));
+    setSceneEntryMenu(null);
+  }, [pushHistory]);
+  const handleModifySceneEntry = useCallback((trackId: string, entry: SceneTrackEntry) => {
+    setSceneEntryMenu(null);
+    setScenePickModal({ trackId, entryId: entry.id });
+  }, []);
 
   /* ─── Insert entity handler ──────────────────────── */
   const handleInsertEntity = useCallback((startTime: number, endTime: number, entityType: string, entityId: string) => {
@@ -3708,6 +3844,11 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           onShowEntryClick={handleShowEntryClick}
           onShowEntryContextMenu={handleShowEntryContextMenu}
           onShowEntryChange={handleShowEntryChange}
+          sceneTracks={sceneTracks}
+          onSceneTrackContextMenu={handleSceneTrackContextMenu}
+          onSceneEntryClick={handleSceneEntryClick}
+          onSceneEntryContextMenu={handleSceneEntryContextMenu}
+          onSceneEntryChange={handleSceneEntryChange}
           onSectionsChange={(newSecs: TrackSection[]) => { pushHistory(); setSections(newSecs); }}
           onAutoScriptContextMenu={(time, _x, _y) => {
             pushHistory();
@@ -3832,6 +3973,14 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         >
           <Plus className="w-3 h-3" />
           Show Track
+        </button>
+        <button
+          onClick={handleAddSceneTrack}
+          className="ml-1 px-2 py-0.5 rounded text-[10px] text-cyan-300 border border-cyan-700/50 hover:bg-cyan-300/10 cursor-pointer flex items-center gap-1"
+          title="Piste de scènes : importe une scène statique qui prend la main sur ses fixtures pendant sa plage"
+        >
+          <Plus className="w-3 h-3" />
+          Scenes Track
         </button>
         <button
           onClick={() => setFadeModal(!fadeModal)}
@@ -4270,40 +4419,39 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
               />
 
               {/* Target type */}
-              <label className="block text-[10px] text-gray-400 mb-1">Apply EFX To</label>
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                {([
-                  { type: 'all' as const, label: 'All Fixtures', icon: '🌐' },
-                  { type: 'group' as const, label: 'Group', icon: '📁' },
-                  { type: 'fixture' as const, label: 'Single Fixture', icon: '💡' },
-                ]).map(opt => (
-                  <button key={opt.type}
-                    onClick={() => {
-                      setEfxTargetType(opt.type);
-                      if (opt.type !== 'group') setEfxTargetGroupId('');
-                      if (opt.type !== 'fixture') setEfxTargetFixtureIds([]);
-                    }}
-                    className={`px-3 py-2.5 rounded-lg text-xs font-medium border transition-all ${
-                      efxTargetType === opt.type
-                        ? 'bg-cyan-600/20 border-cyan-500/50 text-cyan-300'
-                        : 'bg-gray-800/40 border-gray-700/40 text-gray-400 hover:border-gray-600'
-                    }`}
-                  >
-                    <div className="text-lg mb-0.5">{opt.icon}</div>
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
+<label className="block text-[10px] text-gray-400 mb-1">Apply EFX To</label>
+<div className="grid grid-cols-2 gap-2 mb-3">
+  {([
+    { type: 'group' as const, label: 'Group', icon: '📁' },
+    { type: 'fixture' as const, label: 'Single Fixture', icon: '💡' },
+  ]).map(opt => (
+    <button key={opt.type}
+      onClick={() => {
+        setEfxTargetType(opt.type);
+        if (opt.type !== 'group') setEfxTargetGroupId('');
+        if (opt.type !== 'fixture') setEfxTargetFixtureIds([]);
+      }}
+      className={`px-3 py-2.5 rounded-lg text-xs font-medium border transition-all ${
+        efxTargetType === opt.type
+          ? 'bg-cyan-600/20 border-cyan-500/50 text-cyan-300'
+          : 'bg-gray-800/40 border-gray-700/40 text-gray-400 hover:border-gray-600'
+      }`}
+    >
+      <div className="text-lg mb-0.5">{opt.icon}</div>
+      {opt.label}
+    </button>
+  ))}
+</div>
 
               {/* Group selector */}
               {efxTargetType === 'group' && (
                 <div className="mb-3">
                   <label className="block text-[10px] text-gray-400 mb-1">Select Group</label>
-                  <select
-                    value={efxTargetGroupId}
-                    onChange={e => setEfxTargetGroupId(e.target.value)}
-                    className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
-                  >
+<select
+    value={efxTargetGroupId}
+    onChange={e => { setEfxTargetGroupId(e.target.value); setEfxCustomEffectId(''); }}
+    className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
+  >
                     <option value="">-- Choose group --</option>
                     {fixtureGroups.map(g => (
                       <option key={g.id} value={g.id}>{g.name} ({g.fixtureIds.length} fixtures)</option>
@@ -4316,11 +4464,11 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
               {efxTargetType === 'fixture' && (
                 <div className="mb-3">
                   <label className="block text-[10px] text-gray-400 mb-1">Select Fixture</label>
-                  <select
-                    value={efxTargetFixtureIds[0] || ''}
-                    onChange={e => setEfxTargetFixtureIds(e.target.value ? [e.target.value] : [])}
-                    className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
-                  >
+<select
+    value={efxTargetFixtureIds[0] || ''}
+    onChange={e => { setEfxTargetFixtureIds(e.target.value ? [e.target.value] : []); setEfxCustomEffectId(''); }}
+    className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
+  >
                     <option value="">-- Choose fixture --</option>
                     {patchedFixtures.filter(f => f.enabled !== false).map(f => (
                       <option key={f.id} value={f.id}>{f.name} ({f.universeId} ch.{f.startAddress})</option>
@@ -4343,11 +4491,15 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
               {/* Custom effects */}
               <label className="block text-[10px] text-gray-400 mb-1">Custom Effect</label>
               {(() => {
-                const customEffects = effectEntities;
+                const customEffects = efxFilteredEffects;
+                const noTarget = !efxEditTarget
+                  && (efxTargetType === 'group' ? !efxTargetGroupId : !efxTargetFixtureIds[0]);
                 if (customEffects.length === 0) {
                   return (
                     <div className="text-[11px] text-yellow-400/80 bg-yellow-400/5 border border-yellow-400/15 rounded-lg px-3 py-2.5 mb-4">
-                      ⚠ Aucun effet custom. Créez d'abord un effet de mouvement dans l'onglet EFX.
+                      {noTarget
+                        ? '⚠ Aucun effet custom. Créez d\'abord un effet de mouvement dans l\'onglet EFX.'
+                        : '⚠ Aucun effet ne correspond à ce groupe / cette fixture. Choisissez un autre ciblage ou créez un effet pour ces fixtures.'}
                     </div>
                   );
                 }
@@ -4550,32 +4702,24 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         <>
           <div className="fixed inset-0 z-40" onClick={() => setChaserInsertMenu(null)} />
           <div
-            className="fixed z-50 bg-[#1a1a2e] border border-emerald-700/50 rounded-lg shadow-xl py-1 min-w-[200px] max-h-[320px] overflow-auto"
-            style={{ ...clampRect(chaserInsertMenu.x, chaserInsertMenu.y, 240, 340, window.innerWidth, window.innerHeight) }}
+            className="fixed z-50 bg-[#1a1a2e] border border-emerald-700/50 rounded-lg shadow-xl py-1 min-w-[160px]"
+            style={{ ...clampRect(chaserInsertMenu.x, chaserInsertMenu.y, 200, 120, window.innerWidth, window.innerHeight) }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-3 py-1.5 text-[10px] text-emerald-400 uppercase tracking-wider border-b border-gray-800 sticky top-0 bg-[#1a1a2e]">
-              Import Chaser at {(chaserInsertMenu.time ?? 0).toFixed(1)}s
+            <div className="px-3 py-1.5 text-[10px] text-emerald-400 uppercase tracking-wider border-b border-gray-800">
+              Chaser Track
             </div>
-            {entityChaserList.length === 0 && (
-              <div className="px-3 py-2 text-[10px] text-gray-600">No saved chasers — create one in Design → Chasers.</div>
-            )}
-            {entityChaserList.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => handleInsertChaserToTrack(chaserInsertMenu.trackId, chaserInsertMenu.time ?? 0, c.id, c.name)}
-                className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-emerald-500/10 flex items-center gap-2"
-              >
-                <span className="text-emerald-400">🎬</span>
-                {c.name}
-              </button>
-            ))}
-            <div className="border-t border-gray-800" />
             <button
               onClick={() => { handleDeleteChaserTrack(chaserInsertMenu.trackId); setChaserInsertMenu(null); }}
               className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
             >
               Delete track
+            </button>
+            <button
+              onClick={() => setChaserInsertMenu(null)}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
+            >
+              Cancel
             </button>
           </div>
         </>
@@ -4589,13 +4733,24 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 py-1.5 text-[11px] text-emerald-400 uppercase tracking-wider border-b border-gray-800">
-              {chaserEntryMenu.entry.chaserName || 'Chaser'}
+              {chaserEntryMenu.entry.label || chaserEntryMenu.entry.chaserName || 'Chaser'} — {chaserEntryMenu.entry.time.toFixed(2)}s → {chaserEntryMenu.entry.endTime.toFixed(2)}s
             </div>
-            <div className="grid grid-cols-2 gap-3 px-4 py-3">
+            <div className="px-4 pt-3">
+              <label className="text-[10px] text-gray-500">Nom de la section</label>
+              <input defaultValue={chaserEntryMenu.entry.label || chaserEntryMenu.entry.chaserName || ''} id="__chaser_label" placeholder={chaserEntryMenu.entry.chaserName || 'Chaser'} className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
+            </div>
+            <div className="flex gap-2 px-4 py-3">
+              <button onClick={() => {
+                const label = (document.getElementById('__chaser_label') as HTMLInputElement).value;
+                handleRenameChaserEntry(chaserEntryMenu.trackId, chaserEntryMenu.entry, label);
+              }} className="flex-1 py-1.5 rounded bg-emerald-600/20 text-emerald-300 text-xs hover:bg-emerald-600/30">Renommer</button>
+              <button onClick={() => handleModifyChaserEntry(chaserEntryMenu.trackId, chaserEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Modifier</button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 px-4 py-0">
               <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={chaserEntryMenu.entry.time} id="__chaser_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
               <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={chaserEntryMenu.entry.endTime} id="__chaser_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
             </div>
-            <div className="flex gap-2 px-4 pb-2">
+            <div className="flex gap-2 px-4 pb-2 pt-3">
               <button onClick={() => {
                 const st = Number((document.getElementById('__chaser_start') as HTMLInputElement).value);
                 const en = Number((document.getElementById('__chaser_end') as HTMLInputElement).value);
@@ -4973,7 +5128,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
             <div className="bg-[#1a1a2e] border border-emerald-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-gray-200">Sélectionner un chaser</span>
+                <span className="text-sm font-semibold text-gray-200">{chaserPickModal.entryId ? 'Modifier la section chaser' : 'Sélectionner un chaser'}</span>
                 <button onClick={() => setChaserPickModal(null)} className="text-gray-500 hover:text-white">✕</button>
               </div>
 
@@ -4991,7 +5146,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
                   {entityChaserList.map((c) => (
                     <button
                       key={c.id}
-                      onClick={() => handlePickChaserForTrack(chaserPickModal.trackId, c.id, c.name)}
+                      onClick={() => handlePickChaserForTrack(chaserPickModal.trackId, c.id, c.name, chaserPickModal.entryId)}
                       className="w-full text-left px-3 py-2 rounded-lg bg-gray-800/40 border border-gray-700/40 hover:border-emerald-500/50 hover:bg-emerald-500/10 text-xs text-gray-300 flex items-center gap-2 transition-all"
                     >
                       <span className="text-emerald-400">🎬</span>
@@ -5017,7 +5172,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
             <div className="bg-[#1a1a2e] border border-amber-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-gray-200">Sélectionner un show</span>
+                <span className="text-sm font-semibold text-gray-200">{showPickModal.entryId ? 'Modifier la section show' : 'Sélectionner un show'}</span>
                 <button onClick={() => setShowPickModal(null)} className="text-gray-500 hover:text-white">✕</button>
               </div>
               <p className="text-[10px] text-gray-500 leading-relaxed mb-4">
@@ -5033,7 +5188,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
                   {useShowStore.getState().shows.map((s) => (
                     <button
                       key={s.id}
-                      onClick={() => handlePickShowForTrack(showPickModal.trackId, s.id, s.name)}
+                      onClick={() => handlePickShowForTrack(showPickModal.trackId, s.id, s.name, showPickModal.entryId)}
                       className="w-full text-left px-3 py-2 rounded-lg bg-gray-800/40 border border-gray-700/40 hover:border-amber-500/50 hover:bg-amber-500/10 text-xs text-gray-300 flex items-center gap-2 transition-all"
                     >
                       <span className="text-amber-400">🎬</span>
@@ -5050,16 +5205,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         </>
       )}
       {showInsertMenu && (
-        <div className="fixed z-50 bg-[#1a1a2e] border border-amber-700/50 rounded-lg shadow-xl py-1 min-w-[200px]" style={{ left: showInsertMenu.x, top: showInsertMenu.y }}>
-          <div className="px-3 py-1.5 text-[10px] text-amber-400 uppercase tracking-wider border-b border-gray-800">Import Show at {showInsertMenu.time.toFixed(1)}s</div>
-          {useShowStore.getState().shows.length === 0 ? (
-            <div className="px-3 py-2 text-[11px] text-gray-600">Aucun show</div>
-          ) : (
-            useShowStore.getState().shows.map((s) => (
-              <button key={s.id} onClick={() => handleInsertShowToTrack(showInsertMenu.trackId, showInsertMenu.time, s.id, s.name)} className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-amber-500/10 flex items-center gap-2"><span className="text-amber-400">🎬</span>{s.name}</button>
-            ))
-          )}
-          <div className="border-t border-gray-800 my-0.5" />
+        <div className="fixed z-50 bg-[#1a1a2e] border border-amber-700/50 rounded-lg shadow-xl py-1 min-w-[160px]" style={{ left: showInsertMenu.x, top: showInsertMenu.y }}>
+          <div className="px-3 py-1.5 text-[10px] text-amber-400 uppercase tracking-wider border-b border-gray-800">Show Track</div>
           <button onClick={() => { handleDeleteShowTrack(showInsertMenu.trackId); setShowInsertMenu(null); }} className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800">Delete track</button>
           <button onClick={() => setShowInsertMenu(null)} className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800">Cancel</button>
         </div>
@@ -5067,8 +5214,19 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       {showEntryMenu && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowEntryMenu(null)}>
           <div className="bg-[#1a1a2e] border border-amber-700/50 rounded-xl shadow-2xl py-3 w-[360px]" onClick={(e) => e.stopPropagation()}>
-            <div className="px-4 py-1.5 text-[11px] text-amber-400 uppercase tracking-wider border-b border-gray-800">{showEntryMenu.entry.showName || 'Show'} — {showEntryMenu.entry.time.toFixed(2)}s → {showEntryMenu.entry.endTime.toFixed(2)}s</div>
-            <div className="grid grid-cols-2 gap-3 px-4 py-3">
+            <div className="px-4 py-1.5 text-[11px] text-amber-400 uppercase tracking-wider border-b border-gray-800">{showEntryMenu.entry.label || showEntryMenu.entry.showName || 'Show'} — {showEntryMenu.entry.time.toFixed(2)}s → {showEntryMenu.entry.endTime.toFixed(2)}s</div>
+            <div className="px-4 pt-3">
+              <label className="text-[10px] text-gray-500">Nom de la section</label>
+              <input defaultValue={showEntryMenu.entry.label || showEntryMenu.entry.showName || ''} id="__show_label" placeholder={showEntryMenu.entry.showName || 'Show'} className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
+            </div>
+            <div className="flex gap-2 px-4 py-3">
+              <button onClick={() => {
+                const label = (document.getElementById('__show_label') as HTMLInputElement).value;
+                handleRenameShowEntry(showEntryMenu.trackId, showEntryMenu.entry, label);
+              }} className="flex-1 py-1.5 rounded bg-amber-600/20 text-amber-300 text-xs hover:bg-amber-600/30">Renommer</button>
+              <button onClick={() => handleModifyShowEntry(showEntryMenu.trackId, showEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Modifier</button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 px-4 py-0">
               <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={showEntryMenu.entry.time} id="__show_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
               <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={showEntryMenu.entry.endTime} id="__show_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
             </div>
@@ -5085,6 +5243,116 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
               <button onClick={() => handleRemoveShowEntry(showEntryMenu.trackId, showEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">Supprimer</button>
             </div>
             <button onClick={() => setShowEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">Fermer</button>
+          </div>
+        </div>
+      )}
+      {scenePickModal && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setScenePickModal(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
+            <div className="bg-[#1a1a2e] border border-cyan-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold text-gray-200">{scenePickModal.entryId ? 'Modifier la section scène' : 'Sélectionner une scène'}</span>
+                <button onClick={() => setScenePickModal(null)} className="text-gray-500 hover:text-white">✕</button>
+              </div>
+
+              <p className="text-[10px] text-gray-500 leading-relaxed mb-4">
+                La scène statique prend le dessus sur l'autoscript pendant sa plage (comme un chaser mais avec les canaux exacts de la scène), puis rend la main.
+              </p>
+
+              {entitySceneList.length === 0 ? (
+                <div className="text-[11px] text-gray-600 py-6 text-center border border-dashed border-gray-800 rounded-lg">
+                  Aucune scène sauvegardée.<br />
+                  <span className="text-gray-500">Créez-en une dans Design → Scènes, puis réessayez.</span>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {entitySceneList.map((sc) => (
+                    <button
+                      key={sc.id}
+                      onClick={() => handlePickSceneForTrack(scenePickModal.trackId, sc.id, sc.name, scenePickModal.entryId)}
+                      className="w-full text-left px-3 py-2 rounded-lg bg-gray-800/40 border border-gray-700/40 hover:border-cyan-500/50 hover:bg-cyan-500/10 text-xs text-gray-300 flex items-center gap-2 transition-all"
+                    >
+                      <span className="text-cyan-400">🎭</span>
+                      {sc.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex justify-end mt-4">
+                <button onClick={() => setScenePickModal(null)}
+                  className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
+                  Fermer
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+      {sceneInsertMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setSceneInsertMenu(null)} />
+          <div
+            className="fixed z-50 bg-[#1a1a2e] border border-cyan-700/50 rounded-lg shadow-xl py-1 min-w-[160px]"
+            style={{ ...clampRect(sceneInsertMenu.x, sceneInsertMenu.y, 200, 120, window.innerWidth, window.innerHeight) }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1.5 text-[10px] text-cyan-400 uppercase tracking-wider border-b border-gray-800">
+              Scenes Track
+            </div>
+            <button
+              onClick={() => { handleDeleteSceneTrack(sceneInsertMenu.trackId); setSceneInsertMenu(null); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
+            >
+              Delete track
+            </button>
+            <button
+              onClick={() => setSceneInsertMenu(null)}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+      {sceneEntryMenu && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setSceneEntryMenu(null)}>
+          <div
+            className="bg-[#1a1a2e] border border-cyan-700/50 rounded-xl shadow-2xl py-3 w-[360px]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-1.5 text-[11px] text-cyan-400 uppercase tracking-wider border-b border-gray-800">
+              {sceneEntryMenu.entry.label || sceneEntryMenu.entry.sceneName || 'Scène'} — {sceneEntryMenu.entry.time.toFixed(2)}s → {sceneEntryMenu.entry.endTime.toFixed(2)}s
+            </div>
+            <div className="px-4 pt-3">
+              <label className="text-[10px] text-gray-500">Nom de la section</label>
+              <input defaultValue={sceneEntryMenu.entry.label || sceneEntryMenu.entry.sceneName || ''} id="__scene_label" placeholder={sceneEntryMenu.entry.sceneName || 'Scène'} className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
+            </div>
+            <div className="flex gap-2 px-4 py-3">
+              <button onClick={() => {
+                const label = (document.getElementById('__scene_label') as HTMLInputElement).value;
+                handleRenameSceneEntry(sceneEntryMenu.trackId, sceneEntryMenu.entry, label);
+              }} className="flex-1 py-1.5 rounded bg-cyan-600/20 text-cyan-300 text-xs hover:bg-cyan-600/30">Renommer</button>
+              <button onClick={() => handleModifySceneEntry(sceneEntryMenu.trackId, sceneEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Modifier</button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 px-4 py-0">
+              <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={sceneEntryMenu.entry.time} id="__scene_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={sceneEntryMenu.entry.endTime} id="__scene_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+            </div>
+            <div className="flex gap-2 px-4 pb-2 pt-3">
+              <button onClick={() => {
+                const st = Number((document.getElementById('__scene_start') as HTMLInputElement).value);
+                const en = Number((document.getElementById('__scene_end') as HTMLInputElement).value);
+                const dur = resolvedAnalysis?.duration || 9999;
+                if (!Number.isFinite(st) || !Number.isFinite(en) || en <= st || st < 0 || en > dur) return;
+                const idx = sceneTracks.find(t => t.id === sceneEntryMenu.trackId)?.entries.findIndex(e => e.id === sceneEntryMenu.entry.id) ?? -1;
+                if (idx >= 0) handleSceneEntryChange(sceneEntryMenu.trackId, idx, st, en);
+                setSceneEntryMenu(null);
+              }} className="flex-1 py-1.5 rounded bg-cyan-600 text-white text-xs hover:bg-cyan-500">Appliquer</button>
+              <button onClick={() => handleRemoveSceneEntry(sceneEntryMenu.trackId, sceneEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">Supprimer</button>
+            </div>
+            <button onClick={() => setSceneEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">Fermer</button>
           </div>
         </div>
       )}

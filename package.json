@@ -1,6 +1,6 @@
 {
   "name": "light-maestro",
-  "version": "1.0.34",
+  "version": "1.0.35",
   "description": "Fusion QLC+ & SoundSwitch — DMX lighting control + audio-reactive automation",
   "author": "Light Maestro",
   "main": "dist/electron/main.js",

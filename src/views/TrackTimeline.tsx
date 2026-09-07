@@ -177,6 +177,8 @@ export interface ChaserTrackEntry {
   endTime: number;
   chaserId: string;
   chaserName?: string;
+  /** Custom display label (renamed section). */
+  label?: string;
 }
 
 export interface ChaserTrack {
@@ -198,6 +200,8 @@ export interface ShowTrackEntry {
   endTime: number;
   showId: string;
   showName?: string;
+  /** Custom display label (renamed section). */
+  label?: string;
 }
 
 export interface ShowTrack {
@@ -216,6 +220,8 @@ export interface SceneTrackEntry {
   endTime: number;
   sceneId: string;
   sceneName?: string;
+  /** Custom display label (renamed section). */
+  label?: string;
 }
 
 export interface SceneTrack {
@@ -3372,7 +3378,7 @@ if (editBlock) { setEditBlock(null); return; }
         const cEntry0 = cTrack.entries[0];
         let cTargetLabel = '';
         if (cEntry0) {
-          cTargetLabel = '🎬 ' + (cEntry0.chaserName || '').slice(0, 10);
+          cTargetLabel = '🎬 ' + (cEntry0.label || cEntry0.chaserName || '').slice(0, 10);
         } else {
           cTargetLabel = 'clic droit pour importer';
         }
@@ -3423,7 +3429,7 @@ if (editBlock) { setEditBlock(null); return; }
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 7px -apple-system, sans-serif';
             ctx.textAlign = 'center';
-            const nameLabel = (entry.chaserName || 'chaser').length > 14 ? (entry.chaserName || 'chaser').substring(0, 13) + '…' : (entry.chaserName || 'chaser');
+            const nameLabel = (entry.label || entry.chaserName || 'chaser').length > 14 ? (entry.label || entry.chaserName || 'chaser').substring(0, 13) + '…' : (entry.label || entry.chaserName || 'chaser');
             ctx.fillText(nameLabel, ex + entryW / 2, trackY + CHASER_TRACK_HEIGHT / 2 + 3);
           }
 
@@ -3475,7 +3481,7 @@ if (editBlock) { setEditBlock(null); return; }
         const sLabel = sTrack.name.length > 11 ? sTrack.name.substring(0, 10) + '\u2026' : sTrack.name;
         ctx.fillText('SHOW: ' + sLabel, 6, trackY + 12);
         const sEntry0 = sTrack.entries[0];
-        let sTargetLabel = sEntry0 ? ('🎬 ' + (sEntry0.showName || '').slice(0, 10)) : 'clic droit pour importer';
+        let sTargetLabel = sEntry0 ? ('🎬 ' + (sEntry0.label || sEntry0.showName || '').slice(0, 10)) : 'clic droit pour importer';
         if (sTargetLabel) { ctx.fillStyle = '#6b7280'; ctx.font = '8px -apple-system, sans-serif'; ctx.fillText(sTargetLabel, 72, trackY + 12); }
         ctx.strokeStyle = 'rgba(75, 85, 99, 0.1)'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.moveTo(LABEL_WIDTH, trackY + SHOW_TRACK_HEIGHT); ctx.lineTo(w, trackY + SHOW_TRACK_HEIGHT); ctx.stroke();
         for (const entry of sTrack.entries) {
@@ -3486,7 +3492,7 @@ if (editBlock) { setEditBlock(null); return; }
           const pad = 3; const barY = trackY + pad; const barH = SHOW_TRACK_HEIGHT - pad * 2;
           ctx.fillStyle = '#f59e0b'; ctx.globalAlpha = 0.88; ctx.beginPath(); ctx.roundRect(ex, barY, entryW, barH, 3); ctx.fill(); ctx.globalAlpha = 1;
           ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.roundRect(ex, barY, 3, barH, [3, 0, 0, 3]); ctx.fill(); ctx.beginPath(); ctx.roundRect(endX - 3, barY, 3, barH, [0, 3, 3, 0]); ctx.fill();
-          if (entryW > 44) { ctx.fillStyle = '#ffffff'; ctx.font = 'bold 7px -apple-system, sans-serif'; ctx.textAlign = 'center'; const nameLabel = (entry.showName || 'show').length > 14 ? (entry.showName || 'show').substring(0, 13) + '…' : (entry.showName || 'show'); ctx.fillText(nameLabel, ex + entryW / 2, trackY + SHOW_TRACK_HEIGHT / 2 + 3); }
+          if (entryW > 44) { ctx.fillStyle = '#ffffff'; ctx.font = 'bold 7px -apple-system, sans-serif'; ctx.textAlign = 'center'; const nameLabel = (entry.label || entry.showName || 'show').length > 14 ? (entry.label || entry.showName || 'show').substring(0, 13) + '…' : (entry.label || entry.showName || 'show'); ctx.fillText(nameLabel, ex + entryW / 2, trackY + SHOW_TRACK_HEIGHT / 2 + 3); }
           ctx.fillStyle = '#fbbf24'; const diamondSize = 3; ctx.beginPath(); ctx.moveTo(ex, barY + barH / 2 - diamondSize); ctx.lineTo(ex + diamondSize, barY + barH / 2); ctx.lineTo(ex, barY + barH / 2 + diamondSize); ctx.lineTo(ex - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(endX, barY + barH / 2 - diamondSize); ctx.lineTo(endX + diamondSize, barY + barH / 2); ctx.lineTo(endX, barY + barH / 2 + diamondSize); ctx.lineTo(endX - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill();
         }
       }
@@ -3526,7 +3532,7 @@ if (editBlock) { setEditBlock(null); return; }
         const cEntry0 = cTrack.entries[0];
         let cTargetLabel = '';
         if (cEntry0) {
-          cTargetLabel = '🎭 ' + (cEntry0.sceneName || '').slice(0, 10);
+          cTargetLabel = '🎭 ' + (cEntry0.label || cEntry0.sceneName || '').slice(0, 10);
         } else {
           cTargetLabel = 'clic droit pour importer';
         }
@@ -3566,7 +3572,7 @@ if (editBlock) { setEditBlock(null); return; }
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 7px -apple-system, sans-serif';
             ctx.textAlign = 'center';
-            const nameLabel = (entry.sceneName || 'scene').length > 14 ? (entry.sceneName || 'scene').substring(0, 13) + '…' : (entry.sceneName || 'scene');
+            const nameLabel = (entry.label || entry.sceneName || 'scene').length > 14 ? (entry.label || entry.sceneName || 'scene').substring(0, 13) + '…' : (entry.label || entry.sceneName || 'scene');
             ctx.fillText(nameLabel, ex + entryW / 2, trackY + SCENE_TRACK_HEIGHT / 2 + 3);
           }
           ctx.fillStyle = '#c4b5fd'; const diamondSize = 3; ctx.beginPath(); ctx.moveTo(ex, barY + barH / 2 - diamondSize); ctx.lineTo(ex + diamondSize, barY + barH / 2); ctx.lineTo(ex, barY + barH / 2 + diamondSize); ctx.lineTo(ex - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(endX, barY + barH / 2 - diamondSize); ctx.lineTo(endX + diamondSize, barY + barH / 2); ctx.lineTo(endX, barY + barH / 2 + diamondSize); ctx.lineTo(endX - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill();

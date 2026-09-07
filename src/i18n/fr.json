@@ -517,6 +517,8 @@
       "confirm": "Supprimer",
       "cancel": "Annuler",
       "moveToFolder": "Déplacer vers le dossier",
+      "editScene": "Modifier",
+      "rename": "Renommer",
       "noFolderOption": "Non classé (retirer du dossier)",
       "newFolderOption": "Nouveau dossier…",
       "contextMenuHint": "Clic droit : déplacer dans un dossier",
