@@ -671,8 +671,6 @@ export function useDmxPlayback(options: {
     }
   },[patchedFixtures,fixtureDefs,universes]);
 
-  // Ensure DMX engine is started
-  const engineStartedRef=useRef(false);
   useEffect(()=>{
     const api=(typeof window!=='undefined'?(window as any).lightMaestro?.dmx:null);
     if(!api||universes.length===0)return;
@@ -682,7 +680,7 @@ export function useDmxPlayback(options: {
     let cancelled=false;
     (async()=>{
       try{
-        if(await api.isRunning().catch(()=>false)){engineStartedRef.current=true;return;}
+        if(await api.isRunning().catch(()=>false))return;
         await Promise.all(universes.map((u:any)=>api.addUniverse({
           id:u.id,name:u.name,type:u.type||'usb-dmx',output:true,input:false,
           channels:u.channels||512,serialPort:u.serialPort||'',
@@ -691,7 +689,6 @@ export function useDmxPlayback(options: {
         }).catch(()=>{})));
         if(cancelled)return;
         await api.start().catch(()=>{});
-        engineStartedRef.current=true;
       }catch{/* engine start is best-effort */}
     })();
     return()=>{cancelled=true;};
@@ -772,9 +769,11 @@ export function useDmxPlayback(options: {
     // start/restart site below so the engine is never started in dry-run.
 
 
-    // Ensure engine is started (re-attempt on first play tick if needed)
-    if(!engineStartedRef.current && !dryRunRef.current){
-      engineStartedRef.current=true;
+    // Ensure engine is started. Re-attempt on EVERY play start (not just the
+    // first session play): the fail-safe watchdog may have stopped/blacked out
+    // the engine mid-session, and a fresh play must re-establish output right
+    // away instead of waiting for the tick's ~2s _engineRecheck.
+    if(!dryRunRef.current){
       (async()=>{
         try{
           if(await api.isRunning().catch(()=>false))return;

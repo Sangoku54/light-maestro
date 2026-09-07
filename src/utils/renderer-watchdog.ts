@@ -4,8 +4,10 @@
  * The renderer's output pipeline (RAF playback loop) is the only writer of
  * DMX values. If the renderer crashes or hangs, those values would otherwise
  * stay on the wire forever. The main process arms a fail-safe: after the
- * first `watchdog:ping` is received, if no ping arrives for more than 2 s,
- * it blacks out every output and stops the DMX engine.
+ * first `watchdog:ping` is received, if no ping arrives for more than
+ * WATCHDOG_TIMEOUT_MS (4 s), it blacks out every output and stops the DMX
+ * engine. When the renderer pings again the blackout is auto-lifted, so a
+ * transient stall never leaves DMX dead for the rest of the session.
  *
  * This module keeps that heartbeat alive (one ping every 500 ms on the
  * `watchdog:ping` IPC channel). It self-initializes on import and degrades

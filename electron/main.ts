@@ -452,7 +452,7 @@ dmxEngine.on('error', (err: Error) => {
   mainWindow?.webContents.send('dmx:error', err.message);
 });
 
-// ─── Watchdog fail-safe: renderer heartbeat → auto blackout ───
+// ─── Watchdog fail-safe: renderer heartbeat → auto blackout + auto-restore ───
 // The renderer pings `watchdog:ping` every ~500 ms (src/utils/renderer-watchdog.ts).
 // Fail-safe rules (safety live):
 //   • Never armed before the FIRST ping — a slow startup is not a failure.
@@ -462,16 +462,27 @@ dmxEngine.on('error', (err: Error) => {
 //     (zero frame pushed on all universes) and stop the engine so the worker
 //     stops emitting and USB/Art-Net/sACN outputs are closed — no stale frame
 //     can stay on the wire.
+//   • AUTO-RESTORE: as soon as the renderer pings again (>=2 pings after the
+//     fail-safe fired), the blackout is lifted (engine.restore()). One
+//     transient stall >WATCHDOG_TIMEOUT_MS (heavy WebGL / analysis / cue
+//     generation at startup or mid-play) must NOT permanently kill DMX; the
+//     renderer's own playback tick re-starts the engine within its ~2s
+//     re-check, and the play-start path also re-establishes output.
 //   • Additionally, if the DMX worker dies while the renderer is alive and the
 //     engine was previously started (graceful stop emits 'stopped'), we blackout
 //     too — the output pipeline is dead either way.
 const WATCHDOG_PING_INTERVAL_MS = 500;
-const WATCHDOG_TIMEOUT_MS = 2000;
+// Tolerate transient renderer jank (heavy WebGL compile, analysis, cue
+// generation) without tripping the fail-safe: the watchdog must only engage
+// for a genuinely dead/hung renderer, otherwise a >2s hiccup at startup or
+// during playback would blackout DMX for the rest of the session.
+const WATCHDOG_TIMEOUT_MS = 4000;
 let watchdogLastPing = 0;
 let watchdogArmed = false;       // becomes true after the first ping
 let watchdogFired = false;       // fail-safe already engaged for this dead window
 let watchdogTimer: NodeJS.Timeout | null = null;
 let engineStartedByUser = false; // engine reported 'started' (not a graceful stop)
+let pingsAfterFailSafe = 0;      // consecutive pings received since the fail-safe fired
 
 ipcMain.on('watchdog:ping', () => {
   watchdogLastPing = Date.now();
@@ -479,8 +490,19 @@ ipcMain.on('watchdog:ping', () => {
     watchdogArmed = true;
     startWatchdogTimer();
   }
-  // Renderer is alive again after a fail-safe: re-arm for future crashes.
-  watchdogFired = false;
+  if (watchdogFired) {
+    // Renderer is breathing again after a fail-safe. The blackout must not
+    // stay latched forever: auto-lift it so the renderer's own engine
+    // restart (playback tick _engineRecheck / play-start) can re-establish
+    // output. Without this, one transient stall >WATCHDOG_TIMEOUT_MS killed
+    // DMX for the whole session — "audio plays but lights stay black".
+    pingsAfterFailSafe++;
+    if (pingsAfterFailSafe >= 2) {
+      watchdogFired = false;
+      pingsAfterFailSafe = 0;
+      try { dmxEngine.restore(); } catch (e) { console.error('[watchdog] restore() failed:', e); }
+    }
+  }
 });
 
 dmxEngine.on('started', () => { engineStartedByUser = true; });
