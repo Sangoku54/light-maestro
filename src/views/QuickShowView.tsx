@@ -6,6 +6,7 @@ import { Save, FolderOpen, Download, RefreshCw, Undo2, Redo2, Trash2, Zap, ZapOf
 import { useAppStore, type CustomPalette, type ColorPreset } from '../stores/appStore';
 import { useShowStore, type PatchedFixture, type SongPreset, type View3DState } from '../stores/showStore';
 import { useClockStore } from '../stores/clockStore';
+import { RichTooltip } from '../components/RichTooltip';
 import { AudioFileUpload, useAudioFileLoader } from '../hooks/useAudioFileLoader';
 import { TrackAnalysis, TrackSection, SECTION_COLORS, keyToPalette, SectionAnalysis, AtmosphereType } from '../hooks/audio-analysis';
 import type { GenreProfile } from '../hooks/audio-analysis';
@@ -80,6 +81,55 @@ const PromptModal: React.FC<{
 };
 
 /* ─── Helpers ──────────────────────────────────────────── */
+
+/**
+ * Registre du « dernier bon audio » par nom de preset, persistant (IPC,
+ * userData/last-audio.json — évite la quota de localStorage pour ~78 Mo de
+ * base64). Permet :
+ *  - à un ré-export depuis une session fraîche de réutiliser le dernier audio
+ *    connu (sinon l'export écrirait un .lmpreset SANS son et écraserait le bon) ;
+ *  - au chargement d'un .lmpreset devenu sans son de restaurer l'audio depuis
+ *    cette cache.
+ */
+type LastAudioEntry = { base64: string; fileName?: string; ts: string };
+
+async function lastAudioLoad(): Promise<Record<string, LastAudioEntry>> {
+  try {
+    const api = (window as any).lightMaestro?.lastAudio;
+    const m = await api?.load();
+    return m && typeof m === 'object' ? (m as Record<string, LastAudioEntry>) : {};
+  } catch { return {}; }
+}
+
+async function lastAudioRemember(name: string, base64: string | undefined, fileName?: string) {
+  if (!base64) return;
+  try {
+    const api = (window as any).lightMaestro?.lastAudio;
+    if (!api) return;
+    const map = await lastAudioLoad();
+    map[name] = { base64, fileName, ts: new Date().toISOString() };
+    await api.save(map);
+  } catch { /* non-bloquant */ }
+}
+
+/** Extrait le base64 audio d'une entrée de preset (format enveloppe ou plat). */
+function presetAudioOf(p: { data?: any } | undefined): string {
+  if (!p) return '';
+  const d = (p as any).data?.audioDataBase64 || (p as any).audioFileBase64 || '';
+  return typeof d === 'string' ? d : '';
+}
+
+function audioConfirmNoAudio(name: string): boolean {
+  // eslint-disable-next-line no-restricted-globals
+  return window.confirm(
+    `⚠️ Aucun audio disponible pour « ${name} ».` +
+    '\n\nLe .lmpreset sera écrit SANS son — s\'il existe déjà un fichier du même nom' +
+    '\ncontenant l\'audio, il sera ÉCRASÉ sans son (perte définitive).' +
+    '\n\n⚡ Rechargez d\'abord l\'audio dans la sidebar (Nouveau fichier audio),' +
+    '\npuis ré-exportez.' +
+    '\n\nContinuer quand même sans audio ?'
+  );
+}
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');
@@ -1977,6 +2027,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         if (!pf) { resolve(); return; }
         try {
           const text = await pf.text();
+          const textSize = text.length;
           const data = JSON.parse(text);
           const presetName = data.quickShow?.name || pf.name.replace(/\.lmpreset$/i, '');
           useAppStore.getState().setPresetName(presetName);
@@ -1991,6 +2042,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           if (data.disabledFixtures) setDisabledFixtures(new Set(data.disabledFixtures)); else setDisabledFixtures(new Set());
           if (data.musicians) setQsMusicians(normalizeRoster(data.musicians));
           if (data.stageScene) setQsStageScene(data.stageScene as StageScene);
+          const view3DPreset = data.view3D;
+          setQsView3D(view3DPreset && typeof view3DPreset === 'object' ? view3DPreset as View3DState : undefined);
           let audioDataUrl = '';
           if (data.analysis) {
             // Audio robuste : un .lmpreset peut être sans audio embarqué (export
@@ -1998,16 +2051,35 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             // En secours on réutilise l'audio d'un preset du même nom déjà en
             // store (ex. chargé via le projet .lmproj) — on ne perd JAMAIS le son.
             const storeNow = useShowStore.getState();
-            const existingAudio = (storeNow.songPresets.find(p => p.name === presetName) as any)?.audioFileBase64;
-            audioDataUrl = pickAudioUrl(data.audioDataBase64, existingAudio) ?? '';
+            const existingAudio =
+              (storeNow.songPresets.find(p => p.name === presetName) as any)?.audioFileBase64 ||
+              presetAudioOf(savedPresets.find(p => p.name === presetName));
+            const inFile = (data.audioDataBase64 as string) || '';
+            const inStore = (existingAudio as string) || '';
+            console.error(`[loadPresetFile] name="${presetName}" textSize=${textSize} inFileAudio=${inFile.length !== 0} inFileLen=${inFile.length} inStoreAudio=${inStore.length !== 0} inStoreLen=${inStore.length}`);
+            let audioDataUrl = pickAudioUrl(data.audioDataBase64, existingAudio) ?? '';
+            let audioSrc = audioDataUrl === inFile ? 'file' : audioDataUrl === inStore ? 'store' : 'none';
+            // Dernier filet : le « dernier bon audio » enregistré pour ce nom
+            // (IPC last-audio.json) quand ni le fichier ni le store n'ont le son.
+            if (!audioDataUrl) {
+              const lastGood = (await lastAudioLoad())[presetName]?.base64;
+              if (lastGood) {
+                audioDataUrl = lastGood;
+                audioSrc = 'lastGood';
+                console.error(`[loadPresetFile] lastGoodAudio: len=${lastGood.length}`);
+              }
+            }
+            console.error(`[loadPresetFile] pickedAudio: ${audioDataUrl.length !== 0} len=${audioDataUrl.length} src=${audioSrc}`);
             if (audioDataUrl) {
               try {
                 await audioFile.restoreWithAudio(data.analysis, audioDataUrl);
+                console.error('[loadPresetFile] restoreWithAudio OK');
               } catch (e) {
                 console.error('restoreWithAudio failed, falling back to restoreAnalysis:', e);
                 audioFile.restoreAnalysis(data.analysis);
               }
             } else {
+              console.error('[loadPresetFile] NO AUDIO — restoreAnalysis only');
               audioFile.restoreAnalysis(data.analysis);
             }
             setHasEverHadAnalysis(true);
@@ -2032,6 +2104,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             disabledFixtures: data.disabledFixtures || [],
             musicians: data.musicians ? normalizeRoster(data.musicians) : undefined,
             stageScene: data.stageScene as StageScene | undefined,
+            view3D: data.view3D && typeof data.view3D === 'object' ? data.view3D as View3DState : undefined,
             createdAt: new Date().toISOString(),
           }]);
           setKey(Number(data.quickShow?.regenSeed) || 0);
@@ -2042,7 +2115,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       };
       inp.click();
     });
-  }, [audioFile, setQs, setSections, setManualCues, setEfxTracks, setFixtureTracks]);
+  }, [audioFile, setQs, setSections, setManualCues, setEfxTracks, setFixtureTracks, savedPresets]);
 
   const handleSaveAsPreset = useCallback((name: string) => {
     const file = audioFile.file;
@@ -2061,7 +2134,20 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         } else {
           // Aucun fichier rechargé dans la sidebar : réutilise l'audio du preset
           // du même nom déjà en store (sinon on sauverait un preset sans son).
-          audioDataUrl = (useShowStore.getState().songPresets.find(p => p.name === name) as any)?.audioFileBase64;
+          audioDataUrl =
+            (useShowStore.getState().songPresets.find(p => p.name === name) as any)?.audioFileBase64 ||
+            presetAudioOf(savedPresets.find(p => p.name === name)) ||
+            undefined;
+          if (!audioDataUrl) {
+            // Session fraîche ou preset jamais chargé : dernier bon audio connu.
+            audioDataUrl = (await lastAudioLoad())[name]?.base64 || undefined;
+          }
+        }
+        // Garde-fou : ne jamais écraser silencieusement un preset audio par un sans-son.
+        if (!audioDataUrl) {
+          if (!audioConfirmNoAudio(name)) return;
+        } else {
+          await lastAudioRemember(name, audioDataUrl, resolvedAnalysis?.fileName);
         }
         if (audioDataUrl) {
           const commaIdx = audioDataUrl.indexOf(',');
@@ -2146,7 +2232,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         setSavedPresets(updated);
       } catch (e) { console.error('Failed to save preset:', e); }
     })();
-  }, [qs, resolvedAnalysis, sections, manualCues, efxTracks, fixtureTracks, chaserTracks, audioFile, effectiveBpm, key, qsMusicians, qsStageScene, qsView3D]);
+  }, [qs, resolvedAnalysis, sections, manualCues, efxTracks, fixtureTracks, chaserTracks, audioFile, effectiveBpm, key, qsMusicians, qsStageScene, qsView3D, savedPresets]);
 
   const handleExportPreset = useCallback((name: string) => {
     (async () => {
@@ -2163,7 +2249,21 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         } else {
           // Pas de fichier chargé dans la sidebar : embarque l'audio du preset
           // du même nom déjà en store pour que l'export .lmpreset soit autonome.
-          audioDataBase64 = (useShowStore.getState().songPresets.find(p => p.name === name) as any)?.audioFileBase64;
+          audioDataBase64 =
+            (useShowStore.getState().songPresets.find(p => p.name === name) as any)?.audioFileBase64 ||
+            presetAudioOf(savedPresets.find(p => p.name === name)) ||
+            undefined;
+          if (!audioDataBase64) {
+            // Session fraîche : dernier bon audio connu (persistant IPC).
+            audioDataBase64 = (await lastAudioLoad())[name]?.base64 || undefined;
+          }
+        }
+        // Garde-fou : on ne peut pas écraser silencieusement le .lmpreset par
+        // une version sans son. L'utilisateur recharge l'audio puis ré-exporte.
+        if (!audioDataBase64) {
+          if (!audioConfirmNoAudio(name)) return;
+        } else {
+          await lastAudioRemember(name, audioDataBase64, resolvedAnalysis?.fileName);
         }
         const currentCues = genCues(sections, effectiveBpm, qs.beatDivision || 4, qs, manualCues, key, resolvedAnalysis, useShowStore.getState().scenes as any);
         const store = useShowStore.getState();
@@ -2187,7 +2287,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         URL.revokeObjectURL(url);
       } catch (e) { console.error('Failed to export preset:', e); }
     })();
-  }, [qs, resolvedAnalysis, sections, manualCues, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, fixtureTracks, disabledFixtures, audioFile, effectiveBpm, key, qsMusicians, qsStageScene, qsView3D]);
+  }, [qs, resolvedAnalysis, sections, manualCues, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, fixtureTracks, disabledFixtures, audioFile, effectiveBpm, key, qsMusicians, qsStageScene, qsView3D, savedPresets]);
 
   const handleLoadPreset = useCallback(async (preset: typeof savedPresets[number]) => {
     // Support both legacy format {data:{quickShow,analysis,...}} and flat SongPreset format
@@ -3414,67 +3514,79 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800/50 bg-[#0d0d14] flex-wrap">
         {/* DMX Toggle */}
-        <button
-          title={t('dmxOutput') || 'DMX Output'}
-          onClick={() => setDmxOutputEnabled(v => !v)}
-          className={`p-1.5 rounded ${dmxOutputEnabled ? 'text-green-400 bg-green-400/10' : 'text-gray-600 bg-gray-800/50'}`}
-        >
-          {dmxOutputEnabled ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4" />}
-        </button>
+        <RichTooltip content={{ title: 'DMX Output', text: 'Active ou coupe la sortie DMX vers le matériel.\nQuand c\'est coupé, la 3D reste affichée mais rien ne part en hardware.', tone: 'warn' }} placement="bottom">
+          <button
+            title={t('dmxOutput') || 'DMX Output'}
+            onClick={() => setDmxOutputEnabled(v => !v)}
+            className={`p-1.5 rounded ${dmxOutputEnabled ? 'text-green-400 bg-green-400/10' : 'text-gray-600 bg-gray-800/50'}`}
+          >
+            {dmxOutputEnabled ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4" />}
+          </button>
+        </RichTooltip>
 
         {/* Dry-run toggle */}
-        <button
-          title={'Dry-run preview (no hardware DMX)'}
-          onClick={() => setDryRunMode(v => !v)}
-          className={`p-1.5 rounded text-[10px] font-mono font-bold ${dryRunMode ? 'text-amber-400 bg-amber-400/10' : 'text-gray-600 bg-gray-800/50'}`}
-        >
-          DRY
-        </button>
+        <RichTooltip content={{ title: 'Dry-run (sans matériel)', text: 'Branche l\'apparition : la sortie DMX est simulée sans envoyer de vraies données au matériel. Réglage de test en sécurité.', example: 'Utilisez-le pour préparer votre show avant la scène réelle.', tone: 'info' }} placement="bottom">
+          <button
+            title={'Dry-run preview (no hardware DMX)'}
+            onClick={() => setDryRunMode(v => !v)}
+            className={`p-1.5 rounded text-[10px] font-mono font-bold ${dryRunMode ? 'text-amber-400 bg-amber-400/10' : 'text-gray-600 bg-gray-800/50'}`}
+          >
+            DRY
+          </button>
+        </RichTooltip>
 
         {/* Freeze hold */}
-        <button
-          title={frozen ? 'Unfreeze (resume playback)' : 'Freeze (hold current DMX frame)'}
-          onClick={() => { setFrozen(v => { frozenRef.current = !v; return !v; }); }}
-          className={`p-1.5 rounded text-[10px] font-mono font-bold ${frozen ? 'text-cyan-400 bg-cyan-400/10' : 'text-gray-600 bg-gray-800/50'}`}
-        >
-          <Snowflake className="w-3 h-3" />
-        </button>
+        <RichTooltip content={{ title: frozen ? 'Unfreeze — reprendre' : 'Freeze — figer la trame', text: 'En mode Freeze, la trame DMX actuelle est maintenue (pause de la lecture).', example: 'Suspendre la course du show pour vérifier un état précis.', tone: 'info' }} placement="bottom">
+          <button
+            title={frozen ? 'Unfreeze (resume playback)' : 'Freeze (hold current DMX frame)'}
+            onClick={() => { setFrozen(v => { frozenRef.current = !v; return !v; }); }}
+            className={`p-1.5 rounded text-[10px] font-mono font-bold ${frozen ? 'text-cyan-400 bg-cyan-400/10' : 'text-gray-600 bg-gray-800/50'}`}
+          >
+            <Snowflake className="w-3 h-3" />
+          </button>
+        </RichTooltip>
 
         {/* Drop Now */}
-        <button
-          title="Force a drop (max energy + strobe for 300ms)"
-          onClick={() => { forceDropRef.current = true; }}
-          className="p-1.5 rounded text-gray-600 bg-gray-800/50 hover:text-red-400 hover:bg-red-400/5"
-        >
-          <Zap className="w-3.5 h-3.5" />
-        </button>
+        <RichTooltip content={{ title: 'Drop — impact énergique', text: 'Déclenche un "drop" sonore/visuel : énergie max + strobe pendant ~300 ms.', example: 'À l\'appogiathe d\'un refrain ou d\'une drop musicale.', tone: 'danger' }} placement="bottom">
+          <button
+            title="Force a drop (max energy + strobe for 300ms)"
+            onClick={() => { forceDropRef.current = true; }}
+            className="p-1.5 rounded text-gray-600 bg-gray-800/50 hover:text-red-400 hover:bg-red-400/5"
+          >
+            <Zap className="w-3.5 h-3.5" />
+          </button>
+        </RichTooltip>
 
         {/* Divider */}
         <span className="w-px h-5 bg-gray-700/50" />
 
         {/* A/B Compare */}
         {cuesB.length > 0 ? (
-          <button
-            title={showB ? 'Switch to style A' : 'Switch to style B (' + compareStyle + ')'}
-            onClick={() => setShowB(v => !v)}
-            className={`p-1.5 rounded text-[10px] font-mono font-bold ${showB ? 'text-amber-400 bg-amber-400/10' : 'text-gray-500 bg-gray-800/50'}`}
-          >
-            {showB ? 'B' : 'A'}
-          </button>
+          <RichTooltip content={{ title: 'Comparaison A/B', text: 'Bascule entre deux styles de cue générés (A et B) pour comparer l\'ambiance lumineuse.', example: 'Générez le style B (maison) puis alternô avec A (techno) pour choisir la vibe.', tone: 'info' }} placement="bottom">
+            <button
+              title={showB ? 'Switch to style A' : 'Switch to style B (' + compareStyle + ')'}
+              onClick={() => setShowB(v => !v)}
+              className={`p-1.5 rounded text-[10px] font-mono font-bold ${showB ? 'text-amber-400 bg-amber-400/10' : 'text-gray-500 bg-gray-800/50'}`}
+            >
+              {showB ? 'B' : 'A'}
+            </button>
+          </RichTooltip>
         ) : (
-          <button
-            title="Generate B cues with different style for comparison"
-            onClick={() => {
-              const styleB = qs.musicStyle === 'techno' ? 'house' : 'techno';
-              const qsB = { ...qs, musicStyle: styleB };
-              const b = genCues(sections, effectiveBpm, qs.beatDivision || 4, qsB, manualCues, key + '_b', resolvedAnalysis);
-              setCuesB(b);
-              setCompareStyle(styleB);
-            }}
-            className="p-1.5 rounded text-gray-600 bg-gray-800/50 hover:text-amber-400 hover:bg-amber-400/5"
-          >
-            <Layers className="w-3.5 h-3.5" />
-          </button>
+          <RichTooltip content={{ title: 'Générer un style B', text: 'Crée une version alternative des cues avec un style musical différent, pour comparaison en un clic.', example: 'Testé à pleine énergie techno vs house sans tout refaire.', tone: 'info' }} placement="bottom">
+            <button
+              title="Generate B cues with different style for comparison"
+              onClick={() => {
+                const styleB = qs.musicStyle === 'techno' ? 'house' : 'techno';
+                const qsB = { ...qs, musicStyle: styleB };
+                const b = genCues(sections, effectiveBpm, qs.beatDivision || 4, qsB, manualCues, key + '_b', resolvedAnalysis);
+                setCuesB(b);
+                setCompareStyle(styleB);
+              }}
+              className="p-1.5 rounded text-gray-600 bg-gray-800/50 hover:text-amber-400 hover:bg-amber-400/5"
+            >
+              <Layers className="w-3.5 h-3.5" />
+            </button>
+          </RichTooltip>
         )}
 
         {/* Divider */}
@@ -3526,41 +3638,55 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         <div className="h-5 border-l border-gray-700 mx-1" />
 
         {/* Undo / Redo */}
-        <button title="Undo" onClick={undo} disabled={!canUndo} className={`p-1 rounded ${canUndo ? 'text-gray-400 hover:text-white' : 'text-gray-700'}`}>
-          <Undo2 className="w-3.5 h-3.5" />
-        </button>
-        <button title="Redo" onClick={redo} disabled={!canRedo} className={`p-1 rounded ${canRedo ? 'text-gray-400 hover:text-white' : 'text-gray-700'}`}>
-          <Redo2 className="w-3.5 h-3.5" />
-        </button>
+        <RichTooltip content={{ title: 'Annuler (Undo)', text: 'Annule la dernière modification de la timeline ou du montage.', tone: 'info' }} placement="bottom">
+          <button title="Undo" onClick={undo} disabled={!canUndo} className={`p-1 rounded ${canUndo ? 'text-gray-400 hover:text-white' : 'text-gray-700'}`}>
+            <Undo2 className="w-3.5 h-3.5" />
+          </button>
+        </RichTooltip>
+        <RichTooltip content={{ title: 'Rétablir (Redo)', text: 'Réapplique la modification que vous venez d\'annuler.', tone: 'info' }} placement="bottom">
+          <button title="Redo" onClick={redo} disabled={!canRedo} className={`p-1 rounded ${canRedo ? 'text-gray-400 hover:text-white' : 'text-gray-700'}`}>
+            <Redo2 className="w-3.5 h-3.5" />
+          </button>
+        </RichTooltip>
 
         {/* Save / Load */}
-        <button title={t('save') || 'Save'} onClick={() => saveProject(resolvedAnalysis, sections, qs, audioFile, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, disabledFixtures)} className="p-1 rounded text-gray-400 hover:text-white">
-          <Save className="w-3.5 h-3.5" />
-        </button>
-        <button title={t('open') || 'Open'} onClick={() => loadProject(setQs, audioFile, setSections, setManualCues, setEfxTracks, setFixtureTracks, setColorTracks, setStrobeTracks, setDimmerTracks, setChaserTracks, setShowTracks, setSceneTracks, setDisabledFixtures, setFixtureDefs)} className="p-1 rounded text-gray-400 hover:text-white">
-          <FolderOpen className="w-3.5 h-3.5" />
-        </button>
-        <button title={t('clear') || 'Clear'} onClick={clearAudio} className="p-1 rounded text-gray-400 hover:text-red-400">
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
+        <RichTooltip content={{ title: 'Sauvegarder', text: 'Enregistre tout l\'état actuel (scènes, EFX, Show, audio, positions) dans le fichier projet.', example: 'Faites-le régulièrement pour ne pas perdre votre travail.', tone: 'success' }} placement="bottom">
+          <button title={t('save') || 'Save'} onClick={() => saveProject(resolvedAnalysis, sections, qs, audioFile, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, disabledFixtures)} className="p-1 rounded text-gray-400 hover:text-white">
+            <Save className="w-3.5 h-3.5" />
+          </button>
+        </RichTooltip>
+        <RichTooltip content={{ title: 'Ouvrir', text: 'Charges un projet .lmpreset sauvegardé (fill + audio + timeline).', tone: 'info' }} placement="bottom">
+          <button title={t('open') || 'Open'} onClick={() => loadProject(setQs, audioFile, setSections, setManualCues, setEfxTracks, setFixtureTracks, setColorTracks, setStrobeTracks, setDimmerTracks, setChaserTracks, setShowTracks, setSceneTracks, setDisabledFixtures, setFixtureDefs)} className="p-1 rounded text-gray-400 hover:text-white">
+            <FolderOpen className="w-3.5 h-3.5" />
+          </button>
+        </RichTooltip>
+        <RichTooltip content={{ title: 'Effacer (Clear)', text: 'Vide la timeline et le montage (cues, sections, EFX, tracks). L\'audio reste chargé.', tone: 'danger' }} placement="bottom">
+          <button title={t('clear') || 'Clear'} onClick={clearAudio} className="p-1 rounded text-gray-400 hover:text-red-400">
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </RichTooltip>
 
         <div className="h-5 border-l border-gray-700 mx-1" />
 
         {/* New audio file */}
-        <button title="Nouveau fichier audio" onClick={handleNewAudioFile} className="p-1 rounded text-gray-400 hover:text-green-400">
-          <Music className="w-3.5 h-3.5" />
-        </button>
+        <RichTooltip content={{ title: 'Nouveau fichier audio', text: 'Charge un nouveau fichier audio (mp3/wav), détecte le BPM et le découpe en sections automatiquement.', example: 'Idéal pour démarrer un nouveau titre: chargez le son → l\'app crée les 8/16/32 zones.', tone: 'info' }} placement="bottom">
+          <button title="Nouveau fichier audio" onClick={handleNewAudioFile} className="p-1 rounded text-gray-400 hover:text-green-400">
+            <Music className="w-3.5 h-3.5" />
+          </button>
+        </RichTooltip>
 
         {/* Presets dropdown */}
         <div className="relative">
-          <button
-            ref={presetsBtnRef}
-            onClick={() => setPresetsDropdown(v => !v)}
-            className="p-1 rounded text-gray-400 hover:text-yellow-400"
-            title="Presets"
-          >
-            <Layers className="w-3.5 h-3.5" />
-          </button>
+          <RichTooltip content={{ title: 'Presets', text: 'Sauvegardez, rechargez ou exportez vos configurations .lmpreset (scènes, EFX, audio associé).', tone: 'info' }} placement="bottom">
+            <button
+              ref={presetsBtnRef}
+              onClick={() => setPresetsDropdown(v => !v)}
+              className="p-1 rounded text-gray-400 hover:text-yellow-400"
+              title="Presets"
+            >
+              <Layers className="w-3.5 h-3.5" />
+            </button>
+          </RichTooltip>
           {presetsDropdown && (
             <div className="absolute top-full right-0 mt-1 z-50 bg-[#1a1a2e] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[220px]">
               <button onClick={() => { setPresetsDropdown(false); setPromptAction('save'); }} className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2">

@@ -14,6 +14,7 @@ import { MidiManager, type MidiMapping, type MidiTarget } from './midi/manager';
 import type { MtcState } from './midi/mtc';
 import { AudioAnalyzer } from './audio/analyzer';
 import { crashLogger } from './utils/crash-logger';
+import { packProject, unpackProject } from './project-envelope';
 
 // Disable GPU cache to avoid permission errors on Windows
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
@@ -322,6 +323,18 @@ function createWindow() {
       clearTimeout(unresponsiveTimer);
       unresponsiveTimer = null;
     }
+  });
+
+  // ─── Renderer console capture (diagnostic: logs/renderer-console.log) ───
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    try {
+      const LOG_DIR = crashLogger.getLogDir();
+      if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+      const filepath = path.join(LOG_DIR, 'renderer-console.log');
+      const tags: Record<number, string> = { 0: 'log', 1: 'warn', 2: 'error', 3: 'info', 4: 'debug' };
+      const tag = tags[level] ?? String(level);
+      fs.appendFileSync(filepath, `[${new Date().toISOString()}] [${tag}] ${message}\n    at ${sourceId}:${line}\n`, 'utf-8');
+    } catch { /* diagnostic only, never throws */ }
   });
 
   // ─── Close guard: intercept close, let renderer decide ───
@@ -732,16 +745,14 @@ ipcMain.on('audio:pushBuffer', (_, buffer: Float32Array) => {
 });
 
 // ─── IPC Handlers: Project (full-project save/load) ───
-ipcMain.handle('project:save', async (_, content: string) => {
+ipcMain.handle('project:save', async (_, payload: { content: string; blobs: any[] }) => {
   const result = await dialog.showSaveDialog(mainWindow!, {
     defaultPath: `lightmaestro-project-${Date.now()}.lmproj`,
     filters: [{ name: 'Light Maestro Project', extensions: ['lmproj'] }],
   });
   if (result.canceled || !result.filePath) return null;
-  // Atomic write: temp + rename so a crash mid-write never corrupts the project
-  const tmpPath = `${result.filePath}.tmp`;
-  fs.writeFileSync(tmpPath, content, 'utf-8');
-  fs.renameSync(tmpPath, result.filePath);
+  const { content, blobs = [] } = payload ?? {};
+  await packProject(result.filePath, content ?? '', blobs ?? []);
   return result.filePath;
 });
 
@@ -753,8 +764,8 @@ ipcMain.handle('project:open', async () => {
   });
   if (result.canceled || result.filePaths.length === 0) return null;
   const filePath = result.filePaths[0];
-  const content = fs.readFileSync(filePath, 'utf-8');
-  return { filePath, content };
+  const { content, blobs } = await unpackProject(filePath);
+  return { filePath, content, blobs };
 });
 
 // ─── IPC Handlers: Song Presets (file-based, avoids localStorage quota) ──
@@ -765,6 +776,18 @@ ipcMain.handle('presets:save', async (_, presets: any[]) => {
 });
 ipcMain.handle('presets:load', async () => {
   try { if (fs.existsSync(presetsPath)) return JSON.parse(fs.readFileSync(presetsPath, 'utf-8')); return []; } catch (e) { console.error('Failed to load presets:', e); return []; }
+});
+
+// ─── IPC Handlers: Last known-good audio per preset name (file-based) ──
+// Empêche un export silencieux SANS audio d'écraser (et donc de perdre) le
+// dernier .lmpreset qui contenait le son : c'est le registre persistant qui
+// permet de réutiliser le dernier bon audio même en session fraîche.
+const lastAudioPath = path.join(app.getPath('userData'), 'last-audio.json');
+ipcMain.handle('lastAudio:save', async (_, map: Record<string, { base64: string; fileName?: string; ts: string }>) => {
+  try { fs.writeFileSync(lastAudioPath, JSON.stringify(map), 'utf-8'); return true; } catch (e) { console.error('Failed to save last-audio:', e); return false; }
+});
+ipcMain.handle('lastAudio:load', async () => {
+  try { if (fs.existsSync(lastAudioPath)) return JSON.parse(fs.readFileSync(lastAudioPath, 'utf-8')); return {}; } catch { return {}; }
 });
 
 // ─── IPC Handlers: General storage (for showStore) ─────────

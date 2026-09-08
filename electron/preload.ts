@@ -118,7 +118,8 @@ contextBridge.exposeInMainWorld('lightMaestro', {
 
   // Project (full-project save/load)
   project: {
-    save: (content: string) => ipcRenderer.invoke('project:save', content),
+    save: (payload: { content: string; blobs?: { key: string; audioFileBase64: string }[] }) =>
+      ipcRenderer.invoke('project:save', payload),
     open: () => ipcRenderer.invoke('project:open'),
   },
 
@@ -126,6 +127,12 @@ contextBridge.exposeInMainWorld('lightMaestro', {
   presets: {
     save: (presets: any[]) => ipcRenderer.invoke('presets:save', presets),
     load: () => ipcRenderer.invoke('presets:load'),
+  },
+
+  // Last known-good audio per preset name (file-based, avoids localStorage quota)
+  lastAudio: {
+    save: (map: Record<string, { base64: string; fileName?: string; ts: string }>) => ipcRenderer.invoke('lastAudio:save', map),
+    load: () => ipcRenderer.invoke('lastAudio:load'),
   },
 
   // General storage (file-based, avoids localStorage quota)

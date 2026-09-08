@@ -229,12 +229,16 @@ interface LightMaestroAPI {
     saveFile: (filters: any[], defaultName: string, content: string) => Promise<{ filePath: string; name: string } | null>;
   };
   project: {
-    save: (content: string) => Promise<string | { filePath: string } | null>;
-    open: () => Promise<{ content: string; filePath: string } | null>;
+    save: (payload: { content: string; blobs?: { key: string; audioFileBase64: string }[] }) => Promise<string | { filePath: string } | null>;
+    open: () => Promise<{ content: string; filePath: string; blobs?: { key: string; audioFileBase64: string }[] } | null>;
   };
   presets: {
     save: (presets: any[]) => Promise<void>;
     load: () => Promise<any[] | null>;
+  };
+  lastAudio: {
+    save: (map: Record<string, { base64: string; fileName?: string; ts: string }>) => Promise<boolean>;
+    load: () => Promise<Record<string, { base64: string; fileName?: string; ts: string }> | null>;
   };
   storage: {
     get: (key: string) => Promise<any>;

@@ -3,13 +3,13 @@
   "appStore": {
     "mode": "design",
     "quickSidebarTab": "autoscript",
-    "designSidebarTab": "chasers",
+    "designSidebarTab": "scenes",
     "performSidebarTab": "stage",
     "quickShow": {
       "audioActive": false,
       "intensity": "dynamic",
-      "colorScheme": "latino",
-      "musicStyle": "house",
+      "colorScheme": "warm",
+      "musicStyle": "rnb",
       "movement": "dynamic",
       "beatDivision": 1,
       "strobeLimit": 10,
@@ -2214,9 +2214,9 @@
         "x": 0.9975289575289574,
         "y": 0.46482455120448773,
         "h": 0,
-        "heading": 0,
+        "heading": 320,
         "mountMode": "ground",
-        "tilt": 22,
+        "tilt": 20,
         "beamAngle": 0.15
       },
       "fx-1786169093565-v4voek8n": {
@@ -2249,7 +2249,8 @@
         "h": 0,
         "heading": 190,
         "mountMode": "ground",
-        "tilt": 14
+        "tilt": 14,
+        "beamAngle": 0.19000000000000003
       },
       "fx-1788161941718-90pgw12v": {
         "x": 0.5,
@@ -2421,6 +2422,84 @@
         "fadeOut": 1000,
         "duration": 5000,
         "createdAt": "2026-09-04T12:34:12.143Z"
+      },
+      {
+        "id": "scn-1788628852548-hpzxx85v",
+        "name": "test 1",
+        "channels": {
+          "1": 192,
+          "3": 0,
+          "6": 255,
+          "7": 255,
+          "8": 255,
+          "9": 255,
+          "10": 255,
+          "29": 148,
+          "31": 0,
+          "34": 255,
+          "35": 255,
+          "36": 255,
+          "37": 255,
+          "38": 255,
+          "43": 150,
+          "45": 0,
+          "48": 255,
+          "49": 0,
+          "50": 255,
+          "51": 255,
+          "52": 255,
+          "53": 255,
+          "56": 148,
+          "58": 0,
+          "61": 255,
+          "62": 0,
+          "63": 255,
+          "64": 255,
+          "65": 255,
+          "66": 255,
+          "69": 192,
+          "71": 0,
+          "74": 255,
+          "75": 0,
+          "76": 0,
+          "77": 255,
+          "78": 0,
+          "79": 0,
+          "82": 190,
+          "84": 0,
+          "87": 255,
+          "88": 0,
+          "89": 255,
+          "90": 255,
+          "91": 255,
+          "92": 255
+        },
+        "fadeIn": 1000,
+        "fadeOut": 1000,
+        "duration": 5000,
+        "createdAt": "2026-09-05T17:20:52.548Z"
+      },
+      {
+        "id": "scn-1788764206190-a5yjrcev",
+        "name": "Scene 3D 8",
+        "channels": {
+          "1": 194,
+          "3": 1,
+          "6": 255,
+          "7": 0,
+          "8": 0,
+          "9": 255,
+          "10": 0,
+          "34": 242,
+          "35": 0,
+          "36": 0,
+          "37": 255,
+          "38": 0
+        },
+        "fadeIn": 0,
+        "fadeOut": 0,
+        "duration": 5000,
+        "createdAt": "2026-09-07T06:56:46.190Z"
       }
     ],
     "sceneFolders": [],
@@ -31113,5 +31192,5 @@
     }
   ],
   "version": 1,
-  "timestamp": "2026-09-04T18:29:18.768Z"
+  "timestamp": "2026-09-07T07:01:12.011Z"
 }

@@ -24,6 +24,7 @@ import { analyzeFixtureChannels, type FixtureChannelAnalysis } from '../engine/f
 import { solvePanTilt, solveTiltForFixedPan } from '../engine/aim-target';
 import { useAppStore } from '../stores/appStore';
 import { dmxBridge } from '../utils/dmx-bridge';
+import { RichTooltip } from '../components/RichTooltip';
 import {
   loadFixtureDefinitions,
   clearFixtureDefCache,
@@ -315,7 +316,7 @@ interface Fixture3D {
   trailLastAdd: number;
   channelMap: FixtureChannelMap;
   universeIndex: number;        // Index into channelData map
-  mountMode: 'top' | 'ground' | 'rear'; // beam default direction
+  mountMode: 'top' | 'ground' | 'rear' | 'hanging'; // beam default direction
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
   _mountTilt: number;           // mount-mode head tilt compensation (π for ground, 0 otherwise)
@@ -695,8 +696,9 @@ export const Stage3D: React.FC<{
     // Map h (0-1) to actual meters: 0 → 0m, 1 → 5m
     const stageY = STAGE_HEIGHT + pos.h * 5.0;
     group.position.set(stageX, stageY, stageZ);
-    // Apply heading rotation (degrees → radians, Y axis rotation)
-    group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
+    // Apply heading rotation (degrees → radians, Y axis rotation).
+    // Mode « hanging » : yaw auto-aim vers le centre de scène (vers le public).
+    group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current);
     // User data for raycasting identification
     group.userData = { fixtureId: fixture.id, fixtureType: fixture.fixtureType };
 
@@ -1814,7 +1816,7 @@ export const Stage3D: React.FC<{
         const stageZ = (pos.y - 0.5) * stageDimsRef.current.depth;
         const stageY = STAGE_HEIGHT + pos.h * 5.0;
         f3d.group.position.set(stageX, stageY, stageZ);
-        f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
+        f3d.group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current);
         if (pos.mountMode) f3d.mountMode = pos.mountMode;
         fitMountRotation(f3d, pos.mountMode || 'top');
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
@@ -1857,7 +1859,7 @@ export const Stage3D: React.FC<{
       const stageZ = (pos.y - 0.5) * stageDimsRef.current.depth;
       const stageY = STAGE_HEIGHT + pos.h * 5.0;
       f3d.group.position.set(stageX, stageY, stageZ);
-      f3d.group.rotation.y = ((pos.heading ?? 0) * Math.PI) / 180;
+      f3d.group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current);
       if (pos.mountMode) f3d.mountMode = pos.mountMode;
       fitMountRotation(f3d, pos.mountMode || 'top');
       f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
@@ -2800,41 +2802,55 @@ export const Stage3D: React.FC<{
           <span className="w-px h-5 bg-gray-800" />
           <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Caméra</span>
           <div className="flex items-center gap-1 p-0.5 rounded-lg bg-black/30 border border-gray-800/50">
-            <button onClick={() => setCameraPreset('front')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.frontView')}><PanelTop size={11} /> {t('stage3D.front')}</button>
-            <button onClick={() => setCameraPreset('top')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.topView')}><ChevronUp size={11} /> {t('stage3D.top')}</button>
-            <button onClick={() => setCameraPreset('side')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.sideView')}><PanelRight size={11} /> {t('stage3D.side')}</button>
-            <button onClick={() => setCameraPreset('audience')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.audienceView')}><Users size={11} /> {t('stage3D.audience')}</button>
+            <RichTooltip content={{ title: 'Vue face (public)', text: 'Caméra derrière le public, face à la scène. Point de vue standard.', tone: 'info' }}>
+              <button onClick={() => setCameraPreset('front')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.frontView')}><PanelTop size={11} /> {t('stage3D.front')}</button>
+            </RichTooltip>
+            <RichTooltip content={{ title: 'Vue de dessus', text: 'Plan 2D depuis le plafond. Idéal pour ajuster positions X/Z des fixtures.', tone: 'info' }}>
+              <button onClick={() => setCameraPreset('top')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.topView')}><ChevronUp size={11} /> {t('stage3D.top')}</button>
+            </RichTooltip>
+            <RichTooltip content={{ title: 'Vue de côté', text: 'Profil latéral. Utile pour voir les hauteurs et inclinaisons.', tone: 'info' }}>
+              <button onClick={() => setCameraPreset('side')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.sideView')}><PanelRight size={11} /> {t('stage3D.side')}</button>
+            </RichTooltip>
+            <RichTooltip content={{ title: 'Vue public', text: 'Caméra depuis la piste, à hauteur du public. Permet de vérifier l\'impact réel.', tone: 'info' }}>
+              <button onClick={() => setCameraPreset('audience')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.audienceView')}><Users size={11} /> {t('stage3D.audience')}</button>
+            </RichTooltip>
           </div>
           <span className="w-px h-5 bg-gray-800" />
-          <button onClick={() => setDirectMode((v) => !v)} className={`px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 transition-all ${directMode ? 'bg-violet-600 text-white border-violet-500 shadow' : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-gray-200 hover:border-gray-600'}`} title={directMode ? t('stage3D.directOnTitle') : t('stage3D.directOffTitle')}>
-            <Crosshair size={12} /> {directMode ? t('stage3D.directOn') : t('stage3D.direct')}
-          </button>
+          <RichTooltip content={{ title: 'Mode Direct', text: 'Active le mode édition directe : glisse sur une fixture pour ajuster Pan/Tilt. Le curseur devient violet quand il est actif.', example: 'Activez Direct → cliquez + glissez sur une fixture pour la faire tourner en temps réel.', tone: 'warn' }}>
+            <button onClick={() => setDirectMode((v) => !v)} className={`px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 transition-all ${directMode ? 'bg-violet-600 text-white border-violet-500 shadow' : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-gray-200 hover:border-gray-600'}`} title={directMode ? t('stage3D.directOnTitle') : t('stage3D.directOffTitle')}>
+              <Crosshair size={12} /> {directMode ? t('stage3D.directOn') : t('stage3D.direct')}
+            </button>
+          </RichTooltip>
         </div>
         <div className="flex-1 min-w-[12px]" />
         <div className="flex items-center gap-2 min-w-max">
           <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider hidden lg:inline">Scène</span>
           <div className="relative flex items-center">
             <LayoutGrid size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
-            <select value={stageScene} onChange={(e) => handleStageSceneChange(e.target.value as StageScene)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50" title="Configuration de scène">
-              <option value="empty" className="bg-[#0d0d14]">Scène vide</option>
-              <option value="rear" className="bg-[#0d0d14]">Pont arrière</option>
-              <option value="rear-front" className="bg-[#0d0d14]">Pont arrière + avant</option>
-              <option value="full" className="bg-[#0d0d14]">Arrière + avant + 2 côtés</option>
-            </select>
+            <RichTooltip content={{ title: 'Dispositions de scène', text: 'Positions de travail prédéfinies pour les musiciens. Change les positions des fixtures selon la config de ton scène.', tone: 'info' }} placement="bottom">
+              <select value={stageScene} onChange={(e) => handleStageSceneChange(e.target.value as StageScene)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50" title="Configuration de scène">
+                <option value="empty" className="bg-[#0d0d14]">Scène vide</option>
+                <option value="rear" className="bg-[#0d0d14]">Pont arrière</option>
+                <option value="rear-front" className="bg-[#0d0d14]">Pont arrière + avant</option>
+                <option value="full" className="bg-[#0d0d14]">Arrière + avant + 2 côtés</option>
+              </select>
+            </RichTooltip>
           </div>
-          <div className="hidden md:flex items-center gap-1 bg-black/20 border border-gray-800/50 rounded-lg px-2 py-1">
-            <Maximize2 size={11} className="text-gray-500" />
-            <input type="number" min={1} step={0.5} value={draftDims.width} onChange={(e) => setDraftDims((prev) => ({ ...prev, width: e.target.value }))} onBlur={commitStageDims} onKeyDown={(e) => { if (e.key === 'Enter') commitStageDims(); }} className="w-11 bg-transparent text-gray-200 text-[10px] text-center focus:outline-none" aria-label="Largeur" />
-            <span className="text-gray-600 text-[10px]">×</span>
-            <input type="number" min={1} step={0.5} value={draftDims.depth} onChange={(e) => setDraftDims((prev) => ({ ...prev, depth: e.target.value }))} onBlur={commitStageDims} onKeyDown={(e) => { if (e.key === 'Enter') commitStageDims(); }} className="w-11 bg-transparent text-gray-200 text-[10px] text-center focus:outline-none" aria-label="Profondeur" />
-            <span className="text-gray-600 text-[10px]">m</span>
-          </div>
-          <div className="relative flex items-center">
-            <Music size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
-            <button ref={musiciansBtnRef} onClick={() => setMusiciansMenuOpen(v => !v)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50 whitespace-nowrap" title="Présence musiciens/chanteurs sur scène">
-              {rosterTotal(musicians) > 0 ? `Musiciens · ${rosterTotal(musicians)}` : 'Musiciens'}
-            </button>
-          </div>
+<div className="hidden md:flex items-center gap-1 bg-black/20 border border-gray-800/50 rounded-lg px-2 py-1">
+              <Maximize2 size={11} className="text-gray-500" />
+              <input type="number" min={1} step={0.5} value={draftDims.width} onChange={(e) => setDraftDims((prev) => ({ ...prev, width: e.target.value }))} onBlur={commitStageDims} onKeyDown={(e) => { if (e.key === 'Enter') commitStageDims(); }} className="w-11 bg-transparent text-gray-200 text-[10px] text-center focus:outline-none" aria-label="Largeur" />
+              <span className="text-gray-600 text-[10px]">×</span>
+              <input type="number" min={1} step={0.5} value={draftDims.depth} onChange={(e) => setDraftDims((prev) => ({ ...prev, depth: e.target.value }))} onBlur={commitStageDims} onKeyDown={(e) => { if (e.key === 'Enter') commitStageDims(); }} className="w-11 bg-transparent text-gray-200 text-[10px] text-center focus:outline-none" aria-label="Profondeur" />
+              <span className="text-gray-600 text-[10px]">m</span>
+            </div>
+            <div className="relative flex items-center">
+              <Music size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
+              <RichTooltip content={{ title: 'Musiciens sur scène', text: 'Gère la liste des musiciens/chanteurs présents. Chaque nom est lié à un patch de fixtures pour les assigner visuellement.', tone: 'info' }} placement="bottom">
+                <button ref={musiciansBtnRef} onClick={() => setMusiciansMenuOpen(v => !v)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50 whitespace-nowrap" title="Présence musiciens/chanteurs sur scène">
+                  {rosterTotal(musicians) > 0 ? `Musiciens · ${rosterTotal(musicians)}` : 'Musiciens'}
+                </button>
+              </RichTooltip>
+            </div>
         </div>
       </div>
       {/* Musiciens popup — centrée comme toutes les modales */}
@@ -3285,36 +3301,42 @@ export const Stage3D: React.FC<{
 
               {/* Quick height presets */}
               <div className="flex gap-1">
-                <button
-                  onClick={() => setFixturePosition(selectedFixture.id, { h: 0.6 })}
-                  className={`flex-1 px-2 py-1 rounded text-[9px] transition-colors ${
-                    Math.abs(selectedPos.h - 0.6) < 0.01
-                      ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
-                      : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
-                  }`}
-                >
-                  Truss 3m
-                </button>
-                <button
-                  onClick={() => setFixturePosition(selectedFixture.id, { h: 0.3 })}
-                  className={`flex-1 px-2 py-1 rounded text-[9px] transition-colors ${
-                    Math.abs(selectedPos.h - 0.3) < 0.01
-                      ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
-                      : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
-                  }`}
-                >
-                  Ground 1.5m
-                </button>
-                <button
-                  onClick={() => setFixturePosition(selectedFixture.id, { h: 0.8 })}
-                  className={`flex-1 px-2 py-1 rounded text-[9px] transition-colors ${
-                    Math.abs(selectedPos.h - 0.8) < 0.01
-                      ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
-                      : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
-                  }`}
-                >
-                  High 4m
-                </button>
+                <RichTooltip content={{ title: 'Truss 3 m', text: 'Place la fixture à 3 m de hauteur (typique barre de truss).', tone: 'info' }}>
+                  <button
+                    onClick={() => setFixturePosition(selectedFixture.id, { h: 0.6 })}
+                    className={`flex-1 px-2 py-1 rounded text-[9px] transition-colors ${
+                      Math.abs(selectedPos.h - 0.6) < 0.01
+                        ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
+                        : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
+                    }`}
+                  >
+                    Truss 3m
+                  </button>
+                </RichTooltip>
+                <RichTooltip content={{ title: 'Ground 1.5 m', text: 'Place la fixture à 1.5 m de hauteur (pied de parapède).', tone: 'info' }}>
+                  <button
+                    onClick={() => setFixturePosition(selectedFixture.id, { h: 0.3 })}
+                    className={`flex-1 px-2 py-1 rounded text-[9px] transition-colors ${
+                      Math.abs(selectedPos.h - 0.3) < 0.01
+                        ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
+                        : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
+                    }`}
+                  >
+                    Ground 1.5m
+                  </button>
+                </RichTooltip>
+                <RichTooltip content={{ title: 'High 4 m', text: 'Place la fixture à 4 m (grand truss, tête haute).', tone: 'info' }}>
+                  <button
+                    onClick={() => setFixturePosition(selectedFixture.id, { h: 0.8 })}
+                    className={`flex-1 px-2 py-1 rounded text-[9px] transition-colors ${
+                      Math.abs(selectedPos.h - 0.8) < 0.01
+                        ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
+                        : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
+                    }`}
+                  >
+                    High 4m
+                  </button>
+                </RichTooltip>
               </div>
 
               {/* Mount mode */}
@@ -3322,25 +3344,28 @@ export const Stage3D: React.FC<{
                 <div className="flex justify-between text-[10px]">
                   <span className="text-gray-500">Mount</span>
                 </div>
-                <div className="grid grid-cols-3 gap-1">
+                <div className="grid grid-cols-4 gap-1">
                   {([
-                    { v: 'top' as const, label: 'Top', icon: '🔽' },
-                    { v: 'ground' as const, label: 'Ground', icon: '🔼' },
-                    { v: 'rear' as const, label: 'Rear', icon: '▶' },
+                    { v: 'top' as const, label: 'Top', icon: '🔽', tip: { title: 'Top — truss', text: 'Fixé en hauteur, faisceau vers le bas (plafond → sol).', example: 'Classique barres de truss au-dessus de la scène.', tone: 'info' as const } },
+                    { v: 'ground' as const, label: 'Ground', icon: '🔼', tip: { title: 'Ground — sol', text: 'Au sol, faisceau vers le haut (sol → plafond).', example: 'Pieds de parapède, wash plat monté à ras du sol.', tone: 'info' as const } },
+                    { v: 'rear' as const, label: 'Rear', icon: '▶', tip: { title: 'Rear — arrière', text: 'Fixé à l\'arrière, faisceau horizontal vers l\'avant (public).', example: 'Faux-plates arrière, projecteurs derrière les musiciens.', tone: 'info' as const } },
+                    { v: 'hanging' as const, label: 'Hanging', icon: '🎥', tip: { title: 'Hanging — suspendu (renversé)', text: 'Accroché au-dessus du pont, tête en bas. Le faisceau part horizontal vers le public. L\'auto-aim le vise vers le centre de la scène.', example: 'Movers suspendus au truss, tête retournée. Utilisez ensuite l\'outil Target pour orienter précisément.', tone: 'success' as const } },
                   ]).map(opt => (
-                    <button key={opt.v}
-                      onClick={() => setFixturePosition(selectedFixture.id, {
-                        mountMode: opt.v,
-                        ...(opt.v === 'ground' ? { h: 0 } : {}),
-                      })}
-                      className={`px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
-                        (selectedPos.mountMode || 'top') === opt.v
-                          ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
-                          : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
-                      }`}
-                    >
-                      <span className="mr-1">{opt.icon}</span>{opt.label}
-                    </button>
+                    <RichTooltip key={opt.v} content={opt.tip}>
+                      <button
+                        onClick={() => setFixturePosition(selectedFixture.id, {
+                          mountMode: opt.v,
+                          ...(opt.v === 'ground' ? { h: 0 } : {}),
+                        })}
+                        className={`px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
+                          (selectedPos.mountMode || 'top') === opt.v
+                            ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
+                            : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
+                        }`}
+                      >
+                        <span className="mr-1">{opt.icon}</span>{opt.label}
+                      </button>
+                    </RichTooltip>
                   ))}
                 </div>
               </div>
@@ -3434,14 +3459,22 @@ export const Stage3D: React.FC<{
                     for (const seg of f3d.channelMap.rgbSegments ?? []) { setCh(pf.startAddress+seg.r,r); setCh(pf.startAddress+seg.g,g); if(seg.b!==null) setCh(pf.startAddress+seg.b,b); }
                   }} className="w-6 h-6 rounded border border-gray-700 cursor-pointer p-0" />
                 </div>
-                <button onClick={() => setTargetMode((v) => !v)} className={`mt-1 w-full px-2.5 py-1.5 rounded-md text-[10px] font-bold flex items-center justify-center gap-1.5 border transition-all ${targetMode ? 'bg-cyan-600/30 text-cyan-200 border-cyan-500/50 shadow' : 'bg-gray-800/50 text-gray-400 border-gray-700 hover:text-gray-200 hover:border-gray-600'}`} title={targetMode ? 'Quitter le mode cible' : 'Viser un point : sélectionne 1+ projecteurs (Ctrl+clic en 3D), puis cliquez un point de la scène → pan/tilt DMX en direct'}>
-                  <Crosshair size={12} /> {targetMode ? 'Cible active — cliquez la 3D' : 'Target (viser un point)'}
-                </button>
+                <RichTooltip content={{ title: 'Target — viser un point', text: 'Active le mode cible : cliquez sur la scène 3D pour calculer le pan/tilt exact qui vise ce point.\nEcrit les valeurs DMX dans le programmeur (couche LTP, en direct sur la fixture).', example: 'Sélectionnez 1 ou + fixtures → cliquez Target → cliquez un point sur le sol → la fixture bouge physiquement vers ce point.', tone: 'success' }} placement="bottom">
+                  <button onClick={() => setTargetMode((v) => !v)} className={`mt-1 w-full px-2.5 py-1.5 rounded-md text-[10px] font-bold flex items-center justify-center gap-1.5 border transition-all ${targetMode ? 'bg-cyan-600/30 text-cyan-200 border-cyan-500/50 shadow' : 'bg-gray-800/50 text-gray-400 border-gray-700 hover:text-gray-200 hover:border-gray-600'}`} title={targetMode ? 'Quitter le mode cible' : 'Viser un point : sélectionne 1+ projecteurs (Ctrl+clic en 3D), puis cliquez un point de la scène → pan/tilt DMX en direct'}>
+                    <Crosshair size={12} /> {targetMode ? 'Cible active — cliquez la 3D' : 'Target (viser un point)'}
+                  </button>
+                </RichTooltip>
                 <div className="text-[9px] text-gray-500">Drag sur la fixture en mode Direct = Pan/Tilt. Store pour créer Scene/EFX/Show.</div>
                 <div className="flex gap-1.5">
-                  <button onClick={handleRecSceneCb} className="flex-1 py-1 rounded bg-yellow-600/20 text-yellow-300 border border-yellow-500/30 text-[10px] font-medium hover:bg-yellow-600/30">Rec Scène</button>
-                  <button onClick={handleRecEfxCb} className="flex-1 py-1 rounded bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-medium hover:bg-cyan-600/30">Rec EFX</button>
-                  <button onClick={handleRecShowCb} className="flex-1 py-1 rounded bg-amber-600/20 text-amber-300 border border-amber-500/30 text-[10px] font-medium hover:bg-amber-600/30">Rec Show</button>
+                  <RichTooltip content={{ title: 'Rec Scène', text: 'Enregistre le look actuel du programmeur (pan/tilt/couleur/intensité) dans une nouvelle scène sélectionnable.', example: 'Ajoutez la fixture à la scène, ajustez pan/tilt/couleur ici, puis "Rec Scène" → elle apparaît dans la liste des scènes.', tone: 'success' }}>
+                    <button onClick={handleRecSceneCb} className="flex-1 py-1 rounded bg-yellow-600/20 text-yellow-300 border border-yellow-500/30 text-[10px] font-medium hover:bg-yellow-600/30">Rec Scène</button>
+                  </RichTooltip>
+                  <RichTooltip content={{ title: 'Rec EFX', text: 'Enregistre le look actuel dans un nouvel EFX (effet auto : cercle, balayage, vague...).', example: 'Créez un EFX basé sur le pan/tilt actuel → il boucle automatiquement sur les fixtures sélectionnées.', tone: 'info' }}>
+                    <button onClick={handleRecEfxCb} className="flex-1 py-1 rounded bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-medium hover:bg-cyan-600/30">Rec EFX</button>
+                  </RichTooltip>
+                  <RichTooltip content={{ title: 'Rec Show', text: 'Enregistre le look actuel dans le montage Show (séquence globale, toutes les fixtures).', example: 'Pour figer un look global dans le timeline du Show, appuyez ici.', tone: 'info' }}>
+                    <button onClick={handleRecShowCb} className="flex-1 py-1 rounded bg-amber-600/20 text-amber-300 border border-amber-500/30 text-[10px] font-medium hover:bg-amber-600/30">Rec Show</button>
+                  </RichTooltip>
                 </div>
               </div>
 
@@ -3455,7 +3488,7 @@ export const Stage3D: React.FC<{
                   <>
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-gray-500">Pan (tare visuelle)</span>
+                  <RichTooltip content={{ title: 'Pan — tare visuelle', text: 'Rotation horizontale de la tête dans la vue 3D uniquement. Ne touche PAS aux canaux DMX — c\'est un axe de présentation.', example: 'Pour tourner la tête d\'un mover dans la 3D sans affecter le vrai DMX. Utilisez le mode Target pour le DMX.', tone: 'info' }}><span className="text-gray-500 cursor-help">Pan (tare visuelle)</span></RichTooltip>
                   <span className="text-gray-400 font-mono">{((selectedPos.heading ?? 0)).toFixed(0)}°</span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -3478,7 +3511,7 @@ export const Stage3D: React.FC<{
 
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-gray-500">Tilt (tare visuelle)</span>
+                  <RichTooltip content={{ title: 'Tilt — tare visuelle', text: 'Inclinaison verticale de la tête dans la vue 3D uniquement. Ne touche PAS aux canaux DMX — c\'est un axe de présentation.', example: 'Ajustez la hauteur de faisceau dans la 3D sans changer les canaux. Utilisez Target pour du vrai DMX.', tone: 'info' }}><span className="text-gray-500 cursor-help">Tilt (tare visuelle)</span></RichTooltip>
                   <span className="text-gray-400 font-mono">{((selectedPos.tilt ?? 0)).toFixed(0)}°</span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -3686,6 +3719,27 @@ function disposeFixture3D(f3d: Fixture3D): void {
   }
 }
 
+/**
+ * Yaw (rotation Y) d'installation d'une fixture. Mode « hanging » (suspendue
+ * au-dessus du pont) : le faisceau par défaut vise automatiquement vers le
+ * public selon le placement (convention « vue audience ») — arrière → devant,
+ * côtés → centre, devant → arrière. On vise le CENTRE de la scène (compromis
+ * qui couvre ces trois cas à la fois). Comme solvePanTilt lit headingRad =
+ * group.rotation.y, l'outil Aim/Direct reste exact sur ces fixtures.
+ * Autres modes : heading utilisateur, inchangé.
+ */
+export function headingRadForPos(pos: FixturePos, mountMode: string, stageDims: { width: number; depth: number }): number {
+  const heading = ((pos.heading ?? 0) * Math.PI) / 180;
+  if (mountMode !== 'hanging') return heading;
+  const fx = (pos.x - 0.5) * stageDims.width;
+  const fz = (pos.y - 0.5) * stageDims.depth;
+  const dx = -fx; // centre de scène en X (target.x = 0)
+  const dz = -fz; // centre de scène en Z (target.z = 0)
+  if (Math.hypot(dx, dz) < 1e-6) return heading;
+  // Yaw total vers la cible — même formule que solvePanTilt : phi = atan2(-dx, -dz).
+  return Math.atan2(-dx, -dz);
+}
+
 function fitMountRotation(f3d: Fixture3D, mode: string): void {
   // Keep the base at the bottom in all modes.
   // Rotate only the arm (rear) or head (ground), never the whole group.
@@ -3703,6 +3757,13 @@ function fitMountRotation(f3d: Fixture3D, mode: string): void {
   } else if (mode === 'ground') {
     // Keep yoke upright, tilt head 180° so beam points UP
     f3d._mountTilt = Math.PI;
+  } else if (mode === 'hanging') {
+    // Fixture accrochée AU-DESSUS du pont (suspendue, tête en bas) :
+    // retourne le yoke (arm=π) pour que la tête pende sous le point d'accroche,
+    // puis compense la tête à -π/2 → au DMX neutre (tilt 128) le faisceau sort
+    // HORIZONTAL vers le public (dir=(0,0,-1) quand heading=0), au lieu du plafond.
+    if (f3d.armGroup) f3d.armGroup.rotation.x = Math.PI;
+    f3d._mountTilt = -Math.PI / 2;
   }
   // top: no modification (base at bottom, beam down)
 

@@ -142,18 +142,19 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
       // No dialog: persist the full snapshot to the stable autosave slot.
       // NOTE: does NOT mark the project clean — only an explicit save (Ctrl+S /
       // Save & Quit) clears the dirty flag, so the quit save reminder stays active.
-      // Les blobs sont écrits AVANT le snapshot : le fichier autosave ne doit
-      // jamais référencer un blob pas encore sur disque.
+      // L'autosave reste LOCAL (même machine, userData) → l'audio garde la
+      // forme externalisée (blobs userData + références) : embarqué ici, le
+      // JSON.stringify de storage:set dépasserait la limite de string de V8.
+      // Le .lmproj EXPLICITE, lui, embarque l'audio (enveloppe binaire).
       await writeBlobs();
       const ok = await (window as any).lightMaestro?.storage?.set('autosave', data);
       return !!ok;
     }
 
     const json = JSON.stringify(data, null, 2);
-    const saved = await (window as any).lightMaestro?.project?.save(json);
-    // Blobs écrits après le choix du chemin : si l'utilisateur annule, on ne
-    // stocke rien pour rien.
-    await writeBlobs();
+    // Embarque l'audio DANS le fichier .lmproj (conteneur binaire) via le main
+    // process — le projet devient autonome et portable entre machines.
+    const saved = await (window as any).lightMaestro?.project?.save({ content: json, blobs: allBlobs });
     if (saved) {
       useAppStore.getState().markClean();
       // Set project name from save result (project:save resolves to the file path)
@@ -318,24 +319,40 @@ const App: React.FC = () => {
           useAppStore.getState().setProjectName(fileName || 'Sans titre');
         }
         const ss = useShowStore.getState();
-        // Résout les blobs audio externalisés (v2) AVANT l'hydratation des
-        // stores — les widgets sont montés ensuite et doivent trouver leurs
-        // shows/presets complets (résolution async awaitée avant vcSetWidgets).
+        // Résout les blobs audio AVANT l'hydratation des stores — les widgets
+        // sont montés ensuite et doivent trouver leurs shows/presets complets.
+        //
+        // Depuis l'enveloppe binaire autonome, l'audio est embarqué DANS le
+        // .lmproj (result.blobs = [{key, audioFileBase64}] via le main process).
+        // Rétro-compat : un ancien .lmproj JSON pur renvoie blobs=[] → on
+        // retombe sur les blobs externalisés du userData local (même logique
+        // qu'avant). L'ordre de résolution : enveloppe d'abord, puis storage.
         const storageApi = (window as any).lightMaestro?.storage;
+        const fileBlobMap = new Map<string, string>();
+        for (const b of result.blobs ?? []) {
+          if (b && typeof b.key === 'string' && typeof b.audioFileBase64 === 'string') {
+            fileBlobMap.set(b.key, b.audioFileBase64);
+          }
+        }
+        const getAudio = async (key: string): Promise<string | undefined> => {
+          if (fileBlobMap.has(key)) return fileBlobMap.get(key);
+          if (storageApi?.get) {
+            try {
+              const stored = await storageApi.get(key);
+              const b64 = stored?.audioFileBase64;
+              return typeof b64 === 'string' ? b64 : undefined;
+            } catch { return undefined; }
+          }
+          return undefined;
+        };
+
         let resolvedShows: any[] = [];
         let resolvedPresets: any[] = [];
-        if (storageApi?.get) {
-          try {
-            const r = await resolveProjectAudio(data.showStore?.songPresets ?? [], data.showStore?.shows ?? [], (k: string) => storageApi.get(k));
-            resolvedShows = r.shows;
-            resolvedPresets = r.presets;
-          } catch (e) { console.warn('Failed to resolve project audio blobs:', e); }
-        } else {
-          // Pas d'API storage (web/tests) : blobs non résolus — le playback
-          // DMX continue sur horloge virtuelle.
-          resolvedShows = data.showStore?.shows ?? [];
-          resolvedPresets = data.showStore?.songPresets ?? [];
-        }
+        try {
+          const r = await resolveProjectAudio(data.showStore?.songPresets ?? [], data.showStore?.shows ?? [], getAudio);
+          resolvedShows = r.shows;
+          resolvedPresets = r.presets;
+        } catch (e) { console.warn('Failed to resolve project audio blobs:', e); }
         if (data.showStore) {
           if (data.showStore.patchedFixtures) ss.setPatchedFixtures(data.showStore.patchedFixtures);
           if (data.showStore.stageDims) ss.setStageDims(data.showStore.stageDims);
@@ -361,8 +378,8 @@ const App: React.FC = () => {
           useAppStore.setState(restAppStore);
         }
         // Restore virtual console widgets
-        if (data.vcWidgets && storageApi?.get) {
-          try { data.vcWidgets = await resolveWidgetAudio(data.vcWidgets, (k: string) => storageApi.get(k)); } catch { /* blob absent */ }
+        if (data.vcWidgets) {
+          try { data.vcWidgets = await resolveWidgetAudio(data.vcWidgets, getAudio); } catch { /* blob absent */ }
         }
         if (data.vcWidgets) {
           usePerformStore.getState().vcSetWidgets(data.vcWidgets);

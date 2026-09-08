@@ -12,6 +12,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { unpackProject } from '../../electron/project-envelope';
 import { FixtureLibrary } from '@electron/fixtures/library';
 import { analyzeChannels } from '../engine/fixture-analyzer';
 import { computeDmxForCue } from '../hooks/dmx-playback';
@@ -37,7 +38,13 @@ describe('Yolo.lmproj — analyse des fixtures patchées (moteur réel)', () => 
 
   beforeAll(async () => {
     expect(fs.existsSync(PROJECT)).toBe(true);
-    const proj = JSON.parse(fs.readFileSync(PROJECT, 'utf8'));
+    // Le projet peut être en JSON pur (ancien format) ou en conteneur binaire
+    // "LMZPROJ1" (project-envelope) — unpackProject gère les deux.
+    const packed = await unpackProject(PROJECT);
+    const proj = JSON.parse(packed.content);
+    if (packed.blobs.length > 0) {
+      console.log(`[YOLO-PROBE] projet au format enveloppe LMZPROJ1 — ${packed.blobs.length} blob(s) audio embarqué(s)`);
+    }
     patched = proj.showStore.patchedFixtures || [];
     customDefs = new Map((proj.customFixtures || []).map((d: any) => [d.id, d]));
 

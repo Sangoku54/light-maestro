@@ -175,7 +175,7 @@ export interface FixturePos {
   tilt?: number; // static tilt in degrees (-90 to +90)
   beamAngle?: number; // beam opening angle in radians (0.02-0.8)
   thumbnailScale?: number; // sprite scale multiplier (0.2-2.0, default 0.75)
-  mountMode?: 'top' | 'ground' | 'rear'; // beam direction: top=down, ground=up, rear=forward
+  mountMode?: 'top' | 'ground' | 'rear' | 'hanging'; // beam direction: top=down, ground=up, rear=forward, hanging=horizontal vers le public
 }
 
 /**

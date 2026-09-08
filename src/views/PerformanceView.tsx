@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { clampRect } from '../components/clampedpopup';
 import { useTranslation } from 'react-i18next';
 import {
@@ -2496,7 +2496,35 @@ function genCuesLocal(a: TrackAnalysis): CueInput[] {
 
 const CHANNELS_PER_ROW = 16;
 const TOTAL_CHANNELS = 512;
-const ROWS = Math.ceil(TOTAL_CHANNELS / CHANNELS_PER_ROW);
+
+/** Per-channel metadata resolved from fixture definitions. */
+interface ChannelMeta {
+  fixtureId: string;
+  fixtureName: string;
+  channelName: string;
+  channelType: string; // "Intensity", "Red", "Pan", …
+  fixtureIndex: number; // ordering index within the universe (startAddress)
+}
+
+/** A contiguous group of channels belonging to one fixture. */
+interface FixtureGroup {
+  fixtureId: string;
+  fixtureName: string;
+  channels: { dmxChannel: number; meta: ChannelMeta }[];
+  color: string; // deterministic hue from fixture name
+}
+
+const FIXTURE_COLORS = [
+  '#a855f7', '#3b82f6', '#10b981', '#f59e0b', '#ef4444',
+  '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1',
+  '#14b8a6', '#e879f9', '#22d3ee', '#facc15', '#fb923c',
+];
+
+function fixtureColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
+  return FIXTURE_COLORS[Math.abs(hash) % FIXTURE_COLORS.length];
+}
 
 const SimpleDeskPanel: React.FC = () => {
   const { t } = useTranslation();
@@ -2515,6 +2543,8 @@ const SimpleDeskPanel: React.FC = () => {
   const sdSetUniverseId = usePerformStore((s) => s.sdSetUniverseId);
 
   const universes = useShowStore((s) => s.universes);
+  const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+
   // Keep the selected universe in sync with the real (showStore) universe list
   useEffect(() => {
     if (universes.length === 0) return;
@@ -2522,6 +2552,76 @@ const SimpleDeskPanel: React.FC = () => {
       sdSetUniverseId(universes[0].id);
     }
   }, [universes, universeId, sdSetUniverseId]);
+
+  // ── Build channel→metadata map from fixture definitions ──
+  const [channelMap, setChannelMap] = useState<Map<number, ChannelMeta>>(new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const map = new Map<number, ChannelMeta>();
+      const fixturesInUniverse = patchedFixtures
+        .filter((pf) => pf.universeId === universeId)
+        .sort((a, b) => a.startAddress - b.startAddress);
+
+      for (let fi = 0; fi < fixturesInUniverse.length; fi++) {
+        const pf = fixturesInUniverse[fi];
+        try {
+          const def = await (window as any).lightMaestro?.fixtures?.getDefinition?.(pf.fixtureDefId);
+          if (cancelled) return;
+          const mode = def?.modes?.[pf.modeIndex];
+          if (!mode?.channels) continue;
+          for (let ci = 0; ci < mode.channels.length; ci++) {
+            const ch = mode.channels[ci];
+            const offset = ch.offset ?? ci;
+            const dmxChannel = pf.startAddress + offset;
+            if (dmxChannel >= 1 && dmxChannel <= TOTAL_CHANNELS) {
+              map.set(dmxChannel, {
+                fixtureId: pf.id,
+                fixtureName: pf.name || `${pf.manufacturer} ${pf.model}`,
+                channelName: ch.name || `Ch ${ci + 1}`,
+                channelType: ch.type || 'Nothing',
+                fixtureIndex: fi,
+              });
+            }
+          }
+        } catch { /* skip unresolvable defs */ }
+      }
+      if (!cancelled) setChannelMap(map);
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [
+    patchedFixtures.map((pf) => `${pf.id}:${pf.fixtureDefId}:${pf.modeIndex}:${pf.startAddress}:${pf.universeId}`).join('|'),
+    universeId,
+  ]);
+
+  // ── Group channels by fixture ──
+  const fixtureGroups = useMemo<FixtureGroup[]>(() => {
+    const groups: FixtureGroup[] = [];
+    const seen = new Map<string, FixtureGroup>();
+    for (let ch = 1; ch <= TOTAL_CHANNELS; ch++) {
+      const meta = channelMap.get(ch);
+      if (!meta) continue;
+      let grp = seen.get(meta.fixtureId);
+      if (!grp) {
+        grp = {
+          fixtureId: meta.fixtureId,
+          fixtureName: meta.fixtureName,
+          channels: [],
+          color: fixtureColor(meta.fixtureName),
+        };
+        seen.set(meta.fixtureId, grp);
+        groups.push(grp);
+      }
+      grp.channels.push({ dmxChannel: ch, meta });
+    }
+    return groups;
+  }, [channelMap]);
+
+  // Set of all patched channel numbers (for quick lookup)
+  const patchedChannels = useMemo(() => new Set(channelMap.keys()), [channelMap]);
+
   const [jumpInput, setJumpInput] = useState('');
   const gridRef = useRef<HTMLDivElement>(null);
   const [shiftRange, setShiftRange] = useState<{ from: number; to: number } | null>(null);
@@ -2560,14 +2660,100 @@ const SimpleDeskPanel: React.FC = () => {
       const ch = parseInt(jumpInput, 10);
       if (ch >= 1 && ch <= 512) {
         sdSetSelectedChannel(ch);
-        const row = Math.floor((ch - 1) / CHANNELS_PER_ROW);
         if (gridRef.current) {
-          const scrollTarget = row * 140;
-          gridRef.current.scrollTop = Math.max(0, scrollTarget - 200);
+          // Scroll to the channel — find the element with data-channel
+          const el = gridRef.current.querySelector(`[data-channel="${ch}"]`);
+          if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
         }
       }
       setJumpInput('');
     }
+  };
+
+  // ── Fader cell (extracted for reuse) ──
+  const renderFader = (channel: number, meta?: ChannelMeta) => {
+    const val = channelValues[channel] ?? 0;
+    const isSelected = selectedChannel === channel;
+    const isInRange = shiftRange && channel >= shiftRange.from && channel <= shiftRange.to;
+    const isActive = val > 0;
+    const hidden = highlightActive && !isActive;
+
+    if (hidden) return <div key={channel} data-channel={channel} className="w-12 h-[120px]" />;
+
+    const labelTop = meta ? meta.channelName : '';
+    const labelBottom = meta ? `CH ${channel}` : `${channel}`;
+    const accentColor = meta ? fixtureColor(meta.fixtureName) : '#a855f7';
+
+    return (
+      <div
+        key={channel}
+        data-channel={channel}
+        className={`flex flex-col items-center gap-0.5 pt-1 cursor-pointer rounded transition-all ${
+          isSelected ? 'bg-purple-600/10 ring-1 ring-purple-500/30' :
+          isInRange ? 'bg-purple-600/5' : ''
+        }`}
+        onClick={(e) => handleSliderClick(channel, e)}
+      >
+        {/* Channel name (top) */}
+        <span className={`text-[8px] leading-tight text-center w-full truncate px-0.5 ${
+          isSelected ? 'text-purple-300' : 'text-gray-500'
+        }`} title={meta ? `${meta.fixtureName} — ${meta.channelName}` : `CH ${channel}`}>
+          {labelTop}
+        </span>
+
+        {/* Value badge */}
+        <span className={`text-[9px] font-mono ${
+          isSelected ? 'text-purple-400' : isActive ? 'text-purple-500/70' : 'text-gray-600'
+        }`}>
+          {val > 0 ? val : ''}
+        </span>
+
+        {/* Slider track */}
+        <div className="relative flex-1 w-3 min-h-[60px] bg-gray-800/30 rounded-full border border-gray-700/30 overflow-hidden cursor-pointer group/slider"
+          onClick={(e) => {
+            e.stopPropagation();
+            const rect = e.currentTarget.getBoundingClientRect();
+            const pct = 1 - (e.clientY - rect.top) / rect.height;
+            const newVal = Math.round(pct * 255);
+            handleSliderChange(channel, newVal);
+          }}
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            const rect = e.currentTarget.getBoundingClientRect();
+            const onMove = (ev: MouseEvent) => {
+              const pct = 1 - (ev.clientY - rect.top) / rect.height;
+              const newVal = Math.max(0, Math.min(255, Math.round(pct * 255)));
+              handleSliderChange(channel, newVal);
+            };
+            const onUp = () => {
+              document.removeEventListener('mousemove', onMove);
+              document.removeEventListener('mouseup', onUp);
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+          }}
+        >
+          <div
+            className="absolute bottom-0 left-0 right-0 rounded-full transition-all"
+            style={{
+              height: `${(val / 255) * 100}%`,
+              backgroundColor: isSelected ? '#c084fc' : isActive ? accentColor : '#374151',
+              opacity: val > 0 ? 0.7 : 0.3,
+            }}
+          />
+          <div className="absolute inset-0 opacity-0 group-hover/slider:opacity-100 transition-opacity rounded-full"
+            style={{ boxShadow: `inset 0 0 6px ${accentColor}44` }}
+          />
+        </div>
+
+        {/* Channel number (bottom) */}
+        <span className={`text-[9px] font-mono shrink-0 ${
+          isSelected ? 'text-purple-400 font-bold' : 'text-gray-600'
+        }`}>
+          {labelBottom}
+        </span>
+      </div>
+    );
   };
 
   return (
@@ -2639,86 +2825,56 @@ const SimpleDeskPanel: React.FC = () => {
 
       {/* Main area: fader grid + detail panel */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Fader Grid */}
+        {/* Fader Grid — grouped by fixture */}
         <div ref={gridRef} className="flex-1 overflow-auto p-3">
-          <div
-            className="grid gap-1 mx-auto"
-            style={{
-              gridTemplateColumns: `repeat(${CHANNELS_PER_ROW}, 1fr)`,
-              gridAutoRows: 'minmax(120px, auto)',
-              maxWidth: CHANNELS_PER_ROW * 52,
-            }}
-          >
-            {Array.from({ length: TOTAL_CHANNELS }, (_, i) => i + 1).map((channel) => {
-              const val = channelValues[channel] ?? 0;
-              const isSelected = selectedChannel === channel;
-              const isInRange = shiftRange && channel >= shiftRange.from && channel <= shiftRange.to;
-              const isActive = val > 0;
-              const hidden = highlightActive && !isActive;
+          <div className="space-y-4 max-w-[900px] mx-auto">
+            {/* ── Patched fixtures ── */}
+            {fixtureGroups.map((grp) => (
+              <div key={grp.fixtureId} className="space-y-1">
+                {/* Fixture header */}
+                <div className="flex items-center gap-2 px-1 py-1 rounded" style={{ borderLeft: `3px solid ${grp.color}` }}>
+                  <span className="text-[11px] font-semibold truncate" style={{ color: grp.color }}>
+                    {grp.fixtureName}
+                  </span>
+                  <span className="text-[9px] text-gray-600 font-mono">
+                    CH {grp.channels[0]?.dmxChannel}–{grp.channels[grp.channels.length - 1]?.dmxChannel}
+                  </span>
+                  <span className="text-[9px] text-gray-700">·</span>
+                  <span className="text-[9px] text-gray-600">{grp.channels.length} ch</span>
+                </div>
+                {/* Faders for this fixture */}
+                <div className="flex flex-wrap gap-1">
+                  {grp.channels.map(({ dmxChannel, meta }) => renderFader(dmxChannel, meta))}
+                </div>
+              </div>
+            ))}
 
-              if (hidden) return <div key={channel} className="w-12 h-[120px]" />;
-
+            {/* ── Unpatched channels (free universe space) ── */}
+            {(() => {
+              const unpatched: number[] = [];
+              for (let ch = 1; ch <= TOTAL_CHANNELS; ch++) {
+                if (!patchedChannels.has(ch)) unpatched.push(ch);
+              }
+              if (unpatched.length === 0) return null;
+              // Group consecutive unpatched channels into rows of 16
+              const rows: number[][] = [];
+              for (let i = 0; i < unpatched.length; i += CHANNELS_PER_ROW) {
+                rows.push(unpatched.slice(i, i + CHANNELS_PER_ROW));
+              }
               return (
-                <div
-                  key={channel}
-                  className={`flex flex-col items-center gap-0.5 pt-1 cursor-pointer rounded transition-all ${
-                    isSelected ? 'bg-purple-600/10 ring-1 ring-purple-500/30' :
-                    isInRange ? 'bg-purple-600/5' : ''
-                  }`}
-                  onClick={(e) => handleSliderClick(channel, e)}
-                >
-                  <span className={`text-[9px] font-mono ${
-                    isSelected ? 'text-purple-400' : isActive ? 'text-purple-500/70' : 'text-gray-600'
-                  }`}>
-                    {val > 0 ? val : ''}
-                  </span>
-
-                  <div className="relative flex-1 w-3 min-h-[60px] bg-gray-800/30 rounded-full border border-gray-700/30 overflow-hidden cursor-pointer group/slider"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const pct = 1 - (e.clientY - rect.top) / rect.height;
-                      const newVal = Math.round(pct * 255);
-                      handleSliderChange(channel, newVal);
-                    }}
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const startVal = channelValues[channel] ?? 0;
-                      const onMove = (ev: MouseEvent) => {
-                        const pct = 1 - (ev.clientY - rect.top) / rect.height;
-                        const newVal = Math.max(0, Math.min(255, Math.round(pct * 255)));
-                        handleSliderChange(channel, newVal);
-                      };
-                      const onUp = () => {
-                        document.removeEventListener('mousemove', onMove);
-                        document.removeEventListener('mouseup', onUp);
-                      };
-                      document.addEventListener('mousemove', onMove);
-                      document.addEventListener('mouseup', onUp);
-                    }}
-                  >
-                    <div
-                      className="absolute bottom-0 left-0 right-0 rounded-full transition-all"
-                      style={{
-                        height: `${(val / 255) * 100}%`,
-                        backgroundColor: isSelected ? '#c084fc' : val > 0 ? '#a855f7' : '#374151',
-                        opacity: val > 0 ? 0.7 : 0.3,
-                      }}
-                    />
-                    <div className="absolute inset-0 opacity-0 group-hover/slider:opacity-100 transition-opacity rounded-full"
-                      style={{ boxShadow: 'inset 0 0 6px rgba(168,85,247,0.3)' }}
-                    />
+                <div className="space-y-1 pt-2 border-t border-gray-800/30">
+                  <div className="flex items-center gap-2 px-1 py-1">
+                    <span className="text-[10px] text-gray-600 uppercase tracking-wider">Libres</span>
+                    <span className="text-[9px] text-gray-700">{unpatched.length} canaux</span>
                   </div>
-
-                  <span className={`text-[9px] font-mono shrink-0 ${
-                    isSelected ? 'text-purple-400 font-bold' : 'text-gray-600'
-                  }`}>
-                    {channel}
-                  </span>
+                  {rows.map((row, ri) => (
+                    <div key={ri} className="flex gap-1">
+                      {row.map((ch) => renderFader(ch))}
+                    </div>
+                  ))}
                 </div>
               );
-            })}
+            })()}
           </div>
         </div>
 
@@ -2729,6 +2885,21 @@ const SimpleDeskPanel: React.FC = () => {
               <div className="text-center mb-4">
                 <div className="text-[10px] text-gray-500 uppercase tracking-wider">{t('perform.simpleDesk.channelDetail')}</div>
                 <div className="text-3xl font-bold text-purple-300 font-mono mt-1">{selectedChannel}</div>
+                {(() => {
+                  const meta = channelMap.get(selectedChannel);
+                  if (meta) {
+                    return (
+                      <div className="mt-1 space-y-0.5">
+                        <div className="text-[11px] font-medium truncate" style={{ color: fixtureColor(meta.fixtureName) }}>
+                          {meta.fixtureName}
+                        </div>
+                        <div className="text-[10px] text-gray-400">{meta.channelName}</div>
+                        <div className="text-[9px] text-gray-600 font-mono">{meta.channelType}</div>
+                      </div>
+                    );
+                  }
+                  return <div className="text-[10px] text-gray-600 mt-1">Non patché</div>;
+                })()}
               </div>
 
               <div className="bg-[#12121a] border border-gray-800 rounded-lg p-3 mb-4 text-center">
@@ -2807,6 +2978,9 @@ const SimpleDeskPanel: React.FC = () => {
                 <p className="text-[10px] text-gray-700 mt-1">{t('perform.simpleDesk.clickFader')}</p>
                 <p className="text-[10px] text-gray-700">{t('perform.simpleDesk.shiftRange')}</p>
                 <p className="text-[10px] text-gray-700 mt-3">{t('perform.simpleDesk.typeJump')}</p>
+                {fixtureGroups.length > 0 && (
+                  <p className="text-[10px] text-gray-700 mt-3">{fixtureGroups.length} fixture{fixtureGroups.length > 1 ? 's' : ''} patché{fixtureGroups.length > 1 ? 's' : ''}</p>
+                )}
               </div>
             </div>
           )}
@@ -2817,7 +2991,13 @@ const SimpleDeskPanel: React.FC = () => {
       <div className="h-6 px-3 border-t border-gray-800/50 flex items-center text-[10px] text-gray-600 bg-[#0d0d14] shrink-0">
         <span>{t('perform.simpleDesk.status.universe')}: {universeId}</span>
         <span className="mx-2">·</span>
-        <span>{t('perform.simpleDesk.status.channels')}</span>
+        <span>{patchedChannels.size}/{TOTAL_CHANNELS} patchés</span>
+        {fixtureGroups.length > 0 && (
+          <>
+            <span className="mx-2">·</span>
+            <span>{fixtureGroups.length} fixture{fixtureGroups.length > 1 ? 's' : ''}</span>
+          </>
+        )}
         {shiftRange && (
           <>
             <span className="mx-2">·</span>

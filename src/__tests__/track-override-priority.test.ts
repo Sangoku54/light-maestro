@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
+  computeChaserTrackOverrides,
+  computeShowTrackOverrides,
+  computeSceneTrackOverrides,
   computeColorTrackColors,
   computeDimmerTrackOverrides,
   computeStrobeTrackOverrides,
@@ -120,5 +123,64 @@ describe('Track override production (the layer that wins over AutoScript)', () =
     expect(t).toEqual(['fx-1', 'fx-2']);
     const none = resolveTrackTargets({ target: 'fixture:missing' } as any, fixtures as any, groups as any);
     expect(none).toEqual([]);
+  });
+
+  it('scene section fully replaces the autoscript channels on its fixtures (takeover)', () => {
+    const sceneTracks = [
+      { id: 'st1', entries: [{ id: 'e1', time: 0, endTime: 10, sceneId: 's1' }], targetFixtures: { type: 'fixture', fixtureIds: ['fx-1'] } },
+    ];
+    const scenes = [{ id: 's1', name: 'Rouge statique', channels: { 5: 90, 6: 255, 7: 7 } }];
+    const map = computeSceneTrackOverrides(sceneTracks as any, scenes as any, 5, fixtures as any, groups as any);
+    const fx1 = map.get('fx-1')!;
+    expect(fx1[5]).toBe(90);
+    expect(fx1[6]).toBe(255);
+    expect(fx1[7]).toBe(7);
+    // Les canaux de la section remplacent ceux de l'autoscript : la valeur de la
+    // scène (90) doit être celle qui sort, pas la valeur autoscript par défaut.
+    expect(fx1[5]).not.toBe(0);
+  });
+
+  it('takeover priority on shared fixtures: chaser < show < scene (live tick order)', () => {
+    const scenes = [
+      { id: 'sc-chaser', channels: { 5: 250, 6: 250 } },
+      { id: 'sc-show', channels: { 5: 180 } },
+      { id: 'sc-scene', channels: { 5: 90, 7: 77 } },
+    ];
+    const chasers = [{ id: 'ch-1', name: 'C', steps: [{ sceneId: 'sc-chaser', fadeIn: 0, hold: 10000, fadeOut: 0 }] }];
+    const shows = [{ id: 'sh-1', name: 'Show', duration: 10, tracks: [{ type: 'scene', items: [{ startTime: 0, duration: 10000, resourceId: 'sc-show', fadeIn: 0, fadeOut: 0 }] }] }];
+    const chaserTracks = [{ id: 't-ch', entries: [{ id: 'e', time: 0, endTime: 10, chaserId: 'ch-1' }], targetFixtures: { type: 'all' } }];
+    const showTracks = [{ id: 't-sh', entries: [{ id: 'e', time: 0, endTime: 10, showId: 'sh-1' }], targetFixtures: { type: 'all' } }];
+    const sceneTracks = [{ id: 't-sc', entries: [{ id: 'e', time: 0, endTime: 10, sceneId: 'sc-scene' }], targetFixtures: { type: 'all' } }];
+
+    const chaserMap = computeChaserTrackOverrides(chaserTracks as any, chasers as any, scenes as any, 5, fixtures as any, groups as any);
+    const showMap = computeShowTrackOverrides(showTracks as any, shows as any, scenes as any, chasers as any, 5, fixtures as any, groups as any);
+    const sceneMap = computeSceneTrackOverrides(sceneTracks as any, scenes as any, 5, fixtures as any, groups as any);
+
+    expect(sceneMap.get('fx-1')?.[5]).toBe(90);
+    expect(showMap.get('fx-1')?.[5]).toBe(180);
+    expect(chaserMap.get('fx-1')?.[5]).toBe(250);
+
+    // Fusion dans l'ordre du moteur live : chaser → show → scene (scene = dernière passe = priorité max).
+    // Merge channel-level (comme le moteur) : seul le canal partagé change, les canaux propres survivent.
+    const channelMerge = (base: Map<string, Record<number, number>>, src: Map<string, Record<number, number>>) => {
+      for (const [fid, cmap] of src.entries()) {
+        const existing = base.get(fid);
+        if (!existing) { base.set(fid, cmap); continue; }
+        const out: Record<number, number> = { ...existing };
+        for (const [a, v] of Object.entries(cmap)) out[Number(a)] = v;
+        base.set(fid, out);
+      }
+      return base;
+    };
+    const merged = channelMerge(channelMerge(new Map(chaserMap), showMap), sceneMap);
+    const out = merged.get('fx-1')!;
+    expect(out[5]).toBe(90);   // scène gagne sur le canal partagé
+    expect(out[6]).toBe(250);  // canal propre au chaser conservé
+    expect(out[7]).toBe(77);   // canal propre à la scène écrit
+
+    // Chaser < show seul (pas de scène) : le show gagne sur le canal partagé.
+    const merged2 = channelMerge(new Map(chaserMap), showMap);
+    expect(merged2.get('fx-1')?.[5]).toBe(180);
+    expect(merged2.get('fx-1')?.[6]).toBe(250);
   });
 });

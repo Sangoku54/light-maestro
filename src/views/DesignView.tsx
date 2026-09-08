@@ -4661,10 +4661,6 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
   const [selectedManufacturer, setSelectedManufacturer] = useState<string>('');
   const [manufacturerFixtures, setManufacturerFixtures] = useState<FixtureDefResult[]>([]);
 
-  // Budget < 100 € filter (bibliothèque curated, resources/fixtures/ofl/budget.json)
-  const [budgetOnly, setBudgetOnly] = useState(false);
-  const [budgetIds, setBudgetIds] = useState<Set<string>>(new Set());
-
   // Right-click context menu
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean;
@@ -4765,21 +4761,6 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
         modes: d.modes || [],
       }));
       setAllFixtures(fixtureDefs);
-
-      // Budget < 100 € : jointure fabricant+modèle normalisés → ids
-      try {
-        const budget = await (window.lightMaestro.fixtures as any).getBudgetList();
-        const ids = new Set<string>();
-        for (const e of (budget?.entries || [])) {
-          const key = `${e.manufacturer}-${e.model}`.toLowerCase().replace(/[^a-z0-9]/g, '-');
-          for (const f of fixtureDefs) {
-            if (`${f.manufacturer}-${f.model}`.toLowerCase().replace(/[^a-z0-9]/g, '-') === key) ids.add(f.id);
-          }
-        }
-        setBudgetIds(ids);
-      } catch {
-        setBudgetIds(new Set()); // bibliothèque budget indisponible → toggle inerte
-      }
 
       // Group by manufacturer
       const counts: Record<string, number> = {};
@@ -5229,9 +5210,6 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
           onSwitchToSearch={handleOpenSearch}
           onShowDetail={handleShowDetail}
           getNextFree={getNextFreeAddress}
-          budgetOnly={budgetOnly}
-          budgetIds={budgetIds}
-          onToggleBudget={setBudgetOnly}
         />
       )}
 
@@ -5748,9 +5726,6 @@ interface AddFixtureModalProps {
   onSwitchToSearch: (query: string) => void;
   onShowDetail: (def: FixtureDefResult) => void;
   getNextFree: (universeId: string, channels: number, quantity?: number) => number;
-  budgetOnly: boolean;
-  budgetIds: Set<string>;
-  onToggleBudget: (on: boolean) => void;
 }
 
 const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
@@ -5787,9 +5762,6 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
   onSwitchToSearch,
   onShowDetail,
   getNextFree,
-  budgetOnly,
-  budgetIds,
-  onToggleBudget,
 }) => {
   const { t } = useTranslation();
   const mode =
@@ -5849,25 +5821,8 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
               <p className="text-xs text-gray-500">
                 {manufacturers.length} manufacturers · {allFixtures.length} fixtures
               </p>
-              <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={budgetOnly}
-                  onChange={(e) => onToggleBudget(e.target.checked)}
-                  className="accent-purple-500"
-                />
-                {t('design.addFixtureModal.budgetOnly')}
-                {budgetOnly && budgetIds.size > 0 && (
-                  <span className="ml-1 text-[10px] text-purple-400">
-                    ({t('design.addFixtureModal.budgetCount', { count: budgetIds.size })})
-                  </span>
-                )}
-              </label>
               <div className="grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
-                {(budgetOnly
-                  ? manufacturers.filter((m) => allFixtures.some((f) => f.manufacturer === m.name && budgetIds.has(f.id)))
-                  : manufacturers
-                ).map((mfg) => {
+                {manufacturers.map((mfg) => {
                   const hue = (mfg.name.charCodeAt(0) * 37 + mfg.name.length * 53) % 360;
                   const previewColor = `hsl(${hue}, 60%, 35%)`;
                   return (
@@ -5886,11 +5841,7 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                         </span>
                       </div>
                       <div className="text-[10px] text-gray-600">
-                        {budgetOnly
-                          ? allFixtures.filter((f) => f.manufacturer === mfg.name && budgetIds.has(f.id)).length
-                          : mfg.count} fixture{((budgetOnly
-                            ? allFixtures.filter((f) => f.manufacturer === mfg.name && budgetIds.has(f.id)).length
-                            : mfg.count) !== 1) ? 's' : ''}
+                        {mfg.count} fixture{(mfg.count !== 1) ? 's' : ''}
                       </div>
                     </button>
                   );
@@ -5914,9 +5865,7 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                 <span className="text-gray-200 font-medium">{selectedManufacturer}</span>
               </p>
               <div className="space-y-1 max-h-60 overflow-y-auto">
-                {manufacturerFixtures
-                  .filter((def) => !budgetOnly || budgetIds.has(def.id))
-                  .map((def) => (
+                {manufacturerFixtures.map((def) => (
                   <button
                     key={def.id}
                     onClick={() => onSelectFromManufacturer(def)}
@@ -5966,9 +5915,7 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
 
               {searchResults.length > 0 && (
                 <div className="space-y-1 max-h-60 overflow-y-auto">
-                  {searchResults
-                    .filter((def) => !budgetOnly || budgetIds.has(def.id))
-                    .map((def) => (
+                  {searchResults.map((def) => (
                     <button
                       key={def.id}
                       onClick={() => onSelectDef(def)}

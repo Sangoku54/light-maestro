@@ -393,9 +393,7 @@
       "fixturesCount": "{count} fixture",
       "fixturesCount_plural": "{count} fixtures",
       "modeCount": "{count} mode",
-      "modeCount_plural": "{count} modes",
-      "budgetOnly": "Budget < €100 only",
-      "budgetCount": "{{count}} budget fixture"
+      "modeCount_plural": "{count} modes"
     },
     "fixtureDetail": {
       "editFixture": "Edit",
