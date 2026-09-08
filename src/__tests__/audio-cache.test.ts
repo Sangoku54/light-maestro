@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeAudioUrl } from '../utils/audio-cache';
+import { normalizeAudioUrl, pickAudioUrl } from '../utils/audio-cache';
 
 describe('normalizeAudioUrl (lecture audio des presets)', () => {
   it('laisse les data URLs complets intacts (format actuel des .lmproj)', () => {
@@ -20,5 +20,31 @@ describe('normalizeAudioUrl (lecture audio des presets)', () => {
     expect(normalizeAudioUrl(undefined)).toBeNull();
     expect(normalizeAudioUrl(null)).toBeNull();
     expect(normalizeAudioUrl('')).toBeNull();
+  });
+});
+
+describe('pickAudioUrl (audio robuste des presets — pas de perte de son)', () => {
+  it('priorise l’audio du fichier/preset chargé', () => {
+    const file = 'data:audio/mpeg;base64,UklGRa1bWgAA';
+    const store = 'data:audio/mpeg;base64,RIFFxxxx';
+    expect(pickAudioUrl(file, store)).toBe(file);
+  });
+
+  it('retombe sur l’audio en store quand le .lmpreset n’embarque pas l’audio (fichier vide)', () => {
+    const store = 'data:audio/mpeg;base64,UklGRmToewNXQVZFZm10IBAAAA';
+    expect(pickAudioUrl('', store)).toBe(store);
+    expect(pickAudioUrl(undefined, store)).toBe(store);
+    expect(pickAudioUrl(null, store)).toBe(store);
+  });
+
+  it('normalise l’audio en store quand il est en base64 nu', () => {
+    const store = 'UklGRgAAAAJXQVZFZm10IBAAAA';
+    expect(pickAudioUrl(undefined, store)).toBe(`data:audio/mpeg;base64,${store}`);
+  });
+
+  it('retourne null quand aucune source audio n’est disponible', () => {
+    expect(pickAudioUrl(undefined, undefined)).toBeNull();
+    expect(pickAudioUrl('', '')).toBeNull();
+    expect(pickAudioUrl('', null)).toBeNull();
   });
 });

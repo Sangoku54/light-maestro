@@ -39,6 +39,22 @@ export function normalizeAudioUrl(url: string | undefined | null): string | null
 }
 
 /**
+ * Choisit la meilleure URL audio disponible pour un preset.
+ *
+ * Un .lmpreset peut être exporté SANS audio embarqué (export fait sans que la
+ * forme d'onde soit rechargée dans la sidebar). Pour ne jamais perdre le son :
+ * - on prend d'abord l'audio du fichier/preset chargé (`fileAudio`) ;
+ * - sinon on retombe sur l'audio du même preset déjà présent en store
+ *   (par ex. chargé via le projet .lmproj) ;
+ * - le résultat est normalisé en data URL utilisable par fetch()/decodeAudioData.
+ *
+ * Retourne null si aucune source n'est disponible (preset muet assumé).
+ */
+export function pickAudioUrl(fileAudio: string | undefined | null, storeAudio: string | undefined | null): string | null {
+  return normalizeAudioUrl(fileAudio || storeAudio);
+}
+
+/**
  * Decode a base64 data URL (or any URL) into an AudioBuffer.
  * Concurrent calls for the same URL share a single decode promise.
  * Returns null when the input is missing or decoding fails.

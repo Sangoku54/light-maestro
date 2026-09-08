@@ -16,6 +16,7 @@ import { analyzeChannels } from '../engine/fixture-analyzer';
 import { halfDegToDmxOffset, SPATIAL_BY_SECTION } from '../engine/dmx-movement';
 import { DEFAULT_ROSTER, normalizeRoster, type MusicianRoster } from '../utils/musicians';
 import { importCustomFixtureDefs } from '../utils/custom-fixtures';
+import { pickAudioUrl } from '../utils/audio-cache';
 import { MasterClockBar } from '../components/MasterClockBar';
 import type { StageScene } from '../stores/showStore';
 import { AutoLoopsPanel } from './AutoLoopsPanel';
@@ -1992,11 +1993,14 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           if (data.stageScene) setQsStageScene(data.stageScene as StageScene);
           let audioDataUrl = '';
           if (data.analysis) {
-            if (data.audioDataBase64) {
-              // Ensure proper data URL format
-              audioDataUrl = data.audioDataBase64.startsWith('data:')
-                ? data.audioDataBase64
-                : `data:audio/mpeg;base64,${data.audioDataBase64}`;
+            // Audio robuste : un .lmpreset peut être sans audio embarqué (export
+            // effectué sans que la forme d'onde soit rechargée dans la sidebar).
+            // En secours on réutilise l'audio d'un preset du même nom déjà en
+            // store (ex. chargé via le projet .lmproj) — on ne perd JAMAIS le son.
+            const storeNow = useShowStore.getState();
+            const existingAudio = (storeNow.songPresets.find(p => p.name === presetName) as any)?.audioFileBase64;
+            audioDataUrl = pickAudioUrl(data.audioDataBase64, existingAudio) ?? '';
+            if (audioDataUrl) {
               try {
                 await audioFile.restoreWithAudio(data.analysis, audioDataUrl);
               } catch (e) {
@@ -2054,9 +2058,14 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             reader.onerror = reject;
             reader.readAsDataURL(file);
           });
-          // Extract raw base64 for IPC storage
+        } else {
+          // Aucun fichier rechargé dans la sidebar : réutilise l'audio du preset
+          // du même nom déjà en store (sinon on sauverait un preset sans son).
+          audioDataUrl = (useShowStore.getState().songPresets.find(p => p.name === name) as any)?.audioFileBase64;
+        }
+        if (audioDataUrl) {
           const commaIdx = audioDataUrl.indexOf(',');
-          audioBase64Raw = commaIdx > 0 ? audioDataUrl.slice(commaIdx + 1) : '';
+          audioBase64Raw = commaIdx > 0 ? audioDataUrl.slice(commaIdx + 1) : audioDataUrl;
         }
         // Batch-compute DMX cues for VC playback (all track types: fixture, color, strobe, dimmer, efx)
         const currentCues = genCues(sections, effectiveBpm, qs.beatDivision || 4, qs, manualCues, key, resolvedAnalysis, useShowStore.getState().scenes as any);
@@ -2151,6 +2160,10 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             reader.onerror = reject;
             reader.readAsDataURL(file);
           });
+        } else {
+          // Pas de fichier chargé dans la sidebar : embarque l'audio du preset
+          // du même nom déjà en store pour que l'export .lmpreset soit autonome.
+          audioDataBase64 = (useShowStore.getState().songPresets.find(p => p.name === name) as any)?.audioFileBase64;
         }
         const currentCues = genCues(sections, effectiveBpm, qs.beatDivision || 4, qs, manualCues, key, resolvedAnalysis, useShowStore.getState().scenes as any);
         const store = useShowStore.getState();
