@@ -3697,8 +3697,9 @@ function fitMountRotation(f3d: Fixture3D, mode: string): void {
   f3d._mountTilt = 0;
 
   if (mode === 'rear') {
-    // Rotate the yoke horizontal (arm toward +Z, base stays at bottom)
-    if (f3d.armGroup) f3d.armGroup.rotation.x = -Math.PI / 2;
+    // Rotate the yoke horizontal (arm toward -Z / audience, base stays at bottom)
+    // so the beam exits toward the FRONT: alpha=+π/2 → dir=(0,0,-1) quand heading=0.
+    if (f3d.armGroup) f3d.armGroup.rotation.x = Math.PI / 2;
   } else if (mode === 'ground') {
     // Keep yoke upright, tilt head 180° so beam points UP
     f3d._mountTilt = Math.PI;

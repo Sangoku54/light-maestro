@@ -178,11 +178,58 @@ export function buildRgbSegments(colourChannels: Array<{offset:number;name:strin
 import type { DmxFixtureCapability } from '../hooks/dmx-cues';
 import type { PatchedFixture } from '../stores/showStore';
 
+/** Roue dégénérée = toutes ses caps partagent une couleur imposée par le défaut
+ *  (ex: « CHOISE COLOR 0-139 #ff0000 » sur une vraie roue arc-en-ciel). Aucune
+ *  couleur n'est exprimable via le matching → on DOIT piloter la roue par
+ *  POSITION pour que la fixture change réellement de couleur sur la piste. */
+export function wheelIsDegenerateForFixture(caps: DmxFixtureCapability[], fa: { isLaser?: boolean }): boolean {
+  if (fa.isLaser) return false;
+  if (!caps || caps.length === 0) return false;
+  const distinct = new Set(caps.map((c) => c.color ?? '').filter(Boolean));
+  return distinct.size <= 1;
+}
+
+/** Écrit une couleur de roue par POSITION sur la plage manuelle de la roue
+ *  (catégorie ≈ teinte de la palette). Retourne la position ou null si cette
+ *  roue n'est pas dégénérée (→ laisser le matching par slot s'appliquer). */
+export function wheelDegeneratePosition(
+  caps: DmxFixtureCapability[],
+  fa: { isLaser?: boolean },
+  paletteHex: string,
+  timeSeconds: number,
+): number | null {
+  if (!wheelIsDegenerateForFixture(caps, fa)) return null;
+  const manual = caps.filter((c) => !/(auto|change|rotat|scroll|jump|dance|soun|spee|dither)/i.test(c.name ?? ''));
+  const range = manual.length > 0 ? manual : caps;
+  const lo = Math.min(...range.map((c) => c.min));
+  const hi = Math.max(...range.map((c) => c.max));
+  if (!isFinite(lo) || !isFinite(hi) || hi <= lo) return hi;
+  const [r, g, b] = hexToRgb(paletteHex);
+  const cat = classifyColor(r, g, b);
+  const catToWheelPos: Record<string, number> = { red: 0.10, orange: 0.20, yellow: 0.30, green: 0.42, cyan: 0.55, blue: 0.68, magenta: 0.78, purple: 0.78, white: 0.02, black: 0.02 };
+  const wPos = catToWheelPos[cat] ?? 0.5;
+  const sweep = 0.08 * Math.sin(timeSeconds * 1.4); // léger vivaneau temporel
+  return Math.round(lo + Math.max(0, Math.min(1, wPos + sweep)) * (hi - lo));
+}
+
 export function findBestWheelCap(caps: DmxFixtureCapability[], paletteHex: string): DmxFixtureCapability|null {
   if(caps.length===0)return null;
   const[r,g,b]=hexToRgb(paletteHex);const cat=classifyColor(r,g,b);
   let bestName:{cap:DmxFixtureCapability;score:number}|null=null;
-  for(const cap of caps){if(!cap.name)continue;const s=matchCapToCategory(cap.name,cat);if(s>(bestName?.score??0))bestName={cap,score:s};}
+  for(const cap of caps){
+    if(!cap.name)continue;
+    const s=matchCapToCategory(cap.name,cat);
+    if(s>(bestName?.score??0)){
+      bestName={cap,score:s};
+    } else if(s>0&&bestName&&s===bestName.score){
+      // Égalité de score de nom (ex. « CYAN » et « BLUE » matchent tous les
+      // deux la catégorie bleu) : départager par distance de couleur réelle
+      // pour ne pas retomber sur le premier tour de roue.
+      const bestDist=bestName.cap.color?colorDistance(paletteHex,bestName.cap.color):Infinity;
+      const curDist=cap.color?colorDistance(paletteHex,cap.color):Infinity;
+      if(curDist<bestDist) bestName={cap,score:s};
+    }
+  }
   if(bestName&&bestName.score>=5)return bestName.cap;
   let bestCap:DmxFixtureCapability|null=null;let bestDist=Infinity;
   for(const cap of caps){if(cap.color){const d=colorDistance(paletteHex,cap.color);if(d<bestDist){bestDist=d;bestCap=cap;}}}

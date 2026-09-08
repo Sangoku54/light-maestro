@@ -460,7 +460,7 @@ export function computeSceneTrackOverrides(
 // ─── Extracted utilities (pure functions, no React) ──────
 import { evalEffect, toDmx, type EffectPattern } from '../engine/effect-engine';
 import type { RgbSegment } from '../engine/dmx-color';
-import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, findBestWheelCap } from '../engine/dmx-color';
+import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, findBestWheelCap, wheelDegeneratePosition } from '../engine/dmx-color';
 import type { ChannelAnalysis } from '../engine/fixture-analyzer';
 import { analyzeChannels, capMid, pickLaserModeCap, laserGateValue, mapIntensityVal, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
 import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSmartMovement, spatialPhaseFor } from '../engine/dmx-movement';
@@ -1355,10 +1355,15 @@ export function useDmxPlayback(options: {
           }else if(fa.wheelOffset!==null){
             const caps=fa.wheelCaps;
             if(paletteColor){
+              const degPos = wheelDegeneratePosition(caps, fa, paletteColor, ct);
+              if (degPos !== null) {
+                chVals[pf.startAddress+fa.wheelOffset]=degPos;
+              } else {
               let wheelVal:number;
               if(caps.length>0){const bestCap=findBestWheelCap(caps,paletteColor);wheelVal=bestCap?Math.round((bestCap.min+bestCap.max)/2):(()=>{const[r,g,b]=hexToRgb(paletteColor);const cat2=classifyColor(r,g,b);const catMap:Record<string,number>={red:0.10,orange:0.20,yellow:0.30,green:0.42,cyan:0.55,blue:0.68,magenta:0.78,purple:0.78,white:0.02};const wPos=catMap[cat2]??0.5;const capIdx=Math.floor(wPos*caps.length)%caps.length;return Math.round((caps[capIdx].min+caps[capIdx].max)/2);})();}
               else{const[r,g,b]=hexToRgb(paletteColor);const cat2=classifyColor(r,g,b);const catMap:Record<string,number>={red:0.10,orange:0.20,yellow:0.30,green:0.42,cyan:0.55,blue:0.68,magenta:0.78,purple:0.78,white:0.02};const wPos=catMap[cat2]??0.5;wheelVal=Math.round(wPos*255);}
               chVals[pf.startAddress+fa.wheelOffset]=wheelVal;
+              }
             } else if (caps.length > 0) {
               // Pas de couleur dans la cue : ramener la roue à la position
               // « open / white » pour ne pas rester bloqué sur une couleur
@@ -2074,6 +2079,10 @@ export function computeDmxForCue(
         return cmap[pf.startAddress + fa.wheelOffset] === undefined;
       })()) {
         const caps = fa.wheelCaps;
+        const degPos = wheelDegeneratePosition(caps, fa, paletteColor, (cue as any).time ?? 0);
+        if (degPos !== null) {
+          chVals[pf.startAddress + fa.wheelOffset] = degPos;
+        } else {
         let wheelVal: number;
         if (caps.length > 0) {
           const bestCap = findBestWheelCap(caps, paletteColor);
@@ -2082,6 +2091,7 @@ export function computeDmxForCue(
           const[r,g,b]=hexToRgb(paletteColor);const cat2=classifyColor(r,g,b);const catMap:Record<string,number>={red:0.10,orange:0.20,yellow:0.30,green:0.42,cyan:0.55,blue:0.68,magenta:0.78,purple:0.78,white:0.02};const wPos=catMap[cat2]??0.5;wheelVal=Math.round(wPos*255);
         }
         chVals[pf.startAddress + fa.wheelOffset] = wheelVal;
+        }
       }
 
       if (fa.shutterOffset !== null) {

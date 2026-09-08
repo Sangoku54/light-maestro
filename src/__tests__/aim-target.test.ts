@@ -41,8 +41,8 @@ function configs(): Array<{ name: string; o: PanTiltOpts }> {
     { name: 'top mount + heading 45°', o: { headingRad: Math.PI / 4, mountTilt: 0, staticTilt: 0, armRotX: 0 } },
     { name: 'top mount + static tilt 30°', o: { headingRad: 0, mountTilt: 0, staticTilt: Math.PI / 6, armRotX: 0 } },
     { name: 'ground mount', o: { headingRad: 0, mountTilt: Math.PI, staticTilt: 0, armRotX: 0 } },
-    { name: 'rear mount', o: { headingRad: 0, mountTilt: 0, staticTilt: 0, armRotX: -Math.PI / 2 } },
-    { name: 'rear mount + heading 200°', o: { headingRad: (200 * Math.PI) / 180, mountTilt: 0, staticTilt: -0.1, armRotX: -Math.PI / 2 } },
+    { name: 'rear mount (baisse vers le public)', o: { headingRad: 0, mountTilt: 0, staticTilt: 0, armRotX: Math.PI / 2 } },
+    { name: 'rear mount + heading 200°', o: { headingRad: (200 * Math.PI) / 180, mountTilt: 0, staticTilt: -0.1, armRotX: Math.PI / 2 } },
   ];
 }
 
@@ -89,6 +89,20 @@ describe('solvePanTilt valeurs de référence', () => {
     const res = solvePanTilt({ x: 0, y: 0, z: 0 }, { x: 0, y: 3, z: 0 }, o);
     expect(res?.pan).toBe(128);
     expect(res?.tilt).toBe(128);
+  });
+
+  it('rear mount : pan/tilt au centre (128) → faisceau vers le public (-Z)', () => {
+    const o: PanTiltOpts = { headingRad: 0, mountTilt: 0, staticTilt: 0, armRotX: Math.PI / 2 };
+    const res = solvePanTilt({ x: 0.4, y: 1, z: -0.6 }, { x: 0.4, y: 1, z: -6 }, o);
+    expect(res?.pan).toBeGreaterThanOrEqual(127);
+    expect(res?.pan).toBeLessThanOrEqual(129);
+    expect(res?.tilt).toBeGreaterThanOrEqual(127);
+    expect(res?.tilt).toBeLessThanOrEqual(129);
+    const dir = renderDir(128, 128, o);
+    // alpha = armRotX = +π/2 → z = -sin(π/2)·cos(0) = -1 → vers le public
+    expect(dir.z).toBeCloseTo(-1, 3);
+    expect(dir.y).toBeCloseTo(0, 1);
+    expect(dir.x).toBeCloseTo(0, 1);
   });
 
   it('pan au 1/4 du span → valeur DMX cohérente avec le modèle', () => {

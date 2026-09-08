@@ -17,6 +17,7 @@
 import type { PatchedFixture, FixtureTier } from '../stores/showStore';
 import { useShowStore, type FixtureGroup } from '../stores/showStore';
 import { analyzeFixture, capMid, pickLaserModeCap, laserGateValue, mapIntensityVal, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
+import { wheelDegeneratePosition } from '../engine/dmx-color';
 
 // ─── Inline fixture definition types (mirrors electron/fixtures/library.ts) ──
 
@@ -773,6 +774,13 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
           if (fa.rgbOffsets[1] !== undefined) channelValues[pf.startAddress + fa.rgbOffsets[1]] = g;
           if (fa.rgbOffsets[2] !== undefined) channelValues[pf.startAddress + fa.rgbOffsets[2]] = b;
         } else if (fa.wheelOffset !== null && paletteColor) {
+          // Roue dégénérée (toutes caps même couleur, ex. Mini MH « CHOISE COLOR
+          // 0-139 #ff0000 » sur une vraie roue) : piloter par POSITION pour que
+          // la fixture change de couleur au lieu de rester scotchée sur rouge.
+          const degPos = wheelDegeneratePosition(fa.wheelCaps ?? [], fa, paletteColor, cue.time ?? 0);
+          if (degPos !== null) {
+            channelValues[pf.startAddress + fa.wheelOffset] = degPos;
+          } else {
           let bestCap = fa.wheelCaps?.[0] ?? null;
           let bestDist = Infinity;
           if (fa.wheelCaps) {
@@ -817,6 +825,7 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
             ? Math.round((bestCap.min + bestCap.max) / 2)
             : 128;
           channelValues[pf.startAddress + fa.wheelOffset] = wheelVal;
+          }
         }
 
         // ── 2b. LED intensity channels: fixtures with individual LED dimmers (no RGB, no color wheel)
