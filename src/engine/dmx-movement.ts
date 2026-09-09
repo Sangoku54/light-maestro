@@ -19,6 +19,18 @@ export function halfDegToDmxOffset(deg: number, axis: 'pan' | 'tilt'): number {
   return Math.max(0, Math.min(128, dmx));
 }
 
+/** Point zéro (tare) pan/tilt en degrés → décalage DMX signé du centre 128.
+ *  Signé (contrairement à halfDegToDmxOffset) pour exprimer un zéro à gauche/
+ *  droite ou bas/haut du montage. Le mouvement autoscript oscille autour de
+ *  `128 + zeroDmxOffset(...)`. 0 si non renseigné. */
+export function zeroDmxOffset(deg: number | undefined, axis: 'pan' | 'tilt'): number {
+    if (deg === undefined || deg === null || !Number.isFinite(deg)) return 0;
+    // Inverse EXACT du décodage 3D ((byte-128)/255*540 pour pan, *180 pour tilt) :
+    // le centre taré se redécode à la position capturée, sans double comptage ni dérive.
+    const scale = axis === 'pan' ? 540 : 180;
+    return Math.round((deg / scale) * 255);
+  }
+
 // Mapping: section → best suited movement patterns per fixture (ordered by energy)
 export const SMART_MOVEMENTS: Record<string, string[]> = {
   intro:   ['static', 'panOnly', 'tiltOnly', 'sweep', 'wave'],

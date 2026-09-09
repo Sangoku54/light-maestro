@@ -9,6 +9,7 @@
 import type { PatchedFixture, FixtureTier } from '../stores/showStore';
 import type { DmxFixtureDefinition } from '../hooks/dmx-cues';
 import { analyzeFixture, capMid, synthPatternCaps } from './fixture-analyzer';
+import { zeroDmxOffset } from './dmx-movement';
 import { generateAutoscript, BankManager, BANKS } from './autoloop-index';
 import type {
   AutoloopFixture,
@@ -47,6 +48,7 @@ export function toAutoloopFixtures(
   patchedFixtures: PatchedFixture[],
   defs: Map<string, DmxFixtureDefinition>,
   universes: { id: string }[],
+  positions?: Record<string, { centerPan?: number; centerTilt?: number }>,
 ): AutoloopFixture[] {
   const uniIds = universes.map((u) => String(u.id));
   const out: AutoloopFixture[] = [];
@@ -99,6 +101,10 @@ export function toAutoloopFixtures(
       fa.laserRotationOffsets.forEach((off, i) => { channelMap[`laserRot${i + 1}`] = off; });
     }
 
+    const pos = positions?.[pf.id];
+    const centerPanDmx = pos?.centerPan !== undefined ? 128 + zeroDmxOffset(pos.centerPan, 'pan') : undefined;
+    const centerTiltDmx = pos?.centerTilt !== undefined ? 128 + zeroDmxOffset(pos.centerTilt, 'tilt') : undefined;
+
     out.push({
       id: pf.id,
       category: tierToCategory(pf.tier, fa.panOffset !== null || fa.tiltOffset !== null || fa.scanXOffset !== null || fa.scanYOffset !== null),
@@ -106,6 +112,8 @@ export function toAutoloopFixtures(
       address: pf.startAddress,
       channelMap,
       isLaser: fa.isLaser,
+      centerPanDmx,
+      centerTiltDmx,
     });
   }
 

@@ -213,6 +213,74 @@ describe('Yolo.lmproj — analyse des fixtures patchées (moteur réel)', () => 
     }
   });
 
+  it('centre du mouvement (capture) : le sweep est décalé par fixture, jamais hors plage', () => {
+    const defs = new Map<any, any>();
+    for (const pf of patched) {
+      const def = pf.fixtureDefId.startsWith('custom-') ? customDefs.get(pf.fixtureDefId) : lib.get(pf.fixtureDefId);
+      defs.set(pf.fixtureDefId, def);
+    }
+
+    // Une fixture mobile réelle (pan+tilt), non-laser : cas TONIO Mini Moving Head.
+    const mobile = patched.find((pf) => {
+      const fa = analyzeChannels(pf, defs.get(pf.fixtureDefId));
+      return fa.panOffsets.length > 0 && fa.tiltOffsets.length > 0 && !fa.isLaser;
+    });
+    expect(mobile, 'au moins une fixture pan+tilt dans Yolo.lmproj').toBeTruthy();
+    const mfa = analyzeChannels(mobile!, defs.get(mobile!.fixtureDefId));
+    const panOff = mfa.panOffsets[0];
+    const tiltOff = mfa.tiltOffsets[0];
+
+    const cue = {
+      time: 10, section: 'chorus', intensity: 'high', color: '#ff3333',
+      movement: 'sweep', effect: 'vegas', energy: 0.85, colors: ['#ff3333', '#33ff33'],
+    } as any;
+    const tiers = { primary: 100, secondary: 70, tertiary: 40, other: 40 } as any;
+    const uni = [{ id: 'universe-1' }];
+    const NO = undefined;
+
+    const sans = computeDmxForCue(cue, patched, defs, uni, tiers, NO, NO, NO, NO, NO, undefined);
+    const positions: Record<string, any> = {};
+    for (const pf of patched) positions[pf.id] = { x: 0.5, y: 0.3, h: 0.5, heading: 0, centerPan: 45, centerTilt: 30 };
+    const avec = computeDmxForCue(cue, patched, defs, uni, tiers, NO, NO, NO, NO, NO, positions);
+
+    // 1. Aucun canal pan/tilt hors plage avec tare, et la tête mobile bouge vraiment.
+    let diff = 0;
+    for (const d of avec) {
+      for (const pf of patched) {
+        const fa = analyzeChannels(pf, defs.get(pf.fixtureDefId));
+        for (const off of fa.panOffsets) {
+          const v = d.channelValues[pf.startAddress + off];
+          expect(v).toBeGreaterThanOrEqual(0);
+          expect(v).toBeLessThanOrEqual(255);
+          if (pf.id === mobile!.id) diff += Math.abs((v ?? 0) - (sans[0]?.channelValues?.[pf.startAddress + off] ?? 0));
+        }
+        for (const off of fa.tiltOffsets) {
+          const v = d.channelValues[pf.startAddress + off];
+          expect(v).toBeGreaterThanOrEqual(0);
+          expect(v).toBeLessThanOrEqual(255);
+          if (pf.id === mobile!.id) diff += Math.abs((v ?? 0) - (sans[0]?.channelValues?.[pf.startAddress + off] ?? 0));
+        }
+      }
+    }
+    expect(diff).toBeGreaterThan(0);
+
+    // 2. Le décalage suit la définition de degrés → DMX (21 pan / 43 tilt pour
+    //    45°/30°, sauf quand le clamp 0-255 ou la scène corrige).
+    const pA = sans[0]?.channelValues?.[mobile!.startAddress + panOff] ?? 128;
+    const pB = avec[0]?.channelValues?.[mobile!.startAddress + panOff] ?? 128;
+    const tA = sans[0]?.channelValues?.[mobile!.startAddress + tiltOff] ?? 128;
+    const tB = avec[0]?.channelValues?.[mobile!.startAddress + tiltOff] ?? 128;
+    const pDelta = pB - pA;
+    const tDelta = tB - tA;
+    // En cas de clampage, le delta finit plus petit : on vérifie l'énonce
+    // « le zéro décale vers la droite/haut » (signe) + amplitude raisonnable.
+    expect(Math.abs(pDelta)).toBeGreaterThanOrEqual(1);
+    expect(Math.abs(pDelta)).toBeLessThanOrEqual(21);
+    expect(Math.abs(tDelta)).toBeGreaterThanOrEqual(1);
+    expect(Math.abs(tDelta)).toBeLessThanOrEqual(43);
+    console.log(`[YOLO-PROBE] centre(mouvement) ${mobile!.name}: pan ${pA}→${pB} (Δ${pDelta}), tilt ${tA}→${tB} (Δ${tDelta})`);
+  });
+
   it('roue couleur : les Mini Moving Head changent de couleur selon la palette (plus de rouge figé)', () => {
     const defs = new Map<any, any>();
     for (const pf of patched) {

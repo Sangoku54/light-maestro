@@ -320,6 +320,10 @@ interface Fixture3D {
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
   _mountTilt: number;           // mount-mode head tilt compensation (π for ground, 0 otherwise)
+  _zeroPanDeg: number;          // point zéro pan VISUEL (degrés) : décalage du faisceau dans la 3D
+  _zeroTiltDeg: number;         // point zéro tilt VISUEL (degrés) : décalage du faisceau dans la 3D
+  lastPan?: number;             // dernier byte pan vu (pour « capturer le centre du mouvement »)
+  lastTilt?: number;            // dernier byte tilt vu (pour « capturer le centre du mouvement »)
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -1042,6 +1046,8 @@ export const Stage3D: React.FC<{
       beamAngle: pos.beamAngle ?? 0.15,
       _staticTilt: (pos.tilt ?? 0) * Math.PI / 180,
       _mountTilt: 0,
+      _zeroPanDeg: pos.zeroPan ?? 0,
+      _zeroTiltDeg: pos.zeroTilt ?? 0,
       trailPositions: [],
       trailLastAdd: 0,
       extraHeads: extraHeads.length > 0 ? extraHeads : undefined,
@@ -1820,6 +1826,8 @@ export const Stage3D: React.FC<{
         if (pos.mountMode) f3d.mountMode = pos.mountMode;
         fitMountRotation(f3d, pos.mountMode || 'top');
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
+        f3d._zeroPanDeg = pos.zeroPan ?? 0;
+        f3d._zeroTiltDeg = pos.zeroTilt ?? 0;
         // Update beam angle (zoom)
         if (pos.beamAngle !== undefined && f3d.beamCone) {
           f3d.beamAngle = pos.beamAngle;
@@ -1863,6 +1871,8 @@ export const Stage3D: React.FC<{
       if (pos.mountMode) f3d.mountMode = pos.mountMode;
       fitMountRotation(f3d, pos.mountMode || 'top');
       f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
+      f3d._zeroPanDeg = pos.zeroPan ?? 0;
+      f3d._zeroTiltDeg = pos.zeroTilt ?? 0;
       if (pos.beamAngle !== undefined && f3d.beamCone) {
         f3d.beamAngle = pos.beamAngle;
         const ch = BEAM_LENGTH;
@@ -2054,11 +2064,16 @@ export const Stage3D: React.FC<{
       const tiltVal = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128)
         : (cm.scanYOffset !== null ? (data[baseAddr + cm.scanYOffset] ?? 128) : 128);
       dmxLastActivityRef.current = performance.now();
+      // Derniers bytes vus — pour « capturer l'orientation actuelle » (le bouton
+      // lit ces valeurs depuis le panneau).
+      f3d.lastPan = panVal;
+      f3d.lastTilt = tiltVal;
 
       // Rate-limited tracking: beam cannot turn faster than the real fixture motor
       // (maxPanTiltSpeed in °/s), so the 3D view matches the physical movement speed.
       if (f3d.armGroup) {
-        const panTarget = ((panVal / 255) - 0.5) * Math.PI * 3;
+        // Zéro VISUEL (rendu) : décalage persistant du faisceau (tare à DMX=128).
+        const panTarget = ((panVal / 255) - 0.5) * Math.PI * 3 + (f3d._zeroPanDeg * Math.PI) / 180;
         let panDelta = panTarget - f3d.armGroup.rotation.y;
         while (panDelta > Math.PI) panDelta -= 2 * Math.PI;
         while (panDelta < -Math.PI) panDelta += 2 * Math.PI;
@@ -2067,7 +2082,7 @@ export const Stage3D: React.FC<{
       }
       if (f3d.headGroup) {
         const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI;
-        const tiltTarget = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
+        const tiltTarget = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180;
         const tiltDelta = tiltTarget - f3d.headGroup.rotation.x;
         const tiltMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
         f3d.headGroup.rotation.x += Math.max(-tiltMaxStep, Math.min(tiltMaxStep, tiltDelta));
@@ -2077,7 +2092,7 @@ export const Stage3D: React.FC<{
       for (const eh of f3d.extraHeads ?? []) {
         const ehTiltVal = data[baseAddr + eh.tiltOffset] ?? 128;
         const dmxTilt = ((ehTiltVal / 255) - 0.5) * Math.PI;
-        const ehTarget = eh._mountTilt + dmxTilt + (f3d._staticTilt ?? 0);
+        const ehTarget = eh._mountTilt + dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180;
         const ehDelta = ehTarget - eh.headGroup.rotation.x;
         const ehMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
         eh.headGroup.rotation.x += Math.max(-ehMaxStep, Math.min(ehMaxStep, ehDelta));
@@ -2355,9 +2370,9 @@ export const Stage3D: React.FC<{
         { x: exitPos.x, y: exitPos.y, z: exitPos.z },
         { x: point.x, y: point.y, z: point.z },
         {
-          headingRad: f3d.group.rotation.y,
+          headingRad: f3d.group.rotation.y + (f3d._zeroPanDeg * Math.PI) / 180,
           mountTilt: f3d._mountTilt ?? 0,
-          staticTilt: f3d._staticTilt ?? 0,
+          staticTilt: (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180,
           armRotX: f3d.armGroup.rotation.x ?? 0,
           panCurrent: curPan,
         },
@@ -2435,9 +2450,9 @@ export const Stage3D: React.FC<{
           { x: point.x, y: point.y, z: point.z },
           solved.phi,
           {
-            headingRad: f3d.group.rotation.y,
+            headingRad: f3d.group.rotation.y + (f3d._zeroPanDeg * Math.PI) / 180,
             mountTilt: eh._mountTilt ?? f3d._mountTilt ?? 0,
-            staticTilt: f3d._staticTilt ?? 0,
+            staticTilt: (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180,
             armRotX: f3d.armGroup.rotation.x ?? 0,
           },
         );
@@ -3167,7 +3182,7 @@ export const Stage3D: React.FC<{
         {/* Selected fixture editor - floating panel, draggable by header only */}
         {selectedFixture && selectedPos && !hideFixturePanel && (
           <div
-            className="fixed bg-[#12121a] border border-purple-500/30 rounded-xl shadow-2xl min-w-[240px] max-h-[85vh] overflow-y-auto"
+            className="fixed bg-[#12121a] border border-purple-500/30 rounded-xl shadow-2xl min-w-[240px] max-w-[min(90vw,26rem)] max-h-[85vh] overflow-y-auto"
             style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
@@ -3197,17 +3212,17 @@ export const Stage3D: React.FC<{
                 document.addEventListener('mouseup', onUp);
               }}
             >
-              <div className="flex items-center gap-2">
-                <GripVertical size={12} className="text-gray-600" />
-                <span className="text-sm font-semibold text-gray-200">{selectedFixture.name}</span>
-                <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
+              <div className="flex items-center gap-2 min-w-0">
+                <GripVertical size={12} className="text-gray-600 shrink-0" />
+                <span className="text-sm font-semibold text-gray-200 min-w-0 truncate flex-auto">{selectedFixture.name}</span>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded-full shrink-0 ${
                   selectedFixture.tier === 'primary' ? 'bg-purple-500/20 text-purple-400' :
                   selectedFixture.tier === 'secondary' ? 'bg-blue-500/20 text-blue-400' :
                   'bg-gray-500/20 text-gray-400'
                 }`}>{selectedFixture.tier}</span>
                 <button
                   onClick={handleFixtureOn}
-                  className={`px-2.5 py-1 rounded text-[10px] font-semibold flex items-center gap-1 transition-colors border ${lightOn
+                  className={`px-2.5 py-1 rounded text-[10px] font-semibold flex items-center gap-1 transition-colors border shrink-0 ${lightOn
                     ? 'bg-green-500/25 text-green-300 border-green-500/50'
                     : 'bg-green-600/15 text-green-400 border-green-700/40 hover:bg-green-600/25'}`}
                   title={lightOn ? 'Éteindre' : 'Allumer (dimmer max + blanc)'}
@@ -3478,7 +3493,8 @@ export const Stage3D: React.FC<{
                 </div>
               </div>
 
-              {/* Pan/Tilt tare — visual only, does NOT touch DMX */}
+              {/* Point zéro DMX — offset VISUEL persistant du faisceau (seul réglage visuel) ;
+                  le centre du mouvement autoscript est posé par « Capturer » (centerPan/Tilt). */}
               {selectedFixture && selectedFixture.fixtureType && (() => {
                 const f3d = fixturesRef.current.get(selectedFixture.id);
                 const hasPan = f3d?.channelMap?.panOffset !== null && f3d?.channelMap?.panOffset !== undefined;
@@ -3486,52 +3502,89 @@ export const Stage3D: React.FC<{
                 const hasPanTilt = hasPan || hasTilt;
                 return hasPanTilt ? (
                   <>
-              <div className="space-y-1">
+              <div className="pt-2 border-t border-gray-800 space-y-1">
                 <div className="flex justify-between text-[10px]">
-                  <RichTooltip content={{ title: 'Pan — tare visuelle', text: 'Rotation horizontale de la tête dans la vue 3D uniquement. Ne touche PAS aux canaux DMX — c\'est un axe de présentation.', example: 'Pour tourner la tête d\'un mover dans la 3D sans affecter le vrai DMX. Utilisez le mode Target pour le DMX.', tone: 'info' }}><span className="text-gray-500 cursor-help">Pan (tare visuelle)</span></RichTooltip>
-                  <span className="text-gray-400 font-mono">{((selectedPos.heading ?? 0)).toFixed(0)}°</span>
+                  <RichTooltip content={{ title: 'Pan zéro DMX', text: 'Décale le faisceau de la tête dans la vue 3D (réglage visuel persistant) : à DMX pan 128, le faisceau pointe ici. Le centre de l\'oscillation autoscript est posé par « Capturer ».', example: 'Pointe la tête (modale) puis clic sur « Capturer » : le mouvement autoscript tournera autour de cette pose.', tone: 'info' }}><span className="text-gray-500 cursor-help">Pan zéro DMX</span></RichTooltip>
+                  <span className="text-gray-400 font-mono">{((selectedPos.zeroPan ?? 0)).toFixed(0)}°</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button onClick={() => setFixturePosition(selectedFixture.id, { heading: Math.max(0, Math.min(360, (selectedPos.heading ?? 0) - 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { zeroPan: Math.max(-270, Math.min(270, (selectedPos.zeroPan ?? 0) - 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
                   <input
                     type="range"
-                    min={0}
-                    max={360}
+                    min={-270}
+                    max={270}
                     step={5}
-                    value={selectedPos.heading ?? 0}
-                    onChange={(e) => setFixturePosition(selectedFixture.id, { heading: parseFloat(e.target.value) })}
+                    value={selectedPos.zeroPan ?? 0}
+                    onChange={(e) => setFixturePosition(selectedFixture.id, { zeroPan: parseFloat(e.target.value) })}
                     className="flex-1 h-1 accent-orange-500 cursor-pointer"
                   />
-                  <button onClick={() => setFixturePosition(selectedFixture.id, { heading: Math.max(0, Math.min(360, (selectedPos.heading ?? 0) + 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { zeroPan: Math.max(-270, Math.min(270, (selectedPos.zeroPan ?? 0) + 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
                 </div>
                 <div className="flex justify-between text-[8px] text-gray-700">
-                  <span>0°</span><span>360°</span>
+                  <span>-270°</span><span>+270°</span>
                 </div>
-              </div>
-
-              <div className="space-y-1">
-                <div className="flex justify-between text-[10px]">
-                  <RichTooltip content={{ title: 'Tilt — tare visuelle', text: 'Inclinaison verticale de la tête dans la vue 3D uniquement. Ne touche PAS aux canaux DMX — c\'est un axe de présentation.', example: 'Ajustez la hauteur de faisceau dans la 3D sans changer les canaux. Utilisez Target pour du vrai DMX.', tone: 'info' }}><span className="text-gray-500 cursor-help">Tilt (tare visuelle)</span></RichTooltip>
-                  <span className="text-gray-400 font-mono">{((selectedPos.tilt ?? 0)).toFixed(0)}°</span>
+                <div className="flex justify-between text-[10px] pt-1">
+                  <RichTooltip content={{ title: 'Tilt zéro DMX', text: 'Décale verticalement le faisceau de la tête dans la vue 3D (tare visuelle persistante) : à DMX tilt 128, le faisceau pointe ici.', example: 'Compense un accrochage physique qui vise trop haut/bas.', tone: 'info' }}><span className="text-gray-500 cursor-help">Tilt zéro DMX</span></RichTooltip>
+                  <span className="text-gray-400 font-mono">{((selectedPos.zeroTilt ?? 0)).toFixed(0)}°</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button onClick={() => setFixturePosition(selectedFixture.id, { tilt: Math.max(-90, Math.min(90, (selectedPos.tilt ?? 0) - 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { zeroTilt: Math.max(-90, Math.min(90, (selectedPos.zeroTilt ?? 0) - 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
                   <input
                     type="range"
                     min={-90}
                     max={90}
                     step={1}
-                    value={selectedPos.tilt ?? 0}
-                    onChange={(e) => setFixturePosition(selectedFixture.id, { tilt: parseFloat(e.target.value) })}
+                    value={selectedPos.zeroTilt ?? 0}
+                    onChange={(e) => setFixturePosition(selectedFixture.id, { zeroTilt: parseFloat(e.target.value) })}
                     className="flex-1 h-1 accent-blue-500 cursor-pointer"
                   />
-                  <button onClick={() => setFixturePosition(selectedFixture.id, { tilt: Math.max(-90, Math.min(90, (selectedPos.tilt ?? 0) + 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { zeroTilt: Math.max(-90, Math.min(90, (selectedPos.zeroTilt ?? 0) + 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
                 </div>
                 <div className="flex justify-between text-[8px] text-gray-700">
                   <span>-90°</span><span>+90°</span>
                 </div>
+                <div className="flex gap-1 pt-1">
+                  <button onClick={() => {
+                    const f3dC = fixturesRef.current.get(selectedFixture.id);
+                    const pfC = patchedFixtures.find(f => f.id === selectedFixture.id);
+                    const cmC = f3dC?.channelMap;
+                    const prog = useProgrammerStore.getState().channels;
+                    // Pose de référence : lire la valeur POSÉE PAR LE PROGRAMMEUR
+                    // (source de vérité du Target), sinon le dernier byte vu par la 3D.
+                    const readPoseByte = (off: number | null | undefined, fallback: number | undefined) => {
+                      if (off !== null && off !== undefined && pfC) {
+                        const v = prog[pfC.startAddress + off];
+                        if (v !== undefined) return v;
+                      }
+                      return fallback ?? 128;
+                    };
+                    const panByte = readPoseByte(cmC.panOffset ?? (cmC.panOffsets?.[0] ?? null), f3dC?.lastPan);
+                    const tiltByte = readPoseByte(cmC.tiltOffset ?? (cmC.tiltOffsets?.[0] ?? null), f3dC?.lastTilt);
+                    setFixturePosition(selectedFixture.id, {
+                      centerPan: Math.max(-270, Math.min(270, Math.round((panByte - 128) / 255 * 540))),
+                      centerTilt: Math.max(-90, Math.min(90, Math.round((tiltByte - 128) / 255 * 180))),
+                    });
+                    // Libère le programmeur (LTP 85) sur pan/tilt/couleur/dimmer de
+                    // cette fixture : sinon il écrase l'autoscript (priorité
+                    // inférieure) et la tête reste figée/blanche au point visé.
+                    const clearProgAddr = (off: number | null | undefined) => { if (off !== null && off !== undefined && pfC) useProgrammerStore.getState().clearChannel(pfC.startAddress + off); };
+                    if (pfC && cmC) {
+                      (cmC.panOffsets ?? []).forEach((o: number) => clearProgAddr(o));
+                      if (cmC.panOffset !== null) clearProgAddr(cmC.panOffset);
+                      (cmC.tiltOffsets ?? []).forEach((o: number) => clearProgAddr(o));
+                      if (cmC.tiltOffset !== null) clearProgAddr(cmC.tiltOffset);
+                      (cmC.rgbOffsets ?? []).forEach((o: number) => clearProgAddr(o));
+                      for (const seg of (cmC.rgbSegments ?? [])) { clearProgAddr(seg.r); clearProgAddr(seg.g); clearProgAddr(seg.b); clearProgAddr(seg.w); clearProgAddr(seg.a); clearProgAddr(seg.uv); }
+                      clearProgAddr(cmC.intensityOffset);
+                      clearProgAddr(cmC.wheelOffset);
+                      clearProgAddr(cmC.strobeOffset);
+                      clearProgAddr(cmC.shutterOffset);
+                    }
+                  }} title="Centre l'oscillation autoscript sur la pose actuelle de la tête (libère aussi pan/tilt/couleur pour que l'autoscript reprenne le contrôle)" className="flex-1 text-[9px] rounded bg-purple-900/60 border border-purple-700/50 text-purple-200 hover:bg-purple-800/60 py-0.5">Capturer</button>
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { zeroPan: 0, zeroTilt: 0, centerPan: 0, centerTilt: 0 })} title="Remet les faders point zéro et le centre de mouvement à 0°" className="flex-1 text-[9px] rounded bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 py-0.5">Zéro (0°)</button>
+                </div>
+                <p className="text-[9px] text-gray-600">Les faders décalent le faisceau (visuel, persistant). « Capturer » centre l'oscillation autoscript sur la pose actuelle de la tête.</p>
               </div>
-              <p className="text-[9px] text-gray-600">Réglage visuel uniquement — ne touche pas au DMX.</p>
                   </>
                 ) : null;
               })()}

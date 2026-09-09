@@ -53,6 +53,10 @@ const EDGE_MARGIN = 6; // marge min au bord du conteneur (modale / viewport)
 
 // Zone dans laquelle la bulle doit rester : la fenêtre ET le plus proche
 // ancêtre "scrollable/qui clippe" (le panneau/modale qui contient le bouton).
+// Pour un VRAI scroller (contenu qui déborde) on borne sur sa zone visible
+// (clientWidth/clientHeight) ; sinon on garde la boîte complète. Les éléments
+// non-layoutés (inline, vides) sont ignorés — jamais de rect nul qui écraserait
+// le clamp.
 function getClampRect(el: HTMLElement | null, vw: number, vh: number): ClampRect {
   let left = 0, top = 0, right = vw, bottom = vh;
   let node = el?.parentElement ?? null;
@@ -61,10 +65,17 @@ function getClampRect(el: HTMLElement | null, vw: number, vh: number): ClampRect
       const cs = getComputedStyle(node);
       if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
         const r = node.getBoundingClientRect();
-        left = Math.max(left, r.left);
-        top = Math.max(top, r.top);
-        right = Math.min(right, r.right);
-        bottom = Math.min(bottom, r.bottom);
+        const L = r.left + node.clientLeft;
+        const T = r.top + node.clientTop;
+        const scrolled = node.scrollHeight > node.clientHeight || node.scrollWidth > node.clientWidth;
+        const R = scrolled ? L + node.clientWidth : r.right;
+        const B = scrolled ? T + node.clientHeight : r.bottom;
+        if (R - L >= 1 && B - T >= 1) {
+          left = Math.max(left, L);
+          top = Math.max(top, T);
+          right = Math.min(right, R);
+          bottom = Math.min(bottom, B);
+        }
       }
     } catch {
       /* ignore les éléments détachés */
@@ -97,11 +108,17 @@ export function RichTooltip({
     if (!wrap || !tip) return;
     // Mesure réelle de la bulle (montée hors-écran à left:-9999 → taille exacte)
     const wr = wrap.getBoundingClientRect();
-    const tw = tip.offsetWidth || 256;
-    const th = tip.offsetHeight || 120;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const cr = getClampRect(wrap, vw, vh);
+    // Largeur de bulle adaptée à la place réelle dans la zone clampée : au lieu
+    // de rogner la bulle au bord de la modale, on la rétrécit (le texte passe
+    // en wraps) pour qu'elle reste entièrement visible et centrée sur le trigger.
+    const natW = tip.offsetWidth || 256;
+    const availW = Math.max(96, cr.right - cr.left - 2 * EDGE_MARGIN);
+    if (natW > availW) tip.style.width = `${availW}px`;
+    const tw = Math.min(natW, availW);
+    const th = tip.offsetHeight || 120;
     const spaceT = wr.top - cr.top;
     const spaceB = cr.bottom - wr.bottom;
     const spaceL = wr.left - cr.left;

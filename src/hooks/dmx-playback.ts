@@ -463,9 +463,10 @@ import type { RgbSegment } from '../engine/dmx-color';
 import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, findBestWheelCap, wheelDegeneratePosition } from '../engine/dmx-color';
 import type { ChannelAnalysis } from '../engine/fixture-analyzer';
 import { analyzeChannels, capMid, pickLaserModeCap, laserGateValue, mapIntensityVal, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
-import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSmartMovement, spatialPhaseFor } from '../engine/dmx-movement';
+import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSmartMovement, spatialPhaseFor, zeroDmxOffset } from '../engine/dmx-movement';
 import { computeGoboValue } from '../engine/gobo-engine';
 import { useAppStore } from '../stores/appStore';
+import { useProgrammerStore } from '../stores/programmerStore';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { recordAudioTick } from '../utils/latency-meter';
 
@@ -567,7 +568,7 @@ export function useDmxPlayback(options: {
   showsRef?: React.MutableRefObject<Array<{ id: string; name?: string; duration: number; tracks: Array<{ type: string; items: Array<{ startTime: number; duration: number; resourceId: string; fadeIn?: number; fadeOut?: number }>; muted?: boolean }> }>>;
   sceneTracksRef?: React.MutableRefObject<SceneTrackRef[] | null>; // Scene track takeover (static scene config on its fixtures)
   disabledFixturesRef?: React.MutableRefObject<Set<string>>; // Disabled fixture IDs
-  fixturePositionsRef?: React.MutableRefObject<Record<string, { x: number; y: number; h?: number }>>; // For stage-aware pan/tilt
+  fixturePositionsRef?: React.MutableRefObject<Record<string, { x: number; y: number; h?: number; zeroPan?: number; zeroTilt?: number; centerPan?: number; centerTilt?: number }>>; // For stage-aware pan/tilt + centre du mouvement (capture)
   panTiltLimitsRef?: React.MutableRefObject<{ pan: number; tilt: number; perFixture?: Record<string, { pan: number; tilt: number }> }>; // DMX half-amplitude limits for autoscript movement (128 = full)
   onVirtualDmx?: (universe: number, channelValues: Record<number, number>) => void; // Mirror for 3D view
   dryRunMode?: boolean; // Skip hardware DMX output, keep store/3D updates
@@ -757,6 +758,13 @@ export function useDmxPlayback(options: {
     // written renderer-side. Without this guard, a missing `lightMaestro.dmx`
     // killed the whole playback loop (and therefore the 3D show) even in DRY.
     if(!api && !dryRunRef.current)return;
+    // Le programmeur (LTP 85) est un buffer « live design ». Au lancement de
+    // la lecture (audio/autoscript), il doit être vidé sinon il écrase
+    // l'autoscript (HTP 40/45) sur pan/tilt/couleur des fixtures qu'il tient :
+    // les têtes ciblées resteraient figées/blanches au lieu d'osciller et de
+    // se colorer avec le show.
+    try { useProgrammerStore.getState().clear(); } catch { /* best effort */ }
+
     console.warn('[DMX-PLAYBACK] lecture démarrée —',
       'dryRun='+dryRunRef.current,
       'dmxOutput='+dmxEnabledRef.current,
@@ -1183,8 +1191,18 @@ export function useDmxPlayback(options: {
            // sont eteintes (dimmer 0 + shutter 0 + gates laser 0). Le show
            // respire entre intro (primary seul) et drop (toutes les couches).
            // Les fixtures de tier 'other' sont toujours considerees comme actives.
+           // Une fixture dont le centre de mouvement a été « capturé »
+           // (centerPan/centerTilt posés) est une mise en avant intentionnelle :
+           // elle doit participer au show (couleur + mouvement) quelle que soit
+           // sa densité de tier, sinon Target+Capture reste éteinte pendant
+           // intro/bridge/outro (activeTiers réduit) alors que le reste bouge.
+           const _captured = fixturePositions?.[pf.id];
+           const _hasCapturedCenter = !!_captured && (
+             (_captured.centerPan !== undefined && _captured.centerPan !== 0) ||
+             (_captured.centerTilt !== undefined && _captured.centerTilt !== 0)
+           );
            let _fixtureInactive = false;
-           if (Array.isArray(active.activeTiers) && !active.activeTiers.includes(pf.tier) && pf.tier !== 'other' && !_dimmerTrackActive) {
+           if (Array.isArray(active.activeTiers) && !active.activeTiers.includes(pf.tier) && pf.tier !== 'other' && !_dimmerTrackActive && !_hasCapturedCenter) {
              _fixtureInactive = true;
              if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = mapIntensityVal(0, fa);
              if (fa.shutterOffset !== null) chVals[pf.startAddress + fa.shutterOffset] = 0;
@@ -1588,6 +1606,16 @@ if (fa.isLaser) {
                   }
                   return sec;
                 })();
+              // Une fixture « capturée » doit continuer à bouger autour de sa
+              // target même pendant les sections calmes (intro/outro/bridge) :
+              // le pattern 'static' quasi immobile est remplacé par un doux cercle
+              // centré sur le point capturé.
+              const capturedFx = fixturePositions?.[pf.id];
+              const capturedCenter = !!capturedFx && (
+                (capturedFx.centerPan !== undefined && capturedFx.centerPan !== 0) ||
+                (capturedFx.centerTilt !== undefined && capturedFx.centerTilt !== 0)
+              );
+              const effPattern = (capturedCenter && (movPattern === 'static')) ? 'circle' : movPattern;
               // Spatial choreography: per-fixture phase offset from real stage position
               const spatialPattern = (active as any).spatialPattern;
               let mobileIdx = -1, totalMobile = 0;
@@ -1599,6 +1627,12 @@ if (fa.isLaser) {
                   }
                 }
               }
+// Centre du mouvement par fixture : posé par « Capturer » (centerPan/centerTilt),
+              // appliqué que le cue ait unPattern (amplitude>0) ou non. Le zéro visuel
+              // (zeroPan/zeroTilt) n'existe que dans le rendu 3D.
+              const zpos = fixturePositions?.[pf.id];
+                const zeroPd = zpos ? zeroDmxOffset(zpos.centerPan, 'pan') : 0;
+                const zeroTd = zpos ? zeroDmxOffset(zpos.centerTilt, 'tilt') : 0;
               if(amplitude>0){for(let m=0;m<motorCount;m++){const motorPhase=m*(Math.PI*2/motorCount);const speedMult=Math.max(0.1,Math.min(2.5,active.movementSpeed??1));
                 // Crossfade movement params: blend toward next cue (clamped)
                 const curAmp = amplitude; const curSpd = speedMult;
@@ -1612,28 +1646,31 @@ if (fa.isLaser) {
                   ? Math.max(0.1,Math.min(2.5,curSpd*(1-crossfadeT) + nextSpdClamped*crossfadeT))
                   : curSpd);
                 const phase=(ct*Math.PI*2*blendSpd)+motorPhase+(trackMovement?0:movementPhase)+(spatialPattern&&!trackMovement?spatialPhaseFor(fixturePositions?.[pf.id],spatialPattern,mobileIdx):0);
-                const [px, py] = evalEffect(movPattern as EffectPattern, phase, 0);
+                const [px, py] = evalEffect(effPattern as EffectPattern, phase, 0);
                 const pfl = panTiltLimits.perFixture?.[pf.id];
                 // Fixture-track movement blocks are user-authored (higher priority than autoscript): do not clamp them.
                 const panLimit = trackMovement ? 128 : (pfl?.pan ?? panTiltLimits.pan);
                 const tiltLimit = trackMovement ? 128 : (pfl?.tilt ?? panTiltLimits.tilt);
                 if(m<panCount){
-                  const raw = Math.max(0,Math.min(255,Math.round(128+px*blendAmp)));
+                  const raw = Math.max(0,Math.min(255,Math.round(128+zeroPd + (amplitude>0 ? px*blendAmp : 0))));
                   const fp = fixturePositions?.[pf.id];
-                  let pv = fp ? clampPanToStage(raw, fp.x) : raw;
-                  pv = Math.max(128 - panLimit, Math.min(128 + panLimit, pv));
+                  // Fixture avec centre capturé : on ne rencentre PAS vers la zone
+                  // de scène (clampPanToStage annulerait le point visé) — on ne
+                  // borne que autour du centre capturé.
+                  let pv = (zeroPd !== 0 && fp) ? raw : (fp ? clampPanToStage(raw, fp.x) : raw);
+                  pv = Math.max(128 + zeroPd - panLimit, Math.min(128 + zeroPd + panLimit, pv));
                   chVals[pf.startAddress+fa.panOffsets[m]] = pv;
                   if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: pv, tilt: 128 }), pan: pv });
                 }
                 if(m<tiltCount){
-                  const raw = Math.max(0,Math.min(255,Math.round(128+py*blendAmp)));
+                  const raw = Math.max(0,Math.min(255,Math.round(128+zeroTd + (amplitude>0 ? py*blendAmp : 0))));
                   const fp = fixturePositions?.[pf.id];
-                  let tv = fp ? clampTiltToStage(raw, fp.y) : raw;
-                  tv = Math.max(128 - tiltLimit, Math.min(128 + tiltLimit, tv));
-                  chVals[pf.startAddress+fa.tiltOffsets[m]] = tv;
+                  let tv = (zeroTd !== 0 && fp) ? raw : (fp ? clampTiltToStage(raw, fp.y) : raw);
+                  tv = Math.max(128 + zeroTd - tiltLimit, Math.min(128 + zeroTd + tiltLimit, tv));
+chVals[pf.startAddress+fa.tiltOffsets[m]] = tv;
                   if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: 128, tilt: tv }), tilt: tv });
                 }}
-              }else{for(const po of fa.panOffsets)chVals[pf.startAddress+po]=128;for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=128;}
+              }else{for(const po of fa.panOffsets)chVals[pf.startAddress+po]=Math.round(Math.max(0,Math.min(255,128+zeroPd)));for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=Math.round(Math.max(0,Math.min(255,128+zeroTd)));}
             } // fin else autoscript (chaser freeze ci-dessus)
             }
           }
@@ -1948,7 +1985,7 @@ export function computeDmxForCue(
   strobeTrackOverrides?: Map<string, { active: boolean; speed: number }>,
   dimmerTrackOverrides?: Map<string, { active: boolean; value: number }>,
   disabledFixtures?: Set<string>,
-  fixturePositions?: Record<string, { x: number; y: number; h?: number }>,
+  fixturePositions?: Record<string, { x: number; y: number; h?: number; zeroPan?: number; zeroTilt?: number; centerPan?: number; centerTilt?: number }>,
   chaserTakeover?: Map<string, Record<number, number>>,
 ): Array<{ universe: number; channelValues: Record<number, number> }> {
   const uniIds = universes.map(u => String(u.id));
@@ -2227,14 +2264,18 @@ export function computeDmxForCue(
               default: px = Math.sin(phase * .35) * .5; py = Math.cos(phase * .3 + motorPhase) * .5;
             }
             if (m < panCount) {
-              const raw = Math.max(0, Math.min(255, Math.round(128 + px * amplitude)));
+              const rp = fixturePositions?.[pf.id];
+              const zPd = zeroDmxOffset(rp?.centerPan, 'pan');
+              const raw = Math.max(0, Math.min(255, Math.round(128 + zPd + px * amplitude)));
               const fp = fixturePositions?.[pf.id];
-              chVals[pf.startAddress + fa.panOffsets[m]] = fp ? clampPanToStage(raw, fp.x) : raw;
+              chVals[pf.startAddress + fa.panOffsets[m]] = (zPd !== 0 && fp) ? raw : (fp ? clampPanToStage(raw, fp.x) : raw);
             }
             if (m < tiltCount) {
-              const raw = Math.max(0, Math.min(255, Math.round(128 + py * amplitude)));
+              const rp = fixturePositions?.[pf.id];
+              const zTd = zeroDmxOffset(rp?.centerTilt, 'tilt');
+              const raw = Math.max(0, Math.min(255, Math.round(128 + zTd + py * amplitude)));
               const fp = fixturePositions?.[pf.id];
-              chVals[pf.startAddress + fa.tiltOffsets[m]] = fp ? clampTiltToStage(raw, fp.y) : raw;
+              chVals[pf.startAddress + fa.tiltOffsets[m]] = (zTd !== 0 && fp) ? raw : (fp ? clampTiltToStage(raw, fp.y) : raw);
             }
           }
         } else {

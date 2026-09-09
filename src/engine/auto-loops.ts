@@ -12,11 +12,12 @@
 // at `speedBpm`. materializeAutoLoops() turns loops into playable scenes +
 // chasers (the existing chaser engine plays them unchanged).
 
-import type { PatchedFixture, FixtureTier, SavedScene, SavedChaser } from '../stores/showStore';
+import type { PatchedFixture, FixtureTier, SavedScene, SavedChaser, FixturePos } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureCapability } from '../hooks/dmx-cues';
 import { analyzeChannels, type ChannelAnalysis, pickLaserModeCap } from './fixture-analyzer';
 import { classifyGoboCap } from './gobo-engine';
 import { movementAt, type EffectPattern } from './effect-engine';
+import { zeroDmxOffset } from './dmx-movement';
 
 export type AutoLoopKind =
   | 'color-chase' | 'movement' | 'dimmer-pulse' | 'strobe'
@@ -100,6 +101,9 @@ export interface AutoLoopOptions {
   movementSteps?: number;
   /** DMX amplitude (0-128) around the 128 center for movement. Default 64. */
   movementRadius?: number;
+  /** Per-fixture stage positions (for the pan/tilt zero/tare). The movement
+   *  loop oscillates around `128 + zeroDmxOffset(...)` instead of 128. */
+  positions?: Record<string, FixturePos>;
 }
 
 export interface LoopLibraryOptions {
@@ -107,6 +111,8 @@ export interface LoopLibraryOptions {
   count?: number;
   /** Seed for reproducible variety. Change it to get a new set. Default 0. */
   seed?: number;
+  /** Per-fixture positions — same taré semantics as AutoLoopOptions.positions. */
+  positions?: Record<string, FixturePos>;
 }
 
 const TIER_ORDER: FixtureTier[] = ['primary', 'secondary', 'tertiary', 'other'];
@@ -264,6 +270,7 @@ function buildMovementLoop(
   speedBpm: number,
   pattern: MovementPattern = MOVEMENT_PATTERNS[0],
   direction: AutoLoop['direction'] = 'forward',
+  positions?: Record<string, FixturePos>,
 ): AutoLoop {
   const amp = Math.max(0, Math.min(128, radius));
   const steps: AutoLoopStep[] = [];
@@ -271,8 +278,13 @@ function buildMovementLoop(
     const [pan, tilt] = pattern.at(step / movementSteps, amp);
     const frame: Record<number, number> = {};
     for (const { pf, analysis } of fixtures) {
-      for (const off of analysis.panOffsets) put(frame, absAddr(pf, off), pan);
-      for (const off of analysis.tiltOffsets) put(frame, absAddr(pf, off), tilt);
+      // Centre du mouvement (tare) : chaque tête oscille autour de son propre
+      // centre (capture). Le zéro VISUEL (zeroPan/zeroTilt) ne vit pas dans le
+      // moteur — il est appliqué uniquement au rendu 3D.
+      const zPan = positions ? zeroDmxOffset(positions[pf.id]?.centerPan, 'pan') : 0;
+      const zTilt = positions ? zeroDmxOffset(positions[pf.id]?.centerTilt, 'tilt') : 0;
+      for (const off of analysis.panOffsets) put(frame, absAddr(pf, off), pan + zPan);
+      for (const off of analysis.tiltOffsets) put(frame, absAddr(pf, off), tilt + zTilt);
       // Fine 16-bit : neutralisé (0) pour éviter une valeur résiduelle « stale »
       // qui fausserait la précision du mouvement.
       if (analysis.panFineOffset !== null) put(frame, absAddr(pf, analysis.panFineOffset), 0);
@@ -744,7 +756,7 @@ export function generateAutoLoops(
     const laserWheels = fixtures.filter((f) => f.analysis.isLaser && f.analysis.laserColorMode === 'wheel' && f.analysis.wheelOffset !== null && f.analysis.wheelCaps.length > 0);
 
     if (rgb.length > 0) loops.push(buildColorChase(tier, rgb, CHASE_COLORS.slice(0, chaseSteps), speedBpm));
-    if (movers.length > 0) loops.push(buildMovementLoop(tier, movers, movementSteps, movementRadius, speedBpm));
+    if (movers.length > 0) loops.push(buildMovementLoop(tier, movers, movementSteps, movementRadius, speedBpm, MOVEMENT_PATTERNS[0], 'forward', opts.positions));
     if (dimmers.length > 0) loops.push(buildDimmerPulse(tier, dimmers, speedBpm));
     if (wheels.length > 0) loops.push(buildColorWheelLoop(tier, wheels, speedBpm));
     if (gobos.length > 0) loops.push(buildGoboLoop(tier, gobos, speedBpm, true));
@@ -870,7 +882,7 @@ export function generateLoopLibrary(
       case 'movement': {
         const pattern = pick(MOVEMENT_PATTERNS);
         const radius = 36 + Math.floor(rng() * 81); // 36..116
-        loop = buildMovementLoop(tier, cap.movers, 8, radius, speed, pattern, direction);
+        loop = buildMovementLoop(tier, cap.movers, 8, radius, speed, pattern, direction, opts.positions);
         break;
       }
       case 'dimmer-pulse':
@@ -1066,6 +1078,7 @@ export function generateLoopFromRecipe(
   recipe: LoopRecipe,
   patchedFixtures: PatchedFixture[],
   defs: Map<string, DmxFixtureDefinition>,
+  positions?: Record<string, FixturePos>,
 ): AutoLoop | undefined {
   const byTier = analyzeTiers(patchedFixtures, defs);
   const fixtures = byTier.get(recipe.tier);
@@ -1094,7 +1107,7 @@ export function generateLoopFromRecipe(
     case 'movement': {
       if (movers.length === 0) return undefined;
       const pattern = MOVEMENT_PATTERNS.find((p) => p.name === recipe.pattern) ?? MOVEMENT_PATTERNS[0];
-      return buildMovementLoop(recipe.tier, movers, 8, recipe.radius ?? 64, recipe.speedBpm, pattern, recipe.direction);
+      return buildMovementLoop(recipe.tier, movers, 8, recipe.radius ?? 64, recipe.speedBpm, pattern, recipe.direction, positions);
     }
     case 'dimmer-pulse':
       if (dimmers.length === 0) return undefined;

@@ -49,6 +49,7 @@ export interface AutoloopEngineApi {
 export function useAutoloopEngine(bpm = 120): AutoloopEngineApi {
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
   const universes = useShowStore((s) => s.universes);
+  const fixturePositions = useShowStore((s) => s.fixturePositions);
 
   const [defs, setDefs] = useState<Map<string, DmxFixtureDefinition>>(new Map());
   const [banks, setBanks] = useState<BankManager | null>(null);
@@ -95,7 +96,7 @@ export function useAutoloopEngine(bpm = 120): AutoloopEngineApi {
       setBanks(null);
       return;
     }
-    const fixtures = toAutoloopFixtures(patchedFixtures, defs, universes);
+    const fixtures = toAutoloopFixtures(patchedFixtures, defs, universes, fixturePositions);
     fixturesRef.current = fixtures;
     if (fixtures.length === 0) {
       setBanks(null);

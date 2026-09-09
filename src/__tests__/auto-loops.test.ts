@@ -163,6 +163,37 @@ describe('generateAutoLoops', () => {
     }
   });
 
+  it('applies the per-fixture center (centre du mouvement, capture) to the movement center', () => {
+    const fixtures = [
+      pf({ id: 'f2', fixtureDefId: 'mover-rgb', tier: 'primary', startAddress: 9 }),
+      pf({ id: 'f3', fixtureDefId: 'mover-rgb', tier: 'primary', startAddress: 20 }),
+    ];
+    const opts = {
+      movementSteps: 8,
+      movementRadius: 64,
+      positions: {
+        f2: { x: 0.5, y: 0.3, h: 0.5, heading: 0, centerPan: 45, centerTilt: 45 },
+      } as Record<string, any>,
+    };
+    const base = generateAutoLoops(fixtures, defsOf(mover), { movementSteps: 8, movementRadius: 64 });
+    const tared = generateAutoLoops(fixtures, defsOf(mover), opts as any);
+    const mvB = base.find((l) => l.kind === 'movement')!;
+    const mvT = tared.find((l) => l.kind === 'movement')!;
+    // zeroDmxOffset(45,'pan') = 21 ; zeroDmxOffset(45,'tilt') = 64 — même tête,
+    // chaque pas est décalé d'exactement cette somme (put clamps en 0..255).
+    for (let i = 0; i < mvB.steps.length; i++) {
+      const panB = mvB.steps[i].channels[9] ?? 0;
+      const panT = mvT.steps[i].channels[9] ?? 0;
+      const tiltB = mvB.steps[i].channels[10] ?? 0;
+      const tiltT = mvT.steps[i].channels[10] ?? 0;
+      expect(panT).toBe(Math.max(0, Math.min(255, panB + 21)));
+      expect(tiltT).toBe(Math.max(0, Math.min(255, tiltB + 64)));
+    }
+    // La seconde tête (sans position) reste sur le centre 128.
+    expect(mvT.steps[0].channels[20]).toBe(mvB.steps[0].channels[20]);
+    expect(mvT.steps[0].channels[21]).toBe(mvB.steps[0].channels[21]);
+  });
+
   it('default chase palette has high contrast (no near-identical steps)', () => {
     const fixtures = [pf({ id: 'f1', fixtureDefId: 'wash-rgb', tier: 'primary', startAddress: 1 })];
     const loops = generateAutoLoops(fixtures, defsOf(rgbWash), { chaseSteps: 4 });

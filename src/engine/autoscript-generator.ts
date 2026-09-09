@@ -516,7 +516,7 @@ function emitPositionKeys(
           keys.push({
             channel: String(addr),
             beat,
-            value: computeTilt({ ...cue, phase: cue.phase + m * phaseStep }, beat),
+            value: computeTilt({ ...cue, centerTilt: fixture.centerTiltDmx ?? cue.centerTilt ?? 128, phase: cue.phase + m * phaseStep }, beat),
             rampBeats: ramp,
           });
         }
@@ -526,7 +526,7 @@ function emitPositionKeys(
             keys.push({
               channel: String(addr),
               beat,
-              value: computePan(cue, beat),
+              value: computePan({ ...cue, centerPan: fixture.centerPanDmx ?? cue.centerPan ?? 128 }, beat),
               rampBeats: ramp,
             });
           }
@@ -537,7 +537,7 @@ function emitPositionKeys(
             keys.push({
               channel: String(addr),
               beat,
-              value: computePan({ ...cue, phase: cue.phase + m * phaseStep }, beat),
+              value: computePan({ ...cue, centerPan: fixture.centerPanDmx ?? cue.centerPan ?? 128, phase: cue.phase + m * phaseStep }, beat),
               rampBeats: ramp,
             });
           }

@@ -173,6 +173,10 @@ export interface FixturePos {
   h: number; // height multiplier (0-1, maps to 0-5m range)
   heading: number; // rotation in degrees (0-360), 0=front (toward audience)
   tilt?: number; // static tilt in degrees (-90 to +90)
+  zeroPan?: number; // point zéro pan (degrés) : décalage VISUEL du faisceau dans la 3D (comme une tare) ; le fader le déplace en permanence
+  zeroTilt?: number; // point zéro tilt (degrés) : décalage VISUEL du faisceau dans la 3D
+  centerPan?: number; // centre du mouvement autoscript pan (degrés), set par « Capturer » : direction du byte actuel
+  centerTilt?: number; // centre du mouvement autoscript tilt (degrés), set par « Capturer »
   beamAngle?: number; // beam opening angle in radians (0.02-0.8)
   thumbnailScale?: number; // sprite scale multiplier (0.2-2.0, default 0.75)
   mountMode?: 'top' | 'ground' | 'rear' | 'hanging'; // beam direction: top=down, ground=up, rear=forward, hanging=horizontal vers le public

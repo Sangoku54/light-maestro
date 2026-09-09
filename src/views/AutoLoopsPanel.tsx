@@ -134,8 +134,13 @@ export const AutoLoopsPanel: React.FC = () => {
 
   const library = useMemo<AutoLoop[]>(() => {
     if (patchedFixtures.length === 0 || fixtureDefs.size === 0) return [];
-    return generateLoopLibrary(patchedFixtures, fixtureDefs, { count: DEFAULT_COUNT, seed });
-  }, [patchedFixtures, fixtureDefs, seed]);
+    // Positions pour le zéro pan/tilt : chaque tête oscille autour de son tare.
+    return generateLoopLibrary(patchedFixtures, fixtureDefs, {
+      count: DEFAULT_COUNT,
+      seed,
+      positions: useShowStore.getState().fixturePositions,
+    });
+  }, [patchedFixtures, fixtureDefs, seed, patchKey]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

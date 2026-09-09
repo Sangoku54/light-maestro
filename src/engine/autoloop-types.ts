@@ -56,6 +56,10 @@ export interface AutoloopFixture {
   channelMap: Record<string, number>;
   /** Fixture détectée comme laser (routage/exploitation dédiés). */
   isLaser?: boolean;
+  /** Centre pan DMX (128±offset) injecté par « Capturer » — déplace l'oscillation autour de la pose cible. */
+  centerPanDmx?: number;
+  /** Centre tilt DMX (128±offset) injecté par « Capturer » — déplace l'oscillation autour de la pose cible. */
+  centerTiltDmx?: number;
 }
 
 /**

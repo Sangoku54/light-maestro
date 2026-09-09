@@ -867,6 +867,7 @@ const ContextMenuPopup: React.FC<{
  */
 const AutoLoopPicker: React.FC<{ selected?: LoopRecipe; onSelect: (r: LoopRecipe) => void }> = ({ selected, onSelect }) => {
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const fixturePositions = useShowStore((s) => s.fixturePositions);
   const [loops, setLoops] = useState<AutoLoop[]>([]);
 
   useEffect(() => {
@@ -875,11 +876,11 @@ const AutoLoopPicker: React.FC<{ selected?: LoopRecipe; onSelect: (r: LoopRecipe
     const ids = [...new Set(patchedFixtures.map((f) => f.fixtureDefId))];
     loadFixtureDefinitions(ids)
       .then((defs) => {
-        if (!cancelled) setLoops(generateLoopLibrary(patchedFixtures, defs, { count: 36, seed: 0 }));
+        if (!cancelled) setLoops(generateLoopLibrary(patchedFixtures, defs, { count: 36, seed: 0, positions: fixturePositions }));
       })
       .catch(() => { if (!cancelled) setLoops([]); });
     return () => { cancelled = true; };
-  }, [patchedFixtures]);
+  }, [patchedFixtures, fixturePositions]);
 
   const grouped: [AutoLoop['kind'], AutoLoop[]][] = LOOP_KIND_ORDER
     .map((k) => [k, loops.filter((l) => l.kind === k)] as [AutoLoop['kind'], AutoLoop[]])
