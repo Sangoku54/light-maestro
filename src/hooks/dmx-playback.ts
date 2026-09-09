@@ -464,6 +464,7 @@ import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, startsW
 import type { ChannelAnalysis } from '../engine/fixture-analyzer';
 import { analyzeChannels, capMid, pickLaserModeCap, laserGateValue, mapIntensityVal, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
 import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSmartMovement, spatialPhaseFor } from '../engine/dmx-movement';
+import { computeGoboValue } from '../engine/gobo-engine';
 import { useAppStore } from '../stores/appStore';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { recordAudioTick } from '../utils/latency-meter';
@@ -1188,10 +1189,11 @@ export function useDmxPlayback(options: {
              if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = mapIntensityVal(0, fa);
              if (fa.shutterOffset !== null) chVals[pf.startAddress + fa.shutterOffset] = 0;
              if (fa.strobeOffset !== null) chVals[pf.startAddress + fa.strobeOffset] = 0;
-             if (fa.isLaser) {
-               if (fa.rgbOffsets) for (const o of fa.rgbOffsets) chVals[pf.startAddress + o] = 0;
-               if (fa.laserColorGateOffset !== null) chVals[pf.startAddress + fa.laserColorGateOffset] = 0;
-             }
+if (fa.isLaser) {
+                if (fa.rgbOffsets) for (const o of fa.rgbOffsets) chVals[pf.startAddress + o] = 0;
+                if (fa.laserColorGateOffset !== null) chVals[pf.startAddress + fa.laserColorGateOffset] = 0;
+                if (fa.laserMasterOffset !== null) chVals[pf.startAddress + fa.laserMasterOffset] = 0;
+              }
              // RGB-only sans canal intensité (LED bars / wall washers) : on
              // éteint les segments (sinon le bloc palette les rallumerait —
              // la respiration des tiers doit les éteindre aussi).
@@ -1654,11 +1656,15 @@ const _FXPROF: Record<string, [number, number, number, number]> = {
 
           if(fa.goboOffset!==null){const gAddr=pf.startAddress+fa.goboOffset;
             if(fa.goboCaps.length>0){
-              const gc=Math.max(1,fa.goboCaps.length);
-              const gi=Math.floor((fxPhase2*0.5)%gc);
-              chVals[gAddr]=Math.round((fa.goboCaps[gi].min+fa.goboCaps[gi].max)/2);
+              // Régie gobo intelligente (tenues + repos), déterministe par
+              // temps → stable entre 2 frames à 60 fps (aucun scintillement).
+              chVals[gAddr]=computeGoboValue(fa.goboCaps, ct, {
+                bpm: (active as any)?.bpm ?? 120,
+                energy: fxEnergy,
+                seed: 1000 + pf.startAddress,
+              });
             }else{
-              chVals[gAddr]=Math.round(fxEnergy*255);
+              chVals[gAddr]=0; // canal gobo sans caps → position basse stable
             }
           }
           if(fa.prismOffset!==null){const pAddr=pf.startAddress+fa.prismOffset;
@@ -1689,6 +1695,7 @@ const _FXPROF: Record<string, [number, number, number, number]> = {
               // (mode, pattern, scan, rotation, blanking, gates couleur) pour
               // que le laser ne reste pas allumé en intro/outro/bridge.
               if (fa.laserModeOffset !== null) chVals[pf.startAddress + fa.laserModeOffset] = 0;
+              if (fa.laserMasterOffset !== null) chVals[pf.startAddress + fa.laserMasterOffset] = 0;
               if (fa.patternOffset !== null) chVals[pf.startAddress + fa.patternOffset] = 0;
               if (fa.scanXOffset !== null) chVals[pf.startAddress + fa.scanXOffset] = 0;
               if (fa.scanYOffset !== null) chVals[pf.startAddress + fa.scanYOffset] = 0;
@@ -1842,6 +1849,13 @@ export function computeLaserChannels(
   // Mode : toujours un mode pilotable en DMX (jamais sound/off).
   if (fa.laserModeOffset !== null) {
     chVals[pf.startAddress + fa.laserModeOffset] = capMid(pickLaserModeCap(fa.laserModeCaps));
+  }
+  // Master/power switch : toujours OUVERT (cap non-off), sinon le laser risque
+  // de rester éteint faute de valeur écrite (0 = OFF sur beaucoup de defs).
+  if (fa.laserMasterOffset !== null) {
+    chVals[pf.startAddress + fa.laserMasterOffset] = options?.blankWhenStrobe
+      ? 0
+      : capMid(pickLaserModeCap(fa.laserMasterCaps));
   }
   // Pattern : cycle un motif toutes les ~2 s.
   if (fa.patternOffset !== null && fa.patternCaps.length > 0) {
@@ -2244,11 +2258,15 @@ export function computeDmxForCue(
       if (fa.goboOffset !== null) {
         const gAddr = pf.startAddress + fa.goboOffset;
         if (fa.goboCaps.length > 0) {
-          const goboCount = Math.max(1, fa.goboCaps.length);
-          const goboIdx = Math.floor((fxPhase2 * 0.5) % goboCount);
-          chVals[gAddr] = Math.round((fa.goboCaps[goboIdx].min + fa.goboCaps[goboIdx].max) / 2);
+          // Régie gobo intelligente (tenues + repos), jamais énergie*255 qui
+          // déclencherait les slots macro du canal.
+          chVals[gAddr] = computeGoboValue(fa.goboCaps, cue.time, {
+            bpm: (cue as any)?.bpm ?? 120,
+            energy: fxEnergy,
+            seed: 1000 + pf.startAddress,
+          });
         } else {
-          chVals[gAddr] = Math.round(fxEnergy * 255);
+          chVals[gAddr] = 0; // canal gobo sans caps → position basse stable (jamais de macro)
         }
       }
 

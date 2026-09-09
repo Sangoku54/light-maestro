@@ -53,6 +53,20 @@ function isStrobeNamedChannel(ch: DmxFixtureChannel): boolean {
  * 255 (grand ouvert), jamais de valeur intermédiaire qui éteint ou stroboscope
  * le faisceau.
  */
+/**
+ * Caps 100 % preset-selector (no color word at all): AUTO MODE / SOUND /
+ * PROGRAM / CHASE / BUILT-IN / NO FUNCTION / RESET / SELF-... Such a channel
+ * is an internal-program selector -> NEVER auto-write it (risk of reset or
+ * random program relaunch). A cap named "Red", "Color 1" = real color word ->
+ * exploitable channel, not excluded.
+ */
+function isPresetOnlyCapChannel(ch: DmxFixtureChannel): boolean {
+  const caps = ch.capabilities ?? [];
+  if (caps.length === 0) return true;
+  const PRESET_CAP_RE = /auto|sound|program|chase|built\s*in|follow|stand\s*alone|independent|run|step\s*\d|mode\s*\d|no\s*function|no\s*effect|no\s*fonction|aucun|rien|null|fonction|none|idle|dance|reset|self[\s-]*\w+|user|pattern\s*\d|macro\s*\d/i;
+  return caps.every((c) => PRESET_CAP_RE.test(c.name ?? ''));
+}
+
 export function laserGateValue(v: number): number { return v > 22 ? 255 : 0; }
 
 /**
@@ -74,6 +88,13 @@ export function hasLaserColorGateCaps(ch: DmxFixtureChannel): boolean {
   // intensité mono-couleur (route couleur, pas gate).
   return colors.size >= 2;
 }
+
+// Canaux dont le type déclare déjà une fonction (autre qu'un sélecteur de
+// couleur). Une cap portant `color` sur ces canaux = COULEUR D'AFFICHAGE du
+// slot (ex. roue gobo laser « STATIC GRP 1 » en rouge, « ILDA GRP 2 »), PAS un
+// mélangeur de couleur. Sans cette garde, hasColorCaps les avale comme canaux
+// couleur et le canal n'atteint jamais son routing (Gobo/Effect/pattern/scan).
+const NON_COLOR_CAP_TYPE_RE = /^(Intensity|Pan|Tilt|Gobo|Shutter|Strobe|Speed|Prism|Zoom|Frost|Focus|Iris|Maintenance|Nothing)$/;
 
 // ─── Interface unifiée ─────────────────────────────────────────
 
@@ -145,6 +166,11 @@ export interface FixtureChannelAnalysis {
   /** Gate couleur mono-canal (caps « Red laser / Green laser / … », ex. Showtec Dominator). */
   laserColorGateOffset: number | null;
   laserColorGateCaps: DmxFixtureCapability[];
+  /** Master / power switch du laser (« MASTER SXITCH », « Power », « Switch ») :
+   *  sélecteur ON/OFF monoligné. Toujours écrit OUVERT par le bloc laser pour
+   *  ne JAMAIS laisser le laser éteint faute de valeur écrite. */
+  laserMasterOffset: number | null;
+  laserMasterCaps: DmxFixtureCapability[];
   /** Canal « Pattern Selection / Pattern » (motifs : ligne, tunnel, vague…). */
   patternOffset: number | null;
   patternCaps: DmxFixtureCapability[];
@@ -300,6 +326,8 @@ export function analyzeFixtureChannels(
     laserModeCaps: [],
     laserColorGateOffset: null,
     laserColorGateCaps: [],
+    laserMasterOffset: null,
+    laserMasterCaps: [],
     patternOffset: null,
     patternCaps: [],
     scanXOffset: null,
@@ -321,8 +349,18 @@ export function analyzeFixtureChannels(
 
     // Preset override channels — excluded from auto-generated DMX. Mais un
     // canal au nom « macro/auto/sound » qui PORTE des capacités (ex. « Color
-    // Macro », « Prism Macro ») est un vrai canal DMX à exploiter, pas un mode.
-    if (isPresetMode.test(chName) && !ch.capabilities?.length) {
+    // Macro », « Prism Macro ») peut être un vrai canal DMX à exploiter, pas
+    // un mode utilisateur. On exclut donc aussi les canaux à caps 100 %
+    // « présélection » (Auto/Sound/Program/Chase/Reset/Maintenance… sans aucun
+    // mot de couleur) : les écrire en lecture déclencherait des programmes
+    // internes ou pire un RESET (« MAINTENANCE » Beam Pro → cap RESET = 228).
+    if (isPresetMode.test(chName)
+      && (!ch.capabilities?.length || isPresetOnlyCapChannel(ch))) {
+      fa.presetOverrideOffsets.push(off);
+      continue;
+    }
+    if (/(maintenance|reset|self[\s-]*test|calibrat)/i.test(chName)
+      && (!ch.capabilities?.length || isPresetOnlyCapChannel(ch))) {
       fa.presetOverrideOffsets.push(off);
       continue;
     }
@@ -360,7 +398,22 @@ export function analyzeFixtureChannels(
     // Pour un laser, on capture aussi les canaux nommés rouge/vert/bleu même
     // typés Shutter/Nothing (OFL Galaxian 3D : « Red Laser »/« Green Laser »
     // typés ShutterStrobe) — sinon ils sont perdus (ni RGB complet ni roue).
-    const hasColorCaps = ch.capabilities?.some(cap => cap.color);
+    // Canal dont les caps portent une couleur = sélecteur de slots/roue. Mais un
+// canal Macro/Nothing dont le NOM est un sélecteur de MODE/setup (« MODE
+// SELECTION », « MASTER SXITCH », « AUTO MODE »…) n'est JAMAIS une roue
+// couleur : ses caps colorisées lui viennent de la def (ex. modes nommés par
+// couleur) et il doit rester pour son vrai routing (mode laser, effect…).
+const SETUP_SELECTOR_NAME_RE = /\b(mode|master|switch|selection|program|programme|function|maintenance|reset|setup|menu|level|status|operation|running|sound|auto)\b/i;
+/** Canaux de MOUVEMENT/contrôle laser (« Angle Control », « H. Position »,
+ *  « X Rotation », « Waves Direction »…) : leur nom = contrôle laser, pas une
+ *  roue couleur — même quand leur def colorise leurs caps. */
+const LASER_MOTION_NAME_RE = /\b(angle|position|rotation|rotat|spin|movement|move|zoom|axis|scan|direction|control)\b/i;
+
+const hasColorCaps = ch.capabilities?.some(cap => cap.color)
+    && !NON_COLOR_CAP_TYPE_RE.test(ch.type)
+    && !((ch.type === 'Macro' || ch.type === 'Nothing')
+      && (SETUP_SELECTOR_NAME_RE.test(chName)
+        || (isLaser && LASER_MOTION_NAME_RE.test(chName))));
     const isLaserColorNamed = isLaser && (isRed.test(chName) || isGreen.test(chName) || isBlue.test(chName)) && !COLOUR_AUX_RE.test(chName);
     // Gate couleur mono-canal laser (caps « Red laser / Green laser / … »,
     // ex. Showtec Dominator) : interceptée AVANT la collecte couleur — ses
@@ -433,10 +486,12 @@ export function analyzeFixtureChannels(
         if (fa.scanYOffset === null) fa.scanYOffset = off;
         else if (fa.scanXOffset === null) fa.scanXOffset = off;
         matched = true;
-      } else if (/horizontal.*(angle|movement|position)/i.test(chName)) {
+      } else if (/horizontal.*(angle|movement|position)|move.*(hori(?!z)|horiz)/i.test(chName)) {
+        // Variantes TONIO : « HORIZONTAL MOVEMENT » mais aussi « MOVE HORONTALY »
+        // (orthographe défectueuse du fabricant) — l'axe horizontal du laser.
         if (fa.scanXOffset === null) fa.scanXOffset = off;
         matched = true;
-      } else if (/vertical.*(angle|movement|position)/i.test(chName)) {
+      } else if (/vertical.*(angle|movement|position)|move.*verti/i.test(chName)) {
         if (fa.scanYOffset === null) fa.scanYOffset = off;
         matched = true;
       } else if (fa.laserColorGateOffset === null && hasLaserColorGateCaps(ch)) {
@@ -446,6 +501,13 @@ export function analyzeFixtureChannels(
         fa.laserColorGateOffset = off;
         fa.laserColorGateCaps = ch.capabilities ?? [];
         fa.laserColorMode = 'gate';
+        matched = true;
+      } else if (fa.laserMasterOffset === null && /^(master(\s*switch|\s*sxitch)?|power(\s*switch)?|switch(-\d+)?)$/i.test(chName) && (ch.capabilities?.length ?? 0) >= 2) {
+        // Master/power switch du laser (ex. TONIO « MASTER SXITCH » caps OFF/ON).
+        // Slot séparé du mode : le bloc laser l'écrira TOUJOURS OUVERT pour que
+        // le laser ne soit jamais muet par défaut.
+        fa.laserMasterOffset = off;
+        fa.laserMasterCaps = ch.capabilities ?? [];
         matched = true;
       } else if (/\bblank/i.test(chName)) {
         if (fa.blankOffset === null) fa.blankOffset = off;
@@ -582,8 +644,13 @@ export function analyzeFixtureChannels(
         fa.rgbOffsets = colourChannels.slice(0, 3).map(c => c.offset);
       }
     } else if (hasColorCaps) {
-      // Color wheel with capabilities
-      const wheel = colourChannels.find(c => c.caps?.some(cap => cap.color));
+      // Color wheel with capabilities. Si plusieurs canaux portent des caps
+      // colorisées (ex. laser : canal « COLOR » + canaux de contrôle dont la
+      // def colorise les caps), on préfère le canal au nom EXPLICITEMENT
+      // couleur/roue — sinon un « Angle Control » serait choisi comme roue.
+      const wheel =
+        colourChannels.find(c => /\b(color|colour|wheel|cto|amber|hue|saturation|kelvin|white)\b/i.test(c.name) && c.caps?.some(cap => cap.color)) ||
+        colourChannels.find(c => c.caps?.some(cap => cap.color));
       if (wheel) {
         fa.wheelOffset = wheel.offset;
         fa.wheelCaps = enrichWheelCaps(wheel.caps ?? []);

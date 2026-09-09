@@ -501,12 +501,16 @@ describe('generateAutoLoops — capacités (sous-menus) des fixtures', () => {
     expect(loops.find((l) => l.kind === 'color-wheel')).toBeUndefined();
   });
 
-  it('génère un gobo avec rotation speed progressive', () => {
+  it('génère un gobo qui POSE un motif statique (pas de défilé) + rotation speed progressive', () => {
     const fixtures = [pf({ id: 'f1', fixtureDefId: 'gobo-head', tier: 'primary', startAddress: 1 })];
     const loops = generateAutoLoops(fixtures, defsOf(goboHead));
     const gb = loops.find((l) => l.kind === 'gobo');
     expect(gb).toBeDefined();
-    expect(gb!.steps[0].channels[2]).toBe(12); // capMid(8,15) = 11.5 → 12
+    // Le slot gobo reste POSÉ sur le premier motif statique (jamais Open ni
+    // chase de slots) : la roue ne défile pas slot par slot. capMid(32,47)=40.
+    expect(gb!.steps.map((s) => s.channels[2])).toEqual([40, 40, 40, 40]);
+    // Le slot gobo n'est jamais sur Open ni 0 (pas de "trou" dans le motif).
+    for (const s of gb!.steps) expect(s.channels[2]).not.toBe(12);
     expect(gb!.steps[0].channels[3]).toBe(128); // speed step 0
     expect(gb!.steps[3].channels[3]).toBe(223); // speed step 3
   });

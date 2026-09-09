@@ -18,6 +18,7 @@ import type { PatchedFixture, FixtureTier } from '../stores/showStore';
 import { useShowStore, type FixtureGroup } from '../stores/showStore';
 import { analyzeFixture, capMid, pickLaserModeCap, laserGateValue, mapIntensityVal, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
 import { wheelDegeneratePosition } from '../engine/dmx-color';
+import { computeGoboValue } from '../engine/gobo-engine';
 
 // ─── Inline fixture definition types (mirrors electron/fixtures/library.ts) ──
 
@@ -344,22 +345,6 @@ function shouldStrobe(section: string, strobeInput: boolean, strobeProbability?:
 }
 
 // ─── Gobo helpers ──────────────────────────────────────────────
-
-const BEAT_INTERVAL = 0.5;
-
-function getGoboValue(
-  goboCaps: DmxFixtureCapability[],
-  time: number,
-  colorShiftSpeed?: number,
-): number {
-  if (goboCaps.length === 0) return 0;
-  // Color shift speed accelerates gobo rotation
-  const speed = 1 + (colorShiftSpeed ?? 0.5) * 3; // 1x-4x speed
-  const beat = Math.floor(time * speed / BEAT_INTERVAL);
-  const idx = beat % goboCaps.length;
-  const cap = goboCaps[idx];
-  return Math.round((cap.min + cap.max) / 2);
-}
 
 // ─── Color helpers ─────────────────────────────────────────────
 
@@ -935,13 +920,14 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
           }
         }
 
-        // ── 5. Gobo - rotate on beat boundaries, speed-aware ──
+        // ── 5. Gobo — régie intelligente (tenues + repos, jamais de défilé à
+        //    chaque beat ; les slots animate ne servent qu'en forte énergie) ──
         if (fa.goboOffset !== null && fa.goboCaps && fa.goboCaps.length > 0) {
-          const goboVal = getGoboValue(
-            fa.goboCaps,
-            isDrop ? cue.time * 2 : cue.time,
-            cue.colorShiftSpeed,
-          );
+          const goboVal = computeGoboValue(fa.goboCaps, isDrop ? cue.time * 2 : cue.time, {
+            bpm: (cue as any).bpm ?? 120,
+            energy: (cue as any).energy ?? 0.5,
+            seed: 1000 + pf.startAddress,
+          });
           channelValues[pf.startAddress + fa.goboOffset] = goboVal;
         }
 

@@ -15,7 +15,9 @@ import path from 'path';
 import { unpackProject } from '../../electron/project-envelope';
 import { FixtureLibrary } from '@electron/fixtures/library';
 import { analyzeChannels } from '../engine/fixture-analyzer';
+import { classifyGoboCap } from '../engine/gobo-engine';
 import { computeDmxForCue } from '../hooks/dmx-playback';
+import { auditFixtureCoverage, formatCoverageWarning } from '../engine/fixture-coverage';
 // @ts-ignore — le fichier contient du JSX, genCues est du TS pur
 import { genCues } from '../views/QuickShowView';
 
@@ -85,6 +87,41 @@ describe('Yolo.lmproj — analyse des fixtures patchées (moteur réel)', () => 
 
     // Analyse moteur
     console.log('\n=== ANALYSE MOTEUR (analyzeChannels) ===');
+    // Le LASER 4W porte une vraie roue de graphiques laser (10 slots STATIC/ILDA
+    // GRP) : ses caps ont `color:#ff0000` mais ce sont des GOBO/gfx, pas un
+    // mélangeur couleur. hasColorCaps ne doit PAS les avaler (régression.
+    // NON_COLOR_CAP_TYPE_RE) → goboOffset doit être détecté.
+    const laser4w = resolvedAll.find((r) => r.pf.name.includes('LASER 4W'));
+    expect(laser4w?.def, 'LASER 4W doit résoudre sa def').toBeTruthy();
+    const faLaser = analyzeChannels(laser4w!.pf, laser4w!.def);
+    expect(faLaser.goboOffset, 'LASER 4W : roue de graphiques gobo non détectée').not.toBeNull();
+    expect(faLaser.goboCaps.length, 'LASER 4W : goboCaps vides').toBeGreaterThan(0);
+
+    // Régression MAINTENANCE (Tonio Mini Beam Pro) : le canal 12 « MAINTENANCE »
+    // (caps NO FONCTION / RESET) ne doit JAMAIS devenir un effet — l'écrire à
+    // capMid (~228) déclencherait le RESET de la tête en pleine lecture.
+    const beamPro = resolvedAll.find((r) => r.pf.name.includes('Beam Pro #1'));
+    const faBeam = analyzeChannels(beamPro!.pf, beamPro!.def);
+    expect(faBeam.effectOffset, 'Beam Pro : MAINTENANCE ne doit pas être un effet').toBeNull();
+    expect(faBeam.presetOverrideOffsets, 'Beam Pro : MACRO/MAINTENANCE doivent être exclus des écritures')
+      .toContain(11);
+    expect(faBeam.presetOverrideOffsets, 'Beam Pro : MAINTENANCE doit être exclu des écritures')
+      .toContain(12);
+    expect(faBeam.wheelOffset, 'Beam Pro : la roue doit rester vide (RGB pur)').toBeNull();
+
+    // Régression RGB ALIEN : « MODE SELECTION » (laser) ne doit plus être avalé
+    // comme roue de couleur → laserModeOffset, et la vraie roue « COLOR » (ch. 8)
+    // doit être choisie (préférence nom explicitement couleur).
+    const rAliens = resolvedAll.filter((r) => r.pf.name.includes('RGB ALIEN'));
+    expect(rAliens.length).toBeGreaterThan(0);
+    for (const rAli of rAliens) {
+      const faAli = analyzeChannels(rAli.pf, rAli.def);
+      expect(faAli.isLaser, 'RGB ALIEN : doit être laser').toBe(true);
+      expect(faAli.laserModeOffset, 'RGB ALIEN : MODE SELECTION non détecté comme mode laser').not.toBeNull();
+      expect(faAli.wheelOffset, 'RGB ALIEN : roue COLOR non détectée').not.toBeNull();
+      expect(faAli.scanXOffset, 'RGB ALIEN : scanX non détecté').not.toBeNull();
+      expect(faAli.scanYOffset, 'RGB ALIEN : scanY non détecté').not.toBeNull();
+    }
     for (const { pf, def } of resolvedAll) {
       const mode = def?.modes?.[pf.modeIndex];
       const fa = analyzeChannels(pf, def);
@@ -225,6 +262,99 @@ describe('Yolo.lmproj — analyse des fixtures patchées (moteur réel)', () => 
     }
   });
 
+  it('gobos : exploitation intelligente (tenues + repos, jamais de défilé continu)', () => {
+    const defs = new Map<any, any>();
+    for (const pf of patched) {
+      defs.set(pf.fixtureDefId, pf.fixtureDefId.startsWith('custom-')
+        ? customDefs.get(pf.fixtureDefId)
+        : lib.get(pf.fixtureDefId));
+    }
+    const goboFixtures = patched
+      .map((pf) => ({ pf, fa: analyzeChannels(pf, defs.get(pf.fixtureDefId)) }))
+      .filter((f) => f.fa.goboOffset !== null && f.fa.goboCaps && f.fa.goboCaps.length > 0);
+    expect(goboFixtures.length, 'aucune fixture gobo détectée dans le show').toBeGreaterThan(0);
+    for (const f of goboFixtures) {
+      console.log(`[GOBO] ${f.pf.name} @${f.pf.startAddress} slots=${f.fa.goboCaps.map((c: any) => `${c.name}(${c.min}-${c.max})`).join(' · ')}`);
+    }
+
+    // Même config + mêmes sections que le sweep → mêmes cues.
+    const qs = presetQ?.quickShow ?? {};
+    const cfg = {
+      musicStyle: qs.musicStyle || 'dance',
+      colorScheme: qs.colorScheme || 'auto',
+      intensity: qs.intensity ?? 'dynamic',
+      movement: qs.movement ?? 'dynamic',
+      beatDivision: qs.beatDivision ?? 4,
+      audioReactive: qs.audioReactive !== false,
+      sectionAware: qs.sectionAware !== false,
+      customPalette: qs.customPalette ?? [],
+    };
+    let sections: any[];
+    let bpm: number;
+    if (presetQ?.sections?.length && analysis) {
+      sections = presetQ.sections.map((s: any) => ({ type: s.type, startTime: s.startTime, endTime: s.endTime, energy: s.energy ?? 0.5, color: s.color ?? '#888' }));
+      bpm = analysis.bpm || 120;
+    } else {
+      sections = [
+        { type: 'intro', startTime: 0, endTime: 15, energy: 0.3, color: '#888' },
+        { type: 'verse', startTime: 15, endTime: 35, energy: 0.5, color: '#888' },
+        { type: 'build', startTime: 35, endTime: 45, energy: 0.7, color: '#888' },
+        { type: 'chorus', startTime: 45, endTime: 70, energy: 0.9, color: '#888' },
+        { type: 'verse', startTime: 70, endTime: 90, energy: 0.6, color: '#888' },
+      ];
+      bpm = 120;
+    }
+    const cues = genCues(sections, bpm, cfg.beatDivision, cfg, [], 7, analysis);
+    expect(cues.length).toBeGreaterThan(0);
+
+    for (const f of goboFixtures) {
+      const gAddr = f.pf.startAddress + f.fa.goboOffset;
+      const mids = new Set(f.fa.goboCaps.map((c: any) => Math.round((c.min + c.max) / 2)));
+      const animMids = new Set(
+        f.fa.goboCaps.filter((c: any) => classifyGoboCap(c) === 'animate')
+          .map((c: any) => Math.round((c.min + c.max) / 2)),
+      );
+      const seq: number[] = [];
+      for (const cue of cues) {
+        const dmx = computeDmxForCue({ ...cue, energy: cue.energy, bpm }, patched, defs, [{ id: 'universe-1' }], {
+          primary: 100, secondary: 70, tertiary: 40, other: 40,
+        } as any);
+        const written: Record<number, number> = {};
+        for (const d of dmx) Object.assign(written, d.channelValues);
+        const v = written[gAddr];
+        if (v !== undefined) seq.push(v);
+      }
+      expect(seq.length, `${f.pf.name} : canal gobo jamais écrit`).toBeGreaterThan(0);
+
+      // 1. Valeurs toujours À L'INTÉRIEUR des slots réels de la def.
+      for (const v of seq) {
+        expect(mids.has(v), `${f.pf.name} : valeur gobo hors slots reçue (${v})`).toBe(true);
+      }
+      // 2. La roue n'est pas figée sur un seul slot quand la def en propose plusieurs.
+      if (mids.size > 1) {
+        expect(new Set(seq).size, `${f.pf.name} : gobo figé sur un seul slot`).toBeGreaterThan(1);
+      }
+      // 3. PAS de défilé continu : changements < 50 % + des plages constantes (tenues/repos).
+      let tr = 0;
+      for (let i = 1; i < seq.length; i++) if (seq[i] !== seq[i - 1]) tr++;
+      expect(tr, `${f.pf.name} : défilement continu (${tr}/${seq.length} changements)`).toBeLessThan(seq.length * 0.5);
+      let best = 0, cur = 0;
+      let prev: number | null = null;
+      for (const v of seq) {
+        if (v === prev) cur++;
+        else { best = Math.max(best, cur); cur = 1; }
+        prev = v;
+      }
+      expect(Math.max(best, cur), `${f.pf.name} : aucun repos (toujours en train de changer)`).toBeGreaterThanOrEqual(4);
+      // 4. Slots animate (AUTO/SPIN/CHANGE/DITHER…) rares : < 35 % de la timeline.
+      if (animMids.size > 0) {
+        const animCount = seq.filter((v) => animMids.has(v)).length;
+        console.log(`[GOBO] ${f.pf.name} : ${tr}/${seq.length} changements, repos=${Math.max(best, cur)} samples, slots animate=${animCount}/${seq.length}`);
+        expect(animCount, `${f.pf.name} : slots animate trop présents (${animCount}/${seq.length})`).toBeLessThan(seq.length * 0.35);
+      }
+    }
+  });
+
   it('sweep timeline complet : chaque fixture est éclairée, aucune valeur hors plage', () => {
     const defs = new Map<any, any>();
     for (const pf of patched) {
@@ -318,5 +448,29 @@ describe('Yolo.lmproj — analyse des fixtures patchées (moteur réel)', () => 
       ).toBe(true);
     }
     expect([...overflowChannels], 'Le moteur écrit sur des canaux hors de toutes les plages fixtures').toEqual([]);
+  });
+
+  it('couverture : chaque canal parlant est détecté et piloté par le moteur (aucun mutisme)', () => {
+    console.log('\n=== COUVERTURE CANAL-À-CANAL (auditFixtureCoverage) ===');
+    for (const pf of patched) {
+      const def = pf.fixtureDefId.startsWith('custom-') ? customDefs.get(pf.fixtureDefId) : lib.get(pf.fixtureDefId);
+      expect(def, `${pf.name} : def non résolue`).toBeTruthy();
+      const fa = analyzeChannels(pf, def);
+      const report = auditFixtureCoverage(pf, def, fa);
+      const msg = formatCoverageWarning(report);
+      if (msg) console.log(msg);
+      console.log(
+        `  [COUV] ${report.writtenChannels}/${report.totalChannels} canaux écrits · ` +
+        `${report.channels.filter(c => c.status !== 'written').length} exclus/parasites — ` +
+        `${report.warnings.length} canal(aux) parlant(s) non écrit(s)`,
+      );
+      expect(
+        report.warnings,
+        `${pf.name} : canal(aux) parlant(s) jamais écrit(s) → def ou analyse à corriger : ` +
+        report.warnings.map((c) => `ch${c.offset} "${c.name}" (${c.type})`).join(', '),
+      ).toEqual([]);
+      // L'analyse moteur doit produire un audit exploitable pour toute fixture résolue.
+      expect(report.totalChannels).toBeGreaterThan(0);
+    }
   });
 });

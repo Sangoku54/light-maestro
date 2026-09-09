@@ -12,6 +12,7 @@ import { Stage3D } from './Stage3D';
 import { useFixtureTest } from '../hooks/useFixtureTest';
 import { loadFixtureDefinitions, type DmxFixtureDefinition, clearFixtureDefCache } from '../hooks/dmx-cues';
 import { analyzeFixtureChannels as analyzeEngine } from '../engine/fixture-analyzer';
+import { auditFixtureCoverage, formatCoverageWarning } from '../engine/fixture-coverage';
 import { AUTO_LOOP_FOLDER } from '../engine/auto-loops';
 import { groupByTier, TIER_KEYS } from '../engine/tier-utils';
 import { sendChannelsToHardware, sendToUniverse, sendFixtureOn, sendFixtureOff, sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
@@ -1316,6 +1317,14 @@ const SceneEditor: React.FC = () => {
           const mode = def?.modes?.[pf.modeIndex];
           if (mode?.channels) {
             analyses.set(pf.id, analyzeFixtureChannels(pf, mode.channels));
+          }
+          // Règle projet : à chaque patch, vérifier que chaque canal parlant de
+          // la fixture sera bien piloté par le moteur (aucun mutisme, aucune
+          // roue dégénérée) — alerte immédiate dans la console du DevTools.
+          if (def?.modes?.[pf.modeIndex]) {
+            const report = auditFixtureCoverage(pf, def, analyzeEngine(pf, def));
+            const warn = formatCoverageWarning(report);
+            if (warn) console.warn(warn);
           }
         } catch {
           // Fixture def not loadable — skip

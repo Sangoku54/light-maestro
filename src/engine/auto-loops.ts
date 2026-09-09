@@ -15,6 +15,7 @@
 import type { PatchedFixture, FixtureTier, SavedScene, SavedChaser } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureCapability } from '../hooks/dmx-cues';
 import { analyzeChannels, type ChannelAnalysis, pickLaserModeCap } from './fixture-analyzer';
+import { classifyGoboCap } from './gobo-engine';
 import { movementAt, type EffectPattern } from './effect-engine';
 
 export type AutoLoopKind =
@@ -393,13 +394,25 @@ function buildGoboLoop(
   rotate: boolean,
   direction: AutoLoop['direction'] = 'forward',
 ): AutoLoop {
-  const capCount = Math.min(...fixtures.map((f) => f.analysis.goboCaps.length));
+  // Exploitation calme : chaque fixture POSE un motif statique (jamais les
+  // slots animate AUTO/SPIN/CHANGE qui défilent en permanence), et la
+  // rotation n'est exprimée que via le canal Speed quand il existe. La roue ne
+  // défile donc jamais slot par slot (fini le "mur de gobos qui tourne").
+  const staticFor = (f: AnalyzedFixture): DmxFixtureCapability => {
+    const caps = f.analysis.goboCaps ?? [];
+    const stat = caps.filter((c) => classifyGoboCap(c) === 'static');
+    const open = caps.filter((c) => classifyGoboCap(c) === 'open');
+    const pool = stat.length > 0 ? stat : open;
+    return pool.length > 0 ? pool[0] : caps[0];
+  };
   const steps: AutoLoopStep[] = [];
+  const poses = fixtures.map((f) => ({ f, cap: staticFor(f) }));
+  const capCount = Math.max(1, Math.min(...fixtures.map((f) => f.analysis.goboCaps.length)));
   for (let step = 0; step < capCount; step++) {
     const frame: Record<number, number> = {};
-    for (let i = 0; i < fixtures.length; i++) {
-      const { pf, analysis } = fixtures[i];
-      const cap = analysis.goboCaps[(i + step) % analysis.goboCaps.length];
+    for (let i = 0; i < poses.length; i++) {
+      const { f, cap } = poses[i];
+      const { pf, analysis } = f;
       put(frame, absAddr(pf, analysis.goboOffset!), capMid(cap));
       if (rotate && analysis.speedOffset !== null) {
         put(frame, absAddr(pf, analysis.speedOffset), 128 + Math.round(127 * (step / capCount)));
