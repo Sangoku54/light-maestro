@@ -2,11 +2,12 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore, AppMode } from './stores/appStore';
 import { useShowStore } from './stores/showStore';
+import { useLicenseStore } from './stores/licenseStore';
 import { usePerformStore } from './stores/performStore';
 import { TopBar } from './components/layout/TopBar';
 import { Sidebar } from './components/layout/Sidebar';
 import { QuickShowView } from './views/QuickShowView';
-import { ToastHost } from './components/Toast';
+import { ToastHost, toast } from './components/Toast';
 import { DesignView } from './views/DesignView';
 import { PerformanceView } from './views/PerformanceView';
 import { MasterClockBar } from './components/MasterClockBar';
@@ -21,6 +22,7 @@ import { getLatencyMs } from './utils/latency-meter';
 import { dmxBridge } from './utils/dmx-bridge';
 import { collectCustomFixtureDefs, importCustomFixtureDefs } from './utils/custom-fixtures';
 import { externalizeProjectAudio, writeAudioBlobs, resolveProjectAudio, resolveWidgetAudio, audioKeyOf, type ExtractedBlob } from './utils/project-audio';
+import { version as appVersion } from '../package.json';
 import './styles/global.css';
 
 class ErrorBoundary extends React.Component<
@@ -154,6 +156,10 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     const json = JSON.stringify(data, null, 2);
     // Embarque l'audio DANS le fichier .lmproj (conteneur binaire) via le main
     // process — le projet devient autonome et portable entre machines.
+    // + écriture traversante dans userData (skip si déjà stocké) : si
+    // l'enveloppe venait à perdre un blob, la résolution au rechargement et
+    // la résolution à la lecture (ref->hit) le retrouvent quand même en local.
+    await writeBlobs();
     const saved = await (window as any).lightMaestro?.project?.save({ content: json, blobs: allBlobs });
     if (saved) {
       useAppStore.getState().markClean();
@@ -168,6 +174,7 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     return false;
   } catch (e) {
     console.error('Failed to save project:', e);
+    try { toast('Échec de sauvegarde du projet — audio/état non persisté', 'err'); } catch {}
     return false;
   } finally {
     projectSaveInFlight = false;
@@ -179,6 +186,11 @@ const App: React.FC = () => {
   const mode = useAppStore((s) => s.mode);
   const setMode = useAppStore((s) => s.setMode);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // ─── Licence : charger l'état au démarrage (édition + limites) ────
+  useEffect(() => {
+    useLicenseStore.getState().refresh();
+  }, []);
 
   // Lifted to App level — audio survives ALL tab AND mode switches
   const audioFile = useAudioFileLoader();
@@ -345,6 +357,19 @@ const App: React.FC = () => {
           }
           return undefined;
         };
+        // Écriture traversante des blobs de l'enveloppe vers userData
+        // (skip si déjà stocké) : la résolution à la lecture (ref->hit) et
+        // les futurs rechargements retrouvent l'audio même sans le fichier.
+        if (fileBlobMap.size > 0 && storageApi?.set && storageApi?.has) {
+          void (async () => {
+            try {
+              await writeAudioBlobs(
+                Array.from(fileBlobMap.entries()).map(([key, audioFileBase64]) => ({ key, audioFileBase64 })),
+                storageApi,
+              );
+            } catch { /* cache local best-effort */ }
+          })();
+        }
 
         let resolvedShows: any[] = [];
         let resolvedPresets: any[] = [];
@@ -671,7 +696,7 @@ const StatusBar: React.FC = () => {
         </div>
       )}
       <div className="flex-1" />
-      <span>{t('app.version')}</span>
+      <span title={`Build ${appVersion}`}>Light Maestro v{appVersion}</span>
     </footer>
   );
 };

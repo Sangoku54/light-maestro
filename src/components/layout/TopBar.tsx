@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AppMode, useAppStore } from '../../stores/appStore';
+import { useLicenseStore } from '../../stores/licenseStore';
+import { LicenseModal } from '../license/LicenseModal';
 import { UpdateNotification } from './update-notification';
 import logoIcon from '../../../assets/logo/icon.svg';
 import {
@@ -39,6 +41,8 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
     i18n.changeLanguage(next);
     localStorage.setItem('light-maestro-lang', next);
   };
+
+  const [showLicense, setShowLicense] = useState(false);
 
   return (
     <header className="h-10 bg-[var(--bg-2)] border-b border-[var(--border)] grid grid-cols-[1fr_auto_1fr] items-center pl-3 pr-[150px] gap-2 select-none drag-region min-w-0">
@@ -141,6 +145,15 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
         {i18n.language === 'fr' ? '🇫🇷 FR' : '🇬🇧 EN'}
       </button>
 
+      {/* Licence / Compte */}
+      <button
+        onClick={() => setShowLicense(true)}
+        className="no-drag flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-gray-800/30 text-gray-400 hover:bg-gray-700/40 hover:text-gray-200 transition-all"
+        title="Compte & Licence"
+      >
+        <LicenseLabel />
+      </button>
+
       {/* Auto-update notification */}
       <UpdateNotification />
 
@@ -152,8 +165,21 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
         <BlackoutButton />
       </div>
       </div>
+
+      {showLicense && <LicenseModal onClose={() => setShowLicense(false)} />}
     </header>
   );
+};
+
+const LicenseLabel: React.FC = () => {
+  const edition = useLicenseStore((s) => s.edition);
+  const labels: Record<string, string> = { free: 'Gratuite', standard: 'Standard', full: 'Complète' };
+  const colors: Record<string, string> = {
+    free: 'text-gray-400',
+    standard: 'text-blue-400',
+    full: 'text-purple-300',
+  };
+  return <span className={colors[edition] ?? 'text-gray-400'}>{labels[edition] ?? edition}</span>;
 };
 
 const BlackoutButton: React.FC = () => {

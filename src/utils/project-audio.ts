@@ -222,6 +222,37 @@ export async function resolveProjectAudio(
 }
 
 /**
+ * Résout l'URL audio d'un preset au moment de la lecture : base64 direct
+ * d'abord, sinon blob `audioRef` via le stockage userData.
+ *
+ * Après une sauvegarde, le projet ne contient plus que `audioRef` (le base64
+ * complet vit dans userData ou dans l'enveloppe .lmproj). `SongPresetPlayer`
+ * ne savait lire que `audioFileBase64` → silence après rechargement alors que
+ * le show lumière tournait sur l'horloge virtuelle. Cette fonction comble ce
+ * trou sans toucher au cycle save/load.
+ *
+ * Retourne la chaîne base64 / data URL, ou null si aucune source disponible.
+ * Ne logue jamais le contenu base64 (longueurs uniquement côté appelant).
+ */
+export async function resolveAudioUrl(
+  fields: { audioFileBase64?: string; audioDataBase64?: string; audioRef?: string },
+  get?: (key: string) => Promise<any>,
+): Promise<string | null> {
+  const direct = fields?.audioFileBase64 || (fields as any)?.audioDataBase64;
+  if (typeof direct === 'string' && direct.length > 0) return direct;
+  const ref = (fields as any)?.audioRef;
+  if (!ref) return null;
+  const getter = get || ((k: string) => (window as any).lightMaestro?.storage?.get?.(k));
+  try {
+    const stored = await getter(ref);
+    const b64 = stored?.audioFileBase64;
+    return typeof b64 === 'string' && b64.length > 0 ? b64 : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Écrit les blobs externes dans userData (skip si déjà stocké : les saves
  * suivants ne réécrivent pas les mêmes audios).
  */

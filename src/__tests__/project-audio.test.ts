@@ -3,6 +3,7 @@ import {
   audioKeyOf,
   extractAudioField,
   externalizeProjectAudio,
+  resolveAudioUrl,
   resolveProjectAudio,
   resolveWidgetAudio,
   writeAudioBlobs,
@@ -129,6 +130,21 @@ describe('project-audio — externalisation des blobs du .lmproj', () => {
     await writeAudioBlobs(blobs, storage);
     expect(written['audio-exists'].audioFileBase64).toBe('OLD'); // pas réécrit
     expect(written['audio-new'].audioFileBase64).toBe('DATA');
+  });
+
+  it('resolveAudioUrl : base64 direct d\u2019abord, sinon blob audioRef, sinon null', async () => {
+    const get = async (k: string) =>
+      k === 'audio-abc' ? { audioFileBase64: 'QUJD' } : undefined;
+    // direct (prioritaire même si audioRef présent)
+    expect(await resolveAudioUrl({ audioFileBase64: 'REVG', audioRef: 'audio-abc' } as any, get)).toBe('REVG');
+    // legacy audioDataBase64
+    expect(await resolveAudioUrl({ audioDataBase64: 'REVG' } as any, get)).toBe('REVG');
+    // ref -> hit
+    expect(await resolveAudioUrl({ audioRef: 'audio-abc' } as any, get)).toBe('QUJD');
+    // ref -> miss
+    expect(await resolveAudioUrl({ audioRef: 'audio-missing' } as any, get)).toBeNull();
+    // rien
+    expect(await resolveAudioUrl({} as any, get)).toBeNull();
   });
 
   it('round-trip : externalize -> write -> resolve restaure les données', async () => {

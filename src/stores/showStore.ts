@@ -240,6 +240,33 @@ export interface SavedCueList {
 
 // ─── Helpers ───────────────────────────────────────────────
 
+/** Un preset a de l'audio si base64 direct ou référence de blob externalisé. */
+export function presetHasAudio(p: any): boolean {
+  return !!(p?.audioFileBase64 || (p as any)?.audioDataBase64 || p?.audioRef);
+}
+
+/** Choisit le meilleur preset parmi les correspondances id/nom : celui qui a
+ *  de l'audio d'abord. Le store peut contenir des doublons homonymes dont
+ *  certains sans son (import d'un .lmpreset sans audio embarqué ayant écrasé
+ *  l'entrée) — le widget ne doit jamais jouer le doublon muet. */
+export function findBestSongPreset(
+  presets: SongPreset[], songId?: string, songName?: string,
+): SongPreset | undefined {
+  if (!Array.isArray(presets) || presets.length === 0) return undefined;
+  const candidates: SongPreset[] = [];
+  if (songId) {
+    const byId = presets.find((p) => p.id === songId);
+    if (byId) candidates.push(byId);
+  }
+  if (songName) {
+    for (const p of presets) {
+      if (p.name === songName && !candidates.includes(p)) candidates.push(p);
+    }
+  }
+  if (candidates.length === 0) return undefined;
+  return candidates.find((p) => presetHasAudio(p as any)) ?? candidates[0];
+}
+
 function generateId(): string {
   return `fx-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -292,7 +319,7 @@ interface ShowState {
   updateFixtureTier: (id: string, tier: FixtureTier) => void;
   setFixtureName: (id: string, name: string) => void;
   setPatchedFixtures: (fixtures: PatchedFixture[]) => void;
-  addShowUniverse: (config: ShowUniverse) => void;
+  addShowUniverse: (config: ShowUniverse) => ({ error?: string });
   updateShowUniverse: (id: string, updates: Partial<ShowUniverse>) => void;
   removeShowUniverse: (id: string) => void;
   setShowUniverses: (universes: ShowUniverse[]) => void;
@@ -418,6 +445,17 @@ export const useShowStore = create<ShowState>((set, get) => ({
   patchFixture: (fixture) => {
     const { patchedFixtures } = get();
 
+    // ── Licence : limite de fixtures (édition gratuite = 1 fixture) ──
+    try {
+      const { getLicenseLimits } = require('./licenseStore');
+      const limit = getLicenseLimits().maxFixtures;
+      if (Number.isFinite(limit) && patchedFixtures.length >= limit) {
+        return {
+          error: `Licence gratuite limitée à ${limit} fixture(s). Passez à la version standard ou complète pour en ajouter davantage.`,
+        };
+      }
+    } catch { /* licence indisponible : pas de bridage */ }
+
     // Validate address boundaries
     if (fixture.startAddress < 1 || fixture.startAddress > DMX_MAX_ADDRESS) {
       return {
@@ -523,7 +561,18 @@ export const useShowStore = create<ShowState>((set, get) => ({
     try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
   },
 
-  addShowUniverse: (config) =>
+  addShowUniverse: (config) => {
+    // ── Licence : limite d'univers (gratuite + standard = 1 univers) ──
+    try {
+      const { getLicenseLimits } = require('./licenseStore');
+      const limit = getLicenseLimits().maxUniverses;
+      if (Number.isFinite(limit) && get().universes.length >= limit) {
+        return {
+          error: `Licence actuelle limitée à ${limit} univers. Passez à la version complète pour en ajouter davantage.`,
+        };
+      }
+    } catch { /* licence indisponible : pas de bridage */ }
+
     set((state) => {
       // Deduplicate by id
       if (state.universes.some((u) => u.id === config.id)) return state;
@@ -545,7 +594,9 @@ export const useShowStore = create<ShowState>((set, get) => ({
       saveUniverses(next);
       try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
       return { universes: next };
-    }),
+    });
+    return {};
+  },
 
   removeShowUniverse: (id) => {
     set((state) => {

@@ -3580,6 +3580,29 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
+    // ── Section separators (vertical lines) ─────────
+    // Une ligne verticale bien visible à chaque frontière de section, comme les
+    // séparations de la piste audio. Halo sombre + trait coloré plein pour
+    // ressortir sur les pistes d'entrées.
+    for (const s of sections) {
+      const x = LABEL_WIDTH + (s.startTime / duration) * drawW;
+      if (x < LABEL_WIDTH + 1 || x > w) continue; // pas de ligne à t=0
+      // Halo de contraste (sombre, large)
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.moveTo(Math.round(x) + 0.5, HEADER_HEIGHT);
+      ctx.lineTo(Math.round(x) + 0.5, h);
+      ctx.stroke();
+      // Trait coloré plein, net
+      ctx.strokeStyle = s.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.round(x) + 0.5, HEADER_HEIGHT);
+      ctx.lineTo(Math.round(x) + 0.5, h);
+      ctx.stroke();
+    }
+
     // ── Playhead — un seul trait vertical blanc (1px, sans ombre ni doublon)
     if (currentTime >= 0 && currentTime <= duration) {
       const px = Math.round(LABEL_WIDTH + (currentTime / duration) * drawW) + 0.5;

@@ -99,3 +99,59 @@ export function getAudioCacheStats(): { buffers: number; approxBytes: number } {
   for (const b of _bufferCache.values()) bytes += b.length * b.numberOfChannels * 4;
   return { buffers: _bufferCache.size, approxBytes: bytes };
 }
+
+/**
+ * Ré-encode un AudioBuffer décodé en WAV 16-bit et le retourne en data URL
+ * (`data:audio/wav;base64,…`). Sert de source de secours quand le fichier
+ * d'origine n'est plus accessible (`audioFile.file === null`) mais que le son
+ * est bien décodé en mémoire (`audioFile.audioBuffer`). Évite de sauvegarder un
+ * preset sans son après un simple chargement/import.
+ */
+export function audioBufferToWavDataUrl(buffer: AudioBuffer): string {
+  const numCh = Math.max(1, buffer.numberOfChannels);
+  const rate = Math.max(8000, buffer.sampleRate);
+  const len = buffer.length;
+  const bytesPerSample = 2;
+  const blockAlign = numCh * bytesPerSample;
+  const dataSize = len * blockAlign;
+  const buf = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buf);
+
+  const writeStr = (off: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+  };
+
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);       // PCM
+  view.setUint16(22, numCh, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);      // bits
+  writeStr(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  // Entrelacement des canaux → PCM 16-bit
+  let off = 44;
+  for (let i = 0; i < len; i++) {
+    for (let ch = 0; ch < numCh; ch++) {
+      let s = buffer.numberOfChannels > ch ? buffer.getChannelData(ch)[i] : 0;
+      s = Math.max(-1, Math.min(1, s));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      off += 2;
+    }
+  }
+
+  // Binaire → base64 (par blocs pour ne pas exploser la pile sur les gros buffers)
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
+  }
+  return `data:audio/wav;base64,${btoa(binary)}`;
+}

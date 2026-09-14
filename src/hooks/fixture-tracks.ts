@@ -278,18 +278,23 @@ export interface EfxTrackRef {
 }
 
 /**
- * Generate pan/tilt DMX values from an EFX pattern at a given relative time.
- * Returns { pan, tilt } in 0-255 range.
+ * Forme normalisée d'un pattern EFX (-1..1, avant mise à l'échelle DMX).
+ *
+ * C'est LA math de référence, partagée par le moteur du show, le preview SVG,
+ * la boucle live de l'éditeur et le snapshot 3D : un seul endroit à maintenir
+ * pour que le preview soit rigoureusement identique aux projecteurs.
+ * Ordre fixe : rotation du point brut (degrés → radians), puis mise à
+ * l'échelle (width/height) et offsets (xOffset/yOffset en unités /255).
  */
-function generateEfxPanTilt(
+export function evalEfxNormalized(
   pattern: EfxPattern,
   t: number,        // relative time in cycles (0 = start, scales with speed)
-  width: number,     // 0-1
-  height: number,    // 0-1
+  width: number,
+  height: number,
   rotation: number,  // degrees (SavedEffect.rotation est en degrés)
   xOffset: number,
   yOffset: number,
-): { pan: number; tilt: number } {
+): { x: number; y: number } {
   const twoPi = Math.PI * 2;
   const seg = ((t % 1) + 1) % 1;
   const phase = t * twoPi;
@@ -317,12 +322,29 @@ function generateEfxPanTilt(
   const rx = rawPan * cosR - rawTilt * sinR;
   const ry = rawPan * sinR + rawTilt * cosR;
 
-  // Scale and offset → DMX 0-255
+  // Scale and offset (unités normalisées ; le passage DMX multiplie par 127)
   const w = width ?? 1; const h = height ?? 1;
   const ox = (xOffset || 0) / 255;
   const oy = (yOffset || 0) / 255;
-  const prePan = Math.round(128 + rx * w * 127 + ox * 127);
-  const preTilt = Math.round(128 + ry * h * 127 + oy * 127);
+  return { x: rx * w + ox, y: ry * h + oy };
+}
+
+/**
+ * Generate pan/tilt DMX values from an EFX pattern at a given relative time.
+ * Returns { pan, tilt } in 0-255 range.
+ */
+export function generateEfxPanTilt(
+  pattern: EfxPattern,
+  t: number,        // relative time in cycles (0 = start, scales with speed)
+  width: number,
+  height: number,
+  rotation: number,  // degrees (SavedEffect.rotation est en degrés)
+  xOffset: number,
+  yOffset: number,
+): { pan: number; tilt: number } {
+  const { x, y } = evalEfxNormalized(pattern, t, width, height, rotation, xOffset, yOffset);
+  const prePan = Math.round(128 + x * 127);
+  const preTilt = Math.round(128 + y * 127);
 
   return {
     pan: Math.max(0, Math.min(255, prePan)),
@@ -368,14 +390,21 @@ export function computeEfxOverrides(
     if (!activeEntry) continue;
     const s = Math.min(activeEntry.time, activeEntry.endTime);
     const en = Math.max(activeEntry.time, activeEntry.endTime);
-    const dur = Math.max(0.1, en - s);
 
     // Look up the effect definition
     const effect = effectMap.get(activeEntry.effectId);
     if (!effect) continue;
 
     const speed = effect.speed || 0.5;
-    const relTime = ((currentTime - s) / dur) * speed;
+    // Base de temps CONTINUE sur l'horloge absolue du show — identique à
+    // l'aperçu live de l'éditeur et à ShowManager (phase = t·speed·2 rad, soit
+    // speed/π Hz, l'unité affichée dans l'éditeur). L'ancienne formule
+    // entry-relative (((currentTime - s) / dur) * speed) ne bouclait jamais un
+    // cycle complet par entrée et rendait la vitesse dépendante de la longueur
+    // du bloc — le show ne ressemblait pas au preview. s/en bornent toujours
+    // l'entrée active, seule la phase est désormais absolue (sans saut : la
+    // position est continue en t, seule la pente change si speed change).
+    const relTime = (currentTime * speed * 2) / (Math.PI * 2);
 
     // Generate pan/tilt for this effect
     const pt = generateEfxPanTilt(

@@ -22,6 +22,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { useShowStore, getFixtureColor, type PatchedFixture, type FixturePos, type StageScene, type View3DState } from '../stores/showStore';
 import { analyzeFixtureChannels, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
 import { solvePanTilt, solveTiltForFixedPan } from '../engine/aim-target';
+import { generateEfxPanTilt } from '../hooks/fixture-tracks';
 import { useAppStore } from '../stores/appStore';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { RichTooltip } from '../components/RichTooltip';
@@ -589,6 +590,26 @@ export const Stage3D: React.FC<{
   const [showFixtureList, setShowFixtureList] = useState(false);
   const [fixtureSearch, setFixtureSearch] = useState('');
   const [leftDockCollapsed, setLeftDockCollapsed] = useState(true);
+  // Dock droit "Scène & EFX" repliable (mode Scènes), replié par défaut comme
+  // celui des fixtures : la scène physique reste centrée et lisible, et on
+  // ne déplie un panneau que pour s'en servir.
+  const [rightDockCollapsed, setRightDockCollapsed] = useState(true);
+  // Recadre la scène quand un dock latéral se (dé)plie : le ResizeObserver
+  // ajuste déjà le ratio/canvas, ici on recule la caméra juste assez pour que
+  // toute la scène reste visible et lisible. Premier rendu sauté pour ne pas
+  // écraser une caméra sauvegardée (view3D du preset).
+  const dockFitSkipFirst = useRef(true);
+  useEffect(() => {
+    if (dockFitSkipFirst.current) { dockFitSkipFirst.current = false; return; }
+    const id = requestAnimationFrame(() => {
+      const camera = cameraRef.current;
+      const controls = controlsRef.current;
+      if (!camera || !controls) return;
+      ensureStageFits(camera, STAGE_WIDTH, STAGE_DEPTH, camera.position, controls.target);
+      controls.update();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [leftDockCollapsed, rightDockCollapsed]);
   const [musiciansMenuOpen, setMusiciansMenuOpen] = useState(false);
   const musiciansBtnRef = useRef<HTMLButtonElement>(null);
   const [musiciansMenuPos, setMusiciansMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -1917,6 +1938,9 @@ export const Stage3D: React.FC<{
     }
     const hasBridged = Object.keys(bridged).length > 0;
     let channelData = hasBridged ? bridged : (dmxState.channelData as Record<number, Uint8Array | number[]>);
+    // Fallback par univers : si le pont n'a rien pour CET univers (ex. envoi
+    // miroir-only), on retombe sur le miroir appStore au lieu d'éteindre.
+    const mirrorData = dmxState.channelData as Record<number, Uint8Array | number[]> | undefined;
     const blackout = dmxState.blackout ?? false;
     const grandMaster = dmxState.grandMaster ?? 255;
     const maxPanTiltSpeed = dmxState.panTiltMaxSpeed ?? 120;
@@ -1927,7 +1951,7 @@ export const Stage3D: React.FC<{
     for (const f3d of fixturesRef.current.values()) {
       // Get DMX data for this fixture's universe (or synthesize from test override)
       const testVals = fixtureTestState.get(f3d.id);
-      let rawData: Uint8Array | number[] | undefined = channelData[f3d.universeIndex];
+      let rawData: Uint8Array | number[] | undefined = channelData[f3d.universeIndex] ?? mirrorData?.[f3d.universeIndex];
       if (testVals) {
         // Merge test values over real data when available (keeps engine/modale pan-tilt).
         // Otherwise start from a neutral buffer with pan/tilt centered (128) so the beam
@@ -2678,32 +2702,10 @@ export const Stage3D: React.FC<{
     // Snapshot : fige le pattern EFX à phase 0 (centre du pattern) comme valeurs DMX statiques — prévisualisable en 3D dans l'onglet Scène
     const targetIds = efx.fixtureIds.length > 0 ? new Set(efx.fixtureIds) : selectedFixtureId ? new Set([selectedFixtureId]) : new Set<string>();
     if (targetIds.size === 0) return;
-    // Calcule le point du pattern à phase 0 (même math que l'aperçu live DesignView.tsx:3657)
-    const phase = 0;
-    const rx = efx.width * 0.7;
-    const ry = efx.height * 0.7;
-    const rotRad = (efx.rotation * Math.PI) / 180;
-    const ox = (efx.xOffset / 255) * 0.3;
-    const oy = (efx.yOffset / 255) * 0.3;
-    let px = 0, py = 0;
-    const seg = phase / (Math.PI * 2);
-    switch (efx.pattern) {
-      case 'Circle': px = Math.cos(phase) * rx; py = Math.sin(phase) * ry; break;
-      case 'Line': { const lp = seg % 1; const lineX = lp < 0.5 ? (lp * 2) * 2 - 1 : (1 - (lp - 0.5) * 2) * 2 - 1; px = lineX * rx; py = 0; break; }
-      case 'Eight': px = Math.sin(phase) * rx; py = Math.sin(phase * 2) * ry * 0.5; break;
-      case 'Square': { const s = seg * 4; const sIdx = Math.floor(s) % 4; const sFrac = s - Math.floor(s); const cs: [number, number][] = [[1,1],[-1,1],[-1,-1],[1,-1]]; const ce: [number, number][] = [[-1,1],[-1,-1],[1,-1],[1,1]]; px = (cs[sIdx][0] + (ce[sIdx][0] - cs[sIdx][0]) * sFrac) * rx; py = (cs[sIdx][1] + (ce[sIdx][1] - cs[sIdx][1]) * sFrac) * ry; break; }
-      case 'Triangle': { const ta = seg * 3; const ti = Math.floor(ta) % 3; const tf = ta - Math.floor(ta); const tv: [number, number][] = [[0,-1],[-0.866,0.5],[0.866,0.5]]; const tn = tv[(ti+1)%3]; px = (tv[ti][0] + (tn[0]-tv[ti][0])*tf)*rx; py = (tv[ti][1] + (tn[1]-tv[ti][1])*tf)*ry; break; }
-      case 'Infinity': px = Math.cos(phase) * rx; py = Math.sin(phase * 2) * ry * 0.5; break;
-      case 'Zigzag': { const z = (seg % 1) * 2 - 1; px = z * rx; const zs = seg * 8; const zi = Math.floor(zs); const zf = zs - zi; const zy = zi % 2 === 0 ? -1 + zf * 2 : 1 - zf * 2; py = zy * ry; break; }
-      case 'Spiral': { const sc = seg % 1; const sr = 0.2 + sc * 0.8; px = Math.cos(phase) * rx * sr; py = Math.sin(phase) * ry * sr; break; }
-      case 'DoubleCircle': { const dc = Math.cos(phase) * rx; const ds = Math.sin(phase) * ry; const dc2 = Math.cos(phase + Math.PI) * rx * 0.5; const ds2 = Math.sin(phase + Math.PI) * ry * 0.5; const blending = (Math.sin(phase * 3) + 1) / 2; px = dc * (1 - blending) + dc2 * blending; py = ds * (1 - blending) + ds2 * blending; break; }
-      case 'Heart': { const t = phase; const hx = 16 * Math.pow(Math.sin(t), 3); const hy = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t); px = (hx / 16) * rx; py = (hy / 16) * -ry; break; }
-      default: px = Math.cos(phase) * rx; py = Math.sin(phase) * ry; break;
-    }
-    const rx2 = px * Math.cos(rotRad) - py * Math.sin(rotRad) + ox;
-    const ry2 = px * Math.sin(rotRad) + py * Math.cos(rotRad) + oy;
-    const dmxPan = Math.round(Math.max(0, Math.min(255, 128 + rx2 * 127)));
-    const dmxTilt = Math.round(Math.max(0, Math.min(255, 128 + ry2 * 127)));
+    // Point du pattern à phase 0 via la math EXACTE du moteur (fixture-tracks.ts)
+    const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
+      efx.pattern, 0, efx.width, efx.height, efx.rotation, efx.xOffset, efx.yOffset,
+    );
     // Construit les canaux DMX du snapshot (pan/tilt + dimmer 255 pour visibilité 3D)
     const snapshot: Record<number, number> = {};
     for (const fid of targetIds) {
@@ -3030,11 +3032,11 @@ export const Stage3D: React.FC<{
       </div>
       </div>{/* fin toolbar legacy cachée */}
 
-      {/* Corps pro : Left dock + Centre 3D + Right dock */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
+      {/* Corps pro : Left dock + Centre 3D + Right dock — toujours côte à côte */}
+      <div className="flex-1 flex flex-row flex-nowrap overflow-hidden min-h-0">
         {/* Left dock — Fixtures (rétractable) */}
         {!leftDockCollapsed ? (
-          <div className="w-[260px] shrink-0 border-r border-gray-800/50 bg-[#0d0d14]/80 flex flex-col min-h-0">
+          <div className="order-1 w-[260px] shrink-0 border-r border-gray-800/50 bg-[#0d0d14]/80 flex flex-col min-h-0">
             <div className="px-3 py-2 border-b border-gray-800/50">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">Fixtures</span>
@@ -3067,7 +3069,7 @@ export const Stage3D: React.FC<{
           <div className="p-2 border-t border-gray-800/50 text-[10px] text-gray-600">Glisser sur le canvas pour orbiter • Clic = sélectionner • Ctrl+clic = multi • Target = viser</div>
         </div>
         ) : (
-          <div className="w-8 shrink-0 border-r border-gray-800/50 bg-[#0d0d14]/60 flex flex-col items-center py-2 gap-2">
+          <div className="order-1 w-8 shrink-0 border-r border-gray-800/50 bg-[#0d0d14]/60 flex flex-col items-center py-2 gap-2">
             <button onClick={() => setLeftDockCollapsed(false)} className="w-6 h-6 rounded bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 border border-purple-500/30 flex items-center justify-center" title="Ouvrir la liste fixtures">
               <List size={12} />
             </button>
@@ -3077,7 +3079,7 @@ export const Stage3D: React.FC<{
         )}
 
         {/* Centre 3D */}
-        <div className="flex-1 flex flex-col min-w-0 bg-[#08080e] relative">
+        <div className="order-2 flex-1 flex flex-col min-w-0 bg-[#08080e] relative">
       {/* 3D Canvas */}
       <div
         ref={containerRef}
@@ -3174,13 +3176,13 @@ export const Stage3D: React.FC<{
           </div>
         )}
 
-        {/* Barre compacte Rec — mode édition (hideFixturePanel) : aucune modale
-            au centre, la vue 3D reste seule pour suivre les modifications. Les
-            boutons Rec restent accessibles pour capturer la pose affichée.
-            → déplacés dans la status bar pour ne pas recouvrir la scène. */}
+        {/* Selected fixture editor - floating panel, draggable by header only.
+            Affichée au clic sur un projecteur dans TOUTES les vues 3D (y compris
+            le mode édition) : faders, Capturer, Target et snapshot EFX sont
+            indispensables partout. Refermable/déplaçable, ne bloque jamais la vue. */}
 
         {/* Selected fixture editor - floating panel, draggable by header only */}
-        {selectedFixture && selectedPos && !hideFixturePanel && (
+        {selectedFixture && selectedPos && (
           <div
             className="fixed bg-[#12121a] border border-purple-500/30 rounded-xl shadow-2xl min-w-[240px] max-w-[min(90vw,26rem)] max-h-[85vh] overflow-y-auto"
             style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
@@ -3676,11 +3678,16 @@ export const Stage3D: React.FC<{
           </div>
         )}
         </div>{/* fin Centre 3D */}
-        {/* Right dock — EFX uniquement si enableEfxApply (Scènes) */}
-        {enableEfxApply && !selectedFixture && (
-          <div className="w-[300px] shrink-0 border-l border-gray-800/50 bg-[#0d0d14]/60 flex flex-col min-h-0">
-            <div className="px-3 py-2 border-b border-gray-800/50">
+        </div>{/* fin colonne Centre : le dock suit DANS la row, à droite */}
+        {/* Right dock — EFX uniquement si enableEfxApply (Scènes). Repliable
+            pour rendre toute la largeur à la scène 3D. */}
+        {enableEfxApply && !rightDockCollapsed && (
+          <div className="order-3 w-[264px] shrink-0 border-l border-gray-800/50 bg-[#0d0d14]/60 flex flex-col min-h-0">
+            <div className="px-3 py-2 border-b border-gray-800/50 flex items-center justify-between">
               <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">Scène & EFX</span>
+              <button onClick={() => setRightDockCollapsed(true)} className="w-5 h-5 rounded bg-black/30 border border-gray-800 text-gray-500 hover:text-gray-300 hover:border-gray-600 flex items-center justify-center" title="Réduire le panneau">
+                <ChevronUp size={10} className="rotate-90" />
+              </button>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
               <div className="p-3 rounded-xl bg-gradient-to-br from-violet-600/15 to-cyan-600/10 border border-violet-500/20">
@@ -3696,6 +3703,11 @@ export const Stage3D: React.FC<{
                   <Sparkles size={12} /> Appliquer à la scène
                 </button>
               </div>
+              <div className="grid grid-cols-3 gap-1">
+                <button onClick={handleRecSceneCb} className="px-1 py-1.5 rounded-lg bg-yellow-600/20 text-yellow-300 border border-yellow-500/30 text-[10px] font-medium hover:bg-yellow-600/30 transition-colors" title="Capture la pose actuelle en nouvelle scène">Rec Scène</button>
+                <button onClick={handleRecEfxCb} className="px-1 py-1.5 rounded-lg bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-medium hover:bg-cyan-600/30 transition-colors" title="Crée un EFX depuis la pose actuelle">Rec EFX</button>
+                <button onClick={handleRecShowCb} className="px-1 py-1.5 rounded-lg bg-amber-600/20 text-amber-300 border border-amber-500/30 text-[10px] font-medium hover:bg-amber-600/30 transition-colors" title="Capture la pose en scène + show">Rec Show</button>
+              </div>
               <div className="p-2.5 rounded-lg bg-black/20 border border-gray-800/50">
                 <div className="text-[10px] font-semibold text-gray-400 mb-1">Astuce pro</div>
                 <p className="text-[10px] text-gray-500 leading-relaxed">Sélectionne une lyre à gauche, ajuste sa position avec `−/+`, puis fige un EFX — ta scène garde la pose exacte vue en 3D.</p>
@@ -3703,23 +3715,22 @@ export const Stage3D: React.FC<{
             </div>
           </div>
         )}
-        {/* Fermeture du centre + row principale */}
+        {enableEfxApply && rightDockCollapsed && (
+          <div className="order-3 w-8 shrink-0 border-l border-gray-800/50 bg-[#0d0d14]/60 flex flex-col items-center py-2 gap-2">
+            <button onClick={() => setRightDockCollapsed(false)} className="w-6 h-6 rounded bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 border border-purple-500/30 flex items-center justify-center" title="Ouvrir le panneau Scène & EFX">
+              <List size={12} />
+            </button>
+            <span className="text-[9px] text-gray-600 [writing-mode:vertical-lr] tracking-widest uppercase">Scène</span>
+          </div>
+        )}
+        {/* Fermeture row principale (le centre est déjà fermé plus haut) */}
         </div>
-      </div>
       {/* Status bar pro */}
       <div className="h-6 border-t border-gray-800/50 bg-[#0d0d14] flex items-center px-3 gap-3 text-[10px] text-gray-500 shrink-0">
         <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> 3D 30 fps</span>
         <span className="w-px h-3 bg-gray-800" />
         <span>{patchedFixtures.length} fixtures</span>
         {selectedFixture && <><span className="w-px h-3 bg-gray-800" /><span className="text-purple-300">{selectedFixture.name}</span></>}
-        {hideFixturePanel && enableEfxApply && (
-          <>
-            <span className="w-px h-3 bg-gray-800" />
-            <button onClick={handleRecSceneCb} className="px-2 py-0.5 rounded bg-yellow-600/20 text-yellow-300 border border-yellow-500/30 text-[10px] font-medium hover:bg-yellow-600/30 transition-colors">Rec Scène</button>
-            <button onClick={handleRecEfxCb} className="px-2 py-0.5 rounded bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-medium hover:bg-cyan-600/30 transition-colors">Rec EFX</button>
-            <button onClick={handleRecShowCb} className="px-2 py-0.5 rounded bg-amber-600/20 text-amber-300 border border-amber-500/30 text-[10px] font-medium hover:bg-amber-600/30 transition-colors">Rec Show</button>
-          </>
-        )}
         <span className="flex-1" />
         <span className="hidden md:inline">Glisser = orbiter • Clic = sélectionner • Ctrl+clic = multi • Target = viser un point</span>
       </div>
@@ -3808,8 +3819,10 @@ function fitMountRotation(f3d: Fixture3D, mode: string): void {
     // so the beam exits toward the FRONT: alpha=+π/2 → dir=(0,0,-1) quand heading=0.
     if (f3d.armGroup) f3d.armGroup.rotation.x = Math.PI / 2;
   } else if (mode === 'ground') {
-    // Keep yoke upright, tilt head 180° so beam points UP
-    f3d._mountTilt = Math.PI;
+    // Head au sol : faisceau horizontal vers l'avant/public au DMX tilt neutre.
+    // Le balayage tilt (dmxTilt ±90°) couvre alors la scène (en bas) et le
+    // public (en haut). Seule valeur validée : π/2 pointe correctement le public.
+    f3d._mountTilt = Math.PI / 2;
   } else if (mode === 'hanging') {
     // Fixture accrochée AU-DESSUS du pont (suspendue, tête en bas) :
     // retourne le yoke (arm=π) pour que la tête pende sous le point d'accroche,

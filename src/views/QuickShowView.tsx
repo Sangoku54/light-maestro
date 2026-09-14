@@ -17,7 +17,8 @@ import { analyzeChannels } from '../engine/fixture-analyzer';
 import { halfDegToDmxOffset, SPATIAL_BY_SECTION } from '../engine/dmx-movement';
 import { DEFAULT_ROSTER, normalizeRoster, type MusicianRoster } from '../utils/musicians';
 import { importCustomFixtureDefs } from '../utils/custom-fixtures';
-import { pickAudioUrl } from '../utils/audio-cache';
+import { pickAudioUrl, audioBufferToWavDataUrl } from '../utils/audio-cache';
+import { lastAudioLoad, lastAudioRemember } from '../utils/last-audio';
 import { MasterClockBar } from '../components/MasterClockBar';
 import type { StageScene } from '../stores/showStore';
 import { AutoLoopsPanel } from './AutoLoopsPanel';
@@ -91,26 +92,7 @@ const PromptModal: React.FC<{
  *  - au chargement d'un .lmpreset devenu sans son de restaurer l'audio depuis
  *    cette cache.
  */
-type LastAudioEntry = { base64: string; fileName?: string; ts: string };
 
-async function lastAudioLoad(): Promise<Record<string, LastAudioEntry>> {
-  try {
-    const api = (window as any).lightMaestro?.lastAudio;
-    const m = await api?.load();
-    return m && typeof m === 'object' ? (m as Record<string, LastAudioEntry>) : {};
-  } catch { return {}; }
-}
-
-async function lastAudioRemember(name: string, base64: string | undefined, fileName?: string) {
-  if (!base64) return;
-  try {
-    const api = (window as any).lightMaestro?.lastAudio;
-    if (!api) return;
-    const map = await lastAudioLoad();
-    map[name] = { base64, fileName, ts: new Date().toISOString() };
-    await api.save(map);
-  } catch { /* non-bloquant */ }
-}
 
 /** Extrait le base64 audio d'une entrée de preset (format enveloppe ou plat). */
 function presetAudioOf(p: { data?: any } | undefined): string {
@@ -738,6 +720,17 @@ export function genCues(
       const numCues = Math.max(1, Math.floor(dur / interval));
       const isNextDrop = dropStartTimes.has(section.endTime);
 
+      // ── Continuité du mouvement : UN pattern par section ──
+      // Sélectionné une seule fois (features du milieu de section, représentatifs)
+      // et appliqué à TOUS les cues de la section. Les heads ont ainsi le temps
+      // de finir leur trajectoire au lieu de repartir dans un pattern différent
+      // à chaque cue (l'ancien comportement variait avec l'index du cue).
+      const midFeature = getFeature(section.startTime + dur / 2);
+      const sectionRms = midFeature?.rms ?? 0.5;
+      const sectionCentroid = midFeature?.centroid ?? 0.5;
+      const sectionBass = midFeature ? midFeature.bass / Math.max(0.01, midFeature.mid + midFeature.high) : 1;
+      const sectionMovement = selectMovementPattern(section.type, sectionRms, sectionCentroid, sectionBass, false, false, 0);
+
       for (let i = 0; i < numCues; i++) {
         const t = section.startTime + i * interval;
         if (t >= section.endTime) break;
@@ -795,26 +788,24 @@ export function genCues(
           case 'outro': sectionEnergyMult = 0.3 + (1 - sectionProgress) * 0.3; break;
         }
 
-        // Color cycle: plus varié par cue — centre sur le temps ET l'index de cue, pas seulement la progression
-        const colorCycleSpeed = (0.5 + centroid * 1.5 + rms * 2.0) * (SECTION_CYCLE_MULT[section.type] ?? 1);
-        const sectionProgressNorm = dur > 0 ? (t - section.startTime) / dur : 0;
-        const cueJitter = (i * 5 + (beatStrong ? 2 : 0) + Math.floor(rng() * 5)) % sectionPal.length;
-        const paletteIdx = (Math.floor(sectionProgressNorm * sectionPal.length * colorCycleSpeed) + cueJitter) % sectionPal.length;
+        // Color cycle : UNE couleur par section, changement toutes les 12 beats si la
+        // section est longue. Le fondu entre changements est géré côté moteur
+        // (colorFadeMs). La teinte ne défile plus à chaque cue.
+        const beatDur = interval * beatDivision / 4; // durée d'un temps (s)
+        const holdBeats = 12;
+        const sectionColorIdx = Math.floor((t - section.startTime) / (holdBeats * beatDur));
+        const paletteIdx = sectionColorIdx % Math.max(1, sectionPal.length);
         prevColor = sectionPal[paletteIdx];
-        // Accent couleur sur les forts temps : pousse vers une couleur chaude/froide selon centroid
-        if (beatStrong && sectionPal.length > 1) {
-          const accentIdx = centroid > 0.6 ? 0 : centroid < 0.35 ? sectionPal.length - 1 : paletteIdx;
-          if (rng() < 0.35) prevColor = sectionPal[accentIdx];
-        }
         // Gradient interpolation: blend start→end color across section duration
         const gradient = cfg.customGradients?.[section.type] as { start: string; end: string } | undefined;
         if (gradient && gradient.start !== gradient.end) {
           const [sr, sg, sb] = hexToRgb(gradient.start);
           const [er, eg, eb] = hexToRgb(gradient.end);
-          const t = sectionProgressNorm;
-          const rr = Math.round(sr + (er - sr) * t);
-          const rg = Math.round(sg + (eg - sg) * t);
-          const rb = Math.round(sb + (eb - sb) * t);
+          const sectionProgressNorm = dur > 0 ? (t - section.startTime) / dur : 0;
+          const g = sectionProgressNorm;
+          const rr = Math.round(sr + (er - sr) * g);
+          const rg = Math.round(sg + (eg - sg) * g);
+          const rb = Math.round(sb + (eb - sb) * g);
           prevColor = '#' + [rr, rg, rb].map(v => v.toString(16).padStart(2, '0')).join('');
         }
         // Transition d'intensité entre sections : fondu sur 2 beats (fade-in)
@@ -841,8 +832,9 @@ export function genCues(
         const colorTemp: 'warm' | 'neutral' | 'cool' =
           centroid < 0.35 ? 'warm' : centroid > 0.65 ? 'cool' : 'neutral';
 
-        // Movement: audio-driven, genre-aware pattern selection
-        const movement = selectMovementPattern(section.type, rms, centroid, bassRatio, beatStrong, dropAnticipation, i);
+        // Movement: UN pattern par section (stabilisé) — plus de re-sélection par cue.
+        // L'amplitude et la vitesse continuent d'évoluer doucement par cue ci-dessous.
+        const movement = sectionMovement;
 
         // Amplitude: DMX-scale (0-255), audio-driven, section-scaled + jitter par cue pour éviter l'uniformité
         // Center is 128, so amplitude=128 means full edge-to-edge sweep.
@@ -865,11 +857,14 @@ export function genCues(
         const movementAmplitude = Math.min(128, Math.max(12, Math.round(baseAmp + ampJitter)));
 
         const movementSpeed = (() => {
-          const baseSpeed = 0.3 + centroid * 0.6;
-          const jitter = (Math.sin(i * 2.3) * 0.12 + (rng() - 0.5) * 0.1); // ±0.12 par cue
-          let s = baseSpeed + jitter;
-          if (beatStrong) s *= 1.2;
+          // Vitesse STABLE par section (centroid du milieu), plus de jitter aléatoire
+          // par cue. Micro-accélération douce et continue sur les temps forts,
+          // sans saut sec : le beat fort monte en douceur puis redescend.
+          const baseSpeed = 0.3 + sectionCentroid * 0.6;
+          let s = baseSpeed;
           if (dropAnticipation) s *= 1.5; // speed up before drop
+          // Micro-accélération sur beat : onde sinus continue (±8%), jamais de marche.
+          if (beatStrong) s *= 1.08 + Math.sin(t * Math.PI * 2) * 0.04;
           return Math.max(0.15, Math.min(2.5, s));
         })();
 
@@ -889,6 +884,7 @@ export function genCues(
           colorTemp,
           strobeProbability: dropAnticipation ? 0 : (SECTION_STROBE_PROB[section.type] ?? (beatStrong ? 0.8 : 0.15)),
           dimmerPulseOnBeat: section.type === 'drop' || section.type === 'chorus',
+          bpm,
           activeTiers: ACTIVE_TIERS[section.type],
           musicStyle: genre,
           dropAnticipation: dropAnticipation || undefined,
@@ -2057,7 +2053,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             const inFile = (data.audioDataBase64 as string) || '';
             const inStore = (existingAudio as string) || '';
             console.error(`[loadPresetFile] name="${presetName}" textSize=${textSize} inFileAudio=${inFile.length !== 0} inFileLen=${inFile.length} inStoreAudio=${inStore.length !== 0} inStoreLen=${inStore.length}`);
-            let audioDataUrl = pickAudioUrl(data.audioDataBase64, existingAudio) ?? '';
+            audioDataUrl = pickAudioUrl(data.audioDataBase64, existingAudio) ?? '';
             let audioSrc = audioDataUrl === inFile ? 'file' : audioDataUrl === inStore ? 'store' : 'none';
             // Dernier filet : le « dernier bon audio » enregistré pour ce nom
             // (IPC last-audio.json) quand ni le fichier ni le store n'ont le son.
@@ -2084,13 +2080,18 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             }
             setHasEverHadAnalysis(true);
           }
-          // Sync to showStore.songPresets (for VC widget)
+          // Sync to showStore.songPresets (for VC widget) — ne jamais écraser
+          // un audio existant par du vide, et garder un id stable pour que
+          // les widgets qui référencent l'id restent branchés.
           const store = useShowStore.getState();
+          const prevEntry = store.songPresets.find(p => p.name === presetName) as any;
+          const keepAudio = audioDataUrl || prevEntry?.audioFileBase64 || undefined;
           const existing = store.songPresets.filter(p => p.name !== presetName);
           store.setSongPresets([...existing, {
-            id: `qs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            id: prevEntry?.id ?? `qs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             name: presetName,
-            audioFileBase64: audioDataUrl,
+            audioFileBase64: keepAudio,
+            ...(!keepAudio && prevEntry?.audioRef ? { audioRef: prevEntry.audioRef } : {}),
             audioFileName: data.analysis?.fileName || presetName,
             dmxCues: data.dmxCues || [],
             quickShow: data.quickShow,
@@ -2141,6 +2142,14 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           if (!audioDataUrl) {
             // Session fraîche ou preset jamais chargé : dernier bon audio connu.
             audioDataUrl = (await lastAudioLoad())[name]?.base64 || undefined;
+          }
+          // Dernier filet fiable : le son est décodé en mémoire (audioBuffer),
+          // même sans fichier disque. On le ré-encode en WAV pour ne JAMAIS
+          // perdre l'audio quand on sauvegarde après un simple chargement de preset.
+          if (!audioDataUrl && audioFile.audioBuffer) {
+            try {
+              audioDataUrl = audioBufferToWavDataUrl(audioFile.audioBuffer);
+            } catch (e) { console.warn('audioBufferToWavDataUrl failed:', e); }
           }
         }
         // Garde-fou : ne jamais écraser silencieusement un preset audio par un sans-son.
@@ -2256,6 +2265,12 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           if (!audioDataBase64) {
             // Session fraîche : dernier bon audio connu (persistant IPC).
             audioDataBase64 = (await lastAudioLoad())[name]?.base64 || undefined;
+          }
+          // Filet fiable : ré-encode le buffer décodé si aucune autre source.
+          if (!audioDataBase64 && audioFile.audioBuffer) {
+            try {
+              audioDataBase64 = audioBufferToWavDataUrl(audioFile.audioBuffer);
+            } catch (e) { console.warn('audioBufferToWavDataUrl failed:', e); }
           }
         }
         // Garde-fou : on ne peut pas écraser silencieusement le .lmpreset par
@@ -2376,7 +2391,9 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     const newPreset: any = {
       id: existing?.id ?? `qs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: presetName,
-      audioFileBase64: audioDataUrl,
+      // Ne jamais écraser l'audio existant par du vide à l'import.
+      audioFileBase64: audioDataUrl || (existing as any)?.audioFileBase64 || '',
+      ...(!audioDataUrl && (existing as any)?.audioRef ? { audioRef: (existing as any).audioRef } : {}),
       audioFileName: analysisData?.fileName || presetName,
       dmxCues: dmxCuesData || [],
       quickShow: qsData,
@@ -4056,17 +4073,28 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         {sections.length > 0 && (
           <>
             <span className="text-[10px] text-gray-500 mr-1">{t('sections') || 'Sections'}:</span>
-            {sections.map((s, i) => (
-              <button
-                key={i}
-                onClick={() => onSectionClick(i)}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border cursor-pointer"
-                style={{ borderColor: s.color, color: s.color, backgroundColor: s.color + '15' }}
-              >
-                <span>{s.type}</span>
-                <span className="text-gray-600 text-[8px]">{s.startTime.toFixed(1)}s</span>
-              </button>
-            ))}
+            {sections.map((s, i) => {
+              const isActive = audioFile?.isPlaying && audioFile.currentTime >= s.startTime && audioFile.currentTime < s.endTime;
+              return (
+                <button
+                  key={i}
+                  onClick={() => onSectionClick(i)}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border cursor-pointer transition-all ${
+                    isActive ? 'shadow-lg ring-1 ring-white/30 scale-[1.03]' : 'opacity-90'
+                  }`}
+                  style={{
+                    borderColor: s.color,
+                    color: s.color,
+                    backgroundColor: isActive ? s.color : s.color + '15',
+                    boxShadow: isActive ? `0 0 12px ${s.color}` : undefined,
+                  }}
+                >
+                  <span>{s.type}</span>
+                  {isActive && <span className="text-white text-[8px] leading-none">▶</span>}
+                  <span className={isActive ? 'text-white text-[8px]' : 'text-gray-600 text-[8px]'}>{s.startTime.toFixed(1)}s</span>
+                </button>
+              );
+            })}
           </>
         )}
         <button

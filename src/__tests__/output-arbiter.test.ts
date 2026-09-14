@@ -77,6 +77,24 @@ describe('OutputArbiter — LTP', () => {
     expect(buf[2]).toBeUndefined();      // nobody owns it anymore
   });
 
+  it('la preview scène (design-test 60) est masquée par le programmeur parké (85), visible après release', () => {
+    // Cas réel : Target/faders parquent pan/tilt/couleur (programmer LTP 85),
+    // puis la sélection d'une scène pousse design-test (LTP 60) — masquée
+    // tant que le programmeur n'est pas vidé (ni hardware ni 3D, qui lit le
+    // buffer arbitré). La sélection de scène vide donc le programmeur.
+    arb.registerSource('programmer', 'ltp', 85);
+    arb.write('design-test', 0, { 1: 255, 2: 128 });
+    expect(arb.getBuffer(0)[1]).toBe(255); // scène visible seule
+    arb.write('programmer', 0, { 1: 100, 2: 100 });
+    const masked = arb.getBuffer(0);
+    expect(masked[1]).toBe(100); // programmeur gagne → scène invisible
+    expect(masked[2]).toBe(100);
+    arb.release('programmer'); // = useProgrammerStore.clear() à la sélection
+    const shown = arb.getBuffer(0);
+    expect(shown[1]).toBe(255); // la scène réapparaît
+    expect(shown[2]).toBe(128);
+  });
+
   it('release() can target a single universe only', () => {
     arb.registerSource('ltp-high', 'ltp', 90);
     arb.write('ltp-high', 0, { 1: 0 });

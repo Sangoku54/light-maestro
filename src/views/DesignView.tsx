@@ -22,6 +22,7 @@ import { useRgbMatrixStore } from '../stores/rgbmatrixStore';
 import { buildSceneFixtureIndex, collectFolderNames, normalizeFolderName, scenesWithoutFixture, sceneTouchesFixture } from '../utils/scene-fixtures';
 import { useProgrammerStore } from '../stores/programmerStore';
 import { useProgrammerSync } from '../hooks/useProgrammerSync';
+import { evalEfxNormalized, generateEfxPanTilt } from '../hooks/fixture-tracks';
 import { ProgrammerBar } from '../components/ProgrammerBar';
 
 /**
@@ -116,8 +117,9 @@ export const DesignView: React.FC = () => {
       <>
       {/* Editor Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left: Item List */}
-        <div className="w-64 border-r border-gray-800/50 flex flex-col">
+        {/* Left: Item List (wide tile area on tile-based tabs: ~3/5 of the width) */}
+        <div className={`${['scenes', 'efx', 'chasers', 'cuelists', 'groups'].includes(activeTab) ? 'flex-[3] min-w-0' : 'w-64 shrink-0'} border-r border-gray-800/50 flex flex-col`}>
+          {['fixtures', 'scenes', 'chasers', 'cuelists', 'efx', 'groups'].includes(activeTab) && (
           <div className="p-3 border-b border-gray-800/50">
             <button
               onClick={() => {
@@ -134,6 +136,8 @@ export const DesignView: React.FC = () => {
                 } else if (activeTab === 'efx') {
                   const id = useShowStore.getState().createEffect('New EFX');
                   (window as any).__lm_selectedEffectId = id;
+                } else if (activeTab === 'groups') {
+                  window.dispatchEvent(new Event('lm-open-group-create'));
                 }
               }}
               className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-lg text-xs font-medium transition-colors"
@@ -142,13 +146,14 @@ export const DesignView: React.FC = () => {
               New {activeTab.slice(0, -1)}
             </button>
           </div>
+          )}
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             <ItemList mode={activeTab} />
           </div>
         </div>
 
-        {/* Right: Editor Panel */}
-        <div className="flex-1 overflow-y-auto p-4 min-w-0">
+        {/* Right: Editor Panel (narrowed to ~2/5 on tile-based tabs) */}
+        <div className={`${['scenes', 'efx', 'chasers', 'cuelists', 'groups'].includes(activeTab) ? 'flex-[2]' : 'flex-1'} overflow-y-auto p-4 min-w-0`}>
           <EditorPanel mode={activeTab} onEditFixture={(f) => { setEditFixtureData(f); setShowFixtureEditor(true); }} />
         </div>
       </div>
@@ -229,29 +234,22 @@ const ShowWith3D: React.FC = () => {
       <div className="flex-1 flex overflow-hidden min-w-0">
         <ShowManager />
       </div>
-      {show3D && !showFloating3D && (
-        <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-0 h-full relative ml-2">
-          <Stage3D hideFixturePanel musicians={showMusicians} stageScene={showStageScene} onMusiciansChange={handleShowMusiciansChange} onStageSceneChange={handleShowStageSceneChange} />
-          <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1">
-            <button onClick={() => setShowFloating3D(true)} title={t('stage3D.detach')} className="flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white text-[11px] font-medium shadow-lg transition-all"><Maximize2 size={12} /> Détacher</button>
-            <button onClick={() => setShow3D(false)} title={t('stage3D.hide')} className="w-7 h-7 rounded-md bg-gray-700/80 hover:bg-gray-600 text-white flex items-center justify-center"><X size={12} /></button>
-          </div>
-        </div>
-      )}
       {show3D && showFloating3D && (
         <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, overflow: 'hidden' }}>
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
             <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D View — Show</span>
             <div className="flex items-center gap-1">
               <button onClick={() => { setFloat3DSize({ w: 640, h: 360 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
-              <button onClick={() => setShowFloating3D(false)} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
+              <button onClick={() => { setShowFloating3D(false); setShow3D(false); }} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
             </div>
           </div>
           <div className="flex-1 min-h-0 relative"><Stage3D hideFixturePanel musicians={showMusicians} stageScene={showStageScene} onMusiciansChange={handleShowMusiciansChange} onStageSceneChange={handleShowStageSceneChange} /><div className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize" onMouseDown={handleFloat3DResizeStart} style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }} /></div>
         </div>
       )}
-      {!show3D && (
-        <button onClick={() => setShow3D(true)} title={t('stage3D.show')} className="absolute bottom-2 right-2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white text-[11px] font-medium shadow-lg transition-all"><Maximize2 size={12} /> Vue 3D</button>
+      {!showFloating3D && (
+        <button onClick={() => { setShow3D(true); setShowFloating3D(true); }} className="fixed bottom-4 right-4 z-40 bg-purple-600/80 hover:bg-purple-500 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg transition-all">
+          🎥 3D View
+        </button>
       )}
     </div>
   );
@@ -814,11 +812,12 @@ const SceneList: React.FC = () => {
               : t('design.noScenesMatch', { query: sceneSearch })}
         </div>
       ) : (
-      <div className="space-y-1">
+      <div className="grid grid-cols-4 xl:grid-cols-6 gap-2">
         {filteredScenes.map((scene) => {
           const activeChannels = Object.entries(scene.channels).filter(([, v]) => v > 0);
           const isSelected = selectedSceneId === scene.id;
           const touchedFixtures = byScene.get(scene.id) || [];
+          const folderName = normalizeFolderName(scene.folder || '');
           return (
             <div
               key={scene.id}
@@ -844,29 +843,31 @@ const SceneList: React.FC = () => {
                 });
               }}
               title={t('design.scenes.contextMenuHint')}
-              className={`px-2 py-1.5 rounded-md cursor-pointer group transition-colors ${
+              className={`rounded-lg border px-2 py-1.5 cursor-pointer group transition-all ${
                 dragSceneId === scene.id ? 'opacity-40' : ''
               } ${
-                isSelected ? 'bg-purple-600/15 border border-purple-500/20' : 'hover:bg-gray-800/30'
+                isSelected
+                  ? 'bg-purple-600/15 border-purple-500/50 shadow-[0_0_14px_rgba(168,85,247,0.25)]'
+                  : 'bg-[#0d0d14] border-gray-700 hover:border-purple-500/40 hover:bg-gray-800/20'
               }`}
+              style={isSelected ? undefined : { borderLeft: '3px solid rgba(107,114,128,0.5)' }}
             >
               <div className="flex items-center gap-2">
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{
+                    background: isSelected
+                      ? 'linear-gradient(135deg, #a855f7, #6366f1)'
+                      : 'linear-gradient(135deg, #4b5563, #1f2937)',
+                    boxShadow: isSelected ? '0 0 6px rgba(168,85,247,0.8)' : 'none',
+                  }}
+                />
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs text-gray-300 truncate">{scene.name}</div>
-                  <div className="text-[10px] text-gray-600">
-                    {activeChannels.length} ch · {scene.duration > 0 ? `${(scene.duration / 1000).toFixed(1)}s` : '∞'}
+                  <div className={`text-xs truncate ${isSelected ? 'text-purple-100 font-semibold' : 'text-gray-200 font-medium'}`}>{scene.name}</div>
+                  <div className="text-[10px] text-gray-500 truncate">
+                    {activeChannels.length} ch · {scene.duration > 0 ? `${(scene.duration / 1000).toFixed(1)}s` : '∞'}{touchedFixtures.length > 1 ? ` · ${t('design.scenes.fixtureCount', { count: touchedFixtures.length })}` : ''}
                   </div>
                 </div>
-                {normalizeFolderName(scene.folder || '') && (
-                  <span className="text-[8px] px-1 py-0.5 rounded bg-gray-800/80 text-purple-300/80 shrink-0 max-w-[100px] truncate" title={t('design.scenes.folder')}>
-                    📁 {normalizeFolderName(scene.folder || '')}
-                  </span>
-                )}
-                {touchedFixtures.length > 1 && (
-                  <span className="text-[8px] px-1 py-0.5 rounded bg-gray-800 text-gray-400 shrink-0">
-                    {t('design.scenes.fixtureCount', { count: touchedFixtures.length })}
-                  </span>
-                )}
                 <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                   <button
                     onClick={(e) => { e.stopPropagation(); setConfirmDelete(scene.id); }}
@@ -877,16 +878,20 @@ const SceneList: React.FC = () => {
                   </button>
                 </div>
               </div>
-              {/* Active channel badges */}
-              {activeChannels.length > 0 && (
-                <div className="flex gap-0.5 mt-1">
-                  {activeChannels.slice(0, 3).map(([addr, val]) => (
-                    <span key={addr} className="text-[8px] px-1 py-0.5 rounded bg-gray-800 text-gray-400 font-mono">
+              {(folderName || activeChannels.length > 0) && (
+                <div className="flex gap-1 mt-1.5 flex-wrap">
+                  {folderName && (
+                    <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-purple-600/15 border border-purple-500/25 text-purple-300/90 shrink-0 max-w-[110px] truncate" title={t('design.scenes.folder')}>
+                      📁 {folderName}
+                    </span>
+                  )}
+                  {activeChannels.slice(0, 2).map(([addr, val]) => (
+                    <span key={addr} className="text-[8px] px-1.5 py-0.5 rounded-full bg-gray-800/80 border border-gray-700/50 text-gray-400 font-mono">
                       @{addr}:{val}
                     </span>
                   ))}
-                  {activeChannels.length > 3 && (
-                    <span className="text-[8px] text-gray-600">+{activeChannels.length - 3}</span>
+                  {activeChannels.length > 2 && (
+                    <span className="text-[8px] text-gray-600 self-center">+{activeChannels.length - 2}</span>
                   )}
                 </div>
               )}
@@ -1153,6 +1158,17 @@ const SceneEditor: React.FC = () => {
     }
     stopSceneEfxLoop();
     if (scene) {
+      // Le programmeur (LTP 85) garde ses valeurs parkées (Target/faders) et
+      // masque la preview design-test (LTP 60) sur pan/tilt/couleur/dimmer :
+      // la scène sélectionnée semblerait ne pas jouer (ni hardware ni 3D,
+      // qui lit le buffer arbitré). Même traitement qu'au lancement audio.
+      try {
+        const prog = useProgrammerStore.getState();
+        if (Object.keys(prog.channels).length > 0) {
+          console.warn('[ScenePreview] programmeur vidé (il masquait la scène)');
+          prog.clear();
+        }
+      } catch {}
       setEditName(scene.name);
       setEditFolder(scene.folder || '');
       setEditFadeIn(scene.fadeIn);
@@ -1231,23 +1247,12 @@ const SceneEditor: React.FC = () => {
               } catch {}
               return;
             }
-            // Calcule le point du pattern à cet instant (même math que l'aperçu)
-            const phase = (elapsed * efx.speed * 2) % (Math.PI * 2);
-            const rx = efx.width * 0.7; const ry = efx.height * 0.7;
-            const rotRad = (efx.rotation * Math.PI) / 180;
-            const ox = (efx.xOffset / 255) * 0.3; const oy = (efx.yOffset / 255) * 0.3;
-            let px = 0, py = 0;
-            const seg = phase / (Math.PI * 2);
-            switch (efx.pattern) {
-              case 'Circle': px = Math.cos(phase) * rx; py = Math.sin(phase) * ry; break;
-              case 'Line': { const lp = seg % 1; const lineX = lp < 0.5 ? (lp * 2) * 2 - 1 : (1 - (lp - 0.5) * 2) * 2 - 1; px = lineX * rx; py = 0; break; }
-              case 'Eight': px = Math.sin(phase) * rx; py = Math.sin(phase * 2) * ry * 0.5; break;
-              default: px = Math.cos(phase) * rx; py = Math.sin(phase) * ry; break;
-            }
-            const rx2 = px * Math.cos(rotRad) - py * Math.sin(rotRad) + ox;
-            const ry2 = px * Math.sin(rotRad) + py * Math.cos(rotRad) + oy;
-            const dmxPan = Math.round(Math.max(0, Math.min(255, 128 + rx2 * 127)));
-            const dmxTilt = Math.round(Math.max(0, Math.min(255, 128 + ry2 * 127)));
+            // Math EXACTE du moteur (fixture-tracks.ts) : tous les patterns,
+            // même amplitude/offsets/rotation que le preview et le show.
+            const tCycles = (elapsed * efx.speed * 2) / (Math.PI * 2);
+            const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
+              efx.pattern, tCycles, efx.width, efx.height, efx.rotation, efx.xOffset, efx.yOffset,
+            );
             const byUniverse = new Map<string, Record<number, number>>();
             for (const fid of efx.fixtureIds) {
               const pf = useShowStore.getState().patchedFixtures.find((f) => f.id === fid);
@@ -1613,43 +1618,7 @@ const SceneEditor: React.FC = () => {
         </div>
       )}
       </div>
-      {/* Live 3D preview of the programmed scene (hidden by default, toggled) */}
-      {show3D && !showFloating3D && (
-        <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-0 h-full relative">
-          <Stage3D
-            enableEfxApply
-            hideFixturePanel
-            musicians={musicians}
-            stageScene={stageScene}
-            onMusiciansChange={(roster) => {
-              setMusicians(roster);
-              if (scene) updateScene(scene.id, { musicians: roster });
-            }}
-            onStageSceneChange={(cfg) => {
-              setStageScene(cfg);
-              if (scene) updateScene(scene.id, { stageScene: cfg });
-            }}
-          />
-          <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1">
-            <button
-              onClick={() => setShowFloating3D(true)}
-              title={t('stage3D.detach')}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white text-[11px] font-medium shadow-lg transition-all"
-            >
-              <Maximize2 size={12} /> Détacher
-            </button>
-            <button
-              onClick={() => setShow3D(false)}
-              title={t('stage3D.hide')}
-              className="w-7 h-7 rounded-md bg-gray-700/80 hover:bg-gray-600 text-white text-[11px] font-medium shadow-lg transition-all flex items-center justify-center"
-            >
-              <X size={12} />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Floating 3D view (detached) */}
+      {/* Floating 3D view (opened directly, like the AutoScript window) */}
       {show3D && showFloating3D && (
         <div
           className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col"
@@ -1659,7 +1628,7 @@ const SceneEditor: React.FC = () => {
             <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D View</span>
             <div className="flex items-center gap-1">
               <button onClick={() => { setFloat3DSize({ w: 640, h: 360 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
-              <button onClick={() => setShowFloating3D(false)} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
+              <button onClick={() => { setShowFloating3D(false); setShow3D(false); }} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
             </div>
           </div>
           <div className="flex-1 min-h-0 relative">
@@ -1686,14 +1655,18 @@ const SceneEditor: React.FC = () => {
         </div>
       )}
 
-      {/* Open 3D button (bottom-right) — only when the 3D view is hidden */}
-      {!show3D && (
-        <button
-          onClick={() => setShow3D(true)}
-          title={t('stage3D.show')}
-          className="absolute bottom-2 right-2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white text-[11px] font-medium shadow-lg transition-all"
-        >
-          <Maximize2 size={12} /> Vue 3D
+      {/* Open 3D button — identical to the QuickShow AutoScript floating pill.
+          Clampé au viewport pour que la fenêtre ne s'ouvre jamais hors écran
+          (panneau tronqué / que le haut visible). */}
+      {!showFloating3D && (
+        <button onClick={() => {
+          const W = Math.max(420, Math.min(960, window.innerWidth - 60));
+          const H = Math.max(320, Math.min(540, window.innerHeight - 60));
+          setFloat3DSize({ w: W, h: H });
+          setFloat3DPos({ x: Math.max(10, Math.min(100, window.innerWidth - W - 20)), y: Math.max(10, Math.min(80, window.innerHeight - H - 20)) });
+          setShow3D(true); setShowFloating3D(true);
+        }} className="fixed bottom-4 right-4 z-40 bg-purple-600/80 hover:bg-purple-500 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg transition-all">
+          🎥 3D View
         </button>
       )}
     </div>
@@ -2197,7 +2170,7 @@ const ChaserList: React.FC = () => {
 
   return (
     <>
-      <div className="space-y-1">
+      <div className="grid grid-cols-4 xl:grid-cols-6 gap-2">
         {chasers.map((chaser) => {
           const isSelected = selectedId === chaser.id;
           return (
@@ -2208,15 +2181,26 @@ const ChaserList: React.FC = () => {
                 e.preventDefault();
                 setCtxMenu({ visible: true, x: e.clientX, y: e.clientY, id: chaser.id, name: chaser.name });
               }}
-              className={`px-2 py-1.5 rounded-md cursor-pointer group transition-colors ${
-                isSelected ? 'bg-purple-600/15 border border-purple-500/20' : 'hover:bg-gray-800/30'
+              className={`rounded-lg border px-2 py-1.5 cursor-pointer group transition-all ${
+                isSelected
+                  ? 'bg-purple-600/15 border-purple-500/50 shadow-[0_0_14px_rgba(168,85,247,0.25)]'
+                  : 'bg-[#0d0d14] border-gray-700 hover:border-purple-500/40 hover:bg-gray-800/20'
               }`}
             >
               <div className="flex items-center gap-2">
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{
+                    background: isSelected
+                      ? 'linear-gradient(135deg, #a855f7, #6366f1)'
+                      : 'linear-gradient(135deg, #4b5563, #1f2937)',
+                    boxShadow: isSelected ? '0 0 6px rgba(168,85,247,0.8)' : 'none',
+                  }}
+                />
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs text-gray-300 truncate">{chaser.name}</div>
-                  <div className="text-[10px] text-gray-600">
-                    {chaser.steps.length} step{chaser.steps.length !== 1 ? 's' : ''} · {chaser.speed} BPM · {chaser.direction}
+                  <div className={`text-xs truncate ${isSelected ? 'text-purple-100 font-semibold' : 'text-gray-200 font-medium'}`}>{chaser.name}</div>
+                  <div className="text-[10px] text-gray-500 truncate">
+                    {chaser.steps.length} st. · {chaser.speed} BPM · {chaser.direction}
                   </div>
                 </div>
                 <button
@@ -2343,6 +2327,33 @@ const ChaserEditor: React.FC = () => {
     timer: null, paused: false, currentIdx: 0, bouncingForward: true,
     phase: 'fadeIn', phaseStart: 0, phaseDuration: 0, startChannelValues: {},
   });
+
+  // Floating 3D view (same pill pattern as scenes/EFX tabs)
+  const [showFloating3D, setShowFloating3D] = useState(false);
+  const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
+  const [float3DSize, setFloat3DSize] = useState({ w: 960, h: 540 });
+  const float3DDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
+  const float3DResizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const handleFloat3DDragStart = useCallback((e: React.MouseEvent) => {
+    float3DDragRef.current = { startX: e.clientX, startY: e.clientY, startLeft: float3DPos.x, startTop: float3DPos.y };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DDragRef.current) return;
+      setFloat3DPos({ x: Math.max(0, Math.min(float3DDragRef.current.startLeft + ev.clientX - float3DDragRef.current.startX, window.innerWidth - 120)), y: Math.max(0, Math.min(float3DDragRef.current.startTop + ev.clientY - float3DDragRef.current.startY, window.innerHeight - 40)) });
+    };
+    const onUp = () => { float3DDragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DPos]);
+  const handleFloat3DResizeStart = useCallback((e: React.MouseEvent) => {
+    float3DResizeRef.current = { startX: e.clientX, startY: e.clientY, startW: float3DSize.w, startH: float3DSize.h };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DResizeRef.current) return;
+      setFloat3DSize({ w: Math.max(320, float3DResizeRef.current.startW + ev.clientX - float3DResizeRef.current.startX), h: Math.max(200, float3DResizeRef.current.startH + ev.clientY - float3DResizeRef.current.startY) });
+    };
+    const onUp = () => { float3DResizeRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DSize]);
 
   // Sync local state from selected chaser
   useEffect(() => {
@@ -2995,6 +3006,23 @@ const ChaserEditor: React.FC = () => {
           </div>
         </div>
       )}
+      {showFloating3D && (
+        <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, overflow: 'hidden' }}>
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
+            <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D — Chaser</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => { setFloat3DSize({ w: 640, h: 360 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
+              <button onClick={() => setShowFloating3D(false)} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 relative"><Stage3D hideFixturePanel /><div className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize" onMouseDown={handleFloat3DResizeStart} style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }} /></div>
+        </div>
+      )}
+      {!showFloating3D && (
+        <button onClick={() => setShowFloating3D(true)} className="fixed bottom-4 right-4 z-40 bg-purple-600/80 hover:bg-purple-500 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg transition-all">
+          🎥 3D View
+        </button>
+      )}
     </div>
   );
 };
@@ -3317,7 +3345,7 @@ const CueListList: React.FC = () => {
 
   return (
     <>
-      <div className="space-y-1">
+      <div className="grid grid-cols-4 xl:grid-cols-6 gap-2">
         {cueLists.map((cl) => {
           const isSelected = selectedId === cl.id;
           return (
@@ -3328,15 +3356,26 @@ const CueListList: React.FC = () => {
                 e.preventDefault();
                 setCtxMenu({ visible: true, x: e.clientX, y: e.clientY, id: cl.id, name: cl.name });
               }}
-              className={`px-2 py-1.5 rounded-md cursor-pointer group transition-colors ${
-                isSelected ? 'bg-purple-600/15 border border-purple-500/20' : 'hover:bg-gray-800/30'
+              className={`rounded-lg border px-2 py-1.5 cursor-pointer group transition-all ${
+                isSelected
+                  ? 'bg-purple-600/15 border-purple-500/50 shadow-[0_0_14px_rgba(168,85,247,0.25)]'
+                  : 'bg-[#0d0d14] border-gray-700 hover:border-purple-500/40 hover:bg-gray-800/20'
               }`}
             >
               <div className="flex items-center gap-2">
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{
+                    background: isSelected
+                      ? 'linear-gradient(135deg, #a855f7, #6366f1)'
+                      : 'linear-gradient(135deg, #4b5563, #1f2937)',
+                    boxShadow: isSelected ? '0 0 6px rgba(168,85,247,0.8)' : 'none',
+                  }}
+                />
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs text-gray-300 truncate">{cl.name}</div>
-                  <div className="text-[10px] text-gray-600">
-                    {cl.cues.length} cue{cl.cues.length !== 1 ? 's' : ''} · idx {cl.currentCueIndex + 1}
+                  <div className={`text-xs truncate ${isSelected ? 'text-purple-100 font-semibold' : 'text-gray-200 font-medium'}`}>{cl.name}</div>
+                  <div className="text-[10px] text-gray-500 truncate">
+                    {cl.cues.length} cues · #{cl.currentCueIndex + 1}
                   </div>
                 </div>
                 <button
@@ -3581,22 +3620,33 @@ const EFXList: React.FC = () => {
 
   return (
     <>
-      <div className="space-y-1">
+      <div className="grid grid-cols-4 xl:grid-cols-6 gap-2">
         {effects.map((efx) => {
           const isSelected = selectedId === efx.id;
           return (
             <div
               key={efx.id}
               onClick={() => setSelectedId(efx.id)}
-              className={`px-2 py-1.5 rounded-md cursor-pointer group transition-colors ${
-                isSelected ? 'bg-purple-600/15 border border-purple-500/20' : 'hover:bg-gray-800/30'
+              className={`rounded-lg border px-2 py-1.5 cursor-pointer group transition-all ${
+                isSelected
+                  ? 'bg-purple-600/15 border-purple-500/50 shadow-[0_0_14px_rgba(168,85,247,0.25)]'
+                  : 'bg-[#0d0d14] border-gray-700 hover:border-purple-500/40 hover:bg-gray-800/20'
               }`}
             >
               <div className="flex items-center gap-2">
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{
+                    background: isSelected
+                      ? 'linear-gradient(135deg, #a855f7, #6366f1)'
+                      : 'linear-gradient(135deg, #4b5563, #1f2937)',
+                    boxShadow: isSelected ? '0 0 6px rgba(168,85,247,0.8)' : 'none',
+                  }}
+                />
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs text-gray-300 truncate">{efx.name}</div>
-                  <div className="text-[10px] text-gray-600">
-                    {efx.pattern} · {efx.fixtureIds.length} fixture{efx.fixtureIds.length !== 1 ? 's' : ''}
+                  <div className={`text-xs truncate ${isSelected ? 'text-purple-100 font-semibold' : 'text-gray-200 font-medium'}`}>{efx.name}</div>
+                  <div className="text-[10px] text-gray-500 truncate">
+                    {efx.pattern} · {efx.fixtureIds.length} fx
                   </div>
                 </div>
                 <button
@@ -3650,7 +3700,6 @@ const EFXEditor: React.FC = () => {
   const effects = useShowStore((s) => s.effects);
   const createEffect = useShowStore((s) => s.createEffect);
   const updateEffect = useShowStore((s) => s.updateEffect);
-  const deleteEffect = useShowStore((s) => s.deleteEffect);
 
   const [pattern, setPattern] = useState<EfxPattern>('Circle');
   const [width, setWidth] = useState(1.0);
@@ -3663,14 +3712,13 @@ const EFXEditor: React.FC = () => {
   const [efxName, setEfxName] = useState('EFX 1');
   const [selectedFixtureIds, setSelectedFixtureIds] = useState<Set<string>>(new Set());
   const [editingEffectId, setEditingEffectId] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [stopped, setStopped] = useState(false);
   const stoppedRef = useRef(false);
   useEffect(() => { stoppedRef.current = stopped; }, [stopped]);
   const [show3D, setShow3D] = useState(false);
   const [showFloating3D, setShowFloating3D] = useState(false);
   const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
-  const [float3DSize, setFloat3DSize] = useState({ w: 960, h: 540 });
+  const [float3DSize, setFloat3DSize] = useState({ w: 480, h: 270 });
   const float3DDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
   const float3DResizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
   const handleFloat3DDragStart = useCallback((e: React.MouseEvent) => {
@@ -3904,117 +3952,12 @@ const EFXEditor: React.FC = () => {
         return;
       }
       const elapsed = (performance.now() - startTime) / 1000;
-      const phase = (elapsed * speed * 2) % (Math.PI * 2);
-
-      const cx = 0;
-      const cy = 0;
-      const rx = width * 0.7;
-      const ry = height * 0.7;
-      const rotRad = (rotation * Math.PI) / 180;
-      const ox = (xOffset / 255) * 0.3;
-      const oy = (yOffset / 255) * 0.3;
-
-      // Compute pattern point (same math as SVG preview)
-      let px = 0;
-      let py = 0;
-      const seg = phase / (Math.PI * 2);
-      switch (pattern) {
-        case 'Circle':
-          px = Math.cos(phase) * rx;
-          py = Math.sin(phase) * ry;
-          break;
-        case 'Line': {
-          const lp = seg % 1;
-          const lineX = lp < 0.5 ? (lp * 2) * 2 - 1 : (1 - (lp - 0.5) * 2) * 2 - 1;
-          px = lineX * rx;
-          py = 0;
-          break;
-        }
-        case 'Eight':
-          px = Math.sin(phase) * rx;
-          py = Math.sin(phase * 2) * ry * 0.5;
-          break;
-        case 'Square': {
-          const s = seg * 4;
-          const sIdx = Math.floor(s) % 4;
-          const sFrac = s - Math.floor(s);
-          const cs: [number, number][] = [
-            [1, 1],
-            [-1, 1],
-            [-1, -1],
-            [1, -1],
-          ];
-          const ce: [number, number][] = [
-            [-1, 1],
-            [-1, -1],
-            [1, -1],
-            [1, 1],
-          ];
-          px = (cs[sIdx][0] + (ce[sIdx][0] - cs[sIdx][0]) * sFrac) * rx;
-          py = (cs[sIdx][1] + (ce[sIdx][1] - cs[sIdx][1]) * sFrac) * ry;
-          break;
-        }
-        case 'Triangle': {
-          const ta = seg * 3;
-          const ti = Math.floor(ta) % 3;
-          const tf = ta - Math.floor(ta);
-          const tv: [number, number][] = [
-            [0, -1],
-            [-0.866, 0.5],
-            [0.866, 0.5],
-          ];
-          const tn = tv[(ti + 1) % 3];
-          px = (tv[ti][0] + (tn[0] - tv[ti][0]) * tf) * rx;
-          py = (tv[ti][1] + (tn[1] - tv[ti][1]) * tf) * ry;
-          break;
-        }
-        case 'Infinity':
-          px = Math.cos(phase) * rx;
-          py = Math.sin(phase * 2) * ry * 0.5;
-          break;
-        case 'Zigzag': {
-          const z = (seg % 1) * 2 - 1;
-          px = z * rx;
-          const zs = seg * 8;
-          const zi = Math.floor(zs);
-          const zf = zs - zi;
-          const zy = zi % 2 === 0 ? -1 + zf * 2 : 1 - zf * 2;
-          py = zy * ry;
-          break;
-        }
-        case 'Spiral': {
-          const sc = seg % 1;
-          const sr = 0.2 + sc * 0.8;
-          px = Math.cos(phase) * rx * sr;
-          py = Math.sin(phase) * ry * sr;
-          break;
-        }
-        case 'DoubleCircle': {
-          const dc = Math.cos(phase) * rx;
-          const ds = Math.sin(phase) * ry;
-          const dc2 = Math.cos(phase + Math.PI) * rx * 0.5;
-          const ds2 = Math.sin(phase + Math.PI) * ry * 0.5;
-          const blending = (Math.sin(phase * 3) + 1) / 2;
-          px = dc * (1 - blending) + dc2 * blending;
-          py = ds * (1 - blending) + ds2 * blending;
-          break;
-        }
-        case 'Heart': {
-          const t = phase;
-          const hx = 16 * Math.pow(Math.sin(t), 3);
-          const hy = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
-          px = (hx / 16) * rx;
-          py = (hy / 16) * -ry;
-          break;
-        }
-      }
-      // Apply rotation and offset
-      const rx2 = px * Math.cos(rotRad) - py * Math.sin(rotRad) + ox;
-      const ry2 = px * Math.sin(rotRad) + py * Math.cos(rotRad) + oy;
-
-      // Map to DMX: -1..1 → 0..255, center at 128
-      const dmxPan = Math.round(Math.max(0, Math.min(255, 128 + rx2 * 127)));
-      const dmxTilt = Math.round(Math.max(0, Math.min(255, 128 + ry2 * 127)));
+      // Math EXACTE du moteur du show (fixture-tracks.ts) : le test live envoie
+      // rigoureusement les mêmes octets DMX que la lecture du preset.
+      const tCycles = (elapsed * speed * 2) / (Math.PI * 2);
+      const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
+        pattern, tCycles, width, height, rotation, xOffset, yOffset,
+      );
 
       // Send DMX for each selected fixture grouped by universe
       const byUniverse = new Map<string, Record<number, number>>();
@@ -4091,97 +4034,22 @@ const EFXEditor: React.FC = () => {
   const previewPoints = React.useMemo(() => {
     const points: { x: number; y: number }[] = [];
     const steps = 120;
-    const cx = 0;
-    const cy = 0;
-    const rx = width * 0.7;
-    const ry = height * 0.7;
-    const rotRad = (rotation * Math.PI) / 180;
-    const ox = (xOffset / 255) * 0.3;
-    const oy = (yOffset / 255) * 0.3;
-
+    // Math EXACTE du moteur du show (fixture-tracks.ts) : le tracé SVG est la
+    // trajectoire réelle des projecteurs (coordonnées normalisées).
+    const phaseCycles = phase / (Math.PI * 2);
     for (let i = 0; i <= steps; i++) {
-      const t = (i / steps) * Math.PI * 2 + phase;
-      const seg = (t % (Math.PI * 2)) / (Math.PI * 2);
-      let x = 0, y = 0;
-      switch (pattern) {
-        case 'Circle':
-          x = Math.cos(t) * rx;
-          y = Math.sin(t) * ry;
-          break;
-        case 'Line':
-          const lp = seg % 1;
-          const lineX = lp < 0.5 ? (lp * 2) * 2 - 1 : (1 - (lp - 0.5) * 2) * 2 - 1;
-          x = lineX * rx;
-          y = 0;
-          break;
-        case 'Eight':
-          x = Math.sin(t) * rx;
-          y = Math.sin(t * 2) * ry * 0.5;
-          break;
-        case 'Square':
-          const s = seg * 4;
-          const sIdx = Math.floor(s) % 4;
-          const sFrac = s - Math.floor(s);
-          const cs: [number, number][] = [[1, 1], [-1, 1], [-1, -1], [1, -1]];
-          const ce: [number, number][] = [[-1, 1], [-1, -1], [1, -1], [1, 1]];
-          x = (cs[sIdx][0] + (ce[sIdx][0] - cs[sIdx][0]) * sFrac) * rx;
-          y = (cs[sIdx][1] + (ce[sIdx][1] - cs[sIdx][1]) * sFrac) * ry;
-          break;
-        case 'Triangle':
-          const ta = (t % (Math.PI * 2)) / (Math.PI * 2) * 3;
-          const ti = Math.floor(ta) % 3;
-          const tf = ta - Math.floor(ta);
-          const tv: [number, number][] = [[0, -1], [-0.866, 0.5], [0.866, 0.5]];
-          const tn = tv[(ti + 1) % 3];
-          x = (tv[ti][0] + (tn[0] - tv[ti][0]) * tf) * rx;
-          y = (tv[ti][1] + (tn[1] - tv[ti][1]) * tf) * ry;
-          break;
-        case 'Infinity':
-          x = Math.cos(t) * rx;
-          y = Math.sin(t * 2) * ry * 0.5;
-          break;
-        case 'Zigzag': {
-          const zz = (seg % 1) * 2 - 1;
-          x = zz * rx;
-          const zs = seg * 8;
-          const zi = Math.floor(zs);
-          const zf = zs - zi;
-          const zy = zi % 2 === 0 ? -1 + zf * 2 : 1 - zf * 2;
-          y = zy * ry;
-          break;
-        }
-        case 'Spiral': {
-          const sc = seg % 1;
-          const sr = 0.2 + sc * 0.8;
-          x = Math.cos(t) * rx * sr;
-          y = Math.sin(t) * ry * sr;
-          break;
-        }
-        case 'DoubleCircle': {
-          const dc = Math.cos(t) * rx;
-          const ds = Math.sin(t) * ry;
-          const dc2 = Math.cos(t + Math.PI) * rx * 0.5;
-          const ds2 = Math.sin(t + Math.PI) * ry * 0.5;
-          const blending = (Math.sin(t * 3) + 1) / 2;
-          x = dc * (1 - blending) + dc2 * blending;
-          y = ds * (1 - blending) + ds2 * blending;
-          break;
-        }
-        case 'Heart': {
-          const hx = 16 * Math.pow(Math.sin(t), 3);
-          const hy = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
-          x = (hx / 16) * rx;
-          y = (hy / 16) * -ry;
-          break;
-        }
-      }
-      // Apply rotation and offset
-      const rx2 = x * Math.cos(rotRad) - y * Math.sin(rotRad) + ox;
-      const ry2 = x * Math.sin(rotRad) + y * Math.cos(rotRad) + oy;
-      points.push({ x: rx2, y: ry2 });
+      points.push(evalEfxNormalized(pattern, i / steps + phaseCycles, width, height, rotation, xOffset, yOffset));
     }
     return points;
   }, [pattern, width, height, rotation, speed, xOffset, yOffset, phase]);
+
+  // Demi-étendue du tracé : le viewBox zoome juste assez pour tout montrer
+  // (width/height > 1 ou gros offsets dépassent ±1) sans déformer la forme.
+  const previewRange = React.useMemo(() => {
+    let r = 1;
+    for (const p of previewPoints) r = Math.max(r, Math.abs(p.x), Math.abs(p.y));
+    return r;
+  }, [previewPoints]);
 
   const pathD = React.useMemo(() => {
     if (previewPoints.length === 0) return '';
@@ -4220,8 +4088,74 @@ const EFXEditor: React.FC = () => {
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-3">
+      <div className="space-y-6">
+        {/* Live animated preview — on top, capped so controls stay visible */}
+        <div className="space-y-3 max-w-[380px]">
+          <label className="block text-xs font-medium text-gray-400">Live Preview — {pattern}</label>
+          <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
+            <svg
+              viewBox={`${-previewRange} ${-previewRange} ${previewRange * 2} ${previewRange * 2}`}
+              className="w-full aspect-square"
+              style={{ background: '#0a0a0f' }}
+            >
+              {/* Grid */}
+              <circle cx={0} cy={0} r={0.8} fill="none" stroke="#1a1a2e" strokeWidth={0.01} />
+              <line x1={-1} y1={0} x2={1} y2={0} stroke="#1a1a2e" strokeWidth={0.005} />
+              <line x1={0} y1={-1} x2={0} y2={1} stroke="#1a1a2e" strokeWidth={0.005} />
+
+              {/* Path trail */}
+              {trailPoints.map((tp, i) => {
+                if (!tp) return null;
+                return (
+                <circle
+                  key={i}
+                  cx={tp.x}
+                  cy={tp.y}
+                  r={0.03 * (1 - i * 0.06)}
+                  fill="#a855f7"
+                  opacity={tp.alpha * 0.5}
+                />
+              );
+              })}
+
+              {/* Path outline */}
+              <path
+                d={pathD}
+                fill="none"
+                stroke="#a855f7"
+                strokeWidth={0.015}
+                opacity={0.3}
+              />
+
+              {/* Current position */}
+              {previewPoints.length > 0 && (() => {
+                const currentIdx = Math.floor((phase / (Math.PI * 2)) * (previewPoints.length - 1)) % previewPoints.length;
+                const cp = previewPoints[currentIdx];
+                if (!cp) return null;
+                return (
+                  <circle
+                    cx={cp.x}
+                    cy={cp.y}
+                    r={0.06}
+                    fill="#c084fc"
+                    stroke="#ffffff"
+                    strokeWidth={0.02}
+                    style={{ filter: 'drop-shadow(0 0 3px #a855f7)' }}
+                  />
+                );
+              })()}
+            </svg>
+          </div>
+          <div className="flex gap-2 text-[10px] text-gray-600 justify-center">
+            <span>{pattern}</span>
+            <span>·</span>
+            <span>{(speed / Math.PI).toFixed(1)} Hz</span>
+            <span>·</span>
+            <span>{previewPoints.length > 0 ? `${Math.round((phase / (Math.PI * 2) * 100) % 100)}%` : 'idle'}</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-3">
           <label className="block text-xs font-medium text-gray-400">Pattern</label>
           <div className="flex flex-wrap gap-1.5">
             {EFX_PATTERNS.map((p) => (
@@ -4341,7 +4275,10 @@ const EFXEditor: React.FC = () => {
             </div>
           </div>
 
-          {/* Fixture multi-select */}
+        </div>
+
+        <div className="space-y-4">
+        {/* Fixture multi-select */}
           <div className="space-y-1.5">
             <label className="block text-xs font-medium text-gray-400">
               Fixtures ({selectedFixtureIds.size} selected)
@@ -4399,8 +4336,8 @@ const EFXEditor: React.FC = () => {
             )}
           </div>
 
-          {/* Action buttons */}
-          <div className="flex gap-2 pt-1">
+          {/* Action buttons — centered under the fixture list */}
+          <div className="flex gap-2 pt-1 justify-center">
             <button
               onClick={handleSave}
               className="px-4 py-2 bg-purple-600/30 text-purple-200 rounded-lg text-xs font-semibold hover:bg-purple-600/50 active:bg-purple-600/60 flex items-center gap-1.5 transition-all border border-purple-500/30 hover:border-purple-400/60"
@@ -4425,176 +4362,25 @@ const EFXEditor: React.FC = () => {
             </button>
           </div>
         </div>
-
-        {/* Live animated preview */}
-        <div className="space-y-3">
-          <label className="block text-xs font-medium text-gray-400">Live Preview — {pattern}</label>
-          <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
-            <svg
-              viewBox="-1 -1 2 2"
-              className="w-full aspect-square"
-              style={{ background: '#0a0a0f' }}
-            >
-              {/* Grid */}
-              <circle cx={0} cy={0} r={0.8} fill="none" stroke="#1a1a2e" strokeWidth={0.01} />
-              <line x1={-1} y1={0} x2={1} y2={0} stroke="#1a1a2e" strokeWidth={0.005} />
-              <line x1={0} y1={-1} x2={0} y2={1} stroke="#1a1a2e" strokeWidth={0.005} />
-
-              {/* Path trail */}
-              {trailPoints.map((tp, i) => {
-                if (!tp) return null;
-                return (
-                <circle
-                  key={i}
-                  cx={tp.x}
-                  cy={tp.y}
-                  r={0.03 * (1 - i * 0.06)}
-                  fill="#a855f7"
-                  opacity={tp.alpha * 0.5}
-                />
-              );
-              })}
-
-              {/* Path outline */}
-              <path
-                d={pathD}
-                fill="none"
-                stroke="#a855f7"
-                strokeWidth={0.015}
-                opacity={0.3}
-              />
-
-              {/* Current position */}
-              {previewPoints.length > 0 && (() => {
-                const currentIdx = Math.floor((phase / (Math.PI * 2)) * (previewPoints.length - 1)) % previewPoints.length;
-                const cp = previewPoints[currentIdx];
-                if (!cp) return null;
-                return (
-                  <circle
-                    cx={cp.x}
-                    cy={cp.y}
-                    r={0.06}
-                    fill="#c084fc"
-                    stroke="#ffffff"
-                    strokeWidth={0.02}
-                    style={{ filter: 'drop-shadow(0 0 3px #a855f7)' }}
-                  />
-                );
-              })()}
-            </svg>
-          </div>
-          <div className="flex gap-2 text-[10px] text-gray-600 justify-center">
-            <span>{pattern}</span>
-            <span>·</span>
-            <span>{(speed / Math.PI).toFixed(1)} Hz</span>
-            <span>·</span>
-            <span>{previewPoints.length > 0 ? `${Math.round((phase / (Math.PI * 2) * 100) % 100)}%` : 'idle'}</span>
-          </div>
         </div>
       </div>
-
-      {/* Saved Effects list */}
-      <div className="border-t border-gray-800/30 pt-4">
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-xs font-medium text-gray-400">Saved EFX ({effects.length})</span>
-        </div>
-        {effects.length === 0 ? (
-          <div className="text-xs text-gray-600 text-center py-4">
-            No EFX saved yet. Configure your pattern and click "Save EFX".
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {effects.map((efx) => {
-              const isEditing = editingEffectId === efx.id;
-              const fixtureNames = efx.fixtureIds
-                .map((fid) => patchedFixtures.find((pf) => pf.id === fid)?.name)
-                .filter(Boolean)
-                .join(', ') || 'All';
-              return (
-                <div
-                  key={efx.id}
-                  className={`px-3 py-2 rounded-lg flex items-center gap-2 group transition-colors ${
-                    isEditing
-                      ? 'bg-purple-600/15 border border-purple-500/20'
-                      : 'bg-[#0d0d14] border border-gray-800/30 hover:border-gray-700'
-                  }`}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs text-gray-300 truncate">{efx.name}</div>
-                    <div className="text-[10px] text-gray-600">
-                      {efx.pattern} · {(efx.speed / Math.PI).toFixed(1)}Hz · {efx.fixtureIds.length} fixture{efx.fixtureIds.length !== 1 ? 's' : ''}
-                      {fixtureNames && <span className="ml-1 truncate">({fixtureNames})</span>}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setEditingEffectId(efx.id)}
-                    className="p-1 text-gray-500 hover:text-purple-400 opacity-0 group-hover:opacity-100 transition-all"
-                    title="Edit"
-                  >
-                    <Edit2 size={12} />
-                  </button>
-                  <button
-                    onClick={() => setConfirmDelete(efx.id)}
-                    className="p-1 text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
-                    title="Delete"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
-
-      {/* Delete confirmation */}
-      {confirmDelete && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setConfirmDelete(null)}>
-          <div className="bg-[#12121a] border border-gray-700 rounded-xl p-5 shadow-2xl w-80" onClick={(e) => e.stopPropagation()}>
-            <h4 className="text-sm font-bold text-white mb-2">Delete EFX?</h4>
-            <p className="text-xs text-gray-400 mb-4">This will permanently delete this EFX. This cannot be undone.</p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmDelete(null)} className="px-3 py-1.5 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300 hover:bg-gray-700/50">
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  deleteEffect(confirmDelete);
-                  if (editingEffectId === confirmDelete) handleNew();
-                  setConfirmDelete(null);
-                }}
-                className="px-3 py-1.5 bg-red-600/20 border border-red-500/30 rounded-lg text-xs text-red-300 hover:bg-red-600/30"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      </div>
-      {show3D && !showFloating3D && (
-        <div className="w-[46%] shrink-0 rounded-xl overflow-hidden border border-gray-800/50 bg-[#08080e] min-h-0 h-full relative ml-2">
-          <Stage3D hideFixturePanel />
-          <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1">
-            <button onClick={() => setShowFloating3D(true)} title={t('stage3D.detach')} className="flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white text-[11px] font-medium shadow-lg transition-all"><Maximize2 size={12} /> Détacher</button>
-            <button onClick={() => setShow3D(false)} title={t('stage3D.hide')} className="w-7 h-7 rounded-md bg-gray-700/80 hover:bg-gray-600 text-white flex items-center justify-center"><X size={12} /></button>
-          </div>
-        </div>
-      )}
       {show3D && showFloating3D && (
         <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, overflow: 'hidden' }}>
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
             <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D — EFX</span>
             <div className="flex items-center gap-1">
-              <button onClick={() => { setFloat3DSize({ w: 640, h: 360 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
-              <button onClick={() => setShowFloating3D(false)} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
+              <button onClick={() => { setFloat3DSize({ w: 480, h: 270 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
+              <button onClick={() => { setShowFloating3D(false); setShow3D(false); }} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
             </div>
           </div>
           <div className="flex-1 min-h-0 relative"><Stage3D hideFixturePanel /><div className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize" onMouseDown={handleFloat3DResizeStart} style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }} /></div>
         </div>
       )}
-      {!show3D && (
-        <button onClick={() => setShow3D(true)} title={t('stage3D.show')} className="absolute bottom-2 right-2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white text-[11px] font-medium shadow-lg transition-all"><Maximize2 size={12} /> Vue 3D</button>
+      {!showFloating3D && (
+        <button onClick={() => { setShow3D(true); setShowFloating3D(true); }} className="fixed bottom-4 right-4 z-40 bg-purple-600/80 hover:bg-purple-500 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg transition-all">
+          🎥 3D View
+        </button>
       )}
     </div>
   );
@@ -4667,6 +4453,9 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
   // Browse by manufacturer
   const [allFixtures, setAllFixtures] = useState<FixtureDefResult[]>([]);
   const [manufacturers, setManufacturers] = useState<{ name: string; count: number }[]>([]);
+  // Library loading flag: shows a loader in the browse step instead of an
+  // empty shell (avoids the "flashing modal" impression on open).
+  const [libLoading, setLibLoading] = useState(false);
   const [selectedManufacturer, setSelectedManufacturer] = useState<string>('');
   const [manufacturerFixtures, setManufacturerFixtures] = useState<FixtureDefResult[]>([]);
 
@@ -4760,6 +4549,7 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
   // ── Browse: load all fixtures & group by manufacturer ──
   const handleBrowse = async () => {
     setAddError(null);
+    setLibLoading(true);
     try {
       const all = await (window.lightMaestro.fixtures as any).getAll();
       const fixtureDefs: FixtureDefResult[] = (all || []).map((d: any) => ({
@@ -4782,6 +4572,8 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
       setManufacturers(mfgs);
     } catch (e) {
       setAddError('Failed to load fixture library');
+    } finally {
+      setLibLoading(false);
     }
   };
 
@@ -4925,6 +4717,7 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
   const resetAddModal = () => {
     setShowAdd(false);
     setStep('idle');
+    setLibLoading(false);
     setSearchQuery('');
     setSearchResults([]);
     setSelectedDef(null);
@@ -5197,6 +4990,7 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
           error={addError}
           universeId={selectedUniverseId}
           manufacturers={manufacturers}
+          libLoading={libLoading}
           selectedManufacturer={selectedManufacturer}
           manufacturerFixtures={manufacturerFixtures}
           allFixtures={allFixtures}
@@ -5713,6 +5507,7 @@ interface AddFixtureModalProps {
   error: string | null;
   universeId: string;
   manufacturers: { name: string; count: number }[];
+  libLoading: boolean;
   selectedManufacturer: string;
   manufacturerFixtures: FixtureDefResult[];
   allFixtures: FixtureDefResult[];
@@ -5749,6 +5544,7 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
   error,
   universeId,
   manufacturers,
+  libLoading,
   selectedManufacturer,
   manufacturerFixtures,
   allFixtures,
@@ -5827,6 +5623,13 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                   className="w-full bg-gray-800/50 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-purple-500/50"
                 />
               </div>
+              {libLoading ? (
+                <div className="flex flex-col items-center justify-center py-10 gap-3">
+                  <div className="w-6 h-6 rounded-full border-2 border-gray-700 border-t-purple-400 animate-spin" />
+                  <p className="text-xs text-gray-500">Loading fixture library…</p>
+                </div>
+              ) : (
+              <>
               <p className="text-xs text-gray-500">
                 {manufacturers.length} manufacturers · {allFixtures.length} fixtures
               </p>
@@ -5856,10 +5659,10 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                   );
                 })}
               </div>
+              </>
+              )}
             </div>
           )}
-
-          {/* Step: Manufacturer Fixtures */}
           {step === 'manufacturer' && (
             <div className="space-y-4">
               <button
@@ -6257,7 +6060,7 @@ const PatchedFixtureList: React.FC = () => {
           return (
           <div
             key={f.id}
-            className={`px-2 py-1.5 rounded-md hover:bg-gray-800/30 cursor-pointer text-xs flex items-center gap-2 ${isTesting ? 'bg-emerald-600/10 ring-1 ring-emerald-500/40' : ''}`}
+            className={`px-2 py-1.5 rounded-lg border bg-[#0d0d14] border-gray-700 hover:border-purple-500/40 hover:bg-gray-800/20 cursor-pointer text-xs flex items-center gap-2 transition-all ${isTesting ? '!bg-emerald-600/10 !border-emerald-500/40 shadow-[0_0_14px_rgba(16,185,129,0.25)]' : ''}`}
             onContextMenu={(e) => {
               e.preventDefault();
               setCtxMenu({ visible: true, x: e.clientX, y: e.clientY, fixtureId: f.id, fixtureName: f.name });
@@ -6456,24 +6259,27 @@ const GroupsList: React.FC = () => {
 
   return (
     <>
-      <div className="space-y-1">
+      <div className="grid grid-cols-4 xl:grid-cols-6 gap-2">
         {groups.map((g) => (
           <div
             key={g.id}
-            className="px-2 py-1.5 rounded-md hover:bg-gray-800/30 cursor-pointer text-xs flex items-center gap-2"
+            className="rounded-lg border border-gray-700 bg-[#0d0d14] px-2 py-1.5 hover:border-purple-500/40 hover:bg-gray-800/20 cursor-pointer text-xs transition-all"
             onContextMenu={(e) => {
               e.preventDefault();
               setCtxMenu({ visible: true, x: e.clientX, y: e.clientY, groupId: g.id, groupName: g.name });
             }}
+            title="Right-click to delete"
           >
-            <span
-              className="w-2 h-2 rounded-sm shrink-0"
-              style={{ backgroundColor: g.color || '#6b7280' }}
-            />
-            <div className="flex-1 min-w-0">
-              <div className="text-gray-300 truncate font-medium">{g.name}</div>
-              <div className="text-[10px] text-gray-600">
-                {g.fixtureIds.length} fixture{g.fixtureIds.length !== 1 ? 's' : ''}
+            <div className="flex items-center gap-2">
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: g.color || '#6b7280', boxShadow: `0 0 6px ${g.color || '#6b7280'}66` }}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-gray-200 truncate font-medium">{g.name}</div>
+                <div className="text-[10px] text-gray-500 truncate">
+                  {g.fixtureIds.length} fx
+                </div>
               </div>
             </div>
           </div>
@@ -6526,6 +6332,14 @@ const GroupsEditor: React.FC = () => {
   const [editColor, setEditColor] = useState('');
   const [editFixtureIds, setEditFixtureIds] = useState<string[]>([]);
 
+  // Le bouton générique "+ New group" du panneau de gauche ouvre ce formulaire
+  // via l'événement lm-open-group-create (le bouton d'en-tête redondant a été retiré).
+  useEffect(() => {
+    const open = () => setShowCreate(true);
+    window.addEventListener('lm-open-group-create', open);
+    return () => window.removeEventListener('lm-open-group-create', open);
+  }, []);
+
   const resetCreate = () => {
     setShowCreate(false);
     setNewName('');
@@ -6568,21 +6382,13 @@ const GroupsEditor: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-white">Fixture Groups</h2>
-          <p className="text-[10px] text-gray-500 mt-0.5 max-w-lg">
-            Groups are user-defined subsets used to target specific fixtures in AutoScript cues.
-            They differ from <span className="text-purple-400">Tiers</span>, which control automatic show behavior
-            (intensity, movement, and strobe scaling in DMX cues).
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="px-4 py-2 bg-purple-600/30 text-purple-200 rounded-lg text-xs font-semibold hover:bg-purple-600/50 active:bg-purple-600/60 flex items-center gap-1.5 transition-all border border-purple-500/30 hover:border-purple-400/60 cursor-pointer shrink-0 ml-4"
-        >
-          <Plus size={14} /> Create Group
-        </button>
+      <div>
+        <h2 className="text-xl font-bold text-white">Fixture Groups</h2>
+        <p className="text-[10px] text-gray-500 mt-0.5 max-w-lg">
+          Groups are user-defined subsets used to target specific fixtures in AutoScript cues.
+          They differ from <span className="text-purple-400">Tiers</span>, which control automatic show behavior
+          (intensity, movement, and strobe scaling in DMX cues).
+        </p>
       </div>
 
       {fixtureGroups.length === 0 && !showCreate && (
@@ -6960,7 +6766,12 @@ const DesignSettingsPanel: React.FC = () => {
   };
   const handleAddUniverse = () => {
     const id = 'universe-' + (showUniverses.length + 1);
-    addShowUniverse({ id, name: 'Universe ' + (showUniverses.length + 1), type: 'usb-dmx', channels: 512, serialPort: '' });
+    const result = addShowUniverse({ id, name: 'Universe ' + (showUniverses.length + 1), type: 'usb-dmx', channels: 512, serialPort: '' });
+    if (result && 'error' in result) {
+      setSaveStatus(result.error);
+    } else {
+      setSaveStatus(null);
+    }
   };
   const handleRemoveUniverse = (id: string) => removeShowUniverse(id);
   const handleUpdateUniverse = (id: string, updates: any) => {
@@ -7064,7 +6875,7 @@ const DesignSettingsPanel: React.FC = () => {
 
       {saveStatus && (
         <div className={`text-xs px-3 py-2 rounded-lg ${
-          saveStatus.includes('failed')
+          saveStatus.includes('failed') || saveStatus.includes('Licence') || saveStatus.includes('limitée') || saveStatus.includes('limit')
             ? 'bg-red-900/20 border border-red-800/40 text-red-300'
             : 'bg-green-900/20 border border-green-800/40 text-green-300'
         }`}>

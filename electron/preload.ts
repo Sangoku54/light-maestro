@@ -203,4 +203,17 @@ contextBridge.exposeInMainWorld('lightMaestro', {
       return () => { ipcRenderer.removeListener('osc:command', handler); };
     },
   },
+
+  // Licence (connexion compte — état exposé, logique côté main)
+  license: {
+    getState: () => ipcRenderer.invoke('license:getState'),
+    login: (email: string, password: string) =>
+      ipcRenderer.invoke('license:login', email, password),
+    register: (email: string, password: string, displayName?: string) =>
+      ipcRenderer.invoke('license:register', email, password, displayName),
+    checkout: (edition: 'standard' | 'full') =>
+      ipcRenderer.invoke('license:checkout', edition),
+    openUrl: (url: string) => ipcRenderer.invoke('license:openUrl', url),
+    logout: () => ipcRenderer.invoke('license:logout'),
+  },
 });

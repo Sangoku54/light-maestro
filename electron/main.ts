@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, crashReporter } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, crashReporter, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -15,6 +15,8 @@ import type { MtcState } from './midi/mtc';
 import { AudioAnalyzer } from './audio/analyzer';
 import { crashLogger } from './utils/crash-logger';
 import { packProject, unpackProject } from './project-envelope';
+import { LicenseStore } from './license/store';
+import { loginWithLicense, registerWithLicense, startCheckout, LicenseError } from './license/server';
 
 // Disable GPU cache to avoid permission errors on Windows
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
@@ -147,6 +149,7 @@ void midiManager.loadMapping();
 const audioAnalyzer = new AudioAnalyzer();
 const remoteServer = new RemoteServer();
 const oscServer = new OscServer();
+const licenseStore = new LicenseStore();
 
 // ─── Splash screen (animated loading window) ────────────────
 function createSplashWindow() {
@@ -640,6 +643,66 @@ ipcMain.handle('midi:addMapping', async (_, mapping: MidiMapping) => midiManager
 ipcMain.handle('midi:removeMapping', async (_, id: string) => midiManager.removeMapping(id));
 ipcMain.handle('midi:startLearn', async (_, target: MidiTarget) => midiManager.startLearn(target));
 ipcMain.handle('midi:stopLearn', async () => midiManager.stopLearn());
+
+// ─── IPC Handlers: Licence ───────────────────────────────────
+ipcMain.handle('license:getState', () => licenseStore.getState());
+ipcMain.handle('license:login', async (_event, email: string, password: string) => {
+  try {
+    const result = await loginWithLicense(email, password);
+    licenseStore.setLicense({
+      edition: result.edition,
+      email: result.email,
+      displayName: result.displayName,
+      token: result.token,
+    });
+    return { ok: true, state: licenseStore.getState() };
+  } catch (e) {
+    if (e instanceof LicenseError) {
+      return { ok: false, code: e.code, message: e.message };
+    }
+    return { ok: false, code: 'network', message: 'Erreur inattendue' };
+  }
+});
+ipcMain.handle('license:register', async (_event, email: string, password: string, displayName?: string) => {
+  try {
+    const result = await registerWithLicense(email, password, displayName);
+    licenseStore.setLicense({
+      edition: result.edition,
+      email: result.email,
+      displayName: result.displayName,
+      token: result.token,
+    });
+    return { ok: true, state: licenseStore.getState() };
+  } catch (e) {
+    if (e instanceof LicenseError) {
+      return { ok: false, code: e.code, message: e.message };
+    }
+    return { ok: false, code: 'network', message: 'Erreur inattendue' };
+  }
+});
+ipcMain.handle('license:checkout', async (_event, edition: string) => {
+  const token = licenseStore.getToken();
+  if (!token) return { ok: false, code: 'invalid_token', message: 'Non connecté' };
+  if (edition !== 'standard' && edition !== 'full') {
+    return { ok: false, code: 'invalid_edition', message: 'Édition inconnue' };
+  }
+  const url = await startCheckout(token, edition);
+  if (!url) return { ok: false, code: 'network', message: 'Checkout indisponible' };
+  return { ok: true, url };
+});
+ipcMain.handle('license:openUrl', async (_event, url: string) => {
+  try {
+    if (!/^https:\/\//i.test(url)) return { ok: false };
+    await shell.openExternal(url);
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+});
+ipcMain.handle('license:logout', () => {
+  licenseStore.clear();
+  return { ok: true, state: licenseStore.getState() };
+});
 
 // ─── MIDI → Action Execution ─────────────────────────────────
 // The mapping engine emits 'mapped' when incoming MIDI matches a

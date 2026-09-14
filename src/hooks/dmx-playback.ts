@@ -1188,43 +1188,52 @@ export function useDmxPlayback(options: {
           if(_dimmerTrackActive){for(const li of (fa.ledIntensityOffsets||[])){chVals[pf.startAddress+li]=dimmerVal;}}
 
 // Densite par section (activeTiers) : les fixtures hors tiers actifs
-           // sont eteintes (dimmer 0 + shutter 0 + gates laser 0). Le show
-           // respire entre intro (primary seul) et drop (toutes les couches).
-           // Les fixtures de tier 'other' sont toujours considerees comme actives.
-           // Une fixture dont le centre de mouvement a été « capturé »
-           // (centerPan/centerTilt posés) est une mise en avant intentionnelle :
-           // elle doit participer au show (couleur + mouvement) quelle que soit
-           // sa densité de tier, sinon Target+Capture reste éteinte pendant
-           // intro/bridge/outro (activeTiers réduit) alors que le reste bouge.
-           const _captured = fixturePositions?.[pf.id];
-           const _hasCapturedCenter = !!_captured && (
-             (_captured.centerPan !== undefined && _captured.centerPan !== 0) ||
-             (_captured.centerTilt !== undefined && _captured.centerTilt !== 0)
-           );
-           let _fixtureInactive = false;
-           if (Array.isArray(active.activeTiers) && !active.activeTiers.includes(pf.tier) && pf.tier !== 'other' && !_dimmerTrackActive && !_hasCapturedCenter) {
-             _fixtureInactive = true;
-             if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = mapIntensityVal(0, fa);
-             if (fa.shutterOffset !== null) chVals[pf.startAddress + fa.shutterOffset] = 0;
-             if (fa.strobeOffset !== null) chVals[pf.startAddress + fa.strobeOffset] = 0;
+            // passent en veilleuse (plancher ~11 % + shutter ouvert) au lieu du
+            // noir total — les faisceaux restent à peine visibles pendant que
+            // le show respire entre intro (primary seul) et drop (toutes les
+            // couches). Noir total = mouvement fantôme invisible (le cas
+            // rapporté : secondaire qui bouge mais ne se voit pas).
+            // Les fixtures de tier 'other' sont toujours considerees comme actives.
+            // Une fixture dont le centre de mouvement a été « capturé »
+            // (centerPan/centerTilt posés) est une mise en avant intentionnelle :
+            // elle doit participer au show (couleur + mouvement) quelle que soit
+            // sa densité de tier, sinon Target+Capture reste éteinte pendant
+            // intro/bridge/outro (activeTiers réduit) alors que le reste bouge.
+            const _captured = fixturePositions?.[pf.id];
+            const _hasCapturedCenter = !!_captured && (
+              (_captured.centerPan !== undefined && _captured.centerPan !== 0) ||
+              (_captured.centerTilt !== undefined && _captured.centerTilt !== 0)
+            );
+            // ~11 % DMX : faisceau visible en salle noire, nettement en retrait.
+            const INACTIVE_TIER_FLOOR = 28;
+            let _fixtureInactive = false;
+            if (Array.isArray(active.activeTiers) && !active.activeTiers.includes(pf.tier) && pf.tier !== 'other' && !_dimmerTrackActive && !_hasCapturedCenter) {
+              _fixtureInactive = true;
+              if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = mapIntensityVal(INACTIVE_TIER_FLOOR, fa);
+              if (fa.shutterOffset !== null) chVals[pf.startAddress + fa.shutterOffset] = 255;
+              if (fa.strobeOffset !== null) chVals[pf.startAddress + fa.strobeOffset] = 0;
 if (fa.isLaser) {
                 if (fa.rgbOffsets) for (const o of fa.rgbOffsets) chVals[pf.startAddress + o] = 0;
                 if (fa.laserColorGateOffset !== null) chVals[pf.startAddress + fa.laserColorGateOffset] = 0;
                 if (fa.laserMasterOffset !== null) chVals[pf.startAddress + fa.laserMasterOffset] = 0;
               }
-             // RGB-only sans canal intensité (LED bars / wall washers) : on
-             // éteint les segments (sinon le bloc palette les rallumerait —
-             // la respiration des tiers doit les éteindre aussi).
-             if (!fa.isLaser) {
-               for (const o of (fa.rgbOffsets || [])) chVals[pf.startAddress + o] = 0;
-               for (const seg of fa.rgbSegments) {
-                 chVals[pf.startAddress + seg.r] = 0;
-                 chVals[pf.startAddress + seg.g] = 0;
-                 if (seg.b !== null) chVals[pf.startAddress + seg.b] = 0;
-                 if (seg.w !== null) chVals[pf.startAddress + seg.w] = 0;
-               }
-             }
-           }
+              // RGB-only sans canal intensité (LED bars / wall washers) : teinte
+              // du cue au plancher (le bloc palette est sauté pour les inactifs —
+              // sans ça, noir total malgré le mouvement).
+              if (!fa.isLaser) {
+                const _floorHex = (active as any)?.forcedColor || (active as any)?.color || (active as any)?.colors?.[0] || '#ffffff';
+                const [_fr0, _fg0, _fb0] = hexToRgb(_floorHex);
+                const _fs = INACTIVE_TIER_FLOOR / 255;
+                const _fch = [Math.round(_fr0 * _fs), Math.round(_fg0 * _fs), Math.round(_fb0 * _fs)];
+                (fa.rgbOffsets || []).forEach((o, i) => { chVals[pf.startAddress + o] = _fch[i % 3]; });
+                for (const seg of fa.rgbSegments) {
+                  chVals[pf.startAddress + seg.r] = _fch[0];
+                  chVals[pf.startAddress + seg.g] = _fch[1];
+                  if (seg.b !== null) chVals[pf.startAddress + seg.b] = _fch[2];
+                  if (seg.w !== null) chVals[pf.startAddress + seg.w] = 0;
+                }
+              }
+            }
 
           let paletteColor = (() => {
             // Color track override (highest priority)

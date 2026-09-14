@@ -70,8 +70,17 @@ export function mapIntensity(level: string, energy: number, tier: string, tierMu
   const ABSOLUTE_MIN=0; let val: number;
   if(level==='dynamic'){val=Math.round(Math.max(ABSOLUTE_MIN,20+energy*235));}
   else{let lo:number,hi:number;switch(level){case'very-low':lo=40;hi=130;break;case'low':lo=100;hi=200;break;case'medium':lo=140;hi=240;break;case'high':lo=180;hi=255;break;case'very-high':lo=200;hi=255;break;default:lo=120;hi=220;break;}val=Math.round(Math.max(ABSOLUTE_MIN,lo+Math.max(0,Math.min(1,energy))*(hi-lo)));}
-  let tierMult=tier==='primary'||tier==='other'?1.0:tier==='secondary'?0.7:0.4;
-  if(tierMults){if(tier==='primary')tierMult*=(tierMults.primary/100);else if(tier==='secondary')tierMult*=(tierMults.secondary/100);else if(tier==='tertiary')tierMult*=(tierMults.tertiary/100);}
+  let tierMult: number;
+  if (tierMults) {
+    // Le Tier Mix utilisateur exprime directement le niveau final : 70% = 0.70.
+    // L'ancien code sur-multipliait par la base structurelle (0.7 × 0.7 = 0.49
+    // pour le secondaire) — faisceaux invisibles malgré un Tier Mix à 70%.
+    if (tier === 'primary' || tier === 'other') tierMult = tierMults.primary / 100;
+    else if (tier === 'secondary') tierMult = tierMults.secondary / 100;
+    else tierMult = tierMults.tertiary / 100;
+  } else {
+    tierMult = tier === 'primary' || tier === 'other' ? 1.0 : tier === 'secondary' ? 0.7 : 0.4;
+  }
   return Math.round(val*tierMult);
 }
 

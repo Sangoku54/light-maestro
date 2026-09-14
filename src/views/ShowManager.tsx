@@ -8,6 +8,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useShowStore, type ShowData, type ShowTrack, type ShowTrackItem } from '../stores/showStore';
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from '../hooks/dmx-cues';
+import { generateEfxPanTilt } from '../hooks/fixture-tracks';
 import { sendChannelsToHardware } from '../utils/dmx-helpers';
 import { collectCustomFixtureDefs, importCustomFixtureDefs } from '../utils/custom-fixtures';
 import { sceneTouchesFixture } from '../utils/scene-fixtures';
@@ -287,53 +288,14 @@ export const ShowManager: React.FC = () => {
               const allPatched = currentState.patchedFixtures;
               const targetFixtures = allPatched.filter((f) => effect.fixtureIds.includes(f.id));
               for (const pf of targetFixtures) {
-                // Use identical math to EFX Editor live DMX preview
-                const elapsedSec = elapsed / 1000;
-                const phase = (elapsedSec * (effect.speed || 0.5) * 2) % (Math.PI * 2);
-                const rx = (effect.width || 1) * 0.7;
-                const ry = (effect.height || 1) * 0.7;
-                const rotRad = ((effect.rotation || 0) * Math.PI) / 180;
-                const ox = ((effect.xOffset || 0) / 255) * 0.3;
-                const oy = ((effect.yOffset || 0) / 255) * 0.3;
-
-                let px = 0, py = 0;
-                const seg = phase / (Math.PI * 2);
-                switch (effect.pattern) {
-                  case 'Circle':
-                    px = Math.cos(phase) * rx; py = Math.sin(phase) * ry;
-                    break;
-                  case 'Line': {
-                    const lp = seg % 1;
-                    const lineX = lp < 0.5 ? (lp * 2) * 2 - 1 : (1 - (lp - 0.5) * 2) * 2 - 1;
-                    px = lineX * rx; py = 0;
-                    break;
-                  }
-                  case 'Eight':
-                    px = Math.sin(phase) * rx; py = Math.sin(phase * 2) * ry * 0.5;
-                    break;
-                  case 'Square': {
-                    const s = seg * 4; const sIdx = Math.floor(s) % 4; const sFrac = s - Math.floor(s);
-                    const cs: [number, number][] = [[1, 1], [-1, 1], [-1, -1], [1, -1]];
-                    const ce: [number, number][] = [[-1, 1], [-1, -1], [1, -1], [1, 1]];
-                    px = (cs[sIdx][0] + (ce[sIdx][0] - cs[sIdx][0]) * sFrac) * rx;
-                    py = (cs[sIdx][1] + (ce[sIdx][1] - cs[sIdx][1]) * sFrac) * ry;
-                    break;
-                  }
-                  case 'Triangle': {
-                    const ta = seg * 3; const ti = Math.floor(ta) % 3; const tf = ta - Math.floor(ta);
-                    const tv: [number, number][] = [[0, -1], [-0.866, 0.5], [0.866, 0.5]];
-                    const tn = tv[(ti + 1) % 3];
-                    px = (tv[ti][0] + (tn[0] - tv[ti][0]) * tf) * rx;
-                    py = (tv[ti][1] + (tn[1] - tv[ti][1]) * tf) * ry;
-                    break;
-                  }
-                }
-                // Apply rotation and offset (same as EFX editor)
-                const rx2 = px * Math.cos(rotRad) - py * Math.sin(rotRad) + ox;
-                const ry2 = px * Math.sin(rotRad) + py * Math.cos(rotRad) + oy;
-                // Map -1..1 → 0..255 with center at 128
-                const dmxPan = Math.round(Math.max(0, Math.min(255, 128 + rx2 * 127)));
-                const dmxTilt = Math.round(Math.max(0, Math.min(255, 128 + ry2 * 127)));
+                // Math EXACTE du moteur (fixture-tracks.ts) : identique au preview.
+                // L'ancienne copie locale tronquait les patterns (Square+ figés
+                // au centre) et sous-dosait amplitude/offsets.
+                const tCycles = (elapsed / 1000 * (effect.speed || 0.5) * 2) / (Math.PI * 2);
+                const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
+                  effect.pattern, tCycles, effect.width || 1, effect.height || 1,
+                  effect.rotation || 0, effect.xOffset || 0, effect.yOffset || 0,
+                );
 
                 // Find pan/tilt channels for this fixture
                 const def = fixtureDefCacheRef.current.get(pf.fixtureDefId);
@@ -794,7 +756,7 @@ export const ShowManager: React.FC = () => {
                 <div
                   key={show.id}
                   onClick={() => { setSelectedShowId(show.id); stopPlayback(); }}
-                  className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-4 cursor-pointer hover:border-purple-500/30 transition-all group"
+                  className="bg-[#0d0d14] border border-gray-700 rounded-xl p-4 cursor-pointer hover:border-purple-500/40 transition-all group"
                 >
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-sm font-bold text-gray-200 truncate flex-1">{show.name}</h3>

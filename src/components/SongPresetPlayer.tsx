@@ -16,6 +16,8 @@ import { useDmxPlayback } from '../hooks/dmx-playback';
 import { genCues } from '../views/QuickShowView';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { decodeAudioUrl } from '../utils/audio-cache';
+import { resolveAudioUrl } from '../utils/project-audio';
+import { lastAudioLoad } from '../utils/last-audio';
 
 /**
  * Resolve the playback clock for one frame.
@@ -115,10 +117,14 @@ export const SongPresetPlayer: React.FC<{
     }
     if (alive) setCues(cueList);
 
-    // Total show duration = max(cue ends, all track entry ends) — used to end
-    // playback when there is no playable audio clock.
+    // Total show duration = max(cue ends, all track entry ends, audio length) —
+    // used to end playback. Les cues n'ont pas de endTime (juste time), donc
+    // sans analysis.duration la fin serait coupée au début du dernier cue.
     let maxEnd = 0;
     for (const c of cueList) maxEnd = Math.max(maxEnd, Number(c?.endTime ?? c?.time ?? 0));
+    if (Number.isFinite(analysis?.duration ?? NaN)) {
+      maxEnd = Math.max(maxEnd, Number(analysis.duration));
+    }
     for (const trs of [
       (preset as any).chaserTracks,
       preset.colorTracks,
@@ -158,7 +164,7 @@ export const SongPresetPlayer: React.FC<{
   useEffect(() => {
     let rafId = 0;
     let hasAudio = false;
-    const startWall = performance.now();
+    let startWall = performance.now();
     let audioCtx: AudioContext | null = null;
     let audioSrc: AudioBufferSourceNode | null = null;
     let audioStartTime = 0; // ctx.currentTime when audio started
@@ -174,33 +180,76 @@ export const SongPresetPlayer: React.FC<{
       onEnded();
     };
 
-    // Async audio: decode base64 → AudioBuffer → start source node
-    // Uses the shared cache: if the widget preloaded this URL at mount,
-    // playback starts with ~zero latency. Otherwise the first click pays
-    // the decode cost once, and every later play is instant.
-    // Older .lmpreset files store the audio under audioDataBase64;
-    // accept both spellings.
-    const audioUrl = preset.audioFileBase64 || (preset as any).audioDataBase64;
-    if (audioUrl) {
-      (async () => {
-        try {
+    // Async audio: resolve base64 (direct ou blob audioRef externalisé) →
+    // AudioBuffer → start source node. Uses the shared cache: if the widget
+    // preloaded this URL at mount, playback starts with ~zero latency.
+    // Older .lmpreset files store the audio under audioDataBase64; saved
+    // projects store only audioRef (blob userData/enveloppe) — résolu ici.
+    (async () => {
+      try {
+        let audioUrl = await resolveAudioUrl(preset as any);
+        let srcKind =
+          (preset as any)?.audioFileBase64 || (preset as any)?.audioDataBase64
+            ? 'base64'
+            : (preset as any)?.audioRef
+              ? (audioUrl ? 'ref->hit' : 'ref->miss')
+              : 'none';
+        if (!audioUrl) {
+          // Doublon muet : un homonyme en store a peut-être l'audio (même
+          // morceau réimporté sans son). On joue cet audio-là plutôt que rien.
+          try {
+            const sibs = useShowStore.getState().songPresets.filter(
+              (p: any) => p.name === (preset as any)?.name && p.id !== (preset as any)?.id,
+            );
+            for (const s of sibs) {
+              audioUrl = await resolveAudioUrl(s as any);
+              if (audioUrl) { srcKind = 'sibling'; break; }
+            }
+          } catch {}
+        }
+        if (!audioUrl) {
+          // Dernier recours : le registre persistant « dernier bon audio »
+          // (rempli à chaque sauvegarde avec son). Puis auto-réparation :
+          // on réécrit l'audio dans l'entrée du store pour les prochaines fois.
+          try {
+            const last = (await lastAudioLoad())[(preset as any)?.name];
+            if (last?.base64) {
+              audioUrl = last.base64;
+              srcKind = 'last-audio';
+              try {
+                const st = useShowStore.getState();
+                const pid = (preset as any)?.id;
+                if (pid && st.songPresets.some((p: any) => p.id === pid)) {
+                  st.setSongPresets(st.songPresets.map((p: any) =>
+                    p.id === pid ? { ...p, audioFileBase64: last.base64 } : p));
+                }
+              } catch {}
+            }
+          } catch {}
+        }
+        console.warn(`[PlaySong] audio "${(preset as any)?.name ?? ''}": ${srcKind}`);
+        if (audioUrl) {
           audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
           if (audioCtx.state === 'suspended') await audioCtx.resume();
           const buffer = await decodeAudioUrl(audioUrl);
           if (!buffer || cancelled || audioCtx.state === 'closed') return;
+          // Vérité terrain : ne jamais arrêter avant la fin réelle de l'audio
+          // décodé (les sections/cues peuvent s'arrêter quelques secondes avant).
+          totalDurRef.current = Math.max(totalDurRef.current, buffer.duration);
           audioSrc = audioCtx.createBufferSource();
           audioSrc.buffer = buffer;
           audioSrc.connect(audioCtx.destination);
           audioSrc.onended = stop;
-          // Calculate offset from virtual clock already elapsed
-          const elapsed = (performance.now() - startWall) / 1000;
-          const offset = Math.min(Math.max(0, elapsed), Math.max(0, buffer.duration - 0.05));
-          audioStartTime = audioCtx.currentTime - offset;
-          audioSrc.start(0, offset);
+          // Démarre l'audio depuis le DÉBUT (offset 0) et réaligne l'horloge
+          // du show sur ce départ : le temps passé à décoder le base64 ne doit
+          // pas être retranché au début de la chanson (sinon ~1s est tronquée).
+          audioStartTime = audioCtx.currentTime;
+          audioSrc.start(0, 0);
+          startWall = performance.now(); // reset le clock virtuel au départ réel de l'audio
           hasAudio = true;
-        } catch { /* keep virtual clock running */ }
+        }
+      } catch { /* keep virtual clock running */ }
       })();
-    }
 
     const raf = () => {
       if (hasAudio && audioCtx) {

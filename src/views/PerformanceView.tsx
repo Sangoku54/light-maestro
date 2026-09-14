@@ -9,7 +9,7 @@ import {
   Timer as TimerIcon, Radio
 } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
-import { useShowStore, type SavedCueList, type CueListCue, type SongPreset } from '../stores/showStore';
+import { useShowStore, type SavedCueList, type CueListCue, type SongPreset, findBestSongPreset, presetHasAudio } from '../stores/showStore';
 import { computeDmxCues, loadFixtureDefinitions, type CueInput, type DmxCue } from '../hooks/dmx-cues';
 import { computeDmxForCue } from '../hooks/dmx-playback';
 import { SongPresetPlayer } from '../components/SongPresetPlayer';
@@ -19,6 +19,8 @@ import { dmxBridge } from '../utils/dmx-bridge';
 import { startAutoLoop, stopAutoLoop, isAutoLoopActive, stopAllAutoLoops } from '../engine/auto-loop-player';
 import { generateLoopLibrary, loopToRecipe, LOOP_KIND_LABEL, LOOP_KIND_ORDER, type AutoLoop, type LoopRecipe } from '../engine/auto-loops';
 import { preloadAudioUrl, decodeAudioUrl } from '../utils/audio-cache';
+import { generateEfxPanTilt } from '../hooks/fixture-tracks';
+import { resolveAudioUrl } from '../utils/project-audio';
 import { importCustomFixtureDefs } from '../utils/custom-fixtures';
 import { timecodeToMs, msToTimecode, isValidTimecode } from '../engine/mtc-markers';
 import { Stage3D } from './Stage3D';
@@ -437,66 +439,15 @@ const VirtualConsolePanel: React.FC = () => {
               const tiltFineCh = mode.channels?.find((c: any) => c.type?.toLowerCase?.() === 'tilt fine');
               if (!panCh && !tiltCh) continue;
 
-              const hz = efx.speed || 0.5;
-              const width = efx.width ?? 0.5;
-              const height = efx.height ?? 0.5;
-              const xOffset = ((efx.xOffset ?? 0) / 255) * 0.3;
-              const yOffset = ((efx.yOffset ?? 0) / 255) * 0.3;
-              const rot = ((efx.rotation ?? 0) / 255) * 2 * pi;
-              const rx = width * 0.7;
-              const ry = height * 0.7;
-              let px = 0, py = 0;
-              const pct = (tSec * hz) % 1;
-
-              switch (efx.pattern) {
-                case 'Circle': {
-                  const angle = pct * 2 * pi;
-                  px = Math.cos(angle) * rx;
-                  py = Math.sin(angle) * ry;
-                  break;
-                }
-                case 'Line': {
-                  const v = pct < 0.5 ? pct * 2 : 2 - pct * 2;
-                  px = (v - 0.5) * 2 * rx;
-                  py = 0;
-                  break;
-                }
-                case 'Eight': {
-                  const angle = pct * 2 * pi;
-                  const sx = Math.sin(angle);
-                  const cx = Math.cos(angle);
-                  px = sx * rx;
-                  py = sx * cx * ry;
-                  break;
-                }
-                case 'Square': {
-                  const seg = pct * 4;
-                  const idx = Math.floor(seg) % 4;
-                  const frac = seg - Math.floor(seg);
-                  const corners: [number, number][] = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
-                  const c1 = corners[idx];
-                  const c2 = corners[(idx + 1) % 4];
-                  px = (c1[0] + (c2[0] - c1[0]) * frac) * rx;
-                  py = (c1[1] + (c2[1] - c1[1]) * frac) * ry;
-                  break;
-                }
-                case 'Triangle': {
-                  const seg = pct * 3;
-                  const idx = Math.floor(seg) % 3;
-                  const frac = seg - Math.floor(seg);
-                  const corners: [number, number][] = [[0, -1], [-0.866, 0.5], [0.866, 0.5]];
-                  const c1 = corners[idx];
-                  const c2 = corners[(idx + 1) % 3];
-                  px = (c1[0] + (c2[0] - c1[0]) * frac) * rx;
-                  py = (c1[1] + (c2[1] - c1[1]) * frac) * ry;
-                  break;
-                }
-              }
-
-              const rx2 = px * Math.cos(rot) - py * Math.sin(rot) + xOffset;
-              const ry2 = px * Math.sin(rot) + py * Math.cos(rot) + yOffset;
-              const dmxPan = Math.round(Math.max(0, Math.min(255, 128 + rx2 * 127)));
-              const dmxTilt = Math.round(Math.max(0, Math.min(255, 128 + ry2 * 127)));
+              // Math EXACTE du moteur (fixture-tracks.ts) : identique au preview.
+              // L'ancienne copie locale tronquait les patterns (seuls 5 sur 10
+              // bougeaient), sous-dosait amplitude/offsets et lisait la
+              // rotation en unités /255 au lieu de degrés.
+              const tCycles = (tSec * (efx.speed || 0.5) * 2) / (Math.PI * 2);
+              const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
+                efx.pattern, tCycles, efx.width ?? 0.5, efx.height ?? 0.5,
+                efx.rotation ?? 0, efx.xOffset ?? 0, efx.yOffset ?? 0,
+              );
 
               const ch: Record<number, number> = {};
               if (panCh && pf.startAddress != null) ch[pf.startAddress + (panCh.offset ?? 0)] = dmxPan;
@@ -1105,9 +1056,12 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                           audioSrc = `data:${mime};base64,${audioSrc}`;
                         }
                         const name = p.quickShow?.name || p.name || r.filePath?.split(/[\\/]/).pop()?.replace(/\.lmpreset$/i, '') || 'Imported Preset';
-                        const full = {
+                        const full: any = {
                           name,
-                          audioFileBase64: audioSrc,
+                          // Ne jamais écraser l'audio existant par du vide :
+                          // si le fichier n'apporte pas de son, on garde le
+                          // base64 et la ref déjà en store (merge de update).
+                          ...(audioSrc ? { audioFileBase64: audioSrc, audioRef: undefined } : {}),
                           audioFileName: p.audioFileName || p.analysis?.fileName || p.trackAnalysis?.fileName || '',
                           dmxCues: p.dmxCues || [],
                           quickShow: p.quickShow || {},
@@ -1580,19 +1534,23 @@ const VCButtonWidget: React.FC<{
 
   const getSongLabel = () => {
     if (config.actionType !== 'playSong' || !config.songId) return '♪ Song';
-    const sp = songPresets.find((p) => p.id === config.songId)
-      || (config.songName ? songPresets.find((p) => p.name === config.songName) : undefined);
+    const sp = findBestSongPreset(songPresets, config.songId, config.songName);
     return sp ? `♪ ${sp.name}` : (config.songName ? `♪ ${config.songName}` : '♪ Song');
   };
 
   // Pre-decode the preset's audio while the widget is idle (before any
   // click), so playback starts with ~zero audio latency. The decoded
   // AudioBuffer is cached module-wide and reused by SongPresetPlayer.
+  // Résout aussi audioRef (preset externalisé après sauvegarde).
   useEffect(() => {
     if (config.actionType !== 'playSong') return;
-    const sp = songPresets.find((p) => p.id === config.songId)
-      || (config.songName ? songPresets.find((p) => p.name === config.songName) : undefined);
-    if (sp) preloadAudioUrl(sp.audioFileBase64 || (sp as any).audioDataBase64);
+    const sp: any = findBestSongPreset(songPresets, config.songId, config.songName);
+    if (!sp) return;
+    const direct = sp.audioFileBase64 || sp.audioDataBase64;
+    if (direct) { preloadAudioUrl(direct); return; }
+    if (sp.audioRef) {
+      void resolveAudioUrl(sp).then((url) => { if (url) preloadAudioUrl(url); });
+    }
   }, [config.actionType, config.songId, config.songName, songPresets]);
 
   // ─── audioAutoScript playback helper ──────────────────
@@ -1792,11 +1750,14 @@ const VCButtonWidget: React.FC<{
     }
 
     if (config.actionType === 'playSong' && config.songId) {
-      const preset = songPresets.find((p) => p.id === config.songId)
-        || (config.songName ? songPresets.find((p) => p.name === config.songName) : undefined);
+      const preset = findBestSongPreset(songPresets, config.songId, config.songName);
       if (!preset) {
         console.warn('PlaySong: preset not found', config.songId, 'available:', songPresets.map((p) => `${p.name}#${p.id}`).join(', '));
         return;
+      }
+      if (config.songName) {
+        const dupes = songPresets.filter((p) => p.name === (preset as any).name).length;
+        if (dupes > 1) console.warn(`[PlaySong] preset "${(preset as any).name}": ${dupes} homonymes, audio=${presetHasAudio(preset as any) ? 'oui' : 'non'}`);
       }
       // Playback no longer requires an audio file: SongPresetPlayer uses a
       // virtual clock when the audio is missing or not yet playable.

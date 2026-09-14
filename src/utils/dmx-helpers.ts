@@ -72,9 +72,10 @@ export async function sendChannelsToHardware(
   sourceId: string = 'default',
   transientMs?: number,
 ): Promise<void> {
-  const dmx = (window as any).lightMaestro?.dmx;
-  if (!dmx) return;
-
+  // Toujours traverser le pont (arbitre + cache 3D), même sans API hardware :
+  // flushToHardware ignore déjà l'absence de DMX. L'ancien early-return
+  // laissait le cache 3D périmé pendant que le miroir appStore avançait —
+  // la 3D (qui préfère le cache arbitré) ignorait alors ces envois.
   if (patchedFixtures.length > 0 && universes.length > 0) {
     const dispatched = dispatchChannelsByFixture(channelValues, patchedFixtures, universes);
     for (const [uniNum, vals] of dispatched.entries()) {
