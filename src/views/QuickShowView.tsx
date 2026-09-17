@@ -705,6 +705,9 @@ export function genCues(
       drop: ['primary', 'secondary', 'tertiary'],
       outro: ['primary'],
     };
+    // More professional contrast: density (trigger rate), color hold time per section type
+    const SECTION_DENSITY: Record<string, number> = { intro: 0.65, verse: 0.9, chorus: 1.7, bridge: 0.85, drop: 2.2, outro: 0.55, build: 1.4 };
+    const SECTION_HOLD_BEATS: Record<string, number> = { intro: 22, verse: 14, chorus: 5, bridge: 12, drop: 3, outro: 26, build: 7 };
 
     for (const section of sections) {
       const dur = section.endTime - section.startTime;
@@ -717,22 +720,24 @@ export function genCues(
         : (cfg.colorScheme === 'auto' && DEFAULT_SECTION_PALETTES[section.type])
           ? DEFAULT_SECTION_PALETTES[section.type]
           : basePal;
-      const numCues = Math.max(1, Math.floor(dur / interval));
+      const density = SECTION_DENSITY[section.type] || 1;
+      const localInterval = interval / density;
+      const numCues = Math.max(1, Math.floor(dur / localInterval));
+      const holdBeats = SECTION_HOLD_BEATS[section.type] || 12;
       const isNextDrop = dropStartTimes.has(section.endTime);
 
-      // ── Continuité du mouvement : UN pattern par section ──
-      // Sélectionné une seule fois (features du milieu de section, représentatifs)
-      // et appliqué à TOUS les cues de la section. Les heads ont ainsi le temps
-      // de finir leur trajectoire au lieu de repartir dans un pattern différent
-      // à chaque cue (l'ancien comportement variait avec l'index du cue).
+      // Continuité du mouvement : UN pattern de base par section (sauf haute énergie)
+      // Sélectionné une seule fois (features du milieu de section).
+      // Pour drop/chorus/build on re-sélectionne périodiquement pour du tranché sans saccades.
       const midFeature = getFeature(section.startTime + dur / 2);
       const sectionRms = midFeature?.rms ?? 0.5;
       const sectionCentroid = midFeature?.centroid ?? 0.5;
       const sectionBass = midFeature ? midFeature.bass / Math.max(0.01, midFeature.mid + midFeature.high) : 1;
-      const sectionMovement = selectMovementPattern(section.type, sectionRms, sectionCentroid, sectionBass, false, false, 0);
+      let sectionMovement = selectMovementPattern(section.type, sectionRms, sectionCentroid, sectionBass, false, false, 0);
+      const reseedEvery = (section.type === 'drop' || section.type === 'chorus') ? 4 : (section.type === 'build' ? 7 : 9999);
 
       for (let i = 0; i < numCues; i++) {
-        const t = section.startTime + i * interval;
+        const t = section.startTime + i * localInterval;
         if (t >= section.endTime) break;
 
         const feat = getFeature(t);
@@ -788,11 +793,9 @@ export function genCues(
           case 'outro': sectionEnergyMult = 0.3 + (1 - sectionProgress) * 0.3; break;
         }
 
-        // Color cycle : UNE couleur par section, changement toutes les 12 beats si la
-        // section est longue. Le fondu entre changements est géré côté moteur
-        // (colorFadeMs). La teinte ne défile plus à chaque cue.
-        const beatDur = interval * beatDivision / 4; // durée d'un temps (s)
-        const holdBeats = 12;
+        // Color cycle : UNE couleur par section, changement toutes les N beats selon section.
+        // Drop/chorus changent vite (tranché), verse/intro tiennent plus longtemps.
+        const beatDur = localInterval * beatDivision / 4; // durée d'un temps (s) — utilise local pour densité
         const sectionColorIdx = Math.floor((t - section.startTime) / (holdBeats * beatDur));
         const paletteIdx = sectionColorIdx % Math.max(1, sectionPal.length);
         prevColor = sectionPal[paletteIdx];
@@ -808,7 +811,7 @@ export function genCues(
           const rb = Math.round(sb + (eb - sb) * g);
           prevColor = '#' + [rr, rg, rb].map(v => v.toString(16).padStart(2, '0')).join('');
         }
-        // Transition d'intensité entre sections : fondu sur 2 beats (fade-in)
+        // Transition d'intensité entre sections : fondu sur ~2 beats locaux (fade-in)
         // depuis l'intensité de la fin de la section précédente (pas de snap).
         let fadedIntensity = intensity;
         if (lastSectionType !== section.type) {
@@ -816,7 +819,7 @@ export function genCues(
           lastSectionType = section.type;
         }
         if (prevSectionIntensity !== null) {
-          const fadeT = Math.min(1, (t - section.startTime) / (2 * interval));
+          const fadeT = Math.min(1, (t - section.startTime) / (2 * localInterval));
           const targetScore = INTENSITY_SCORE[intensity] ?? 0.5;
           fadedIntensity = scoreToIntensity(prevSectionIntensity + (targetScore - prevSectionIntensity) * fadeT);
         }
@@ -832,40 +835,50 @@ export function genCues(
         const colorTemp: 'warm' | 'neutral' | 'cool' =
           centroid < 0.35 ? 'warm' : centroid > 0.65 ? 'cool' : 'neutral';
 
-        // Movement: UN pattern par section (stabilisé) — plus de re-sélection par cue.
-        // L'amplitude et la vitesse continuent d'évoluer doucement par cue ci-dessous.
-        const movement = sectionMovement;
+        // Reselection for high-energy sections to create sharp contrast between sections
+        // while still giving heads time to move. Low energy sections keep stable pattern.
+        let movement = sectionMovement;
+        if (reseedEvery < 9999 && (i % reseedEvery === 0) && i > 0) {
+          movement = selectMovementPattern(section.type, rms, centroid, bassRatio, beatStrong, dropAnticipation, cueGlobalIdx + i);
+        }
 
         // Amplitude: DMX-scale (0-255), audio-driven, section-scaled + jitter par cue pour éviter l'uniformité
         // Center is 128, so amplitude=128 means full edge-to-edge sweep.
         // Values capped at 128 to prevent DMX overflow (excess just saturates at 0/255).
         const baseAmp = (() => {
           switch (section.type) {
-            case 'intro': return 50 + rms * 78;           // 50-130 DMX
-            case 'outro': return 40 + rms * 60;           // 40-100 DMX
-            case 'verse': return 80 + rms * 48;          // 80-180 DMX
-            case 'chorus': return 90 + bassRatio * 38;   // 110-220 DMX
-            case 'drop': return 100 + bassRatio * 28;     // 140-250 DMX (near full sweep)
-            case 'bridge': return 60 + rms * 68;           // 60-140 DMX
+            case 'intro': return 32 + rms * 48;
+            case 'outro': return 28 + rms * 42;
+            case 'verse': return 65 + rms * 52;
+            case 'chorus': return 92 + bassRatio * 52;
+            case 'drop': return 118 + bassRatio * 35;
+            case 'bridge': return 52 + rms * 58;
             case 'build': return dropAnticipation
-              ? 100 + (1 - beatsUntilDrop / 2) * 28       // ramps 160→240 before drop
-              : 60 + sectionProgress * 68;                // ramps 70→230 across section
-            default: return 80;
+              ? 108 + (1 - beatsUntilDrop / 2) * 32
+              : 52 + sectionProgress * 72;
+            default: return 70;
           }
         })();
-        const ampJitter = (Math.sin(i * 1.7) * 12 + (rng() - 0.5) * 16); // ±12-16 DMX par cue
-        const movementAmplitude = Math.min(128, Math.max(12, Math.round(baseAmp + ampJitter)));
+        const ampJitter = (Math.sin(i * 1.7) * 9 + (rng() - 0.5) * 18);
+        const movementAmplitude = Math.min(128, Math.max(10, Math.round(baseAmp + ampJitter)));
 
         const movementSpeed = (() => {
-          // Vitesse STABLE par section (centroid du milieu), plus de jitter aléatoire
-          // par cue. Micro-accélération douce et continue sur les temps forts,
-          // sans saut sec : le beat fort monte en douceur puis redescend.
-          const baseSpeed = 0.3 + sectionCentroid * 0.6;
+          // Sharper per-section speed signatures + bigger range for contrast
+          let baseSpeed: number;
+          switch (section.type) {
+            case 'drop': baseSpeed = 0.9 + sectionCentroid * 1.4; break;
+            case 'chorus': baseSpeed = 0.7 + sectionCentroid * 1.05; break;
+            case 'build': baseSpeed = 0.55 + sectionCentroid * 0.85; break;
+            case 'verse': baseSpeed = 0.32 + sectionCentroid * 0.5; break;
+            case 'intro': case 'outro': baseSpeed = 0.18 + sectionCentroid * 0.32; break;
+            case 'bridge': baseSpeed = 0.26 + sectionCentroid * 0.6; break;
+            default: baseSpeed = 0.38 + sectionCentroid * 0.55;
+          }
           let s = baseSpeed;
-          if (dropAnticipation) s *= 1.5; // speed up before drop
-          // Micro-accélération sur beat : onde sinus continue (±8%), jamais de marche.
-          if (beatStrong) s *= 1.08 + Math.sin(t * Math.PI * 2) * 0.04;
-          return Math.max(0.15, Math.min(2.5, s));
+          if (dropAnticipation) s *= 1.7;
+          if (beatStrong) s *= 1.09 + Math.sin(t * Math.PI * 2) * 0.045;
+          if (section.type === 'drop' || section.type === 'chorus') s *= 1.18;
+          return Math.max(0.1, Math.min(4.0, s));
         })();
 
         cues.push({
@@ -1157,7 +1170,8 @@ async function loadProject(
         if (data.analysis) {
           if (data.audioDataBase64) {
             try {
-              const dataUrl = `data:audio/mpeg;base64,${data.audioDataBase64}`;
+              // Safe: handle both raw base64 (legacy) and full data: URL (from export)
+              const dataUrl = pickAudioUrl(data.audioDataBase64, null) || `data:audio/mpeg;base64,${data.audioDataBase64}`;
               await audioFile.restoreWithAudio(data.analysis, dataUrl);
             } catch (e2) {
               console.error('restoreWithAudio failed in loadProject:', e2);
@@ -2280,6 +2294,13 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         } else {
           await lastAudioRemember(name, audioDataBase64, resolvedAnalysis?.fileName);
         }
+        // Always store RAW base64 (no data: prefix) in the .lmpreset file for consistency
+        // with internal saves and legacy. Loaders use normalize/pick to handle both.
+        let exportAudioBase64 = audioDataBase64;
+        if (exportAudioBase64 && exportAudioBase64.includes(',')) {
+          const comma = exportAudioBase64.indexOf(',');
+          exportAudioBase64 = exportAudioBase64.slice(comma + 1);
+        }
         const currentCues = genCues(sections, effectiveBpm, qs.beatDivision || 4, qs, manualCues, key, resolvedAnalysis, useShowStore.getState().scenes as any);
         const store = useShowStore.getState();
         const pf = store.patchedFixtures;
@@ -2292,7 +2313,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
           efxTracksRef, effectsRef, fixtureGroupsRef,
           chaserTracksRef, chasersRef, scenesRef, showTracksRef, showsRef, sceneTracksRef,
         );
-        const exportData = { version: 1, name, createdAt: new Date().toISOString(), quickShow: { ...qs, regenSeed: key }, analysis: resolvedAnalysis, sections, manualCues, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, fixtureTracks, dmxCues: dmxCuesArray, disabledFixtures: [...disabledFixtures], musicians: normalizeRoster(qsMusicians), stageScene: qsStageScene, view3D: qsView3D, audioDataBase64 };
+        const exportData = { version: 1, name, createdAt: new Date().toISOString(), quickShow: { ...qs, regenSeed: key }, analysis: resolvedAnalysis, sections, manualCues, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, fixtureTracks, dmxCues: dmxCuesArray, disabledFixtures: [...disabledFixtures], musicians: normalizeRoster(qsMusicians), stageScene: qsStageScene, view3D: qsView3D, audioDataBase64: exportAudioBase64 };
         const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -2673,6 +2694,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const dimmerEntryMenuRef = useRef<HTMLDivElement>(null);
   // Dimmer track modal state
   const [dimmerTrackModal, setDimmerTrackModal] = useState(false);
+  // Magnétisme timeline : snap des sections/pistes sur les beats (désactivable top barre)
+  const [snapToBeats, setSnapToBeats] = useState(true);
   const [dimmerTrackName, setDimmerTrackName] = useState('');
   const [dimmerTargetType, setDimmerTargetType] = useState<'all' | 'group' | 'fixture'>('all');
   const [dimmerTargetGroupId, setDimmerTargetGroupId] = useState('');
@@ -3683,6 +3706,22 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           </button>
         </RichTooltip>
 
+        {/* Magnétisme timeline : snap sections/pistes sur les beats */}
+        <RichTooltip content={{ title: 'Magnétisme (snap aux beats)', text: 'ON : déplacer/redimensionner une section ou un bloc de piste les aligne sur les beats détectés (points roses du waveform, barres verticales de la timeline). OFF : placement libre.', tone: 'info' }} placement="bottom">
+          <button
+            onClick={() => setSnapToBeats((v) => !v)}
+            title={snapToBeats ? 'Magnétisme ON : aligné sur les beats (cliquer pour désactiver)' : 'Magnétisme OFF : placement libre (cliquer pour activer)'}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold border transition-all ${
+              snapToBeats
+                ? 'bg-violet-600/30 text-violet-200 border-violet-500/60 shadow-[0_0_6px_rgba(139,92,246,0.4)]'
+                : 'bg-gray-800/50 text-gray-500 border-gray-700 hover:text-gray-300'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M5 4h4l3 8 3-8h4v7a5 5 0 0 1-10 0V4z" /><path d="M12 16v5" /></svg>
+            <span>{snapToBeats ? 'SNAP ON' : 'SNAP OFF'}</span>
+          </button>
+        </RichTooltip>
+
         <div className="h-5 border-l border-gray-700 mx-1" />
 
         {/* New audio file */}
@@ -3952,6 +3991,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           onSectionClick={onSectionClick}
           onSectionsChange={(next) => { pushHistory(); setSections(next); }}
           sections={sections}
+          snapToBeats={snapToBeats}
           onInsertEntity={handleInsertEntity}
           scenes={entitySceneList}
           chasers={entityChaserList}
@@ -3971,6 +4011,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           sections={sections}
           patchedFixtures={patchedFixtures}
           bpm={effectiveBpm}
+          snapToBeats={snapToBeats}
           efxTracks={efxTracks}
           onEfxTrackContextMenu={handleEfxTrackContextMenu}
           onEfxEntryContextMenu={handleEfxEntryContextMenu}
@@ -5257,11 +5298,21 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
               <label className="block text-[10px] text-gray-400 mb-1">Valeur de début (%)</label>
               <input type="number" min={0} max={100} value={dimmerTrackValue}
-                onChange={e => setDimmerTrackValue(Math.max(0, Math.min(100, Number(e.target.value) || 100)))}
+                onChange={e => {
+                  // Champ vide → 0 (pas 100 : l'ancien `Number(...) || 100`
+                  // rendait le 0 impossible à saisir).
+                  if (e.target.value.trim() === '') { setDimmerTrackValue(0); return; }
+                  const v = Number(e.target.value);
+                  if (!Number.isNaN(v)) setDimmerTrackValue(Math.max(0, Math.min(100, v)));
+                }}
                 className="w-24 mb-2 bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none" />
               <label className="block text-[10px] text-gray-400 mb-1">Valeur de fin (%)</label>
               <input type="number" min={0} max={100} value={dimmerTrackEndValue}
-                onChange={e => setDimmerTrackEndValue(Math.max(0, Math.min(100, Number(e.target.value) || 100)))}
+                onChange={e => {
+                  if (e.target.value.trim() === '') { setDimmerTrackEndValue(0); return; }
+                  const v = Number(e.target.value);
+                  if (!Number.isNaN(v)) setDimmerTrackEndValue(Math.max(0, Math.min(100, v)));
+                }}
                 className="w-24 mb-2 bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none" />
               <div className="flex items-center gap-2 mb-4 text-[10px] text-gray-500">
                 <span>Début {dimmerTrackValue} %</span>

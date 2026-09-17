@@ -2095,6 +2095,11 @@ export const Stage3D: React.FC<{
 
       // Rate-limited tracking: beam cannot turn faster than the real fixture motor
       // (maxPanTiltSpeed in °/s), so the 3D view matches the physical movement speed.
+      // Deux régimes : grands deltas → slew à vitesse moteur ; petits deltas →
+      // settle exponentiel (au lieu du snap exact) pour absorber la gigue de la
+      // source DMX (tick setInterval non synchronisé avec le rendu → aliasing
+      // = micro-saccades visibles, critique en capture vidéo).
+      const settleK = Math.min(1, dt * 25);
       if (f3d.armGroup) {
         // Zéro VISUEL (rendu) : décalage persistant du faisceau (tare à DMX=128).
         const panTarget = ((panVal / 255) - 0.5) * Math.PI * 3 + (f3d._zeroPanDeg * Math.PI) / 180;
@@ -2102,14 +2107,18 @@ export const Stage3D: React.FC<{
         while (panDelta > Math.PI) panDelta -= 2 * Math.PI;
         while (panDelta < -Math.PI) panDelta += 2 * Math.PI;
         const panMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
-        f3d.armGroup.rotation.y += Math.max(-panMaxStep, Math.min(panMaxStep, panDelta));
+        f3d.armGroup.rotation.y += Math.abs(panDelta) > panMaxStep
+          ? Math.sign(panDelta) * panMaxStep
+          : panDelta * settleK;
       }
       if (f3d.headGroup) {
         const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI;
         const tiltTarget = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180;
         const tiltDelta = tiltTarget - f3d.headGroup.rotation.x;
         const tiltMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
-        f3d.headGroup.rotation.x += Math.max(-tiltMaxStep, Math.min(tiltMaxStep, tiltDelta));
+        f3d.headGroup.rotation.x += Math.abs(tiltDelta) > tiltMaxStep
+          ? Math.sign(tiltDelta) * tiltMaxStep
+          : tiltDelta * settleK;
       }
 
       // Extra heads: per-arm tilt, same color/intensity as the main head
@@ -2119,7 +2128,9 @@ export const Stage3D: React.FC<{
         const ehTarget = eh._mountTilt + dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180;
         const ehDelta = ehTarget - eh.headGroup.rotation.x;
         const ehMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
-        eh.headGroup.rotation.x += Math.max(-ehMaxStep, Math.min(ehMaxStep, ehDelta));
+        eh.headGroup.rotation.x += Math.abs(ehDelta) > ehMaxStep
+          ? Math.sign(ehDelta) * ehMaxStep
+          : ehDelta * settleK;
         if (eh.pointLight) {
           eh.pointLight.color.copy(color);
           eh.pointLight.intensity = visIntensity * 25;
@@ -2377,6 +2388,7 @@ export const Stage3D: React.FC<{
     if (ids.length === 0) return;
     const prog = useProgrammerStore.getState().channels;
     const setCh = useProgrammerStore.getState().setChannel;
+    const clearCh = useProgrammerStore.getState().clearChannel;
     for (const fid of ids) {
       const f3d = fixturesRef.current.get(fid);
       const pf = patchedFixtures.find((f) => f.id === fid);
@@ -2413,59 +2425,28 @@ export const Stage3D: React.FC<{
       };
       writePan(solved.pan);
       writeTilt(solved.tilt);
-      // Capture « look » : dimmer, couleur, strobe/shutter depuis le live
-      // (dmxBridge arbitré) — défauts visibles (dimmer 255, couleur blanche,
-      // shutter ouvert) si le live est éteint, pour que la scène enregistrée
-      // montre le faisceau visé, pas une tête éteinte.
-      const liveCh = dmxBridge.getChannels(f3d.universeIndex);
-      const readLive = (off: number): number | undefined => {
-        const v = liveCh?.[pf.startAddress + off];
-        return typeof v === 'number' ? v : undefined;
-      };
-      // Dimmer
-      if (cm.intensityOffset !== null && cm.intensityOffset >= 0) {
-        const v = readLive(cm.intensityOffset) ?? 0;
-        setCh(pf.startAddress + cm.intensityOffset, v > 0 ? v : 255);
+
+      // On ne touche QUE pan/tilt.
+      // Les couleurs de l'AutoScript (QuickShow) doivent continuer a piloter
+      // les projecteurs. Le boost visuel des faisceaux selectionnes est gere
+      // uniquement dans le rendu 3D (visIntensity).
+      // On libere les canaux couleur/dimmer du programmeur (LTP 85) pour que
+      // l'autoscript (HTP 40) repasse au travers, et on purge les anciennes
+      // valeurs blanches parquees par les versions precedentes du Target.
+      if (cm.intensityOffset !== null && cm.intensityOffset !== undefined && cm.intensityOffset >= 0) clearCh(pf.startAddress + cm.intensityOffset);
+      for (const o of (cm.rgbOffsets ?? [])) clearCh(pf.startAddress + o);
+      for (const s of (cm.rgbSegments ?? [])) {
+        if (s.r !== null && s.r !== undefined) clearCh(pf.startAddress + s.r);
+        if (s.g !== null && s.g !== undefined) clearCh(pf.startAddress + s.g);
+        if (s.b !== null && s.b !== undefined) clearCh(pf.startAddress + s.b);
+        if (s.w !== null && s.w !== undefined) clearCh(pf.startAddress + s.w);
+        if (s.a !== null && s.a !== undefined) clearCh(pf.startAddress + s.a);
+        if (s.uv !== null && s.uv !== undefined) clearCh(pf.startAddress + s.uv);
       }
-      // Couleur : segments RGB(A/W/UV) sinon rgbOffsets sinon roue
-      const segs = cm.rgbSegments ?? [];
-      if (segs.length > 0) {
-        const any = segs.some((s) =>
-          (readLive(s.r) ?? 0) > 0 || (s.g !== null && (readLive(s.g) ?? 0) > 0) || (s.b !== null && (readLive(s.b) ?? 0) > 0));
-        for (const s of segs) {
-          setCh(pf.startAddress + s.r, any ? (readLive(s.r) ?? 0) : 255);
-          if (s.g !== null) setCh(pf.startAddress + s.g, any ? (readLive(s.g) ?? 0) : 255);
-          if (s.b !== null) setCh(pf.startAddress + s.b, any ? (readLive(s.b) ?? 0) : 255);
-          if (s.w !== null) setCh(pf.startAddress + s.w, any ? (readLive(s.w) ?? 0) : 255);
-          if (s.a !== null && s.a !== undefined) setCh(pf.startAddress + s.a, any ? (readLive(s.a) ?? 0) : 255);
-          if (s.uv !== null && s.uv !== undefined) setCh(pf.startAddress + s.uv, any ? (readLive(s.uv) ?? 0) : 255);
-        }
-      } else if (cm.rgbOffsets && cm.rgbOffsets.length > 0) {
-        const any = cm.rgbOffsets.some((o) => (readLive(o) ?? 0) > 0);
-        for (const o of cm.rgbOffsets) setCh(pf.startAddress + o, any ? (readLive(o) ?? 0) : 255);
-      } else if (cm.wheelOffset !== null && cm.wheelOffset >= 0) {
-        const v = readLive(cm.wheelOffset) ?? 0;
-        let wv = v;
-        if (v <= 2) {
-          const white = cm.wheelCaps?.find((c) => {
-            const n = (c.color ?? '').toLowerCase();
-            return n === 'white' || n === 'open' || /^#fff/i.test(n);
-          }) ?? cm.wheelCaps?.[0];
-          wv = white ? Math.round((white.min + white.max) / 2) : 255;
-        }
-        setCh(pf.startAddress + cm.wheelOffset, wv);
-      }
-      // Strobe dédié : copie du live (0 si aucun)
-      if (cm.strobeOffset !== null && cm.strobeOffset >= 0) {
-        setCh(pf.startAddress + cm.strobeOffset, readLive(cm.strobeOffset) ?? 0);
-      }
-      // Shutter : garantit l'ouverture (jamais fermé à 0-31) tout en gardant
-      // un éventuel strobe shutter live (32-255).
-      if (cm.shutterOffset !== null && cm.shutterOffset >= 0) {
-        const v = readLive(cm.shutterOffset) ?? 255;
-        setCh(pf.startAddress + cm.shutterOffset, v > 31 ? v : 255);
-      }
-      // Bras complémentaires (Tonio 6 arm) : même pan, tilt propre par tête.
+      if (cm.wheelOffset !== null && cm.wheelOffset !== undefined && cm.wheelOffset >= 0) clearCh(pf.startAddress + cm.wheelOffset);
+      if (cm.strobeOffset !== null && cm.strobeOffset !== undefined && cm.strobeOffset >= 0) clearCh(pf.startAddress + cm.strobeOffset);
+      if (cm.shutterOffset !== null && cm.shutterOffset !== undefined && cm.shutterOffset >= 0) clearCh(pf.startAddress + cm.shutterOffset);
+      // Bras complementaires (Tonio 6 arm) : meme pan, tilt propre par tete.
       for (const eh of f3d.extraHeads ?? []) {
         const ehPos = new THREE.Vector3();
         eh.lightTarget.getWorldPosition(ehPos);

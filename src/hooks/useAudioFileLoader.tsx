@@ -92,8 +92,10 @@ export function useAudioFileLoader() {
     const buffer = state.audioBuffer;
     if (!buffer) return;
     if (ctx.state === 'suspended') ctx.resume();
-    sourceRef.current?.stop();
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    const old = sourceRef.current;
+    if (old) { old.onended = null; try { old.stop(); } catch {} }
+    sourceRef.current = null;
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(ctx.destination);
@@ -118,20 +120,26 @@ export function useAudioFileLoader() {
 
   const pause = useCallback(() => {
     pausedRef.current = true;
-    sourceRef.current?.stop();
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    const old = sourceRef.current;
+    if (old) { old.onended = null; try { old.stop(); } catch {} }
+    sourceRef.current = null;
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
     setState(s => ({ ...s, isPlaying: false }));
   }, []);
 
   const stop = useCallback(() => {
-    sourceRef.current?.stop();
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    const old = sourceRef.current;
+    if (old) { old.onended = null; try { old.stop(); } catch {} }
+    sourceRef.current = null;
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
     setState(s => ({ ...s, isPlaying: false, currentTime: 0 }));
   }, []);
 
   const clear = useCallback(() => {
-    sourceRef.current?.stop();
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    const old = sourceRef.current;
+    if (old) { old.onended = null; try { old.stop(); } catch {} }
+    sourceRef.current = null;
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
     setState(s => ({ ...s, file: null, audioBuffer: null, analysis: null, isPlaying: false, currentTime: 0, error: null }));
   }, []);
 
@@ -139,18 +147,23 @@ export function useAudioFileLoader() {
     const buffer = state.audioBuffer;
     if (!buffer) return;
     const wasPlaying = state.isPlaying;
-    sourceRef.current?.stop();
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    setState(s => ({ ...s, currentTime: Math.max(0, Math.min(time, buffer.duration)) }));
+    const old = sourceRef.current;
+    if (old) { old.onended = null; try { old.stop(); } catch {} }
+    sourceRef.current = null;
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
+    const newTime = Math.max(0, Math.min(time, buffer.duration));
+    setState(s => ({ ...s, currentTime: newTime }));
     if (wasPlaying) {
+      pausedRef.current = false;
       const ctx = getAudioContext();
+      if (ctx.state === 'suspended') ctx.resume();
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       source.connect(ctx.destination);
-      source.start(0, time);
+      source.start(0, newTime);
       sourceRef.current = source;
       startTimeRef.current = ctx.currentTime;
-      startOffsetRef.current = time;
+      startOffsetRef.current = newTime;
       const updateTime = () => {
         const elapsed = ctx.currentTime - startTimeRef.current;
         const pos = startOffsetRef.current + elapsed;
@@ -160,6 +173,7 @@ export function useAudioFileLoader() {
       };
       updateTime();
       source.onended = () => { if (pausedRef.current) return; setState(s => ({ ...s, isPlaying: false, currentTime: 0 })); };
+      setState(s => ({ ...s, isPlaying: true }));
     }
   }, [state.audioBuffer, state.isPlaying, getAudioContext]);
 
@@ -183,13 +197,15 @@ interface AudioFileUploadProps {
   sections?: TrackSection[];
   onSections?: TrackSection[];
   onSectionsChange?: (sections: TrackSection[]) => void;
+  /** Magnétisme : aligne les séparatrices de sections sur les beats détectés. Défaut ON. */
+  snapToBeats?: boolean;
   scenes?: { id: string; name: string }[];
   chasers?: { id: string; name: string }[];
   cueLists?: { id: string; name: string }[];
   effects?: { id: string; name: string }[];
 }
 
-export const AudioFileUpload: React.FC<AudioFileUploadProps> = ({ onFileLoaded, onInsertColor, onInsertDimmer, onInsertStrobe, compact, externalState, onSelectionChange, onSectionClick, onInsertEntity, sections, onSectionsChange, scenes, chasers, cueLists, effects }) => {
+export const AudioFileUpload: React.FC<AudioFileUploadProps> = ({ onFileLoaded, onInsertColor, onInsertDimmer, onInsertStrobe, compact, externalState, onSelectionChange, onSectionClick, onInsertEntity, sections, onSectionsChange, snapToBeats, scenes, chasers, cueLists, effects }) => {
   const internalState = useAudioFileLoader();
   const { file, analysis, isAnalyzing, isPlaying, currentTime, error, loadFile, play, pause, stop, seek, clear } = externalState || internalState;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -251,7 +267,7 @@ export const AudioFileUpload: React.FC<AudioFileUploadProps> = ({ onFileLoaded, 
     <div className="space-y-3">
       {/* Waveform */}
       <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-2">
-        <WaveformDisplay waveform={analysis.waveform} beats={analysis.beats} sections={displaySections} onSectionsChange={onSectionsChange}
+        <WaveformDisplay waveform={analysis.waveform} beats={analysis.beats} sections={displaySections} onSectionsChange={onSectionsChange} snapToBeats={snapToBeats}
           duration={analysis.duration} currentTime={currentTime} onSeek={seek}
           onSelectionChange={onSelectionChange} onSectionClick={onSectionClick}
           onInsertEntity={onInsertEntity} onInsertColor={onInsertColor} onInsertDimmer={onInsertDimmer} onInsertStrobe={onInsertStrobe} scenes={scenes} chasers={chasers} cueLists={cueLists} effects={effects}
@@ -298,6 +314,8 @@ interface WaveformDisplayProps {
   onSelectionChange?: (startTime: number, endTime: number, newType: string) => void;
   onSectionClick?: (idx: number) => void;
   onSectionsChange?: (sections: TrackSection[]) => void;
+  /** Magnétisme : aligne les séparatrices de sections sur les beats détectés. Défaut ON. */
+  snapToBeats?: boolean;
   onInsertEntity?: (startTime: number, endTime: number, entityType: 'scene' | 'chaser' | 'cuelist' | 'efx', entityId: string) => void;
   onInsertColor?: (startTime: number, endTime: number, color: string) => void;
   onInsertDimmer?: (startTime: number, endTime: number) => void;
@@ -311,7 +329,7 @@ interface WaveformDisplayProps {
 
 const TYPE_KEYS: Record<string, string> = { Digit1: 'intro', Digit2: 'verse', Digit3: 'chorus', Digit4: 'bridge', Digit5: 'drop', Digit6: 'outro' };
 
-const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sections, duration, currentTime, onSeek, onSelectionChange, onSectionClick, onSectionsChange, onInsertEntity, onInsertColor, onInsertDimmer, onInsertStrobe, scenes, chasers, cueLists, effects, energyCurve, lowCurve }) => {
+const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sections, duration, currentTime, onSeek, onSelectionChange, onSectionClick, onSectionsChange, snapToBeats, onInsertEntity, onInsertColor, onInsertDimmer, onInsertStrobe, scenes, chasers, cueLists, effects, energyCurve, lowCurve }) => {
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
   const minimapCanvasRef = useRef<HTMLCanvasElement>(null);
   const mainContainerRef = useRef<HTMLDivElement>(null);
@@ -417,6 +435,21 @@ const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sect
     return () => window.removeEventListener('keydown', handler);
   }, [zoomLevel, zoomToFit]);
 
+  // Magnétisme : snap des séparatrices sur les beats détectés (points roses).
+  // Via ref (valeurs toujours fraîches, aucun rebind des handlers).
+  const snapBeatRef = useRef({ on: true, beats: [] as number[] });
+  snapBeatRef.current = { on: snapToBeats ?? true, beats: beats ?? [] };
+  const snapToBeat = (t: number): number => {
+    const { on, beats: bs } = snapBeatRef.current;
+    if (!on || bs.length === 0) return t;
+    let best = bs[0], bd = Math.abs(t - bs[0]);
+    for (let i = 1; i < bs.length; i++) {
+      const d = Math.abs(t - bs[i]);
+      if (d < bd) { bd = d; best = bs[i]; }
+    }
+    return Math.max(0, Math.min(duration, best));
+  };
+
   // Mouse handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -463,7 +496,7 @@ const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sect
       const dx = e.clientX - sectionResizeRef.current.startX;
       const w = mainContainerRef.current?.getBoundingClientRect().width || 1;
       const dt = (dx / w) * viewDuration;
-      const newTime = Math.max(0, Math.min(duration, sectionResizeRef.current.startTime + dt));
+      const newTime = snapToBeat(Math.max(0, Math.min(duration, sectionResizeRef.current.startTime + dt)));
       const { leftIdx, rightIdx } = sectionResizeRef.current;
       const sorted = [...sections].sort((a,b)=>a.startTime-b.startTime);
       // retrouve les index triés des deux sections adjacentes
