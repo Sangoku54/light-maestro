@@ -22,6 +22,7 @@ import { getLatencyMs } from './utils/latency-meter';
 import { dmxBridge } from './utils/dmx-bridge';
 import { collectCustomFixtureDefs, importCustomFixtureDefs } from './utils/custom-fixtures';
 import { externalizeProjectAudio, writeAudioBlobs, resolveProjectAudio, resolveWidgetAudio, audioKeyOf, type ExtractedBlob } from './utils/project-audio';
+import { stripUncloneable } from './utils/ipc-safe';
 import { version as appVersion } from '../package.json';
 import './styles/global.css';
 
@@ -67,13 +68,27 @@ let projectSaveInFlight = false;
  * Returns true when a snapshot was persisted. Never throws.
  */
 async function saveProject(options: { silent?: boolean } = {}): Promise<boolean> {
-  if (projectSaveInFlight) return false; // a save is already running — skip
+  if (projectSaveInFlight) {
+    if (!options.silent) {
+      try { toast('Sauvegarde déjà en cours…', 'err'); } catch {}
+    }
+    return false; // a save is already running — skip
+  }
   projectSaveInFlight = true;
   try {
     const showState = useShowStore.getState();
     const perfState = usePerformStore.getState();
     const appState = useAppStore.getState();
-    const { isDirty, dirtyAt, markDirty, markClean, ...persistable } = appState;
+    // getState() renvoie AUSSI les actions (setMode, markDirty,…) — sans ce
+    // filtre, storage:set / project:save plantent en IPC :
+    // « An object could not be cloned ».
+    const persistable = Object.fromEntries(
+      Object.entries(appState).filter(
+        ([k, v]) =>
+          !['isDirty', 'dirtyAt', 'markDirty', 'markClean'].includes(k) &&
+          typeof v !== 'function',
+      ),
+    ) as Omit<typeof appState, 'isDirty' | 'dirtyAt' | 'markDirty' | 'markClean'>;
     // Strip showData from widget configs (large binary, stored separately in show store)
     // but preserve showId and showName so the show can be found in the store on load.
     // Strip showData (gros binaire, stocké séparément dans le show store) et
@@ -149,7 +164,9 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
       // JSON.stringify de storage:set dépasserait la limite de string de V8.
       // Le .lmproj EXPLICITE, lui, embarque l'audio (enveloppe binaire).
       await writeBlobs();
-      const ok = await (window as any).lightMaestro?.storage?.set('autosave', data);
+      // Belt-and-braces : aucun champ non clonable ne doit partir en IPC
+      // (functions / symbols → DataCloneError « could not be cloned »).
+      const ok = await (window as any).lightMaestro?.storage?.set('autosave', stripUncloneable(data));
       return !!ok;
     }
 
@@ -160,7 +177,17 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     // l'enveloppe venait à perdre un blob, la résolution au rechargement et
     // la résolution à la lecture (ref->hit) le retrouvent quand même en local.
     await writeBlobs();
-    const saved = await (window as any).lightMaestro?.project?.save({ content: json, blobs: allBlobs });
+    const projectApi = (window as any).lightMaestro?.project;
+    if (!projectApi?.save) {
+      if (!options.silent) {
+        try { toast('API de sauvegarde indisponible (preload ?)', 'err'); } catch {}
+      }
+      return false;
+    }
+    const saved = await projectApi.save({
+      content: json,
+      blobs: stripUncloneable(allBlobs),
+    });
     if (saved) {
       useAppStore.getState().markClean();
       // Set project name from save result (project:save resolves to the file path)
@@ -171,10 +198,15 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
       }
       return true;
     }
+    // falsy = dialog cancelled (null) or IPC failure — silent for cancel,
+    // visible when the API itself blew up (no path, no toast otherwise).
+    if (!options.silent && saved === false) {
+      try { toast('Sauvegarde du projet refusée par le système', 'err'); } catch {}
+    }
     return false;
   } catch (e) {
     console.error('Failed to save project:', e);
-    try { toast('Échec de sauvegarde du projet — audio/état non persisté', 'err'); } catch {}
+    try { toast(`Échec de sauvegarde du projet — ${e instanceof Error ? e.message : String(e)}`, 'err'); } catch {}
     return false;
   } finally {
     projectSaveInFlight = false;
@@ -426,12 +458,37 @@ const App: React.FC = () => {
       } catch (e) { console.error('Failed to open project:', e); }
     };
 
-    (window as any).__lm_save = () => { saveProject(); };
+    (window as any).__lm_save = async () => {
+      const ok = await saveProject();
+      if (ok) {
+        try { toast('Projet sauvegardé', 'ok'); } catch {}
+      }
+      return ok;
+    };
 
     return () => {
       delete (window as any).__lm_new;
       delete (window as any).__lm_open;
       delete (window as any).__lm_save;
+    };
+  }, []);
+
+  // ─── Global error visibility ────────────────────
+  // Un throw dans un onClick n'atteint PAS l'ErrorBoundary → sans ça,
+  // un échec de sauvegarde est totalement invisible pour l'utilisateur.
+  useEffect(() => {
+    const onError = (e: ErrorEvent) => {
+      try { toast(`Erreur: ${e.message}`, 'err'); } catch {}
+    };
+    const onRejection = (e: PromiseRejectionEvent) => {
+      const msg = e.reason instanceof Error ? e.reason.message : String(e.reason);
+      try { toast(`Erreur async: ${msg}`, 'err'); } catch {}
+    };
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection as EventListener);
+    return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection as EventListener);
     };
   }, []);
 
@@ -552,7 +609,7 @@ const App: React.FC = () => {
             onClick={handleCancelClose}
           >
             <div
-              className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[420px] overflow-hidden"
+              className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[420px] max-w-[95vw] overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}

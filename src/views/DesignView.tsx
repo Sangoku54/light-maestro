@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { clampRect } from '../components/clampedpopup';
 import { generateAllThumbnails, getVariantsForCategory, type ThumbnailVariant } from '../utils/fixtureThumbnails';
 import { useTranslation } from 'react-i18next';
-import { Plus, Play, Pause, Square, Trash2, GripVertical, Search, X, Edit2, Check, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Zap, Save, FolderPlus, Maximize2, Type } from 'lucide-react';
+import { Plus, Play, Pause, Square, Trash2, GripVertical, Search, X, Edit2, Check, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Zap, Save, FolderPlus, Maximize2, Type, Copy } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { useShowStore, getFixtureColor, type PatchedFixture, type FixtureGroup, type SavedScene, type SavedChaser, type ChaserStep, type SavedCueList, type CueListCue, type ShowUniverse, type StageScene } from '../stores/showStore';
 import { normalizeRoster, rosterFromBandConfig, type MusicianRoster } from '../utils/musicians';
@@ -17,12 +17,15 @@ import { AUTO_LOOP_FOLDER } from '../engine/auto-loops';
 import { groupByTier, TIER_KEYS } from '../engine/tier-utils';
 import { sendChannelsToHardware, sendToUniverse, sendFixtureOn, sendFixtureOff, sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
+import { outputArbiter } from '../engine/output-arbiter';
 import { fixtureTestState } from '../utils/fixture-test-state';
 import { useRgbMatrixStore } from '../stores/rgbmatrixStore';
 import { buildSceneFixtureIndex, collectFolderNames, normalizeFolderName, scenesWithoutFixture, sceneTouchesFixture } from '../utils/scene-fixtures';
+import { setFixtureChannelMaps, type LookChannelMap } from '../utils/scene-look';
 import { useProgrammerStore } from '../stores/programmerStore';
 import { useProgrammerSync } from '../hooks/useProgrammerSync';
 import { evalEfxNormalized, generateEfxPanTilt } from '../hooks/fixture-tracks';
+import { crossfadeSceneChannels, holdMissingChannels } from '../hooks/dmx-playback';
 import { ProgrammerBar } from '../components/ProgrammerBar';
 
 /**
@@ -173,7 +176,7 @@ const ShowWith3D: React.FC = () => {
   const [float3DSize, setFloat3DSize] = useState({ w: 960, h: 540 });
   // 3D config par show
   const [showMusicians, setShowMusicians] = useState<MusicianRoster>({});
-  const [showStageScene, setShowStageScene] = useState<StageScene>('rear-front');
+  const [showStageScene, setShowStageScene] = useState<StageScene>('empty');
   const shows = useShowStore((s) => s.shows);
   const updateShowStore = useShowStore((s) => s.updateShow);
   // Sync depuis le show sélectionné (window.__lm_selectedShowId publié par ShowManager)
@@ -193,7 +196,7 @@ const ShowWith3D: React.FC = () => {
       setShowStageScene((sc as any).stageScene ?? 'rear-front');
     } else {
       setShowMusicians({});
-      setShowStageScene('rear-front');
+      setShowStageScene('empty');
     }
   }, [selectedShowIdSync, shows]);
   const handleShowMusiciansChange = useCallback((roster: MusicianRoster) => {
@@ -235,7 +238,7 @@ const ShowWith3D: React.FC = () => {
         <ShowManager />
       </div>
       {show3D && showFloating3D && (
-        <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, overflow: 'hidden' }}>
+        <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}>
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
             <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D View — Show</span>
             <div className="flex items-center gap-1">
@@ -487,7 +490,11 @@ const SceneList: React.FC = () => {
     { visible: false, x: 0, y: 0, sceneId: '', sceneName: '' }
   );
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
+  // Init depuis window : Store/Rec posent l'id AVANT le montage de la grille
+  // (bascule onglet Scènes) — un useState(null) écrasait la sélection au mount.
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(
+    () => ((window as any).__lm_selectedSceneId as string | null | undefined) ?? null
+  );
   // Drag & drop: scene currently dragged (source) + folder chip hovered (target).
   const [dragSceneId, setDragSceneId] = useState<string | null>(null);
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
@@ -519,6 +526,29 @@ const SceneList: React.FC = () => {
   useEffect(() => {
     (window as any).__lm_selectedSceneId = selectedSceneId;
   }, [selectedSceneId]);
+
+  // Sync depuis l'extérieur (Store ProgrammerBar / Rec Scène 3D) : la grille
+  // n'écrivait que le window hack, jamais ne le relisait → tuile non
+  // sélectionnée après validation de la modale.
+  useEffect(() => {
+    const check = () => {
+      const id = (window as any).__lm_selectedSceneId as string | null | undefined;
+      const next = id ?? null;
+      if (next !== selectedSceneId) setSelectedSceneId(next);
+    };
+    check();
+    const iv = setInterval(check, 100);
+    return () => clearInterval(iv);
+  }, [selectedSceneId]);
+
+  // Révèle la tuile : si un filtre/recherche la masque après un select
+  // externe, on relâche les filtres plutôt que « rien ne s'affiche ».
+  useEffect(() => {
+    if (!selectedSceneId) return;
+    if (filteredScenes.some((s) => s.id === selectedSceneId)) return;
+    if (sceneFilter) setSceneFilter('');
+    if (sceneSearch) setSceneSearch('');
+  }, [selectedSceneId, filteredScenes, sceneFilter, sceneSearch]);
 
   if (scenes.length === 0 && sceneFolders.length === 0) {
     // Empty project: the filter bar is skipped, but folder creation must
@@ -812,7 +842,7 @@ const SceneList: React.FC = () => {
               : t('design.noScenesMatch', { query: sceneSearch })}
         </div>
       ) : (
-      <div className="grid grid-cols-4 xl:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
         {filteredScenes.map((scene) => {
           const activeChannels = Object.entries(scene.channels).filter(([, v]) => v > 0);
           const isSelected = selectedSceneId === scene.id;
@@ -822,7 +852,20 @@ const SceneList: React.FC = () => {
             <div
               key={scene.id}
               draggable
-              onClick={() => setSelectedSceneId(isSelected ? null : scene.id)}
+              onClick={() => {
+                // Clic = toujours sélectionner + jouer. Re-clic sur la tuile
+                // déjà sélectionnée = re-lancer (replay), JAMAIS désélectionner
+                // : l'ancien toggle (→ null) déclenchait le blackout 512 zéros
+                // de SceneEditor — symptôme « tuile générée mais ne déclenche rien »
+                // (cas Store : la scène est déjà sélectionnée après la modale).
+                if (isSelected) {
+                  (window as any).__lm_sceneReplayAt = Date.now();
+                }
+                setSelectedSceneId(scene.id);
+                // Écriture synchrone : l'éditeur lit window via poll — ne pas
+                // attendre l'effet React (1 frame) pour que la scène joue.
+                (window as any).__lm_selectedSceneId = scene.id;
+              }}
               onDragStart={(e) => {
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', scene.id);
@@ -930,6 +973,16 @@ const SceneList: React.FC = () => {
           >
             <Edit2 size={12} /> {t('design.scenes.editScene')}
           </button>
+          <button
+            onClick={() => {
+              const newId = useShowStore.getState().duplicateScene(ctxMenu.sceneId);
+              if (newId) setSelectedSceneId(newId);
+              setCtxMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-200 transition-colors flex items-center gap-2"
+          >
+            <Copy size={12} /> {t('design.scenes.duplicateScene')}
+          </button>
           <div className="my-1 border-t border-gray-800" />
           <div className="px-3 py-1 text-[10px] text-gray-600">{t('design.scenes.moveToFolder')}</div>
           {folderOptions.map((fo) => (
@@ -1023,18 +1076,31 @@ const SceneEditor: React.FC = () => {
   const universesRef = useRef(universes);
   universesRef.current = universes;
 
-  // Get selected scene ID from the SceneList via window hack
-  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
+  // Get selected scene ID from the SceneList via window hack — init from
+  // window so a Store that selected before mount plays on the first frame
+  // (no 100ms scene=null window that would push 512 zeros).
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(
+    () => ((window as any).__lm_selectedSceneId as string | null | undefined) ?? null
+  );
 
   // Ref for auto-focus on the scene name input when renaming via context menu
   const renameInputRef = useRef<HTMLInputElement>(null);
 
-  // Listen for scene selection
+  // Listen for scene selection + replay (re-clic tuile déjà sélectionnée)
+  const lastSceneKeyRef = useRef<string | null>(null);
+  const [replayTick, setReplayTick] = useState(0);
+  const lastReplayAtRef = useRef(0);
   useEffect(() => {
     const check = () => {
       const id = (window as any).__lm_selectedSceneId;
       if (id !== selectedSceneId) setSelectedSceneId(id);
+      const replayAt = Number((window as any).__lm_sceneReplayAt) || 0;
+      if (replayAt > lastReplayAtRef.current) {
+        lastReplayAtRef.current = replayAt;
+        setReplayTick((t) => t + 1);
+      }
     };
+    check(); // immédiat au mount (sinon 100 ms de scene=null → blackout)
     const interval = setInterval(check, 100);
     return () => clearInterval(interval);
   }, [selectedSceneId]);
@@ -1065,7 +1131,7 @@ const SceneEditor: React.FC = () => {
   const [fixtureAnalyses, setFixtureAnalyses] = useState<Map<string, AnalyzedFixtureChannels>>(new Map());
   const [testActive, setTestActive] = useState(false);
   const [musicians, setMusicians] = useState<MusicianRoster>({});
-  const [stageScene, setStageScene] = useState<StageScene>('rear-front');
+  const [stageScene, setStageScene] = useState<StageScene>('empty');
   const [showFloating3D, setShowFloating3D] = useState(false);
   const [show3D, setShow3D] = useState(false);
   const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
@@ -1157,16 +1223,25 @@ const SceneEditor: React.FC = () => {
       return () => stopSceneEfxLoop({ blackout: false });
     }
     stopSceneEfxLoop();
+    // Musiciens / ponts (stageScene) ne se rechargent QUE si l'identité de la
+    // scène change. Un apply/cancel EFX ne touche que efxId/channels : sans
+    // cette garde, l'effet re-tirait scene.musicians (undefined → {}) et
+    // scene.stageScene (undefined → 'rear-front') et écrasait la config 3D.
+    const sceneId = scene?.id ?? null;
+    const sceneChanged = lastSceneKeyRef.current !== sceneId;
+    if (sceneChanged) lastSceneKeyRef.current = sceneId;
     if (scene) {
       // Le programmeur (LTP 85) garde ses valeurs parkées (Target/faders) et
       // masque la preview design-test (LTP 60) sur pan/tilt/couleur/dimmer :
       // la scène sélectionnée semblerait ne pas jouer (ni hardware ni 3D,
       // qui lit le buffer arbitré). Même traitement qu'au lancement audio.
       try {
-        const prog = useProgrammerStore.getState();
-        if (Object.keys(prog.channels).length > 0) {
-          console.warn('[ScenePreview] programmeur vidé (il masquait la scène)');
-          prog.clear();
+        if (!(window as any).__lm_storeOpen) {
+          const prog = useProgrammerStore.getState();
+          if (Object.keys(prog.channels).length > 0) {
+            console.warn('[ScenePreview] programmeur vidé (il masquait la scène)');
+            prog.clear();
+          }
         }
       } catch {}
       setEditName(scene.name);
@@ -1174,8 +1249,10 @@ const SceneEditor: React.FC = () => {
       setEditFadeIn(scene.fadeIn);
       setEditFadeOut(scene.fadeOut);
       setEditDuration(scene.duration);
-      setMusicians(normalizeRoster(scene.musicians ?? rosterFromBandConfig(scene.bandConfig)));
-      setStageScene(scene.stageScene ?? 'rear-front');
+      if (sceneChanged) {
+        setMusicians(normalizeRoster(scene.musicians ?? rosterFromBandConfig(scene.bandConfig)));
+        setStageScene(scene.stageScene ?? 'rear-front');
+      }
       setEditChannels({ ...scene.channels });
       // Éteint les canaux de la scène précédente qui ne sont pas dans la nouvelle (sinon scène précédente reste allumée)
       const prev = latestChannelsRef.current;
@@ -1188,7 +1265,7 @@ const SceneEditor: React.FC = () => {
       latestChannelsRef.current = { ...scene.channels };
       // Push scene channels to DMX engine immédiatement (avec clear des anciens)
       if (Object.keys(toSend).length > 0) {
-        sendChannelsToHardwareAndStore(toSend, patchedFixtures, universes).catch(() => {});
+        sendChannelsToHardwareAndStore(toSend, patchedFixtures, universes, 'design-test').catch(() => {});
       }
       // Si la scène a une durée finie, programme un blackout à la fin (comme un chaser) — 0 = infini (reste allumée)
       if (scene.duration > 0) {
@@ -1208,6 +1285,13 @@ const SceneEditor: React.FC = () => {
       }
       // Si la scène a un EFX lié, démarre son loop continu (comme l'aperçu EFX) — il dure `duration` (0 = infini)
       const efxId = (scene as any).efxId as string | undefined;
+      if (!efxId) {
+        // Scène statique (Store Target…) : rien ne doit masquer design-test
+        // (LTP 60) via des résidus scene-efx (LTP 75) OU design-efx (LTP 70)
+        // d'un aperçu EFX précédent.
+        try { dmxBridge.release('scene-efx'); } catch {}
+        try { dmxBridge.release('design-efx'); } catch {}
+      }
       if (efxId) {
         const efx = useShowStore.getState().effects.find((e) => e.id === efxId);
         if (efx && efx.fixtureIds.length > 0) {
@@ -1249,12 +1333,15 @@ const SceneEditor: React.FC = () => {
             }
             // Math EXACTE du moteur (fixture-tracks.ts) : tous les patterns,
             // même amplitude/offsets/rotation que le preview et le show.
-            const tCycles = (elapsed * efx.speed * 2) / (Math.PI * 2);
-            const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
-              efx.pattern, tCycles, efx.width, efx.height, efx.rotation, efx.xOffset, efx.yOffset,
-            );
+            const tBase = (elapsed * efx.speed * 2) / (Math.PI * 2);
+            const sceneSpread = (efx as any).spread ?? 0;
             const byUniverse = new Map<string, Record<number, number>>();
-            for (const fid of efx.fixtureIds) {
+            for (let sfi = 0; sfi < efx.fixtureIds.length; sfi++) {
+              const fid = efx.fixtureIds[sfi];
+              const tCycles = efx.fixtureIds.length > 1 && sceneSpread > 0 ? tBase + (sfi * sceneSpread) / efx.fixtureIds.length : tBase;
+              const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
+                efx.pattern, tCycles, efx.width, efx.height, efx.rotation, efx.xOffset, efx.yOffset,
+              );
               const pf = useShowStore.getState().patchedFixtures.find((f) => f.id === fid);
               if (!pf) continue;
               try {
@@ -1282,14 +1369,23 @@ const SceneEditor: React.FC = () => {
         }
       }
     } else {
+      // Sélection déjà posée sur window par Store/Rec mais pas encore
+      // consommée par le poll (100 ms) : NE PAS blackout — sinon les zéros
+      // transient écrasent le handoff design-test (« rien ne lance »).
+      const pendingId = (window as any).__lm_selectedSceneId as string | null | undefined;
+      if (pendingId) {
+        setSelectedSceneId(pendingId);
+        return; // re-run de l'effet avec scene trouvée → push
+      }
       setEditName('');
       setEditFolder('');
       setEditFadeIn(1000);
       setEditFadeOut(1000);
       setEditDuration(5000);
-      setMusicians({});
-      setStageScene('rear-front');
       setEditChannels({});
+      // Musiciens/ponts : on NE les efface pas à la désélection (notamment
+      // annulation EFX d'une scène créée → sélection nulle). Ils ne se
+      // rechargent qu'au changement d'identité de scène (ci-dessus).
       latestChannelsRef.current = {};
       // Blackout — clear entire DMX universe. Transient (2 s): the zeros
       // flush the hardware, then the design-test source is released so the
@@ -1300,7 +1396,7 @@ const SceneEditor: React.FC = () => {
       sendChannelsToHardwareAndStore(zeros, patchedFixtures, universes, 'design-test', 2000).catch(() => {});
     }
     return () => stopSceneEfxLoop();
-  }, [scene?.id, (scene as any)?.efxId, scene?.duration, isScenePreviewVisible]);
+  }, [scene?.id, (scene as any)?.efxId, scene?.duration, scene?.channels, isScenePreviewVisible, replayTick]);
 
   // Keep the folder field in sync when the scene's folder changes from
   // elsewhere (e.g. the scene list context menu) — without touching the DMX
@@ -1337,6 +1433,13 @@ const SceneEditor: React.FC = () => {
       }
       if (!cancelled) {
         setFixtureAnalyses(analyses);
+        // Publie les channelMaps pour ensureFixtureLook (Store ProgrammerBar)
+        // même quand la vue 3D n'est pas ouverte.
+        try {
+          const maps = new Map<string, LookChannelMap>();
+          for (const [fid, a] of analyses) maps.set(fid, a as unknown as LookChannelMap);
+          setFixtureChannelMaps(maps);
+        } catch {}
         // Auto-expand all if no scene is selected yet
         if (!scene && analyses.size > 0) {
           setExpandedFixtures(new Set(analyses.keys()));
@@ -1362,10 +1465,20 @@ const SceneEditor: React.FC = () => {
 
   const handleSave = () => {
     const prog = useProgrammerStore.getState().channels;
-    const hasProg = Object.keys(prog).length > 0;
+    const backupRaw = (globalThis as any).__lm_programmerBackup as Record<number, number> | undefined;
+    // Sanitizer : ne garder que des adresses DMX numériques (évite Number('at')=NaN).
+    const backup: Record<number, number> | undefined = backupRaw
+      ? Object.fromEntries(Object.entries(backupRaw).filter(([k]) => /^\d+$/.test(k)).map(([k, v]) => [Number(k), v]))
+      : undefined;
+    // Si la preview a vidé le programmeur pendant la Target, on retombe sur
+    // le backup (sinon pan/tilt Target est perdu silencieusement).
+    const progMerged: Record<number, number> = Object.keys(prog).length > 0
+      ? prog
+      : (backup && Object.keys(backup).length > 0 ? backup : {});
+    const hasProg = Object.keys(progMerged).length > 0;
     const baseChannels = hasProg ? (() => {
       const merged: Record<number, number> = { ...(scene ? scene.channels : editChannels) };
-      for (const [k, v] of Object.entries(prog)) merged[Number(k)] = v;
+      for (const [k, v] of Object.entries(progMerged)) merged[Number(k)] = v;
       return merged;
     })() : editChannels;
     if (!scene) {
@@ -1393,7 +1506,13 @@ const SceneEditor: React.FC = () => {
         stageScene,
       });
     }
-    if (hasProg) useProgrammerStore.getState().clear();
+    if (hasProg) {
+      useProgrammerStore.getState().clear();
+      (globalThis as any).__lm_programmerBackup = undefined;
+      try { (window as any).__lm_toast?.('Scène enregistrée (programmeur fusionné)', 'ok'); } catch {}
+    } else {
+      try { (window as any).__lm_toast?.('Scène enregistrée', 'ok'); } catch {}
+    }
   };
 
   const handleTest = async () => {
@@ -1622,12 +1741,12 @@ const SceneEditor: React.FC = () => {
       {show3D && showFloating3D && (
         <div
           className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col"
-          style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, overflow: 'hidden' }}
+          style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}
         >
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
             <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D View</span>
             <div className="flex items-center gap-1">
-              <button onClick={() => { setFloat3DSize({ w: 640, h: 360 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
+              <button onClick={() => { const w = 640; setFloat3DSize({ w, h: 360 }); setFloat3DPos({ x: Math.max(10, window.innerWidth - w - 20), y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
               <button onClick={() => { setShowFloating3D(false); setShow3D(false); }} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
             </div>
           </div>
@@ -1656,14 +1775,14 @@ const SceneEditor: React.FC = () => {
       )}
 
       {/* Open 3D button — identical to the QuickShow AutoScript floating pill.
-          Clampé au viewport pour que la fenêtre ne s'ouvre jamais hors écran
-          (panneau tronqué / que le haut visible). */}
+          Ouvre à DROITE : la liste des scènes est à gauche (z-index sous le
+          fixed z-40) — x≤100 la couvrait et interceptait les clics sur les tuiles. */}
       {!showFloating3D && (
         <button onClick={() => {
           const W = Math.max(420, Math.min(960, window.innerWidth - 60));
           const H = Math.max(320, Math.min(540, window.innerHeight - 60));
           setFloat3DSize({ w: W, h: H });
-          setFloat3DPos({ x: Math.max(10, Math.min(100, window.innerWidth - W - 20)), y: Math.max(10, Math.min(80, window.innerHeight - H - 20)) });
+          setFloat3DPos({ x: Math.max(10, window.innerWidth - W - 20), y: Math.max(10, Math.min(80, window.innerHeight - H - 20)) });
           setShow3D(true); setShowFloating3D(true);
         }} className="fixed bottom-4 right-4 z-40 bg-purple-600/80 hover:bg-purple-500 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg transition-all">
           🎥 3D View
@@ -2170,7 +2289,7 @@ const ChaserList: React.FC = () => {
 
   return (
     <>
-      <div className="grid grid-cols-4 xl:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
         {chasers.map((chaser) => {
           const isSelected = selectedId === chaser.id;
           return (
@@ -2323,10 +2442,14 @@ const ChaserEditor: React.FC = () => {
   const [playState, setPlayState] = useState<'stopped' | 'playing' | 'paused'>('stopped');
   const [activeStepIdx, setActiveStepIdx] = useState(-1);
   const [stepProgress, setStepProgress] = useState(0); // 0-1 for current step
-  const playRef = useRef<{ timer: ReturnType<typeof setInterval> | null; paused: boolean; currentIdx: number; bouncingForward: boolean; phase: 'fadeIn' | 'hold' | 'fadeOut'; phaseStart: number; phaseDuration: number; startChannelValues: Record<number, number> }>({
+  const playRef = useRef<{ timer: number | null; paused: boolean; currentIdx: number; bouncingForward: boolean; phase: 'fadeIn' | 'hold' | 'fadeOut'; phaseStart: number; phaseDuration: number; startChannelValues: Record<number, number>; lastProgress: number }>({
     timer: null, paused: false, currentIdx: 0, bouncingForward: true,
-    phase: 'fadeIn', phaseStart: 0, phaseDuration: 0, startChannelValues: {},
+    phase: 'fadeIn', phaseStart: 0, phaseDuration: 0, startChannelValues: {}, lastProgress: -1,
   });
+  // Dernières valeurs brutes envoyées (anti-saccade : un canal absent d'une
+  // scène garde sa valeur au lieu de plonger à 0 — cas tuto : scènes qui ne
+  // couvrent pas toutes les fixtures).
+  const lastSentRef = useRef<Record<number, number>>({});
 
   // Floating 3D view (same pill pattern as scenes/EFX tabs)
   const [showFloating3D, setShowFloating3D] = useState(false);
@@ -2407,11 +2530,11 @@ const ChaserEditor: React.FC = () => {
 
   // ── Playback ──
   const stopPlayback = useCallback(() => {
-    if (playRef.current.timer) {
-      clearInterval(playRef.current.timer);
+    if (playRef.current.timer !== null) {
+      cancelAnimationFrame(playRef.current.timer);
       playRef.current.timer = null;
     }
-    // Blackout
+    // Blackout (scènes + valeurs tenues, sinon un canal absent des scènes reste allumé)
     const zeros: Record<number, number> = {};
     for (const step of editSteps) {
       const scn = sceneById(step.sceneId);
@@ -2421,6 +2544,10 @@ const ChaserEditor: React.FC = () => {
         }
       }
     }
+    for (const addr of Object.keys(lastSentRef.current)) {
+      zeros[Number(addr)] = 0;
+    }
+    lastSentRef.current = {};
     if (Object.keys(zeros).length > 0) {
       // TRANSIENT (2 s): the zeros flush the hardware, then the design-test
       // source is released so the engine regains control after stopping the
@@ -2460,38 +2587,82 @@ const ChaserEditor: React.FC = () => {
       const progress = Math.min(1, elapsed / phaseDuration);
 
       const currentStep = seq[currentIdx];
-      if (!currentStep) return;
+      if (!currentStep) {
+        if (playRef.current.timer !== null) playRef.current.timer = requestAnimationFrame(tick);
+        return;
+      }
 
       const scn = sceneById(currentStep.sceneId);
       if (!scn) {
         // Skip missing scene
         advanceStep();
+        if (playRef.current.timer !== null) playRef.current.timer = requestAnimationFrame(tick);
         return;
       }
+
+      // Index de l'étape qui suivra (miroir de advanceStep, sans mutation) —
+      // la cible du crossfade. Clampé par sécurité.
+      const peekNextIdx = () => {
+        if (seq.length <= 1) return 0;
+        if (editDirection === 'bounce') {
+          if (bouncingForward && currentIdx >= seq.length - 1) return Math.max(0, currentIdx - 1);
+          if (!bouncingForward && currentIdx <= 0) return Math.min(seq.length - 1, currentIdx + 1);
+          return Math.max(0, Math.min(seq.length - 1, bouncingForward ? currentIdx + 1 : currentIdx - 1));
+        }
+        const n = getNextStepIndex(currentIdx);
+        return Math.max(0, Math.min(seq.length - 1, n));
+      };
 
       // Calculate target values for this phase
       let targetValues: Record<number, number> = {};
       if (phase === 'fadeIn') {
-        // Fade from 0 to full
+        // Fade from 0 to full (première étape uniquement — démarrage depuis le noir)
         for (const [addrStr, val] of Object.entries(scn.channels)) {
           targetValues[Number(addrStr)] = Math.round(val * progress);
         }
       } else if (phase === 'hold') {
-        targetValues = { ...scn.channels };
+        // Tient aussi les canaux connus absents de cette scène (sinon la
+        // source les lâche et les fixtures concernées freezent puis snappent).
+        targetValues = holdMissingChannels(scn.channels, lastSentRef.current);
       } else if (phase === 'fadeOut') {
-        // Fade from full to 0
-        for (const [addrStr, val] of Object.entries(scn.channels)) {
-          targetValues[Number(addrStr)] = Math.round(val * (1 - progress));
+        // CROSSFADE vers l'étape suivante (pas de passage par 0 : l'ancien
+        // code éteignait tout — dip noir + shutter en zone strobe + pan/tilt
+        // en butée — d'où le « clignotement stroboscope » à chaque transition).
+        // Un canal absent d'un côté garde sa dernière valeur envoyée (pas de
+        // plongeon à 0). Scène suivante manquante : repli sur l'ancien fade.
+        const nextScn = sceneById(seq[peekNextIdx()]?.sceneId);
+        if (!nextScn) {
+          for (const [addrStr, val] of Object.entries(scn.channels)) {
+            targetValues[Number(addrStr)] = Math.round(val * (1 - progress));
+          }
+        } else {
+          targetValues = crossfadeSceneChannels(
+            scn.channels, nextScn.channels, progress, 1, lastSentRef.current,
+          );
         }
       }
 
+      lastSentRef.current = { ...targetValues };
       try { sendChannelsToHardware(targetValues, patchedFixtures, universes, 'design-test'); } catch {}
 
-      setActiveStepIdx(currentIdx);
-      setStepProgress(progress);
+      // Mise à jour UI allégée : setStepProgress à 60 fps re-rendait tout
+      // DesignView (dont le wrapper Stage3D) 60×/s → mouvements 3D saccadés.
+      // Index seulement si changé, progression par pas visibles (~2 %).
+      setActiveStepIdx((prev) => (prev === currentIdx ? prev : currentIdx));
+      const lastProg = playRef.current?.lastProgress ?? -1;
+      if (Math.abs(progress - lastProg) >= 0.02 || progress >= 1) {
+        if (playRef.current) playRef.current.lastProgress = progress;
+        setStepProgress(progress);
+      }
 
       if (progress >= 1) {
         advanceStep();
+      }
+      // Boucle RAF (vsync) plutôt que setInterval : pas de dérive ni de
+      // paquets de ticks, les mouvements restent réguliers. La progression
+      // reste pilotée par Date.now(), donc le tempo est inchangé.
+      if (playRef.current.timer !== null) {
+        playRef.current.timer = requestAnimationFrame(tick);
       }
     };
 
@@ -2512,12 +2683,14 @@ const ChaserEditor: React.FC = () => {
         return;
       }
 
-      // fadeOut done → advance to next step
+      // fadeOut done → advance to next step. Le fadeOut était un crossfade :
+      // les valeurs sont déjà pleines → reprise en hold, jamais en fadeIn
+      // (repasser par fadeIn redescendrait par 0 = re-dip noir/strobe).
       if (seq.length <= 1) {
         currentIdx = 0;
         const s = seq[0];
-        phase = 'fadeIn';
-        phaseDuration = ((s?.fadeIn ?? 0) * speedMultiplier) || 1;
+        phase = 'hold';
+        phaseDuration = ((s?.hold ?? 0) * speedMultiplier) || 1;
         return;
       }
       const nextIdx = getNextStepIndex(currentIdx);
@@ -2540,8 +2713,10 @@ const ChaserEditor: React.FC = () => {
       const step = seq[currentIdx];
       if (!step) { currentIdx = 0; return; }
 
-      phase = 'fadeIn';
-      phaseDuration = ((step.fadeIn ?? 0) * speedMultiplier) || 1;
+      // Le fadeOut précédent était un crossfade vers cette étape : valeurs
+      // déjà pleines → démarrage en hold (voir commentaire ci-dessus).
+      phase = 'hold';
+      phaseDuration = ((step.hold ?? 0) * speedMultiplier) || 1;
     };
 
     const getNextStepIndex = (idx: number) => {
@@ -2550,9 +2725,9 @@ const ChaserEditor: React.FC = () => {
       return idx + 1;
     };
 
-    // Start tick
+    // Start tick (RAF, synchronisé au rafraîchissement écran)
     playRef.current = {
-      timer: setInterval(tick, 16), // ~60fps
+      timer: requestAnimationFrame(tick),
       paused: false,
       currentIdx: 0,
       bouncingForward: true,
@@ -2560,6 +2735,7 @@ const ChaserEditor: React.FC = () => {
       phaseStart,
       phaseDuration,
       startChannelValues: {},
+      lastProgress: -1,
     };
 
     setPlayState('playing');
@@ -2568,8 +2744,8 @@ const ChaserEditor: React.FC = () => {
   }, [editSteps, editDirection, editSpeed, stopPlayback, sceneById]);
 
   const pausePlayback = useCallback(() => {
-    if (playRef.current.timer) {
-      clearInterval(playRef.current.timer);
+    if (playRef.current.timer !== null) {
+      cancelAnimationFrame(playRef.current.timer);
       playRef.current.timer = null;
       playRef.current.paused = true;
     }
@@ -3007,7 +3183,7 @@ const ChaserEditor: React.FC = () => {
         </div>
       )}
       {showFloating3D && (
-        <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, overflow: 'hidden' }}>
+        <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}>
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
             <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D — Chaser</span>
             <div className="flex items-center gap-1">
@@ -3110,8 +3286,40 @@ const RgbMatrixList: React.FC = () => {
 
 const RGBMatrixEditor: React.FC = () => {
   const { matrices, activeMatrixId, updateMatrix } = useRgbMatrixStore();
+  const matrixStats = useRgbMatrixStore(s => s.stats);
   const fixtureGroups = useShowStore(s => s.fixtureGroups);
+  const patchedFixtures = useShowStore(s => s.patchedFixtures);
+  const universes = useShowStore(s => s.universes);
   const [livePhase, setLivePhase] = useState(0);
+
+  // Fenêtre 3D flottante (même modèle que l'éditeur EFX)
+  const [show3D, setShow3D] = useState(false);
+  const [showFloating3D, setShowFloating3D] = useState(false);
+  const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
+  const [float3DSize, setFloat3DSize] = useState({ w: 960, h: 540 });
+  const float3DDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
+  const float3DResizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const handleFloat3DDragStart = useCallback((e: React.MouseEvent) => {
+    float3DDragRef.current = { startX: e.clientX, startY: e.clientY, startLeft: float3DPos.x, startTop: float3DPos.y };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DDragRef.current) return;
+      setFloat3DPos({ x: Math.max(0, Math.min(float3DDragRef.current.startLeft + ev.clientX - float3DDragRef.current.startX, window.innerWidth - 120)), y: Math.max(0, Math.min(float3DDragRef.current.startTop + ev.clientY - float3DDragRef.current.startY, window.innerHeight - 40)) });
+    };
+    const onUp = () => { float3DDragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DPos]);
+  const handleFloat3DResizeStart = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    float3DResizeRef.current = { startX: e.clientX, startY: e.clientY, startW: float3DSize.w, startH: float3DSize.h };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DResizeRef.current) return;
+      setFloat3DSize({ w: Math.max(320, float3DResizeRef.current.startW + ev.clientX - float3DResizeRef.current.startX), h: Math.max(200, float3DResizeRef.current.startH + ev.clientY - float3DResizeRef.current.startY) });
+    };
+    const onUp = () => { float3DResizeRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DSize]);
 
   const active = matrices.find(m => m.id === activeMatrixId);
 
@@ -3309,6 +3517,68 @@ const RGBMatrixEditor: React.FC = () => {
           })}
         </div>
       </div>
+
+      {/* Diagnostic moteur → sortie : prouve ce que la matrice écrit et ce qui sort réellement */}
+      {(() => {
+        const stats = matrixStats[active.id];
+        const groupFixtures = patchedFixtures.filter(f => (fixtureGroups.find(g => g.id === active.groupId)?.fixtureIds ?? []).includes(f.id));
+        let overriddenBy: string | null = null;
+        let outNonZero = false;
+        if (active.enabled && stats && stats.resolved > 0) {
+          const checked = groupFixtures.slice(0, 8);
+          for (const pf of checked) {
+            const uniIdx = universes.findIndex(u => u.id === pf.universeId);
+            if (uniIdx < 0) continue;
+            const mine = outputArbiter.getSourceValues('rgb-matrix', uniIdx) ?? {};
+            const out = dmxBridge.getChannels(uniIdx) ?? {};
+            const from = pf.startAddress, to = pf.startAddress + (pf.channelCount || 16);
+            let mineLit = false, outLit = false;
+            for (let a = from; a < to; a++) {
+              if ((mine[a] ?? 0) > 0) mineLit = true;
+              if ((out[a] ?? 0) > 0) outLit = true;
+            }
+            if (mineLit) outNonZero = outNonZero || outLit;
+            if (mineLit && !outLit && !overriddenBy) {
+              for (const src of ['simple-desk', 'fixture-test', 'efx-highlight', 'vc', 'scene-efx', 'design-efx', 'design-test', 'fixture-onoff', 'default']) {
+                const sv = outputArbiter.getSourceValues(src, uniIdx) ?? {};
+                if (Object.keys(sv).some(k => Number(k) >= from && Number(k) < to)) { overriddenBy = src; break; }
+              }
+              if (!overriddenBy) overriddenBy = '?';
+            }
+          }
+        }
+        return (
+          <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-3 text-[11px] space-y-1">
+            <div className="text-gray-400">
+              Moteur : {stats ? <span className={stats.resolved > 0 ? 'text-green-400' : 'text-red-400'}>{stats.resolved}/{stats.total} fixtures écrites en DMX</span> : 'en attente…'}
+              {stats && stats.total === 0 && <span className="text-amber-400"> — groupe vide ou introuvable, rien à piloter</span>}
+              {stats && stats.total > 0 && stats.resolved === 0 && <span className="text-amber-400"> — définitions non résolues ou fixtures sans RGB</span>}
+            </div>
+            {active.enabled && stats && stats.resolved > 0 && (
+              outNonZero
+                ? <div className="text-green-400">Sortie : pilotage auto actif ✓ (RGB/roue + dimmer + shutter gérés par la matrice)</div>
+                : <div className="text-red-400">Sortie : la matrice écrit mais RIEN ne sort{overriddenBy && overriddenBy !== '?' ? <> — écrasée par <span className="text-yellow-300">{overriddenBy}</span> <button onClick={() => dmxBridge.release(overriddenBy!)} className="ml-1 px-2 py-0.5 rounded bg-red-600/30 border border-red-500/40 text-red-200 hover:bg-red-600/50">Libérer</button></> : ' — aucune source LTP détectée'}.</div>
+            )}
+          </div>
+        );
+      })()}
+      {show3D && showFloating3D && (
+        <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}>
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
+            <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D — RGB Matrix{active.enabled ? '' : ' (matrice coupée : activez ▶ pour voir les couleurs)'}</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => { setFloat3DSize({ w: 480, h: 270 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
+              <button onClick={() => { setShowFloating3D(false); setShow3D(false); }} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 relative"><Stage3D hideFixturePanel /><div className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize" onMouseDown={handleFloat3DResizeStart} style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }} /></div>
+        </div>
+      )}
+      {!showFloating3D && (
+        <button onClick={() => { setShow3D(true); setShowFloating3D(true); }} className="fixed bottom-4 right-4 z-40 bg-purple-600/80 hover:bg-purple-500 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg transition-all">
+          🎥 3D View
+        </button>
+      )}
     </div>
   );
 };
@@ -3345,7 +3615,7 @@ const CueListList: React.FC = () => {
 
   return (
     <>
-      <div className="grid grid-cols-4 xl:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
         {cueLists.map((cl) => {
           const isSelected = selectedId === cl.id;
           return (
@@ -3620,7 +3890,7 @@ const EFXList: React.FC = () => {
 
   return (
     <>
-      <div className="grid grid-cols-4 xl:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
         {effects.map((efx) => {
           const isSelected = selectedId === efx.id;
           return (
@@ -3691,8 +3961,10 @@ const EFXList: React.FC = () => {
 
 // ─── EFX Editor ────────────────────────────────────────────
 
-const EFX_PATTERNS = ['Circle', 'Line', 'Eight', 'Square', 'Triangle', 'Infinity', 'Zigzag', 'Spiral', 'DoubleCircle', 'Heart'] as const;
-type EfxPattern = typeof EFX_PATTERNS[number];
+const EFX_PATTERNS = ['Circle', 'Line', 'Eight', 'Square', 'Triangle', 'Zigzag', 'Spiral', 'DoubleCircle', 'Heart', 'Wave', 'Bounce', 'Cross'] as const;
+// 'Infinity' retiré du sélecteur (doublon de 'Eight') mais gardé dans le type
+// pour charger les anciens effets sauvegardés (rendu identique, moteur inchangé).
+type EfxPattern = typeof EFX_PATTERNS[number] | 'Infinity';
 
 const EFXEditor: React.FC = () => {
   const { t } = useTranslation();
@@ -3708,6 +3980,7 @@ const EFXEditor: React.FC = () => {
   const [speed, setSpeed] = useState(0.5);
   const [xOffset, setXOffset] = useState(0);
   const [yOffset, setYOffset] = useState(0);
+  const [spread, setSpread] = useState(0);
   const [target] = useState({ x: 0, y: 1.5, z: 0 });
   const [efxName, setEfxName] = useState('EFX 1');
   const [selectedFixtureIds, setSelectedFixtureIds] = useState<Set<string>>(new Set());
@@ -3718,7 +3991,7 @@ const EFXEditor: React.FC = () => {
   const [show3D, setShow3D] = useState(false);
   const [showFloating3D, setShowFloating3D] = useState(false);
   const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
-  const [float3DSize, setFloat3DSize] = useState({ w: 480, h: 270 });
+  const [float3DSize, setFloat3DSize] = useState({ w: 960, h: 540 });
   const float3DDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
   const float3DResizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
   const handleFloat3DDragStart = useCallback((e: React.MouseEvent) => {
@@ -3765,6 +4038,7 @@ const EFXEditor: React.FC = () => {
         setSpeed(efx.speed);
         setXOffset(efx.xOffset);
         setYOffset(efx.yOffset);
+        setSpread(efx.spread ?? 0);
         setSelectedFixtureIds(new Set(efx.fixtureIds));
       }
     }
@@ -3791,6 +4065,7 @@ const EFXEditor: React.FC = () => {
         speed,
         xOffset,
         yOffset,
+        spread,
         fixtureIds,
       });
     } else {
@@ -3803,6 +4078,7 @@ const EFXEditor: React.FC = () => {
         speed,
         xOffset,
         yOffset,
+        spread,
         fixtureIds,
       });
       setEditingEffectId(newId);
@@ -3819,6 +4095,7 @@ const EFXEditor: React.FC = () => {
     setSpeed(0.5);
     setXOffset(0);
     setYOffset(0);
+    setSpread(0);
     setSelectedFixtureIds(new Set());
   };
 
@@ -3926,7 +4203,14 @@ const EFXEditor: React.FC = () => {
             if (ch.type === 'Strobe' || (ch.type === 'Shutter' && /strobe/i.test(ch.name ?? ''))) { strobeOff = ci; strobeCaps = (ch as any).capabilities ?? null; }
           }
         }
-        return { fixture: f, panOff, tiltOff, panFineOff, tiltFineOff, dimmerOff, shutterOff, strobeOff, strobeCaps };
+        // Shutter sûr à ouvrir (analyseur : exclut les canaux strobe —
+        // écrire 255 sur un strobe donnerait un flash permanent, pas une ouverture).
+        let safeShutterOff: number | null = null;
+        try {
+          const fa = def ? analyzeEngine(f, def) : null;
+          if (fa && fa.shutterOffset !== null && fa.shutterOffset !== undefined) safeShutterOff = fa.shutterOffset;
+        } catch {}
+        return { fixture: f, panOff, tiltOff, panFineOff, tiltFineOff, dimmerOff, shutterOff, strobeOff, strobeCaps, safeShutterOff };
       })
       .filter((f) => f.panOff !== null || f.tiltOff !== null);
 
@@ -3955,13 +4239,17 @@ const EFXEditor: React.FC = () => {
       // Math EXACTE du moteur du show (fixture-tracks.ts) : le test live envoie
       // rigoureusement les mêmes octets DMX que la lecture du preset.
       const tCycles = (elapsed * speed * 2) / (Math.PI * 2);
-      const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
-        pattern, tCycles, width, height, rotation, xOffset, yOffset,
-      );
+      // Décalage « vague » : même formule que computeEfxOverrides.
+      const nSel = patchedWithDefs.length;
 
       // Send DMX for each selected fixture grouped by universe
       const byUniverse = new Map<string, Record<number, number>>();
-      for (const f of patchedWithDefs) {
+      for (let fi = 0; fi < nSel; fi++) {
+        const f = patchedWithDefs[fi];
+        const t = nSel > 1 && spread > 0 ? tCycles + (fi * spread) / nSel : tCycles;
+        const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
+          pattern, t, width, height, rotation, xOffset, yOffset,
+        );
         const uniId = f.fixture.universeId;
         let vals = byUniverse.get(uniId);
         if (!vals) {
@@ -3969,7 +4257,10 @@ const EFXEditor: React.FC = () => {
           byUniverse.set(uniId, vals);
         }
         // Toujours allumer : dimmer + RGB wash en blanc (sinon les wash restent éteints en Target)
+        // + ouverture du shutter (sans ça, un spot au shutter fermé reste noir malgré dimmer=255).
         if (f.dimmerOff !== null) vals[f.fixture.startAddress + f.dimmerOff] = 255;
+        const openShutter = (f as any).safeShutterOff;
+        if (openShutter !== null && openShutter !== undefined) vals[f.fixture.startAddress + openShutter] = 255;
         // Pour les wash/pars sans dimmer mais avec RGB, allumer en blanc
         const def = fixtureDefs.get(f.fixture.fixtureDefId);
         const mode = def?.modes[f.fixture.modeIndex];
@@ -4028,7 +4319,7 @@ const EFXEditor: React.FC = () => {
         dmxBridge.writeTransient('design-efx', uniNum, vals);
       }
     };
-  }, [isPreviewVisible, selectedFixtureIds, fixtureDefs, patchedFixtures, pattern, width, height, rotation, speed, xOffset, yOffset, target]);
+  }, [isPreviewVisible, selectedFixtureIds, fixtureDefs, patchedFixtures, pattern, width, height, rotation, speed, xOffset, yOffset, spread, target]);
 
   // Compute preview path points based on pattern
   const previewPoints = React.useMemo(() => {
@@ -4090,7 +4381,7 @@ const EFXEditor: React.FC = () => {
 
       <div className="space-y-6">
         {/* Live animated preview — on top, capped so controls stay visible */}
-        <div className="space-y-3 max-w-[380px]">
+        <div className="space-y-3 max-w-[220px]">
           <label className="block text-xs font-medium text-gray-400">Live Preview — {pattern}</label>
           <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
             <svg
@@ -4185,7 +4476,7 @@ const EFXEditor: React.FC = () => {
                   step={0.01}
                   value={speed}
                   onChange={(e) => setSpeed(parseFloat(e.target.value))}
-                  className="flex-1 accent-purple-500"
+                  className="flex-1 min-w-0 accent-purple-500"
                 />
                 <button onClick={() => setSpeed(v => Math.max(0.3, Math.min(0.8, Number((v + 0.01).toFixed(2)))))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
               </div>
@@ -4200,10 +4491,27 @@ const EFXEditor: React.FC = () => {
                 max={360}
                 value={rotation}
                 onChange={(e) => setRotation(Number(e.target.value))}
-                className="flex-1 accent-purple-500"
+                className="flex-1 min-w-0 accent-purple-500"
               />
                 <button onClick={() => setRotation(v => Math.max(0, Math.min(360, v + 1)))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
               </div>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-[10px] text-gray-500">Vague (décalage entre fixtures): {Math.round(spread * 100)}%</label>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setSpread(0)} className="h-6 px-2 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">0</button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={spread}
+                onChange={(e) => setSpread(parseFloat(e.target.value))}
+                className="flex-1 min-w-0 accent-purple-500"
+              />
+              <button onClick={() => setSpread(1)} className="h-6 px-2 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">100%</button>
             </div>
           </div>
 
@@ -4219,7 +4527,7 @@ const EFXEditor: React.FC = () => {
                 step={0.01}
                 value={width}
                 onChange={(e) => setWidth(parseFloat(e.target.value))}
-                className="flex-1 accent-purple-500"
+                className="flex-1 min-w-0 accent-purple-500"
               />
                 <button onClick={() => setWidth(v => Math.max(0.01, Math.min(2, Number((v + 0.01).toFixed(2)))))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
               </div>
@@ -4233,9 +4541,9 @@ const EFXEditor: React.FC = () => {
                   min={0.01}
                   max={2}
                   step={0.01}
-                  value={height}
-                  onChange={(e) => setHeight(parseFloat(e.target.value))}
-                  className="flex-1 accent-purple-500"
+                value={height}
+                onChange={(e) => setHeight(parseFloat(e.target.value))}
+                className="flex-1 min-w-0 accent-purple-500"
                 />
                 <button onClick={() => setHeight(v => Math.max(0.01, Math.min(2, Number((v + 0.01).toFixed(2)))))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
               </div>
@@ -4251,9 +4559,9 @@ const EFXEditor: React.FC = () => {
                   type="range"
                   min={-400}
                   max={400}
-                  value={xOffset}
-                  onChange={(e) => setXOffset(Number(e.target.value))}
-                  className="flex-1 accent-purple-500"
+                value={xOffset}
+                onChange={(e) => setXOffset(Number(e.target.value))}
+                className="flex-1 min-w-0 accent-purple-500"
                 />
                 <button onClick={() => setXOffset(v => Math.max(-400, Math.min(400, v + 1)))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
               </div>
@@ -4268,7 +4576,7 @@ const EFXEditor: React.FC = () => {
                 max={400}
                 value={yOffset}
                 onChange={(e) => setYOffset(Number(e.target.value))}
-                className="flex-1 accent-purple-500"
+                className="flex-1 min-w-0 accent-purple-500"
               />
                 <button onClick={() => setYOffset(v => Math.max(-400, Math.min(400, v + 1)))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
               </div>
@@ -4366,7 +4674,7 @@ const EFXEditor: React.FC = () => {
       </div>
       </div>
       {show3D && showFloating3D && (
-        <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, overflow: 'hidden' }}>
+        <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}>
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
             <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D — EFX</span>
             <div className="flex items-center gap-1">
@@ -5123,7 +5431,7 @@ const FixtureDetailModal: React.FC<{
   if (!fixture) return null;
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[560px] max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[560px] max-w-[95vw] max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-3 border-b border-gray-800/50 flex items-center justify-between">
           <div>
             <h3 className="text-sm font-bold text-white">{fixture.manufacturer} {fixture.model}</h3>
@@ -5495,6 +5803,32 @@ const DmxAddressMap: React.FC<DmxAddressMapProps> = ({
 
 // ─── Add Fixture Modal ─────────────────────────────────────
 
+/** Champ numérique effaçable : texte libre local, commit au parent quand la
+ *  valeur est valide. Sans ça (value={number} + parseInt), vider le champ est
+ *  impossible : parseInt("") = NaN → ignoré → le state number reprend la main
+ *  et le champ « revient ». Ici le texte reste éditable (dont vide) ; au blur
+ *  on réaffiche la valeur validée. La resynchro externe (auto-find,
+ *  changement de mode/univers) repasse par `value`. */
+function useErasableNumber(
+  value: number,
+  commit: (v: number) => void,
+  opts?: { min?: number; max?: number; maxLen?: number },
+) {
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => { setText(null); }, [value]);
+  const lo = opts?.min ?? 1;
+  const hi = opts?.max ?? 512;
+  const onChange = (rawIn: string) => {
+    const raw = rawIn.replace(/[^0-9]/g, '').slice(0, opts?.maxLen ?? 3);
+    setText(raw);
+    if (raw === '') return;
+    const v = parseInt(raw, 10);
+    if (!isNaN(v) && v >= lo && v <= hi) commit(v);
+  };
+  const onBlur = () => setText(null);
+  return { shown: text ?? String(value), onChange, onBlur };
+}
+
 interface AddFixtureModalProps {
   step: PatchStep;
   searchQuery: string;
@@ -5569,6 +5903,9 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
   getNextFree,
 }) => {
   const { t } = useTranslation();
+  // Champs adresse / quantité effaçables (voir useErasableNumber).
+  const addrField = useErasableNumber(startAddress, onSetAddress, { min: 1, max: 512, maxLen: 3 });
+  const qtyField = useErasableNumber(quantity, onSetQuantity, { min: 1, max: 99, maxLen: 2 });
   const mode =
     selectedDef && selectedModeIdx < selectedDef.modes.length
       ? selectedDef.modes[selectedModeIdx]
@@ -5576,7 +5913,7 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[480px] max-h-[80vh] flex flex-col">
+      <div className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[480px] max-w-[95vw] max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="px-5 py-3 border-b border-gray-800/50 flex items-center justify-between">
           <h3 className="text-sm font-bold text-white">
@@ -5820,11 +6157,9 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                     type="number"
                     min={1}
                     max={513 - mode.channels.length * quantity}
-                    value={startAddress}
-                    onChange={(e) => {
-                      const v = parseInt(e.target.value, 10);
-                      if (!isNaN(v)) onSetAddress(Math.max(1, Math.min(512, v)));
-                    }}
+                    value={addrField.shown}
+                    onChange={(e) => addrField.onChange(e.target.value)}
+                    onBlur={addrField.onBlur}
                     className="w-24 bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-purple-500/50"
                   />
                   <span className="text-xs text-gray-600">
@@ -5862,11 +6197,9 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                     type="number"
                     min={1}
                     max={99}
-                    value={quantity}
-                    onChange={(e) => {
-                      const v = parseInt(e.target.value, 10);
-                      if (!isNaN(v) && v >= 1 && v <= 99) onSetQuantity(v);
-                    }}
+                    value={qtyField.shown}
+                    onChange={(e) => qtyField.onChange(e.target.value)}
+                    onBlur={qtyField.onBlur}
                     className="w-16 bg-gray-800/50 border border-gray-700 rounded-lg px-2 py-2 text-sm text-gray-200 font-mono text-center outline-none focus:border-purple-500/50"
                   />
                   <button
@@ -6259,7 +6592,7 @@ const GroupsList: React.FC = () => {
 
   return (
     <>
-      <div className="grid grid-cols-4 xl:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
         {groups.map((g) => (
           <div
             key={g.id}

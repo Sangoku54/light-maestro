@@ -34,8 +34,9 @@ import {
   type DmxFixtureCapability,
 } from '../hooks/dmx-cues';
 import { useTranslation } from 'react-i18next';
-import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X, LayoutGrid, Music, Zap, List, Search, Crosshair, Sparkles } from 'lucide-react';
-import { DEFAULT_POSITIONS, DEFAULT_ROSTER, MUSICIAN_KINDS, MUSICIAN_LABELS, isRosterEmpty, normalizeRoster, rosterTotal, type MusicianKind, type MusicianRoster } from '../utils/musicians';
+import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X, LayoutGrid, Music, Zap, List, Search, Crosshair, Sparkles, LampDesk, Undo2, RotateCcw } from 'lucide-react';
+import { DEFAULT_POSITIONS, MUSICIAN_KINDS, MUSICIAN_LABELS, isRosterEmpty, normalizeRoster, rosterTotal, type MusicianKind, type MusicianRoster } from '../utils/musicians';
+import { SUPPORT_KINDS, SUPPORT_LABELS, needsSupportGeometry, resolveSupportKind, supportColumnHeight, type FixtureSupport } from '../utils/supports';
 import clavierImg from '../assets/musicians/clavier.png';
 import chanteuseImg from '../assets/musicians/chanteuse.png';
 import chanteurImg from '../assets/musicians/chanteur.png';
@@ -44,6 +45,7 @@ import bassisteImg from '../assets/musicians/bassiste.png';
 import guitaristeImg from '../assets/musicians/guitariste.png';
 import cuivreImg from '../assets/musicians/cuivre.png';
 import { sendFixtureOn, sendFixtureOff, sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
+import { captureFixtureLook, ensureFixtureLook, setFixtureChannelMaps, type LookChannelMap } from '../utils/scene-look';
 import { fixtureTestState } from '../utils/fixture-test-state';
 import { generateAllThumbnails, getVariantsForCategory } from '../utils/fixtureThumbnails';
 import { useProgrammerStore } from '../stores/programmerStore';
@@ -318,6 +320,8 @@ interface Fixture3D {
   channelMap: FixtureChannelMap;
   universeIndex: number;        // Index into channelData map
   mountMode: 'top' | 'ground' | 'rear' | 'hanging'; // beam default direction
+  supportGroup?: THREE.Group;   // Support physique (totem/trépied), null si pont/sol
+  supportKey?: string;          // kind:position:hauteur — évite les reconstructions
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
   _mountTilt: number;           // mount-mode head tilt compensation (π for ground, 0 otherwise)
@@ -344,6 +348,14 @@ function livePoseChannels(prog: Record<number, number>, f3dMap: Map<string, any>
   const fixtures = state.patchedFixtures;
   const universes = state.universes;
   const positions = state.fixturePositions as Record<string, { heading?: number; tilt?: number }> | undefined;
+  // 0. Look minimal (dimmer/couleur) pour chaque fixture TOUCHÉE par le
+  //    programmer — sinon Rec fige pan/tilt sans intensité → scène muette.
+  //    Capture AVANT le merge live pour que ensureFixtureLook voie le touch.
+  for (const pf of fixtures ?? []) {
+    const cm = (f3dMap?.get(pf.id)?.channelMap ?? null) as LookChannelMap | null;
+    if (!cm) continue;
+    ensureFixtureLook(channels, pf, cm);
+  }
   // 1. Pose visuelle (tare fixturePositions) → DMX pour les axes non touchés au
   //    programmer. Le drag « normal » et les sliders Pan/Tilt tare sont VISUELS
   //    uniquement (ne touchent pas le programmer) : c'est ici qu'ils deviennent
@@ -364,17 +376,21 @@ function livePoseChannels(prog: Record<number, number>, f3dMap: Map<string, any>
       for (const off of tiltOffsets) if (channels[pf.startAddress + off] === undefined) channels[pf.startAddress + off] = tilt;
     }
   }
-  // 2. État DMX RÉEL (dernier buffer poussé) pour compléter le reste des canaux.
-  const channelData = useAppStore.getState().dmx?.channelData as Record<number, Uint8Array> | undefined;
+  // 2. État DMX RÉEL — buffer arbitré dmxBridge d'abord (programmer LTP 85,
+  //    design-test…), miroir appStore en secours. Le miroir seul ne voyait
+  //    JAMAIS le look Target (useProgrammerSync n'écrit pas setUniverseData).
   for (const pf of fixtures ?? []) {
     const uniIdx = universes.findIndex((u) => String(u.id) === String(pf.universeId));
     if (uniIdx < 0) continue;
-    const buf = channelData?.[uniIdx];
-    if (!buf) continue;
+    const arb = dmxBridge.getChannels(uniIdx);
+    const channelData = useAppStore.getState().dmx?.channelData as Record<number, Uint8Array> | undefined;
+    const mirror = channelData?.[uniIdx];
     const range: Record<number, number> = {};
     let anyVal = false;
     for (let a = pf.startAddress; a < pf.startAddress + pf.channelCount && a <= 512; a++) {
-      const v = buf[a - 1] ?? 0;
+      let v = 0;
+      if (arb && typeof arb[a] === 'number') v = arb[a];
+      else if (mirror) v = mirror[a - 1] ?? 0;
       if (v > 0) anyVal = true;
       range[a] = v;
     }
@@ -383,6 +399,12 @@ function livePoseChannels(prog: Record<number, number>, f3dMap: Map<string, any>
       const addr = Number(aStr);
       if (channels[addr] === undefined) channels[addr] = range[addr];
     }
+  }
+  // 3. Re-forcer le look après merge (le live peut avoir remis intensity=0).
+  for (const pf of fixtures ?? []) {
+    const cm = (f3dMap?.get(pf.id)?.channelMap ?? null) as LookChannelMap | null;
+    if (!cm) continue;
+    ensureFixtureLook(channels, pf, cm);
   }
   return channels;
 }
@@ -421,6 +443,38 @@ function DirectPTFaders({ panAddrs, tiltAddrs }: { panAddrs: number[]; tiltAddrs
       {hasPan && row('Pan', pan, panAddrs)}
       {hasTilt && row('Tilt', tilt, tiltAddrs)}
     </>
+  );
+}
+
+/**
+ * Fader Dimmer contrôlé (réactif programmeur) : `defaultValue` ne se
+ * réappliquait pas au changement de fixture → le curseur restait collé à
+ * droite (valeur de la fixture précédente). Ici on lit la/les adresses
+ * intensity (ou RGB en fallback) de TOUTES les fixtures sélectionnées :
+ * écriture multi-cibles via `onSet` quand fourni.
+ */
+function DirectDimmerFader({ intensityAddrs, rgbAddrs, onSet }: { intensityAddrs: number[]; rgbAddrs: number[]; onSet?: (v: number) => void }) {
+  const chans = useProgrammerStore((s) => s.channels);
+  const setCh = useProgrammerStore((s) => s.setChannel);
+  const hasDimmer = intensityAddrs.length > 0;
+  const hasRgb = rgbAddrs.length > 0;
+  if (!hasDimmer && !hasRgb) return null;
+  const val = hasDimmer ? (chans[intensityAddrs[0]] ?? 0) : (chans[rgbAddrs[0]] ?? 0);
+  const setVal = (v: number) => {
+    const vv = Math.max(0, Math.min(255, Math.round(v)));
+    if (onSet) { onSet(vv); return; }
+    if (hasDimmer) for (const a of intensityAddrs) setCh(a, vv);
+    else for (const a of rgbAddrs) setCh(a, vv);
+  };
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-[10px]"><span className="text-gray-500">Dimmer</span><span className="text-violet-300 font-mono">{val}</span></div>
+      <div className="flex items-center gap-1">
+        <button onClick={() => setVal(val - 1)} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+        <input type="range" min={0} max={255} value={val} onChange={(e) => setVal(Number(e.target.value))} className="flex-1 h-1 accent-violet-500 cursor-pointer" />
+        <button onClick={() => setVal(val + 1)} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+      </div>
+    </div>
   );
 }
 
@@ -467,15 +521,16 @@ export const Stage3D: React.FC<{
   const [showBeamsInternal, setShowBeamsInternal] = useState(true);
   const [showLabelsInternal, setShowLabelsInternal] = useState(true);
   const [showSmokeInternal, setShowSmokeInternal] = useState(true);
-  const [musiciansInternal, setMusiciansInternal] = useState<MusicianRoster>(DEFAULT_ROSTER);
-  const musicianPositionsRef = useRef<Record<string, { x: number; z: number }>>(buildRosterPositions(DEFAULT_ROSTER));
+  const [musiciansInternal, setMusiciansInternal] = useState<MusicianRoster>({});
+  const musicianPositionsRef = useRef<Record<string, { x: number; z: number }>>(buildRosterPositions({}));
   const dragMusicianRef = useRef<string | null>(null);
   const [fixtureDefsReady, setFixtureDefsReady] = useState(false);
   const [lightOn, setLightOn] = useState(false);
   const lastDmxFrameRef = useRef(performance.now());
 
   // ── Stage scene config ────────────────────────────
-  const [stageSceneInternal, setStageSceneInternal] = useState<StageScene>('rear-front');
+  // Neuf = scène vide ; une config chargée (props) prend toujours le dessus.
+  const [stageSceneInternal, setStageSceneInternal] = useState<StageScene>('empty');
 
   // Controlled stage config (host supplies props) vs internal default
   const musicians = musiciansProp ?? musiciansInternal;
@@ -587,6 +642,41 @@ export const Stage3D: React.FC<{
     setTargetMode(false);
     if (targetMarkerRef.current) targetMarkerRef.current.visible = false;
   }, []);
+
+  /** IDs ciblés par une action Direct de la modale : multi-sélection si >0, sinon la fixture active. */
+  const getActionFixtureIds = useCallback((): string[] => {
+    if (multiSelectedIdsRef.current.size > 0) return [...multiSelectedIdsRef.current];
+    if (selectedFixtureIdRef.current) return [selectedFixtureIdRef.current];
+    if (selectedFixtureId) return [selectedFixtureId];
+    return [];
+  }, [selectedFixtureId]);
+
+  const applyHexColorToFixture = useCallback((fid: string, hex: string) => {
+    const f3d = fixturesRef.current.get(fid);
+    const pf = useShowStore.getState().patchedFixtures.find((f) => f.id === fid);
+    if (!f3d || !pf) return;
+    const setCh = useProgrammerStore.getState().setChannel;
+    const [r, g, b] = [
+      parseInt(hex.slice(1, 3), 16),
+      parseInt(hex.slice(3, 5), 16),
+      parseInt(hex.slice(5, 7), 16),
+    ];
+    for (const seg of f3d.channelMap.rgbSegments ?? []) {
+      setCh(pf.startAddress + seg.r, r);
+      setCh(pf.startAddress + seg.g, g);
+      if (seg.b !== null) setCh(pf.startAddress + seg.b, b);
+      if (seg.w !== null) setCh(pf.startAddress + seg.w, 0);
+    }
+    if ((f3d.channelMap.rgbSegments?.length ?? 0) === 0) {
+      for (const off of f3d.channelMap.rgbOffsets ?? []) {
+        const idx = f3d.channelMap.rgbOffsets!.indexOf(off);
+        setCh(pf.startAddress + off, idx === 0 ? r : idx === 1 ? g : b);
+      }
+    }
+    if (f3d.channelMap.wheelOffset !== null && f3d.channelMap.wheelOffset !== undefined) {
+      setCh(pf.startAddress + f3d.channelMap.wheelOffset, hex === '#ff0000' ? 10 : hex === '#00ff00' ? 60 : hex === '#0000ff' ? 120 : hex === '#ffff00' ? 30 : 0);
+    }
+  }, []);
   const [showFixtureList, setShowFixtureList] = useState(false);
   const [fixtureSearch, setFixtureSearch] = useState('');
   const [leftDockCollapsed, setLeftDockCollapsed] = useState(true);
@@ -612,6 +702,7 @@ export const Stage3D: React.FC<{
   }, [leftDockCollapsed, rightDockCollapsed]);
   const [musiciansMenuOpen, setMusiciansMenuOpen] = useState(false);
   const musiciansBtnRef = useRef<HTMLButtonElement>(null);
+  const [supportsMenuOpen, setSupportsMenuOpen] = useState(false);
   const [musiciansMenuPos, setMusiciansMenuPos] = useState<{ top: number; left: number } | null>(null);
   const stageDims = useShowStore((s) => s.stageDims);
   const setStageDims = useShowStore((s) => s.setStageDims);
@@ -1090,9 +1181,11 @@ export const Stage3D: React.FC<{
     // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setSize(W, H);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  // Ombres désactivées : aucune light ne projette d'ombres (pas de
+  // SpotLight/DirectionalLight avec castShadow) — PCFSoft ne coûterait
+  // que du temps GPU pour zéro pixel différent.
+  renderer.shadowMap.enabled = false;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1713,6 +1806,7 @@ export const Stage3D: React.FC<{
       // Remove fixtures that are no longer patched
       for (const [id, f3d] of fixturesRef.current) {
         if (!currentIds.has(id)) {
+          clearFixtureSupport(scene, f3d);
           scene.remove(f3d.group);
           if (f3d.pointLight) scene.remove(f3d.pointLight);
           if (f3d.beamCone) scene.remove(f3d.beamCone);
@@ -1814,6 +1908,7 @@ export const Stage3D: React.FC<{
         f3d.floorGlow = floorGlow;
 
         fixturesRef.current.set(pf.id, f3d);
+        updateFixtureSupport(scene, f3d, pos, stageDimsRef.current);
 
         // Movement trail line
         const trailGeo = new THREE.BufferGeometry();
@@ -1864,12 +1959,24 @@ export const Stage3D: React.FC<{
             eh.beamCone.position.set(0, -ch / 2, 0);
           }
         }
+        updateFixtureSupport(scene, f3d, pos, stageDimsRef.current);
       }
+
+      // Publie les channelMaps après sync complète (add + remove) pour
+      // ensureFixtureLook côté Store / Rec — pas seulement au premier add.
+      try {
+        const maps = new Map<string, LookChannelMap>();
+        for (const [fid, f] of fixturesRef.current) {
+          maps.set(fid, f.channelMap as unknown as LookChannelMap);
+        }
+        setFixtureChannelMaps(maps);
+      } catch {}
     });
 
     return () => {
       // Clean up all fixtures on unmount
       for (const f3d of fixturesRef.current.values()) {
+        clearFixtureSupport(sceneRef.current, f3d);
         disposeFixture3D(f3d);
       }
       fixturesRef.current.clear();
@@ -1909,6 +2016,7 @@ export const Stage3D: React.FC<{
           eh.beamCone.position.set(0, -ch / 2, 0);
         }
       }
+      updateFixtureSupport(sceneRef.current, f3d, pos, stageDimsRef.current);
     }
   }, [fixturePositions, patchedFixtures]);
 
@@ -1972,7 +2080,10 @@ export const Stage3D: React.FC<{
         rawData = buf;
       }
       if (!rawData) {
-        if (f3d.pointLight) f3d.pointLight.intensity = 0;
+        if (f3d.pointLight) { f3d.pointLight.intensity = 0; f3d.pointLight.visible = false; }
+        for (const eh of f3d.extraHeads ?? []) {
+          if (eh.pointLight) { eh.pointLight.intensity = 0; eh.pointLight.visible = false; }
+        }
         if (f3d.beamCone) { (f3d.beamCone.material as THREE.MeshBasicMaterial).opacity = 0; }
         // Auto-sweep: slow stage scan when no DMX for 3+ seconds
         const idleSec = (performance.now() - dmxLastActivityRef.current) / 1000;
@@ -2133,12 +2244,15 @@ export const Stage3D: React.FC<{
           : ehDelta * settleK;
         if (eh.pointLight) {
           eh.pointLight.color.copy(color);
-          eh.pointLight.intensity = visIntensity * 25;
+          eh.pointLight.intensity = visIntensity * 55;
+          // Éteinte = retirée du setup de lights (le forward renderer paie
+          // chaque PointLight sur chaque fragment, même à intensité 0).
+          eh.pointLight.visible = showBeams && visIntensity > 0.005;
         }
         if (eh.beamCone) {
           const m = eh.beamCone.material as THREE.MeshBasicMaterial;
           m.color.copy(color);
-          m.opacity = visIntensity * 0.35;
+          m.opacity = visIntensity * 0.75;
           eh.beamCone.visible = showBeams && visIntensity > 0.005;
         }
       }
@@ -2195,14 +2309,18 @@ export const Stage3D: React.FC<{
       // --- Update PointLight ---
       if (f3d.pointLight) {
         f3d.pointLight.color.copy(color);
-        f3d.pointLight.intensity = visIntensity * 25;
+        f3d.pointLight.intensity = visIntensity * 55;
+        f3d.pointLight.visible = showBeams && visIntensity > 0.005;
       }
 
       // --- Update beam cone ---
+      // Opacité 0.75 (au lieu de 0.35) : à DMX 255 le faisceau doit sembler
+      // plein, pas « à peine à moitié » — AdditiveBlending + 0.35 plafonnait
+      // trop bas sur fond sombre.
       if (f3d.beamCone) {
         const mat = f3d.beamCone.material as THREE.MeshBasicMaterial;
         mat.color.copy(color);
-        mat.opacity = visIntensity * 0.35;
+        mat.opacity = visIntensity * 0.75;
         f3d.beamCone.visible = showBeams && visIntensity > 0.005;
       }
 
@@ -2214,10 +2332,10 @@ export const Stage3D: React.FC<{
     if (visIntensity > 0.01) {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
         if (Array.isArray(bodyMat)) {
-          for (const m of bodyMat) { m.emissive = color; m.emissiveIntensity = visIntensity * 0.8; }
+          for (const m of bodyMat) { m.emissive = color; m.emissiveIntensity = visIntensity * 1.4; }
         } else {
           bodyMat.emissive = color;
-          bodyMat.emissiveIntensity = visIntensity * 0.8;
+          bodyMat.emissiveIntensity = visIntensity * 1.4;
         }
       } else {
         const bodyMat = f3d.bodyMesh.material as THREE.MeshStandardMaterial;
@@ -2388,7 +2506,6 @@ export const Stage3D: React.FC<{
     if (ids.length === 0) return;
     const prog = useProgrammerStore.getState().channels;
     const setCh = useProgrammerStore.getState().setChannel;
-    const clearCh = useProgrammerStore.getState().clearChannel;
     for (const fid of ids) {
       const f3d = fixturesRef.current.get(fid);
       const pf = patchedFixtures.find((f) => f.id === fid);
@@ -2426,26 +2543,25 @@ export const Stage3D: React.FC<{
       writePan(solved.pan);
       writeTilt(solved.tilt);
 
-      // On ne touche QUE pan/tilt.
-      // Les couleurs de l'AutoScript (QuickShow) doivent continuer a piloter
-      // les projecteurs. Le boost visuel des faisceaux selectionnes est gere
-      // uniquement dans le rendu 3D (visIntensity).
-      // On libere les canaux couleur/dimmer du programmeur (LTP 85) pour que
-      // l'autoscript (HTP 40) repasse au travers, et on purge les anciennes
-      // valeurs blanches parquees par les versions precedentes du Target.
-      if (cm.intensityOffset !== null && cm.intensityOffset !== undefined && cm.intensityOffset >= 0) clearCh(pf.startAddress + cm.intensityOffset);
-      for (const o of (cm.rgbOffsets ?? [])) clearCh(pf.startAddress + o);
-      for (const s of (cm.rgbSegments ?? [])) {
-        if (s.r !== null && s.r !== undefined) clearCh(pf.startAddress + s.r);
-        if (s.g !== null && s.g !== undefined) clearCh(pf.startAddress + s.g);
-        if (s.b !== null && s.b !== undefined) clearCh(pf.startAddress + s.b);
-        if (s.w !== null && s.w !== undefined) clearCh(pf.startAddress + s.w);
-        if (s.a !== null && s.a !== undefined) clearCh(pf.startAddress + s.a);
-        if (s.uv !== null && s.uv !== undefined) clearCh(pf.startAddress + s.uv);
+      // Capture le look (dimmer/couleur/strobe/shutter) DANS le programmer
+      // via setCh — un simple objet snapshot ne met pas à jour le store.
+      // Sans ça, Rec/Store fige uniquement pan/tilt → scène « muette »
+      // (intensity 0, faisceau invisible en 3D et sur le matériel).
+      const lookCm = cm as unknown as LookChannelMap;
+      // « live » = programmer courant + buffer arbitré (captureFixtureLook).
+      // Ne PAS écraser une couleur/dimmer déjà programmé(>0) : seul un canal
+      // absent (ou intensity à 0) reçoit le look minimal forcé (255/blanc).
+      const lookVals: Record<number, number> = {};
+      captureFixtureLook(lookVals, pf, lookCm, { ...prog });
+      const intensityAddr = lookCm.intensityOffset != null && lookCm.intensityOffset >= 0
+        ? pf.startAddress + lookCm.intensityOffset
+        : -1;
+      for (const [addrStr, val] of Object.entries(lookVals)) {
+        const a = Number(addrStr);
+        const isIntensity = a === intensityAddr;
+        if (prog[a] === undefined || (isIntensity && prog[a] === 0)) setCh(a, val);
       }
-      if (cm.wheelOffset !== null && cm.wheelOffset !== undefined && cm.wheelOffset >= 0) clearCh(pf.startAddress + cm.wheelOffset);
-      if (cm.strobeOffset !== null && cm.strobeOffset !== undefined && cm.strobeOffset >= 0) clearCh(pf.startAddress + cm.strobeOffset);
-      if (cm.shutterOffset !== null && cm.shutterOffset !== undefined && cm.shutterOffset >= 0) clearCh(pf.startAddress + cm.shutterOffset);
+
       // Bras complementaires (Tonio 6 arm) : meme pan, tilt propre par tete.
       for (const eh of f3d.extraHeads ?? []) {
         const ehPos = new THREE.Vector3();
@@ -2672,6 +2788,149 @@ export const Stage3D: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFixture?.id]);
 
+  // ── Historique / reset de la modale 3D (undo + baseline scènes) ──
+  type UndoEntry =
+    | { type: 'efx-snapshot'; sceneId: string; created: boolean; selectBefore?: string | null; prevName?: string; prevChannels?: Record<number, number>; prevEfxId?: string | null }
+    | { type: 'scene-create'; sceneId: string }
+    | { type: 'show-create'; showId: string; sceneId: string }
+    | { type: 'efx-create'; efxId: string }
+    | { type: 'scene-update'; sceneId: string; prevName: string; prevChannels: Record<number, number>; prevEfxId?: string | null };
+
+  const undoStackRef = useRef<UndoEntry[]>([]);
+  const baselineRef = useRef<Map<string, { name: string; channels: Record<number, number>; efxId?: string | null }>>(new Map());
+  const [undoDepth, setUndoDepth] = useState(0);
+  const [efxSnapshotActive, setEfxSnapshotActive] = useState(false);
+
+  const pushUndo = useCallback((entry: UndoEntry) => {
+    undoStackRef.current.push(entry);
+    setUndoDepth(undoStackRef.current.length);
+  }, []);
+
+  const captureSceneBaseline = useCallback((sceneId: string) => {
+    if (baselineRef.current.has(sceneId)) return;
+    const sc = useShowStore.getState().getScene(sceneId);
+    if (sc) baselineRef.current.set(sceneId, { name: sc.name, channels: { ...sc.channels }, efxId: (sc as any).efxId ?? null });
+  }, []);
+
+  const restoreSceneState = useCallback(async (
+    sceneId: string,
+    prev: { name?: string; channels?: Record<number, number>; efxId?: string | null },
+  ) => {
+    const store = useShowStore.getState();
+    const sc = store.getScene(sceneId);
+    if (!sc) return;
+    store.updateScene(sceneId, {
+      name: prev.name ?? sc.name,
+      channels: prev.channels ?? sc.channels,
+      efxId: (prev.efxId ?? null) as any,
+    } as any);
+    if (prev.channels) {
+      try { await sendChannelsToHardwareAndStore(prev.channels, store.patchedFixtures, store.universes); } catch {}
+    }
+  }, []);
+
+  const clearEfxSnapshotFlag = useCallback(() => {
+    delete (window as any).__lm_efxSnapshotApplied;
+    setEfxSnapshotActive(false);
+  }, []);
+
+  const applyUndoEntry = useCallback(async (entry: UndoEntry) => {
+    const store = useShowStore.getState();
+    switch (entry.type) {
+      case 'efx-snapshot': {
+        if (entry.created) {
+          store.deleteScene(entry.sceneId);
+          if ((window as any).__lm_selectedSceneId === entry.sceneId) {
+            (window as any).__lm_selectedSceneId = entry.selectBefore ?? null;
+          }
+        } else {
+          await restoreSceneState(entry.sceneId, {
+            name: entry.prevName,
+            channels: entry.prevChannels,
+            efxId: entry.prevEfxId,
+          });
+          try { dmxBridge.release('scene-efx'); } catch {}
+        }
+        if ((window as any).__lm_efxSnapshotApplied?.sceneId === entry.sceneId) clearEfxSnapshotFlag();
+        break;
+      }
+      case 'scene-create':
+        store.deleteScene(entry.sceneId);
+        if ((window as any).__lm_selectedSceneId === entry.sceneId) (window as any).__lm_selectedSceneId = null;
+        break;
+      case 'show-create':
+        store.deleteShow(entry.showId);
+        store.deleteScene(entry.sceneId);
+        if ((window as any).__lm_selectedSceneId === entry.sceneId) (window as any).__lm_selectedSceneId = null;
+        break;
+      case 'efx-create':
+        store.deleteEffect(entry.efxId);
+        break;
+      case 'scene-update':
+        await restoreSceneState(entry.sceneId, { name: entry.prevName, channels: entry.prevChannels, efxId: entry.prevEfxId });
+        break;
+    }
+  }, [restoreSceneState, clearEfxSnapshotFlag]);
+
+  const handleUndoLast = useCallback(async () => {
+    const entry = undoStackRef.current.pop();
+    if (!entry) return;
+    setUndoDepth(undoStackRef.current.length);
+    await applyUndoEntry(entry);
+    try { (window as any).__lm_toast?.('Dernière action annulée', 'info'); } catch {}
+  }, [applyUndoEntry]);
+
+  const handleResetAll = useCallback(async () => {
+    while (undoStackRef.current.length > 0) {
+      const entry = undoStackRef.current.pop()!;
+      await applyUndoEntry(entry);
+    }
+    setUndoDepth(0);
+    for (const [sid, prev] of Array.from(baselineRef.current.entries())) {
+      await restoreSceneState(sid, prev);
+    }
+    baselineRef.current.clear();
+    try { useProgrammerStore.getState().clear(); } catch {}
+    try { dmxBridge.release('design-efx'); } catch {}
+    try { dmxBridge.release('scene-efx'); } catch {}
+    clearEfxSnapshotFlag();
+    try { fixtureTestState.clearAll(); setLightOn(false); } catch {}
+    undoStackRef.current = [];
+    setUndoDepth(0);
+    try { (window as any).__lm_toast?.('Programmation réinitialisée', 'success'); } catch {}
+  }, [applyUndoEntry, restoreSceneState, clearEfxSnapshotFlag]);
+
+  const handleCancelEfxSnapshot = useCallback(async () => {
+    const snap = (window as any).__lm_efxSnapshotApplied as { sceneId: string } | undefined;
+    if (!snap) {
+      setEfxSnapshotActive(false);
+      return;
+    }
+    let entry: UndoEntry | undefined;
+    for (let i = undoStackRef.current.length - 1; i >= 0; i--) {
+      const e = undoStackRef.current[i];
+      if (e.type === 'efx-snapshot' && e.sceneId === snap.sceneId) {
+        entry = undoStackRef.current.splice(i, 1)[0];
+        break;
+      }
+    }
+    setUndoDepth(undoStackRef.current.length);
+    if (entry) {
+      await applyUndoEntry(entry);
+    } else {
+      const prev = baselineRef.current.get(snap.sceneId);
+      const store = useShowStore.getState();
+      const sc = store.getScene(snap.sceneId);
+      if (prev) await restoreSceneState(snap.sceneId, prev);
+      else if (sc) await restoreSceneState(snap.sceneId, { name: sc.name.replace(/ ?\[EFX:[^\]]*\]/g, ''), channels: sc.channels, efxId: null });
+      clearEfxSnapshotFlag();
+      try { dmxBridge.release('scene-efx'); } catch {}
+    }
+    clearEfxSnapshotFlag();
+    try { dmxBridge.release('design-efx'); } catch {}
+    try { (window as any).__lm_toast?.('EFX snapshot annulé', 'info'); } catch {}
+  }, [applyUndoEntry, restoreSceneState, clearEfxSnapshotFlag]);
+
   // ── EFX snapshot — uniquement si enableEfxApply (onglet Scènes) ──
   const effects = useShowStore((s) => s.effects);
   const [selectedEfxId, setSelectedEfxId] = useState<string>('');
@@ -2683,13 +2942,18 @@ export const Stage3D: React.FC<{
     // Snapshot : fige le pattern EFX à phase 0 (centre du pattern) comme valeurs DMX statiques — prévisualisable en 3D dans l'onglet Scène
     const targetIds = efx.fixtureIds.length > 0 ? new Set(efx.fixtureIds) : selectedFixtureId ? new Set([selectedFixtureId]) : new Set<string>();
     if (targetIds.size === 0) return;
-    // Point du pattern à phase 0 via la math EXACTE du moteur (fixture-tracks.ts)
-    const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
-      efx.pattern, 0, efx.width, efx.height, efx.rotation, efx.xOffset, efx.yOffset,
-    );
+    // Points du pattern via la math EXACTE du moteur (fixture-tracks.ts) —
+    // phase 0 + décalage « vague » par fixture pour figer la forme réelle.
+    const snapIds = Array.from(targetIds);
+    const snapSpread = (efx as any).spread ?? 0;
     // Construit les canaux DMX du snapshot (pan/tilt + dimmer 255 pour visibilité 3D)
     const snapshot: Record<number, number> = {};
-    for (const fid of targetIds) {
+    for (let sni = 0; sni < snapIds.length; sni++) {
+      const fid = snapIds[sni];
+      const t = snapIds.length > 1 && snapSpread > 0 ? (sni * snapSpread) / snapIds.length : 0;
+      const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
+        efx.pattern, t, efx.width, efx.height, efx.rotation, efx.xOffset, efx.yOffset,
+      );
       const pf = store.patchedFixtures.find((f) => f.id === fid);
       if (!pf) continue;
       // Résout les offsets pan/tilt via la définition du fixture (comme l'aperçu live)
@@ -2721,39 +2985,96 @@ export const Stage3D: React.FC<{
       if (sc) {
         const tag = ` [EFX:${efx.name}]`;
         const merged = { ...sc.channels, ...snapshot };
+        captureSceneBaseline(sceneId);
+        pushUndo({
+          type: 'efx-snapshot',
+          sceneId,
+          created: false,
+          prevName: sc.name,
+          prevChannels: { ...sc.channels },
+          prevEfxId: (sc as any).efxId ?? null,
+        });
         store.updateScene(sceneId, { name: sc.name.includes('[EFX:') ? sc.name : sc.name + tag, channels: merged, efxId: efx.id } as any);
         // Push immédiat + flag pour que l'aperçu EFX ne blackout pas ces fixtures dans les 2s qui suivent
         (window as any).__lm_efxSnapshotApplied = { sceneId, efxId: efx.id, at: Date.now() };
+        setEfxSnapshotActive(true);
         try { await sendChannelsToHardwareAndStore(merged, store.patchedFixtures, store.universes); } catch {}
       }
     } else {
       // Nouvelle scène : reprend la durée courante de l'éditeur si dispo, sinon 0 = infini (l'EFX ne doit pas s'arrêter seul)
       const curDur = (document.querySelector('input[data-scene-duration]') as HTMLInputElement)?.valueAsNumber ?? 0;
       const dur = Number.isFinite(curDur) && curDur > 0 ? curDur : 0;
+      // Hérite de la config 3D courante (musiciens + ponts) : sans ça, la scène
+      // créée est vide → DesignView default stageScene 'rear-front' = ponts en
+      // trop, et musicians {} = musiciens perdus.
       const newId = store.createScene(`Scene + ${efx.name}`);
-      store.updateScene(newId, { name: `Scene + ${efx.name}`, channels: snapshot, efxId: efx.id, duration: dur } as any);
+      store.updateScene(newId, {
+        name: `Scene + ${efx.name}`,
+        channels: snapshot,
+        efxId: efx.id,
+        duration: dur,
+        musicians,
+        stageScene,
+      } as any);
+      pushUndo({ type: 'efx-snapshot', sceneId: newId, created: true, selectBefore: null });
       (window as any).__lm_selectedSceneId = newId;
       (window as any).__lm_efxSnapshotApplied = { sceneId: newId, efxId: efx.id, at: Date.now() };
+      setEfxSnapshotActive(true);
       try { await sendChannelsToHardwareAndStore(snapshot, store.patchedFixtures, store.universes); } catch {}
     }
     try { (window as any).__lm_toast?.(`EFX "${efx.name}" appliqué à la scène — prévisualisation 3D à jour`, 'success'); } catch {}
-  }, [effects, selectedEfxId, selectedFixtureId]);
+  }, [effects, selectedEfxId, selectedFixtureId, captureSceneBaseline, pushUndo, musicians, stageScene]);
 
   // ── Rec Scène / Rec EFX / Rec Show — extraits du panneau modal pour être
   //    réutilisables par la barre compacte affichée en mode édition
   //    (hideFixturePanel) où l'on garde la vue 3D seule. ──
   const handleRecSceneCb = useCallback(() => {
-    const prog = useProgrammerStore.getState().channels;
-    if (Object.keys(prog).length === 0) return;
+    let prog = useProgrammerStore.getState().channels;
+    if (Object.keys(prog).length === 0) {
+      const backupRaw = (globalThis as any).__lm_programmerBackup as Record<number, number> | undefined;
+      if (backupRaw) {
+        const cleaned = Object.fromEntries(Object.entries(backupRaw).filter(([k]) => /^\d+$/.test(k)).map(([k, v]) => [Number(k), v]));
+        if (Object.keys(cleaned).length > 0) prog = cleaned;
+      }
+    }
+    if (Object.keys(prog).length === 0) {
+      try { (window as any).__lm_toast?.('Programmeur vide — rien à capturer', 'err'); } catch {}
+      return;
+    }
     const s = useShowStore.getState();
     const scId = s.createScene(`Scene 3D ${s.scenes.length + 1}`);
-    s.updateScene(scId, { name: `Scene 3D ${s.scenes.length}`, channels: livePoseChannels(prog, fixturesRef.current), fadeIn: 0, fadeOut: 0, duration: 5000 });
-  }, []);
+    const channels = livePoseChannels(prog, fixturesRef.current);
+    // duration 0 = hold (∞) : la capture doit rester jouée, pas blackout après 5 s.
+    // Pas de name dans update : s est un snapshot AVANT createScene (off-by-one).
+    s.updateScene(scId, { channels, fadeIn: 0, fadeOut: 0, duration: 0 });
+    pushUndo({ type: 'scene-create', sceneId: scId });
+    // Auto-sélection + handoff (comme Store) : la tuile se sélectionne et la
+    // scène joue immédiatement — sans ça, Rec crée une tuile « muette ».
+    (window as any).__lm_selectedSceneId = scId;
+    try {
+      const show = useShowStore.getState();
+      sendChannelsToHardwareAndStore({ ...channels }, show.patchedFixtures, show.universes, 'design-test').catch(() => {});
+      useProgrammerStore.getState().clear();
+    } catch {}
+    // isScenePreviewVisible exige design+scenes (sinon SceneEditor ne push rien)
+    try {
+      const app = useAppStore.getState();
+      if (app.mode !== 'design') app.setMode('design');
+      app.setDesignSidebarTab('scenes');
+    } catch {}
+    try { (window as any).__lm_toast?.(`Rec Scène OK (${Object.keys(channels).length} ch)`, 'ok'); } catch {}
+  }, [pushUndo]);
 
   const handleRecEfxCb = useCallback(() => {
     const prog = useProgrammerStore.getState().channels;
-    if (Object.keys(prog).length === 0) return;
-    if (!selectedFixture) return;
+    if (Object.keys(prog).length === 0) {
+      try { (window as any).__lm_toast?.('Programmeur vide — rien à capturer', 'err'); } catch {}
+      return;
+    }
+    if (!selectedFixture) {
+      try { (window as any).__lm_toast?.('Sélectionne une fixture pour Rec EFX', 'err'); } catch {}
+      return;
+    }
     const f3d = fixturesRef.current.get(selectedFixture.id);
     const pf = patchedFixtures.find((f) => f.id === selectedFixture.id);
     const s = useShowStore.getState();
@@ -2764,14 +3085,32 @@ export const Stage3D: React.FC<{
     const yOff = Math.round(((tilt - 128) / 128) * 120);
     const id = s.createEffect(`EFX 3D ${s.effects.length + 1}`);
     s.updateEffect(id, { name: `EFX 3D ${s.effects.length}`, pattern: 'Circle', width: 1, height: 1, rotation: 0, speed: 0.5, xOffset: xOff, yOffset: yOff, fixtureIds: selectedFixture ? [selectedFixture.id] : [] });
-  }, [selectedFixture, patchedFixtures]);
+    pushUndo({ type: 'efx-create', efxId: id });
+  }, [selectedFixture, patchedFixtures, pushUndo]);
 
   const handleRecShowCb = useCallback(() => {
     const prog = useProgrammerStore.getState().channels;
-    if (Object.keys(prog).length === 0) return;
+    if (Object.keys(prog).length === 0) {
+      try { (window as any).__lm_toast?.('Programmeur vide — rien à capturer', 'err'); } catch {}
+      return;
+    }
     const s = useShowStore.getState();
     const scId = s.createScene(`Scene 3D ${s.scenes.length + 1}`);
-    s.updateScene(scId, { name: `Scene 3D ${s.scenes.length}`, channels: livePoseChannels(prog, fixturesRef.current), fadeIn: 0, fadeOut: 0, duration: 5000 });
+    const showChans = livePoseChannels(prog, fixturesRef.current);
+    // duration 0 = hold ; pas de name (snapshot s AVANT createScene).
+    s.updateScene(scId, { channels: showChans, fadeIn: 0, fadeOut: 0, duration: 0 });
+    // Auto-sélection + handoff (idem Rec Scène / Store)
+    (window as any).__lm_selectedSceneId = scId;
+    try {
+      const show = useShowStore.getState();
+      sendChannelsToHardwareAndStore({ ...showChans }, show.patchedFixtures, show.universes, 'design-test').catch(() => {});
+      useProgrammerStore.getState().clear();
+    } catch {}
+    try {
+      const app = useAppStore.getState();
+      if (app.mode !== 'design') app.setMode('design');
+      app.setDesignSidebarTab('scenes');
+    } catch {}
     const shId = s.createShow(`Show 3D ${s.shows.length + 1}`);
     // getState() ci-dessus est un snapshot AVANT createShow : les
     // références s.shows/s.scenes sont périmées. Re-snapshoter pour
@@ -2779,7 +3118,8 @@ export const Stage3D: React.FC<{
     const fresh = useShowStore.getState();
     const show = fresh.shows.find((sh) => sh.id === shId);
     if (show) fresh.updateShow(shId, { tracks: [{ id: `trk-${Date.now()}`, name: 'Scene Track', type: 'scene', items: [{ id: `tmi-${Date.now()}`, startTime: 0, duration: 5000, resourceId: scId, fadeIn: 0, fadeOut: 0, name: fresh.scenes.find((sc) => sc.id === scId)?.name || 'Scene 3D' }], muted: false, solo: false }] as any });
-  }, []);
+    pushUndo({ type: 'show-create', showId: shId, sceneId: scId });
+  }, [pushUndo]);
 
   // ── Render ──────────────────────────────────────────
   const filteredFixtures = fixtureSearch.trim()
@@ -2849,6 +3189,14 @@ export const Stage3D: React.FC<{
                 </button>
               </RichTooltip>
             </div>
+            <div className="relative flex items-center">
+              <LampDesk size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
+              <RichTooltip content={{ title: 'Supports des projecteurs', text: 'Applique un support physique à TOUTES les fixtures patchées (le détail par fixture reste réglable en cliquant un projecteur). Pont = rendu historique, rien de dessiné.', tone: 'info' }} placement="bottom">
+                <button onClick={() => setSupportsMenuOpen(v => !v)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50 whitespace-nowrap" title="Appliquer un support à toutes les fixtures">
+                  Supports
+                </button>
+              </RichTooltip>
+            </div>
         </div>
       </div>
       {/* Musiciens popup — centrée comme toutes les modales */}
@@ -2872,6 +3220,36 @@ export const Stage3D: React.FC<{
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+      {/* Supports popup — centrée comme toutes les modales : applique à toutes les fixtures */}
+      {supportsMenuOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setSupportsMenuOpen(false)}>
+          <div className="w-64 rounded-lg border border-gray-700/60 bg-[#0d0d14] shadow-xl shadow-black/60 p-2" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
+              <span className="text-[10px] font-medium text-gray-300">Supports · toutes les fixtures</span>
+              <button onClick={() => setSupportsMenuOpen(false)} className="text-gray-500 hover:text-gray-300 text-sm px-1">✕</button>
+            </div>
+            {SUPPORT_KINDS.map(kind => {
+              const count = patchedFixtures.filter(pf => resolveSupportKind(fixturePositions[pf.id]?.support) === kind).length;
+              return (
+                <button
+                  key={kind}
+                  onClick={() => {
+                    const st = useShowStore.getState();
+                    for (const pf of st.patchedFixtures) st.setFixturePosition(pf.id, { support: kind });
+                    setSupportsMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-800/30 text-left"
+                  title={kind === 'truss' ? 'Rendu historique : rien de dessiné' : `Pose ${patchedFixtures.length} fixture(s) sur ${SUPPORT_LABELS[kind].toLowerCase()}`}
+                >
+                  <span className="text-[10px] text-gray-200 flex-1">{SUPPORT_LABELS[kind]}</span>
+                  <span className="text-[10px] text-gray-500 tabular-nums">{count}</span>
+                </button>
+              );
+            })}
+            <p className="px-2 pt-1 text-[9px] text-gray-600">Le détail par fixture se règle en cliquant un projecteur.</p>
           </div>
         </div>
       )}
@@ -3017,7 +3395,7 @@ export const Stage3D: React.FC<{
       <div className="flex-1 flex flex-row flex-nowrap overflow-hidden min-h-0">
         {/* Left dock — Fixtures (rétractable) */}
         {!leftDockCollapsed ? (
-          <div className="order-1 w-[260px] shrink-0 border-r border-gray-800/50 bg-[#0d0d14]/80 flex flex-col min-h-0">
+          <div className="order-1 w-[220px] xl:w-[260px] shrink-0 border-r border-gray-800/50 bg-[#0d0d14]/80 flex flex-col min-h-0">
             <div className="px-3 py-2 border-b border-gray-800/50">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">Fixtures</span>
@@ -3368,93 +3746,90 @@ export const Stage3D: React.FC<{
                 </div>
               </div>
 
+              {/* Support physique (comme les musiciens : choix visible en 3D) */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-gray-500">Support</span>
+                </div>
+                <div className="grid grid-cols-4 gap-1">
+                  {([
+                    { v: 'truss' as const, label: SUPPORT_LABELS.truss, icon: '🏗', tip: { title: 'Pont — truss', text: 'Comportement historique : rien de dessiné, la fixture flotte à sa hauteur (pont existant).', example: 'Par défaut : projets existants inchangés.', tone: 'info' as const } },
+                    { v: 'totem' as const, label: SUPPORT_LABELS.totem, icon: '🗼', tip: { title: 'Totem — tour verticale', text: 'Colonne posée au sol qui monte jusqu\'à la fixture. Standard DJ des deux côtés de la scène.', example: 'Deux totems + 2 lyres pour un set DJ.', tone: 'info' as const } },
+                    { v: 'tripod' as const, label: SUPPORT_LABELS.tripod, icon: '📷', tip: { title: 'Trépied — pied en T', text: 'Pied repliable avec barre en T, posé au sol sous la fixture. Standard prestataires.', example: 'Projecteur en façade sans structure.', tone: 'info' as const } },
+                    { v: 'floor' as const, label: SUPPORT_LABELS.floor, icon: '🟫', tip: { title: 'Sol — posé au sol', text: 'Aucun support dessiné : uplight, wash posé au sol (combine avec Mount Ground).', example: 'Uplights au pied du mur.', tone: 'info' as const } },
+                  ]).map(opt => (
+                    <RichTooltip key={opt.v} content={opt.tip}>
+                      <button
+                        onClick={() => setFixturePosition(selectedFixture.id, { support: opt.v })}
+                        className={`px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
+                          resolveSupportKind(selectedPos.support) === opt.v
+                            ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
+                            : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
+                        }`}
+                      >
+                        <span className="mr-1">{opt.icon}</span>{opt.label}
+                      </button>
+                    </RichTooltip>
+                  ))}
+                </div>
+              </div>
+
               {/* Direct DMX — intensity + couleur (programmer) */}
               <div className="space-y-2 p-2 rounded-lg bg-violet-600/10 border border-violet-500/20">
                 <div className="text-[10px] font-semibold text-violet-300">Direct — programmer (violet)</div>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[10px]"><span className="text-gray-500">Dimmer</span><span className="text-violet-300 font-mono">{useProgrammerStore.getState().channels[selectedFixture ? (patchedFixtures.find(f=>f.id===selectedFixture.id)?.startAddress ?? 0) + (fixturesRef.current.get(selectedFixture.id)?.channelMap.intensityOffset ?? 0) : 0] ?? 0}</span></div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => {
-                      const f3d = fixturesRef.current.get(selectedFixture!.id);
-                      const pf = patchedFixtures.find(f=>f.id===selectedFixture!.id);
-                      if (!f3d || !pf) return;
-                      const addr = pf.startAddress+(f3d.channelMap.intensityOffset ?? 0);
-                      const cur = useProgrammerStore.getState().channels[addr] ?? 0;
-                      const v = Math.max(0, cur - 1);
-                      const setCh = useProgrammerStore.getState().setChannel;
-                      if (f3d.channelMap.intensityOffset!==null) setCh(addr, v);
-                      (document.querySelector('input[type="range"][min="0"][max="255"]') as HTMLInputElement | null)?.dispatchEvent(new Event('input', {bubbles:true}));
-                    }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
-                    <input type="range" min={0} max={255} defaultValue={useProgrammerStore.getState().channels[selectedFixture ? (patchedFixtures.find(f=>f.id===selectedFixture.id)?.startAddress ?? 0) + (fixturesRef.current.get(selectedFixture.id)?.channelMap.intensityOffset ?? 0) : 0] ?? 0}
-                      onChange={(e)=>{
-                        const f3d = fixturesRef.current.get(selectedFixture!.id);
-                        const pf = patchedFixtures.find(f=>f.id===selectedFixture!.id);
-                        if (!f3d || !pf) return;
-                        const v = Number(e.target.value);
-                        const addrs: number[] = [];
-                        if (f3d.channelMap.intensityOffset!==null) addrs.push(pf.startAddress+f3d.channelMap.intensityOffset);
-                        for (const o of f3d.channelMap.rgbOffsets ?? []) addrs.push(pf.startAddress+o);
-                        for (const seg of f3d.channelMap.rgbSegments ?? []) { addrs.push(pf.startAddress+seg.r); if(seg.g!==null) addrs.push(pf.startAddress+seg.g); if(seg.b!==null) addrs.push(pf.startAddress+seg.b); }
-                        if (addrs.length===0 && f3d.channelMap.intensityOffset!==null) addrs.push(pf.startAddress+f3d.channelMap.intensityOffset);
-                        const setCh = useProgrammerStore.getState().setChannel;
-                        if (f3d.channelMap.intensityOffset!==null) setCh(pf.startAddress+f3d.channelMap.intensityOffset, v);
-                        else for (const a of addrs) setCh(a, v);
-                      }} className="flex-1 h-1 accent-violet-500 cursor-pointer" />
-                    <button onClick={() => {
-                      const f3d = fixturesRef.current.get(selectedFixture!.id);
-                      const pf = patchedFixtures.find(f=>f.id===selectedFixture!.id);
-                      if (!f3d || !pf) return;
-                      const addr = pf.startAddress+(f3d.channelMap.intensityOffset ?? 0);
-                      const cur = useProgrammerStore.getState().channels[addr] ?? 0;
-                      const v = Math.min(255, cur + 1);
-                      const setCh = useProgrammerStore.getState().setChannel;
-                      if (f3d.channelMap.intensityOffset!==null) setCh(addr, v);
-                    }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
-                  </div>
-                </div>
                 {selectedFixture && (() => {
-                  const f3d = fixturesRef.current.get(selectedFixture.id);
-                  const pf = patchedFixtures.find(f=>f.id===selectedFixture.id);
-                  if (!f3d || !pf) return null;
-                  const cm = f3d.channelMap;
-                  const panAddrs: number[] = (cm.panOffsets ?? []).map(o => pf.startAddress + o);
-                  if (cm.panOffset !== null && !panAddrs.includes(pf.startAddress + cm.panOffset)) panAddrs.push(pf.startAddress + cm.panOffset);
-                  const tiltAddrs: number[] = (cm.tiltOffsets ?? []).map(o => pf.startAddress + o);
-                  if (cm.tiltOffset !== null && !tiltAddrs.includes(pf.startAddress + cm.tiltOffset)) tiltAddrs.push(pf.startAddress + cm.tiltOffset);
+                  const ids = getActionFixtureIds();
+                  const setCh = useProgrammerStore.getState().setChannel;
+                  const intensityAddrs: number[] = [];
+                  const rgbAddrs: number[] = [];
+                  for (const fid of ids) {
+                    const f3d = fixturesRef.current.get(fid);
+                    const pf = patchedFixtures.find(f=>f.id===fid);
+                    if (!f3d || !pf) continue;
+                    const cm = f3d.channelMap;
+                    if (cm.intensityOffset !== null) intensityAddrs.push(pf.startAddress + cm.intensityOffset);
+                    for (const off of cm.rgbOffsets ?? []) rgbAddrs.push(pf.startAddress + off);
+                    for (const seg of cm.rgbSegments ?? []) {
+                      rgbAddrs.push(pf.startAddress + seg.r);
+                      if (seg.g !== null) rgbAddrs.push(pf.startAddress + seg.g);
+                      if (seg.b !== null) rgbAddrs.push(pf.startAddress + seg.b);
+                    }
+                  }
+                  return <DirectDimmerFader
+                    key={ids.join(',')}
+                    intensityAddrs={intensityAddrs}
+                    rgbAddrs={Array.from(new Set(rgbAddrs))}
+                    onSet={(v) => { for (const a of intensityAddrs) setCh(a, v); if (intensityAddrs.length === 0) for (const a of rgbAddrs) setCh(a, v); }}
+                  />;
+                })()}
+                {selectedFixture && (() => {
+                  const panAddrs: number[] = [];
+                  const tiltAddrs: number[] = [];
+                  for (const fid of getActionFixtureIds()) {
+                    const f3d = fixturesRef.current.get(fid);
+                    const pf = patchedFixtures.find(f=>f.id===fid);
+                    if (!f3d || !pf) continue;
+                    const cm = f3d.channelMap;
+                    if (cm.panOffset !== null && !panAddrs.includes(pf.startAddress + cm.panOffset)) panAddrs.push(pf.startAddress + cm.panOffset);
+                    for (const o of cm.panOffsets ?? []) if (!panAddrs.includes(pf.startAddress + o)) panAddrs.push(pf.startAddress + o);
+                    if (cm.tiltOffset !== null && !tiltAddrs.includes(pf.startAddress + cm.tiltOffset)) tiltAddrs.push(pf.startAddress + cm.tiltOffset);
+                    for (const o of cm.tiltOffsets ?? []) if (!tiltAddrs.includes(pf.startAddress + o)) tiltAddrs.push(pf.startAddress + o);
+                  }
                   return <DirectPTFaders panAddrs={panAddrs} tiltAddrs={tiltAddrs} />;
                 })()}
                 <div className="flex gap-1">
                   {['#ff0000','#00ff00','#0000ff','#ffff00','#ffffff'].map(hex=>(
                     <button key={hex} onClick={()=>{
-                      const f3d = fixturesRef.current.get(selectedFixture!.id);
-                      const pf = patchedFixtures.find(f=>f.id===selectedFixture!.id);
-                      if (!f3d || !pf) return;
-                      const setCh = useProgrammerStore.getState().setChannel;
-                      const hexToRgb = (h:string)=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)] as [number,number,number];
-                      const [r,g,b]=hexToRgb(hex);
-                      for (const seg of f3d.channelMap.rgbSegments ?? []) {
-                        setCh(pf.startAddress+seg.r, r); setCh(pf.startAddress+seg.g, g); if(seg.b!==null) setCh(pf.startAddress+seg.b, b); if(seg.w!==null) setCh(pf.startAddress+seg.w, 0);
-                      }
-                      if ((f3d.channelMap.rgbSegments?.length ?? 0)===0) {
-                        for (const off of f3d.channelMap.rgbOffsets ?? []) {
-                          const idx = f3d.channelMap.rgbOffsets!.indexOf(off);
-                          setCh(pf.startAddress+off, idx===0?r:idx===1?g:b);
-                        }
-                      }
-                      if (f3d.channelMap.wheelOffset!==null) {
-                        // approx wheel position
-                        setCh(pf.startAddress+f3d.channelMap.wheelOffset, hex==='#ff0000'?10:hex==='#00ff00'?60:hex==='#0000ff'?120:hex==='#ffff00'?30:0);
-                      }
+                      const ids = getActionFixtureIds();
+                      if (ids.length === 0) return;
+                      for (const fid of ids) applyHexColorToFixture(fid, hex);
                     }} style={{backgroundColor:hex}} className="w-6 h-6 rounded border border-gray-700 hover:scale-110 transition-transform" title={hex} />
                   ))}
                   <input type="color" defaultValue="#ff0064" onChange={(e)=>{
                     const hex=e.target.value;
-                    const f3d = fixturesRef.current.get(selectedFixture!.id);
-                    const pf = patchedFixtures.find(f=>f.id===selectedFixture!.id);
-                    if (!f3d || !pf) return;
-                    const setCh = useProgrammerStore.getState().setChannel;
-                    const [r,g,b]=[parseInt(hex.slice(1,3),16),parseInt(hex.slice(3,5),16),parseInt(hex.slice(5,7),16)];
-                    for (const seg of f3d.channelMap.rgbSegments ?? []) { setCh(pf.startAddress+seg.r,r); setCh(pf.startAddress+seg.g,g); if(seg.b!==null) setCh(pf.startAddress+seg.b,b); }
+                    const ids = getActionFixtureIds();
+                    if (ids.length === 0) return;
+                    for (const fid of ids) applyHexColorToFixture(fid, hex);
                   }} className="w-6 h-6 rounded border border-gray-700 cursor-pointer p-0" />
                 </div>
                 <RichTooltip content={{ title: 'Target — viser un point', text: 'Active le mode cible : cliquez sur la scène 3D pour calculer le pan/tilt exact qui vise ce point.\nEcrit les valeurs DMX dans le programmeur (couche LTP, en direct sur la fixture).', example: 'Sélectionnez 1 ou + fixtures → cliquez Target → cliquez un point sur le sol → la fixture bouge physiquement vers ce point.', tone: 'success' }} placement="bottom">
@@ -3528,42 +3903,33 @@ export const Stage3D: React.FC<{
                 </div>
                 <div className="flex gap-1 pt-1">
                   <button onClick={() => {
-                    const f3dC = fixturesRef.current.get(selectedFixture.id);
-                    const pfC = patchedFixtures.find(f => f.id === selectedFixture.id);
-                    const cmC = f3dC?.channelMap;
-                    const prog = useProgrammerStore.getState().channels;
-                    // Pose de référence : lire la valeur POSÉE PAR LE PROGRAMMEUR
-                    // (source de vérité du Target), sinon le dernier byte vu par la 3D.
-                    const readPoseByte = (off: number | null | undefined, fallback: number | undefined) => {
-                      if (off !== null && off !== undefined && pfC) {
-                        const v = prog[pfC.startAddress + off];
-                        if (v !== undefined) return v;
-                      }
-                      return fallback ?? 128;
-                    };
-                    const panByte = readPoseByte(cmC.panOffset ?? (cmC.panOffsets?.[0] ?? null), f3dC?.lastPan);
-                    const tiltByte = readPoseByte(cmC.tiltOffset ?? (cmC.tiltOffsets?.[0] ?? null), f3dC?.lastTilt);
-                    setFixturePosition(selectedFixture.id, {
-                      centerPan: Math.max(-270, Math.min(270, Math.round((panByte - 128) / 255 * 540))),
-                      centerTilt: Math.max(-90, Math.min(90, Math.round((tiltByte - 128) / 255 * 180))),
-                    });
-                    // Libère le programmeur (LTP 85) sur pan/tilt/couleur/dimmer de
-                    // cette fixture : sinon il écrase l'autoscript (priorité
-                    // inférieure) et la tête reste figée/blanche au point visé.
-                    const clearProgAddr = (off: number | null | undefined) => { if (off !== null && off !== undefined && pfC) useProgrammerStore.getState().clearChannel(pfC.startAddress + off); };
-                    if (pfC && cmC) {
-                      (cmC.panOffsets ?? []).forEach((o: number) => clearProgAddr(o));
-                      if (cmC.panOffset !== null) clearProgAddr(cmC.panOffset);
-                      (cmC.tiltOffsets ?? []).forEach((o: number) => clearProgAddr(o));
-                      if (cmC.tiltOffset !== null) clearProgAddr(cmC.tiltOffset);
-                      (cmC.rgbOffsets ?? []).forEach((o: number) => clearProgAddr(o));
-                      for (const seg of (cmC.rgbSegments ?? [])) { clearProgAddr(seg.r); clearProgAddr(seg.g); clearProgAddr(seg.b); clearProgAddr(seg.w); clearProgAddr(seg.a); clearProgAddr(seg.uv); }
-                      clearProgAddr(cmC.intensityOffset);
-                      clearProgAddr(cmC.wheelOffset);
-                      clearProgAddr(cmC.strobeOffset);
-                      clearProgAddr(cmC.shutterOffset);
+                    // Capture pour TOUTES les fixtures sélectionnées (multi + active).
+                    // On pose centerPan/centerTilt (centre d'oscillation autoscript)
+                    // mais on ne purge JAMAIS le programmeur ici : après Target,
+                    // purger pan/tilt/couleur faisait retomber la dernière fixture
+                    // sélectionnée à sa pose initiale (blanc, face à 128).
+                    const setPos = useShowStore.getState().setFixturePosition;
+                    const progSnap = useProgrammerStore.getState().channels;
+                    for (const fid of getActionFixtureIds()) {
+                      const f3dC = fixturesRef.current.get(fid);
+                      const pfC = patchedFixtures.find(f => f.id === fid);
+                      const cmC = f3dC?.channelMap;
+                      if (!f3dC || !pfC || !cmC) continue;
+                      const readPoseByte = (off: number | null | undefined, fallback: number | undefined) => {
+                        if (off !== null && off !== undefined) {
+                          const v = progSnap[pfC.startAddress + off];
+                          if (v !== undefined) return v;
+                        }
+                        return fallback ?? 128;
+                      };
+                      const panByte = readPoseByte(cmC.panOffset ?? (cmC.panOffsets?.[0] ?? null), f3dC.lastPan);
+                      const tiltByte = readPoseByte(cmC.tiltOffset ?? (cmC.tiltOffsets?.[0] ?? null), f3dC.lastTilt);
+                      setPos(fid, {
+                        centerPan: Math.max(-270, Math.min(270, Math.round((panByte - 128) / 255 * 540))),
+                        centerTilt: Math.max(-90, Math.min(90, Math.round((tiltByte - 128) / 255 * 180))),
+                      });
                     }
-                  }} title="Centre l'oscillation autoscript sur la pose actuelle de la tête (libère aussi pan/tilt/couleur pour que l'autoscript reprenne le contrôle)" className="flex-1 text-[9px] rounded bg-purple-900/60 border border-purple-700/50 text-purple-200 hover:bg-purple-800/60 py-0.5">Capturer</button>
+                  }} title="Centre l'oscillation autoscript sur la pose actuelle (toutes les fixtures sélectionnées) — conserve la couleur et la position du programmeur" className="flex-1 text-[9px] rounded bg-purple-900/60 border border-purple-700/50 text-purple-200 hover:bg-purple-800/60 py-0.5">Capturer</button>
                   <button onClick={() => setFixturePosition(selectedFixture.id, { zeroPan: 0, zeroTilt: 0, centerPan: 0, centerTilt: 0 })} title="Remet les faders point zéro et le centre de mouvement à 0°" className="flex-1 text-[9px] rounded bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 py-0.5">Zéro (0°)</button>
                 </div>
                 <p className="text-[9px] text-gray-600">Les faders décalent le faisceau (visuel, persistant). « Capturer » centre l'oscillation autoscript sur la pose actuelle de la tête.</p>
@@ -3646,8 +4012,35 @@ export const Stage3D: React.FC<{
                 {effects.length === 0 && <p className="text-[9px] text-gray-600 mt-1 text-center">Aucun EFX enregistré — crée-en dans Design → EFX</p>}
               </div>
             )}
+            {/* Reset / Undo — efface la programmation en cours */}
+            <div className="mx-4 mb-3 grid grid-cols-2 gap-2">
+              <button
+                onClick={handleUndoLast}
+                disabled={undoDepth === 0}
+                className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg bg-gray-800/60 border border-gray-700 text-[11px] text-gray-300 hover:bg-gray-700 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                title="Effacer la dernière action (undo)"
+              >
+                <Undo2 size={12} /> Dernière action
+              </button>
+              <button
+                onClick={handleResetAll}
+                className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg bg-red-600/15 border border-red-500/30 text-[11px] text-red-300 hover:bg-red-600/30 transition-colors"
+                title="Tout réinitialiser : vide le programmeur, annule les actions et l'EFX snapshot"
+              >
+                <RotateCcw size={12} /> Tout réinit.
+              </button>
+            </div>
             {/* Close button */}
-            <div className="px-4 py-2 border-t border-gray-800/50">
+            <div className="px-4 py-2 border-t border-gray-800/50 space-y-2">
+              {efxSnapshotActive && (
+                <button
+                  onClick={handleCancelEfxSnapshot}
+                  className="w-full px-3 py-2 bg-orange-600/15 border border-orange-500/40 rounded-lg text-xs text-orange-300 hover:bg-orange-600/25 transition-colors flex items-center justify-center gap-1.5"
+                  title="Annule l'EFX snapshot appliqué à la scène (restaure l'état d'avant)"
+                >
+                  <Undo2 size={12} /> Annuler l'EFX snapshot
+                </button>
+              )}
               <button
                 onClick={clearFixtureSelection}
                 className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-700/50 transition-colors"
@@ -3663,7 +4056,7 @@ export const Stage3D: React.FC<{
         {/* Right dock — EFX uniquement si enableEfxApply (Scènes). Repliable
             pour rendre toute la largeur à la scène 3D. */}
         {enableEfxApply && !rightDockCollapsed && (
-          <div className="order-3 w-[264px] shrink-0 border-l border-gray-800/50 bg-[#0d0d14]/60 flex flex-col min-h-0">
+          <div className="order-3 w-[220px] xl:w-[264px] shrink-0 border-l border-gray-800/50 bg-[#0d0d14]/60 flex flex-col min-h-0">
             <div className="px-3 py-2 border-b border-gray-800/50 flex items-center justify-between">
               <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">Scène & EFX</span>
               <button onClick={() => setRightDockCollapsed(true)} className="w-5 h-5 rounded bg-black/30 border border-gray-800 text-gray-500 hover:text-gray-300 hover:border-gray-600 flex items-center justify-center" title="Réduire le panneau">
@@ -3689,6 +4082,32 @@ export const Stage3D: React.FC<{
                 <button onClick={handleRecEfxCb} className="px-1 py-1.5 rounded-lg bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-medium hover:bg-cyan-600/30 transition-colors" title="Crée un EFX depuis la pose actuelle">Rec EFX</button>
                 <button onClick={handleRecShowCb} className="px-1 py-1.5 rounded-lg bg-amber-600/20 text-amber-300 border border-amber-500/30 text-[10px] font-medium hover:bg-amber-600/30 transition-colors" title="Capture la pose en scène + show">Rec Show</button>
               </div>
+              <div className="grid grid-cols-2 gap-1">
+                <button
+                  onClick={handleUndoLast}
+                  disabled={undoDepth === 0}
+                  className="flex items-center justify-center gap-1 px-1 py-1.5 rounded-lg bg-gray-800/60 border border-gray-700 text-[10px] text-gray-300 hover:bg-gray-700 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="Effacer la dernière action (undo)"
+                >
+                  <Undo2 size={11} /> Dernière action
+                </button>
+                <button
+                  onClick={handleResetAll}
+                  className="flex items-center justify-center gap-1 px-1 py-1.5 rounded-lg bg-red-600/15 border border-red-500/30 text-[10px] text-red-300 hover:bg-red-600/30 transition-colors"
+                  title="Tout réinitialiser : vide le programmeur, annule les actions et l'EFX snapshot"
+                >
+                  <RotateCcw size={11} /> Tout réinit.
+                </button>
+              </div>
+              {efxSnapshotActive && (
+                <button
+                  onClick={handleCancelEfxSnapshot}
+                  className="w-full px-2 py-1.5 rounded-lg bg-orange-600/15 border border-orange-500/40 text-[10px] text-orange-300 hover:bg-orange-600/25 transition-colors flex items-center justify-center gap-1"
+                  title="Annule l'EFX snapshot appliqué à la scène"
+                >
+                  <Undo2 size={11} /> Annuler l'EFX snapshot
+                </button>
+              )}
               <div className="p-2.5 rounded-lg bg-black/20 border border-gray-800/50">
                 <div className="text-[10px] font-semibold text-gray-400 mb-1">Astuce pro</div>
                 <p className="text-[10px] text-gray-500 leading-relaxed">Sélectionne une lyre à gauche, ajuste sa position avec `−/+`, puis fige un EFX — ta scène garde la pose exacte vue en 3D.</p>
@@ -3762,6 +4181,94 @@ function disposeFixture3D(f3d: Fixture3D): void {
     f3d.floorGlow.geometry?.dispose();
     (f3d.floorGlow.material as THREE.Material)?.dispose();
   }
+}
+
+// ─── Supports physiques (totem / trépied) ──────────────────────────
+// Matériaux partagés (jamais disposés : clearFixtureSupport ne libère que
+// les géométries). Le pont ('truss') et le sol ('floor') ne dessinent rien
+// (rendu historique : projets existants inchangés).
+const supportMetalMat = new THREE.MeshStandardMaterial({ color: 0x23232e, roughness: 0.5, metalness: 0.7 });
+const supportBaseMat = new THREE.MeshStandardMaterial({ color: 0x14141c, roughness: 0.6, metalness: 0.5 });
+
+function strutBetween(a: THREE.Vector3, b: THREE.Vector3, r: number, mat: THREE.Material): THREE.Mesh {
+  const dir = new THREE.Vector3().subVectors(b, a);
+  const len = Math.max(0.01, dir.length());
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 8), mat);
+  mesh.position.copy(a).addScaledVector(dir, 0.5);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+  return mesh;
+}
+
+function buildSupportVisual(kind: FixtureSupport, height: number): THREE.Group | null {
+  if (!needsSupportGeometry(kind, height)) return null;
+  const g = new THREE.Group();
+  if (kind === 'totem') {
+    const col = new THREE.Mesh(new THREE.BoxGeometry(0.34, height, 0.34), supportMetalMat);
+    col.position.y = height / 2;
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.06, 0.8), supportBaseMat);
+    base.position.y = 0.03;
+    const top = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.05, 0.42), supportBaseMat);
+    top.position.y = Math.max(0.06, height - 0.025);
+    g.add(col, base, top);
+  } else {
+    // Trépied : mât central + barre en T + 3 jambes + embase.
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, height, 10), supportMetalMat);
+    pole.position.y = height / 2;
+    g.add(pole);
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.1, 8), supportMetalMat);
+    bar.rotation.z = Math.PI / 2;
+    bar.position.y = Math.max(0.1, height - 0.05);
+    g.add(bar);
+    const hubY = Math.min(0.55, Math.max(0.2, height * 0.4));
+    const spread = Math.min(0.9, 0.25 + height * 0.15);
+    for (let k = 0; k < 3; k++) {
+      const a = (k / 3) * Math.PI * 2;
+      g.add(strutBetween(
+        new THREE.Vector3(0, hubY, 0),
+        new THREE.Vector3(Math.cos(a) * spread, 0.02, Math.sin(a) * spread),
+        0.025, supportMetalMat,
+      ));
+    }
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.05, 12), supportBaseMat);
+    foot.position.y = 0.025;
+    g.add(foot);
+  }
+  return g;
+}
+
+function clearFixtureSupport(scene: THREE.Scene | null, f3d: Fixture3D): void {
+  const g = f3d.supportGroup;
+  if (!g) return;
+  if (scene) { try { scene.remove(g); } catch {} }
+  g.traverse((child) => {
+    if (child instanceof THREE.Mesh) child.geometry?.dispose();
+  });
+  f3d.supportGroup = undefined;
+  f3d.supportKey = undefined;
+}
+
+function updateFixtureSupport(
+  scene: THREE.Scene | null,
+  f3d: Fixture3D,
+  pos: FixturePos,
+  stageDims: { width: number; depth: number },
+): void {
+  if (!scene) return;
+  const kind = resolveSupportKind(pos.support);
+  const stageX = (pos.x - 0.5) * stageDims.width;
+  const stageZ = (pos.y - 0.5) * stageDims.depth;
+  const stageY = STAGE_HEIGHT + pos.h * 5.0;
+  const height = supportColumnHeight(stageY, STAGE_HEIGHT);
+  const key = `${kind}:${Math.round(stageX * 20)}:${Math.round(stageZ * 20)}:${Math.round(height * 20)}`;
+  if (f3d.supportGroup && f3d.supportKey === key) return;
+  clearFixtureSupport(scene, f3d);
+  if (!needsSupportGeometry(kind, height)) return;
+  const g = buildSupportVisual(kind, height);
+  if (!g) return;
+  g.position.set(stageX, STAGE_HEIGHT, stageZ);
+  scene.add(g);
+  f3d.supportGroup = g;
+  f3d.supportKey = key;
 }
 
 /**
