@@ -13,6 +13,8 @@ import {
   vcActivateScene,
   vcActivateChaser,
   vcActivateBlackout,
+  vcActivateGrandMaster,
+  vcActivateDmxChannel,
   vcDeactivate,
   vcButtonPress,
   vcSetSliderFraction,
@@ -21,6 +23,7 @@ import {
   vcStopAllRuns,
   __setVCSender,
   __setVCBlackoutFns,
+  __setVCButtonFns,
 } from '../engine/virtual-console-runtime';
 import { useShowStore } from '../stores/showStore';
 import { usePerformStore } from '../stores/performStore';
@@ -29,6 +32,8 @@ type Sent = Record<number, number>;
 
 let sent: Sent[] = [];
 let blackoutCalls: string[] = [];
+let gmCalls: number[] = [];
+let channelCalls: Array<{ universe: number; address: number; value: number }> = [];
 let events: Array<{ id: string; running: boolean; kind: string }> = [];
 let unsubscribe: (() => void) | null = null;
 
@@ -46,11 +51,17 @@ beforeEach(() => {
   vi.useFakeTimers();
   sent = [];
   blackoutCalls = [];
+  gmCalls = [];
+  channelCalls = [];
   events = [];
   __setVCSender((channels) => { sent.push(channels); });
   __setVCBlackoutFns({
     blackout: () => { blackoutCalls.push('blackout'); },
     restore: () => { blackoutCalls.push('restore'); },
+  });
+  __setVCButtonFns({
+    applyGrandMaster01: (v) => { gmCalls.push(v); },
+    setChannel: (universe, address, value) => { channelCalls.push({ universe, address, value }); },
   });
   unsubscribe = vcOnRunChange((id, running, kind) => { events.push({ id, running, kind }); });
 
@@ -85,6 +96,12 @@ beforeEach(() => {
       widget('w-flash', { actionType: 'scene', sceneId: 's-hold', flashMode: 'flash' }),
       widget('w-chaser', { actionType: 'chaser', chaserId: 'ch1' }),
       widget('w-black', { actionType: 'blackout' }),
+      widget('w-gm', { actionType: 'grandMaster', grandMasterValue: 0 }),
+      widget('w-gm128', { actionType: 'grandMaster', grandMasterValue: 128 }),
+      widget('w-gm-flash', { actionType: 'grandMaster', grandMasterValue: 64, flashMode: 'flash' }),
+      widget('w-dmx', { actionType: 'dmxChannel', dmxUniverse: 1, dmxAddress: 300, dmxValue: 200 }),
+      widget('w-dmx-flash', { actionType: 'dmxChannel', dmxUniverse: 0, dmxAddress: 7, dmxValue: 255, flashMode: 'flash' }),
+      widget('w-dmx-bad', { actionType: 'dmxChannel' }),
       widget('w-auto', { actionType: 'autoLoop' }),
     ],
   } as any);
@@ -96,6 +113,7 @@ afterEach(() => {
   unsubscribe = null;
   __setVCSender(null);
   __setVCBlackoutFns(null);
+  __setVCButtonFns(null);
   vi.useRealTimers();
 });
 
@@ -192,6 +210,110 @@ describe('runtime Console Virtuelle — blackout', () => {
     expect(vcIsRunning('w-black')).toBe(false);
     expect(blackoutCalls).toEqual(['blackout', 'restore']);
     expect(last()).toBeUndefined(); // aucun envoi de canaux pour un blackout
+  });
+});
+
+describe('runtime Console Virtuelle — bouton Grand Master', () => {
+  it('kill par défaut (0), réappui → restauration exacte à 255', () => {
+    expect(vcButtonPress('w-gm', true)).toBe(true);
+    expect(vcIsRunning('w-gm')).toBe(true);
+    expect(gmCalls).toEqual([0]);
+    expect(events[0]).toMatchObject({ id: 'w-gm', running: true, kind: 'grandmaster' });
+    expect(vcButtonPress('w-gm', true)).toBe(true); // toggle : 2e press
+    expect(vcIsRunning('w-gm')).toBe(false);
+    expect(gmCalls).toEqual([0, 1]); // restore = pleine puissance
+  });
+
+  it('valeur configurée (128/255) puis restauration', () => {
+    vcActivateGrandMaster('w-gm128', 128);
+    expect(gmCalls).toEqual([128 / 255]);
+    vcDeactivate('w-gm128');
+    expect(gmCalls).toEqual([128 / 255, 1]);
+  });
+
+  it('flash : press applique, release restaure', () => {
+    vcButtonPress('w-gm-flash', true);
+    expect(gmCalls).toEqual([64 / 255]);
+    vcButtonPress('w-gm-flash', false);
+    expect(gmCalls).toEqual([64 / 255, 1]);
+    expect(vcIsRunning('w-gm-flash')).toBe(false);
+  });
+
+  it('borne la valeur hors plage (300 → 255, négative → 0)', () => {
+    vcActivateGrandMaster('w-gm', 300);
+    expect(gmCalls).toEqual([1]);
+    vcDeactivate('w-gm');
+    vcActivateGrandMaster('w-gm', -20);
+    expect(gmCalls[gmCalls.length - 1]).toBe(0);
+  });
+});
+
+describe('runtime Console Virtuelle — bouton canal DMX', () => {
+  it('envoie la valeur configurée, réappui → remise à zéro du même canal', () => {
+    expect(vcButtonPress('w-dmx', true)).toBe(true);
+    expect(vcIsRunning('w-dmx')).toBe(true);
+    expect(channelCalls).toEqual([{ universe: 1, address: 300, value: 200 }]);
+    expect(events[0]).toMatchObject({ id: 'w-dmx', running: true, kind: 'dmxchannel' });
+    expect(vcButtonPress('w-dmx', true)).toBe(true);
+    expect(vcIsRunning('w-dmx')).toBe(false);
+    expect(channelCalls).toEqual([
+      { universe: 1, address: 300, value: 200 },
+      { universe: 1, address: 300, value: 0 },
+    ]);
+  });
+
+  it('flash : momentané (press = valeur, release = 0)', () => {
+    vcButtonPress('w-dmx-flash', true);
+    expect(channelCalls).toEqual([{ universe: 0, address: 7, value: 255 }]);
+    vcButtonPress('w-dmx-flash', false);
+    expect(channelCalls).toEqual([
+      { universe: 0, address: 7, value: 255 },
+      { universe: 0, address: 7, value: 0 },
+    ]);
+  });
+
+  it('adresse invalide (tuile non configurée) → false, aucun run, aucun effet', () => {
+    expect(vcActivateDmxChannel('w-dmx-bad', 0, undefined as any, 255)).toBe(false);
+    expect(vcActivateDmxChannel('w-dmx-bad', 0, 0, 255)).toBe(false);
+    expect(vcActivateDmxChannel('w-dmx-bad', 0, 513, 255)).toBe(false);
+    expect(vcIsRunning('w-dmx-bad')).toBe(false);
+    expect(channelCalls).toEqual([]);
+  });
+});
+
+describe('runtime Console Virtuelle — migration des actions bouton retirées', () => {
+  it('flashScene → scène flash (cible et mode conservés)', () => {
+    usePerformStore.getState().vcSetWidgets([
+      widget('w-old', { actionType: 'flashScene', sceneId: 's-hold' }),
+    ] as any);
+    const cfg = usePerformStore.getState().vcWidgets[0].config as any;
+    expect(cfg.actionType).toBe('scene');
+    expect(cfg.flashMode).toBe('flash');
+    expect(cfg.sceneId).toBe('s-hold');
+    // La tuile migrée fonctionne immédiatement
+    expect(vcButtonPress('w-old', true)).toBe(true);
+    expect(vcIsRunning('w-old')).toBe(true);
+  });
+
+  it('showSequence / go / audioPlayPause → tuile scène vide (inerte, comme avant)', () => {
+    usePerformStore.getState().vcSetWidgets([
+      widget('w-a', { actionType: 'showSequence' }),
+      widget('w-b', { actionType: 'go' }),
+      widget('w-c', { actionType: 'audioPlayPause' }),
+    ] as any);
+    for (const w of usePerformStore.getState().vcWidgets) {
+      expect((w.config as any).actionType).toBe('scene');
+    }
+  });
+
+  it('les actions valides traversent la migration intactes', () => {
+    usePerformStore.getState().vcSetWidgets([
+      widget('w-gm', { actionType: 'grandMaster', grandMasterValue: 10 }),
+      widget('w-sc', { actionType: 'scene', sceneId: 's-hold' }),
+    ] as any);
+    const widgets = usePerformStore.getState().vcWidgets;
+    expect((widgets[0].config as any).actionType).toBe('grandMaster');
+    expect((widgets[1].config as any).actionType).toBe('scene');
   });
 });
 

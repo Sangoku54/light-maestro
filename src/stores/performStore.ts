@@ -64,17 +64,16 @@ export type WidgetType = 'button' | 'slider' | 'frame';
 export type ButtonActionType =
   | 'scene'
   | 'chaser'
-  | 'showSequence'
   | 'blackout'
   | 'grandMaster'
-  | 'flashScene'
-  | 'go'
-  | 'audioPlayPause'
   | 'dmxChannel'
   | 'loadShow'
   | 'playSong'
   | 'audioAutoScript'
   | 'autoLoop';
+// NOTE : 'showSequence' | 'flashScene' | 'go' | 'audioPlayPause' ont été
+// retirés (jamais proposés au modal, jamais gérés — tuiles mortes). Les vieux
+// projets qui en contiendraient sont migrés dans `vcSetWidgets` ci-dessous.
 
 export type SliderFunctionType =
   | 'channel'
@@ -307,7 +306,23 @@ export const usePerformStore = create<PerformState>()(
   vcSetGridSnap: (snap) => set({ vcGridSnap: snap }),
 
   vcSetWidgets: (widgets) => {
-    set({ vcWidgets: widgets });
+    // Migration des actions bouton retirées (jamais pilotées) : `flashScene`
+    // garde sa cible et devient une scène en mode flash ; les autres
+    // retombent sur une tuile scène vide (même comportement qu'avant : rien).
+    const migrated = (widgets ?? []).map((w: any) => {
+      const at = w?.config?.actionType;
+      if (w?.type !== 'button') return w;
+      if (at === 'flashScene') {
+        console.warn(`[vc] action bouton "${at}" retirée → scène flash (tuile ${w.id})`);
+        return { ...w, config: { ...w.config, actionType: 'scene', flashMode: 'flash' } };
+      }
+      if (at === 'showSequence' || at === 'go' || at === 'audioPlayPause') {
+        console.warn(`[vc] action bouton "${at}" retirée → tuile scène vide (tuile ${w.id})`);
+        return { ...w, config: { ...w.config, actionType: 'scene' } };
+      }
+      return w;
+    });
+    set({ vcWidgets: migrated });
     useAppStore.getState().markDirty();
   },
 

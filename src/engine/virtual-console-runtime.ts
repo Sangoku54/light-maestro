@@ -1,13 +1,15 @@
 /**
- * Virtual Console — runtime d'exécution des tuiles (scène / chaser / blackout).
+ * Virtual Console — runtime d'exécution des tuiles (scène / chaser /
+ * blackout / grandMaster / canal DMX).
  *
  * La logique vivait dans `VCButtonWidget` (closures React) : non testable, et
  * le pilotage MIDI ne marchait que si le widget était monté (page active).
  * Ce module la sort de la vue :
  *   - registre `Map<widgetId, Run>` → un run survit au changement de page ;
  *   - canal d'émission `vcOnRunChange` → la LED de la tuile suit l'état réel ;
- *   - injections (`__setVCSender`, `__setVCBlackoutFns`) → tests unitaires
- *     dans `src/__tests__/vc-runtime.test.ts` (aucun matériel requis).
+ *   - injections (`__setVCSender`, `__setVCBlackoutFns`, `__setVCButtonFns`) →
+ *     tests unitaires dans `src/__tests__/vc-runtime.test.ts` (aucun matériel
+ *     requis).
  *
  * Sémantique conservée à l'identique par rapport à l'implémentation vue :
  * fade-in/hold/fade-out de la scène, timing par étape du chaser (fallback sur
@@ -17,8 +19,9 @@
 import { useShowStore, type SavedScene, type SavedChaser } from '../stores/showStore';
 import { usePerformStore, applyWidgetSliderEffect } from '../stores/performStore';
 import { sendChannelsToHardware } from '../utils/dmx-helpers';
+import { dmxBridge } from '../utils/dmx-bridge';
 
-export type VCRunKind = 'scene' | 'chaser' | 'blackout';
+export type VCRunKind = 'scene' | 'chaser' | 'blackout' | 'grandmaster' | 'dmxchannel';
 export const VC_SOURCE = 'vc';
 
 // ─── Environnement (node-safe : tests sans DOM) ────────────
@@ -76,6 +79,36 @@ export function __setVCBlackoutFns(fns: Partial<typeof blackoutFns> | null): voi
       };
 }
 
+// ─── Effets bouton (grandMaster / canal DMX) ───────────────
+// Même motif que blackoutFns : chemin réel par défaut (preload / dmxBridge),
+// remplaçable sous vitest. Le `restore` exact (GM → 1, canal → 0) est capturé
+// en closure sur le run à l'activation.
+
+let buttonFns = {
+  applyGrandMaster01: (v: number) => {
+    if (typeof window === 'undefined') return;
+    try { (window as any)?.lightMaestro?.dmx?.applyGrandMaster?.(v); } catch { /* */ }
+  },
+  setChannel: (universe: number, address: number, value: number) => {
+    try { dmxBridge.writeMerge(VC_SOURCE, universe, { [address]: value }); } catch { /* */ }
+  },
+};
+
+/** Test hook : remplacer les effets bouton (pas de DMX sous vitest). */
+export function __setVCButtonFns(fns: Partial<typeof buttonFns> | null): void {
+  buttonFns = fns
+    ? { ...buttonFns, ...fns }
+    : {
+        applyGrandMaster01: (v: number) => {
+          if (typeof window === 'undefined') return;
+          try { (window as any)?.lightMaestro?.dmx?.applyGrandMaster?.(v); } catch { /* */ }
+        },
+        setChannel: (universe: number, address: number, value: number) => {
+          try { dmxBridge.writeMerge(VC_SOURCE, universe, { [address]: value }); } catch { /* */ }
+        },
+      };
+}
+
 // ─── Registre des runs ─────────────────────────────────────
 
 interface Run {
@@ -91,6 +124,8 @@ interface Run {
   running: boolean;
   timers: Array<ReturnType<typeof setTimeout>>;
   frames: number[];
+  /** Restauration exacte (grandMaster → 1, canal DMX → 0), capturée à l'activation. */
+  restore?: () => void;
 }
 
 const runs = new Map<string, Run>();
@@ -368,12 +403,53 @@ export function vcActivateBlackout(widgetId: string): boolean {
   return true;
 }
 
+const clamp255 = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(0, Math.min(255, Math.round(n))) : 0;
+};
+
+/**
+ * Bouton Grand Master : applique `value` (0..255, défaut 0 = kill) et retient
+ * la restauration exacte (GM → 255) jouée à `vcDeactivate`.
+ */
+export function vcActivateGrandMaster(widgetId: string, value255: number): boolean {
+  const value = clamp255(value255);
+  replaceRun(widgetId);
+  buttonFns.applyGrandMaster01(value / 255);
+  const run = createRun(widgetId, 'grandmaster', {}, 0);
+  run.restore = () => buttonFns.applyGrandMaster01(1);
+  return true;
+}
+
+/**
+ * Bouton canal DMX : force `value` sur (univers moteur 0-based, adresse
+ * 1..512) et retient la remise à zéro jouée à `vcDeactivate`.
+ * @returns false si l'adresse est invalide (tuile non configurée).
+ */
+export function vcActivateDmxChannel(
+  widgetId: string,
+  universe: number,
+  address: number,
+  value255: number,
+): boolean {
+  const uni = Number.isFinite(Number(universe)) ? Math.max(0, Math.floor(Number(universe))) : 0;
+  const addr = Math.floor(Number(address));
+  if (!Number.isFinite(addr) || addr < 1 || addr > 512) return false;
+  const value = clamp255(value255);
+  replaceRun(widgetId);
+  buttonFns.setChannel(uni, addr, value);
+  const run = createRun(widgetId, 'dmxchannel', {}, 0);
+  run.restore = () => buttonFns.setChannel(uni, addr, 0);
+  return true;
+}
+
 // ─── Désactivation / extinction ────────────────────────────
 
 /**
  * Désactive la tuile : annule timers/fades puis ÉTEINT ce qu'elle allumait
  * (fadeOut de la scène respecté, 0 = coupure immédiate). Pour un blackout,
- * désactiver RESTAURE (l'inverse exact).
+ * désactiver RESTAURE (l'inverse exact) ; idem pour grandMaster (GM → 255)
+ * et canal DMX (remise à zéro capturée à l'activation).
  */
 export function vcDeactivate(widgetId: string): void {
   const run = runs.get(widgetId);
@@ -382,6 +458,12 @@ export function vcDeactivate(widgetId: string): void {
   if (run.kind === 'blackout') {
     finishRun(run);
     blackoutFns.restore();
+    return;
+  }
+  if (run.kind === 'grandmaster' || run.kind === 'dmxchannel') {
+    const restore = run.restore;
+    finishRun(run);
+    try { restore?.(); } catch { /* effet best effort */ }
     return;
   }
   run.running = false;
@@ -401,13 +483,25 @@ export function vcButtonPress(widgetId: string, press: boolean): boolean {
   if (!widget || widget.type !== 'button') return false;
   const cfg = widget.config ?? {};
   const kind = cfg.actionType;
-  if (kind !== 'scene' && kind !== 'chaser' && kind !== 'blackout') return false;
+  if (
+    kind !== 'scene' &&
+    kind !== 'chaser' &&
+    kind !== 'blackout' &&
+    kind !== 'grandMaster' &&
+    kind !== 'dmxChannel'
+  ) return false;
 
   const flash = cfg.flashMode === 'flash';
   const start = () => {
     if (kind === 'scene' && cfg.sceneId) vcActivateScene(widgetId, cfg.sceneId);
     else if (kind === 'chaser' && cfg.chaserId) vcActivateChaser(widgetId, cfg.chaserId);
     else if (kind === 'blackout') vcActivateBlackout(widgetId);
+    else if (kind === 'grandMaster') vcActivateGrandMaster(widgetId, cfg.grandMasterValue ?? 0);
+    else if (kind === 'dmxChannel') {
+      // Adresse invalide = tuile non configurée : aucun run, aucun effet
+      // (la LED reste éteinte, comme une scène sans sceneId).
+      vcActivateDmxChannel(widgetId, cfg.dmxUniverse ?? 0, cfg.dmxAddress, cfg.dmxValue ?? 255);
+    }
   };
 
   if (flash) {

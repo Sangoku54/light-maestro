@@ -1097,6 +1097,8 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                   <option value="scene">{t('perform.vc.scene')}</option>
                   <option value="chaser">{t('perform.vc.chaser')}</option>
                   <option value="blackout">{t('perform.vc.blackoutWidget')}</option>
+                  <option value="grandMaster">{t('perform.vc.grandMaster')}</option>
+                  <option value="dmxChannel">{t('perform.vc.dmxChannel')}</option>
                   <option value="loadShow">♪ Play Show</option>
                   <option value="playSong">♪ Play Preset</option>
                   <option value="autoLoop">🎛 Boucle auto</option>
@@ -1264,6 +1266,50 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {config.actionType === 'grandMaster' && (
+                <div>
+                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('perform.vc.gmValue')}</label>
+                  <input type="number" min={0} max={255} value={config.grandMasterValue ?? 0}
+                    onChange={(e) => setConfig({ ...config, grandMasterValue: Number(e.target.value) })}
+                    className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300" />
+                  <p className="text-[9px] text-gray-500 mt-1">0 = noir (kill), 255 = pleine puissance. Réappuyer restaure 255.</p>
+                </div>
+              )}
+
+              {config.actionType === 'dmxChannel' && (
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('perform.vc.universe')}</label>
+                    <select value={config.dmxUniverse ?? 0}
+                      onChange={(e) => setConfig({ ...config, dmxUniverse: Number(e.target.value) })}
+                      className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300">
+                      {universes.length === 0 ? (
+                        <option value={0}>1</option>
+                      ) : (
+                        universes.map((u: any, i: number) => (
+                          <option key={String(u.id)} value={i}>
+                            {i + 1}{u.name ? ` · ${u.name}` : ''}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('perform.vc.channelAddress')}</label>
+                    <input type="number" min={1} max={512} value={config.dmxAddress || ''}
+                      placeholder="1-512"
+                      onChange={(e) => setConfig({ ...config, dmxAddress: Number(e.target.value) })}
+                      className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('perform.vc.dmxValue')}</label>
+                    <input type="number" min={0} max={255} value={config.dmxValue ?? 255}
+                      onChange={(e) => setConfig({ ...config, dmxValue: Number(e.target.value) })}
+                      className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300" />
+                  </div>
                 </div>
               )}
 
@@ -1816,13 +1862,15 @@ const VCButtonWidget: React.FC<{
     setActive(true);
     const currentState = useShowStore.getState();
 
-    // Scènes / chasers / blackout → runtime partagé (mêmes chemins que le
-    // pilotage MIDI, testable unitairement, survit au changement de page).
-    // La LED de la tuile suit l'état réel via vcOnRunChange.
+    // Scènes / chasers / blackout / grandMaster / canal DMX → runtime partagé
+    // (mêmes chemins que le pilotage MIDI, testable unitairement, survit au
+    // changement de page). La LED de la tuile suit l'état réel via vcOnRunChange.
     if (
       config.actionType === 'scene' ||
       config.actionType === 'chaser' ||
-      config.actionType === 'blackout'
+      config.actionType === 'blackout' ||
+      config.actionType === 'grandMaster' ||
+      config.actionType === 'dmxChannel'
     ) {
       vcButtonPress(widget.id, true);
       return;
@@ -2047,13 +2095,15 @@ const VCButtonWidget: React.FC<{
   const deactivate = () => {
     setActive(false);
     playIntentRef.current = false;
-    // Scènes / chasers / blackout → runtime partagé : annule timers et fades,
-    // éteint les canaux allumés (fadeOut de la scène respecté) et RESTAURE le
-    // blackout — l'inverse exact de l'activation.
+    // Scènes / chasers / blackout / grandMaster / canal DMX → runtime partagé :
+    // annule timers et fades, éteint les canaux allumés (fadeOut respecté),
+    // RESTAURE blackout / GM / canal (l'inverse exact de l'activation).
     if (
       config.actionType === 'scene' ||
       config.actionType === 'chaser' ||
-      config.actionType === 'blackout'
+      config.actionType === 'blackout' ||
+      config.actionType === 'grandMaster' ||
+      config.actionType === 'dmxChannel'
     ) {
       vcDeactivate(widget.id);
       return;
@@ -2183,6 +2233,8 @@ const VCButtonWidget: React.FC<{
            config.actionType === 'loadShow' ? (config.showName || '📂 Load Show') :
            config.actionType === 'playSong' ? getSongLabel() :
            config.actionType === 'blackout' ? t('perform.vc.blackoutLabel') :
+           config.actionType === 'grandMaster' ? `GM ${config.grandMasterValue ?? 0}` :
+           config.actionType === 'dmxChannel' ? `CH ${config.dmxAddress || '–'} → ${config.dmxValue ?? 255}` :
            config.actionType === 'chaser' ? getChaserLabel() :
            config.actionType === 'autoLoop' ? (config.autoLoopRecipe?.name || '🎛 Boucle auto') :
            scenes.find((s) => s.id === config.sceneId)?.name || 'Button'}

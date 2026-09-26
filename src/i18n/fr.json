@@ -606,6 +606,8 @@
       "function": "Fonction",
       "dmxChannel": "Canal DMX",
       "grandMaster": "Grand Master",
+      "gmValue": "Valeur GM (0-255)",
+      "dmxValue": "Valeur envoyée (0-255)",
       "channelAddress": "Adresse du Canal",
       "universe": "Univers",
       "min": "Min",

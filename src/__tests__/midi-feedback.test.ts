@@ -14,9 +14,12 @@ import { MidiManager, type MidiMapping } from '@electron/midi/manager';
 import { collectMidiFeedbackEntries } from '../hooks/use-midi-feedback';
 import {
   vcActivateScene,
+  vcActivateGrandMaster,
+  vcActivateDmxChannel,
   vcDeactivate,
   vcStopAllRuns,
   __setVCSender,
+  __setVCButtonFns,
 } from '../engine/virtual-console-runtime';
 import { usePerformStore } from '../stores/performStore';
 import { useShowStore } from '../stores/showStore';
@@ -119,6 +122,10 @@ describe('MidiManager.sendFeedbackState — LED sortantes', () => {
 describe('collectMidiFeedbackEntries — état des cibles (renderer)', () => {
   beforeEach(() => {
     __setVCSender(() => { /* capture silencieuse */ });
+    __setVCButtonFns({
+      applyGrandMaster01: () => { /* silencieux */ },
+      setChannel: () => { /* silencieux */ },
+    });
     useShowStore.setState({
       scenes: [
         { id: 's1', name: 'Scene 1', channels: { 1: 255 }, fadeIn: 0, fadeOut: 0, duration: 0 },
@@ -129,6 +136,10 @@ describe('collectMidiFeedbackEntries — état des cibles (renderer)', () => {
       vcWidgets: [
         { id: 'w-btn', type: 'button', x: 0, y: 0, width: 60, height: 40, pageIndex: 0,
           config: { actionType: 'scene', sceneId: 's1' } } as any,
+        { id: 'w-gm', type: 'button', x: 70, y: 0, width: 60, height: 40, pageIndex: 0,
+          config: { actionType: 'grandMaster', grandMasterValue: 0 } } as any,
+        { id: 'w-dmx', type: 'button', x: 140, y: 0, width: 60, height: 40, pageIndex: 0,
+          config: { actionType: 'dmxChannel', dmxUniverse: 0, dmxAddress: 5, dmxValue: 255 } } as any,
         { id: 'w-fader', type: 'slider', x: 0, y: 60, width: 30, height: 120, pageIndex: 0,
           config: { sliderFunction: 'channel', channelAddress: 1 } } as any,
       ],
@@ -139,6 +150,7 @@ describe('collectMidiFeedbackEntries — état des cibles (renderer)', () => {
   afterEach(() => {
     vcStopAllRuns();
     __setVCSender(null);
+    __setVCButtonFns(null);
   });
 
   const entryOf = (entries: ReturnType<typeof collectMidiFeedbackEntries>, type: string, id?: string) =>
@@ -172,5 +184,15 @@ describe('collectMidiFeedbackEntries — état des cibles (renderer)', () => {
   it('blackout actif → entry blackout ON', () => {
     useAppStore.setState({ dmx: { ...useAppStore.getState().dmx, blackout: true } } as any);
     expect(entryOf(collectMidiFeedbackEntries(), 'blackout')?.on).toBe(true);
+  });
+
+  it('runs grandMaster / dmxChannel → LEDs des tuiles ON (kinds suivis comme les autres)', () => {
+    expect(vcActivateGrandMaster('w-gm', 0)).toBe(true);
+    expect(vcActivateDmxChannel('w-dmx', 0, 5, 255)).toBe(true);
+    const entries = collectMidiFeedbackEntries();
+    expect(entryOf(entries, 'widget', 'w-gm')?.on).toBe(true);
+    expect(entryOf(entries, 'widget', 'w-dmx')?.on).toBe(true);
+    vcDeactivate('w-gm');
+    expect(entryOf(collectMidiFeedbackEntries(), 'widget', 'w-gm')?.on).toBe(false);
   });
 });
