@@ -895,6 +895,25 @@ ipcMain.handle('project:open', async () => {
   return { filePath, content, blobs };
 });
 
+// Projet démo embarqué (`resources/demo/Light-Maestro-Demo.lmproj`, Yolo
+// allégé sans lasers + preset 1-Waiting) : vitrine gratuite, aucune boîte de
+// dialogue. Résolution multi-layout comme les fixtures (dev + packagé).
+ipcMain.handle('project:openDemo', async () => {
+  const candidates = [
+    path.join(app.getAppPath(), 'resources', 'demo', 'Light-Maestro-Demo.lmproj'),
+    path.join(process.resourcesPath, 'app', 'resources', 'demo', 'Light-Maestro-Demo.lmproj'),
+    path.join(process.resourcesPath, 'resources', 'demo', 'Light-Maestro-Demo.lmproj'),
+  ];
+  const filePath = candidates.find((p) => { try { return fs.existsSync(p); } catch { return false; } });
+  if (!filePath) return { error: 'DEMO_MISSING' };
+  try {
+    const { content, blobs } = await unpackProject(filePath);
+    return { filePath, content, blobs };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+});
+
 // ─── IPC Handlers: Song Presets (file-based, avoids localStorage quota) ──
 const presetsPath = path.join(app.getPath('userData'), 'presets.json');
 const showStorePath = path.join(app.getPath('userData'), 'show-store.json');
