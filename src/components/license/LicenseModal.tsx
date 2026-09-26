@@ -1,11 +1,12 @@
 /**
  * LicenseModal — connexion / inscription + affichage de l'édition active +
- * achat (redirection vers le checkout Stripe).
+ * achat (redirection vers le checkout Stripe) + crédits & sécurité.
  */
 
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLicenseStore, type LicenseEdition } from '../../stores/licenseStore';
+import { version as appVersion } from '../../../package.json';
 
 const EDITION_LABEL: Record<LicenseEdition, { label: string; desc: string; color: string }> = {
   free: {
@@ -149,6 +150,13 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
               </div>
             </div>
           )}
+
+          {/* Crédits & sécurité — attribution de licence obligatoire */}
+          <div className="pt-3 border-t border-gray-800 text-[10px] text-gray-500 space-y-1">
+            <p className="uppercase tracking-wider text-gray-600">{t('safety.creditsTitle')}</p>
+            <p>{t('safety.ofl')}</p>
+            <p>{t('safety.appLine')} v{appVersion}</p>
+          </div>
         </div>
       </div>
     </div>

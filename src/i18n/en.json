@@ -948,6 +948,16 @@
     "storeTitle": "Store Programmer ({{count}} ch)"
   },
   "masterClock": {
-    "abletonLink": "Ableton Link — sync with DJ software"
+    "abletonLink": "Ableton Link �? sync with DJ software"
+  },
+  "safety": {
+    "title": "⚠️ Safety — read before going live",
+    "p1": "Strobe effects can trigger photosensitive epileptic seizures, even in people with no history. Always warn the audience before a show with strobes.",
+    "p2": "Light Maestro caps strobe at a safe level (“strobe limit” setting, 10 by default, 25 max). Only raise it when the venue and audience allow it.",
+    "p3": "You remain solely responsible for public use. When in doubt: no strobe.",
+    "accept": "Understood, don't show again",
+    "creditsTitle": "Credits",
+    "ofl": "Fixture definitions: Open Fixture Library (MIT license) — open-fixture-library.org",
+    "appLine": "Light Maestro — DMX lighting control software"
   }
 }

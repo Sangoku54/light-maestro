@@ -17,6 +17,7 @@
 import { useEffect, useRef } from 'react';
 import type { PatchedFixture, FixtureGroup, FixtureTier } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureCapability } from './dmx-cues';
+import { clampStrobeLimit } from './dmx-cues';
 import { resolveTrackTargets, computeEfxOverrides, type EfxTrackRef, type FixtureTrack, type MovementBlock } from './fixture-tracks';
 import { computeMatrixTrackColors } from './rgb-matrix-playback';
 
@@ -637,6 +638,9 @@ export function useDmxPlayback(options: {
   arbiterSource?: string; // Output-arbiter source id this engine writes as (default 'quickshow')
 }): void {
   const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,showTracksRef,showsRef,sceneTracksRef,matrixTracksRef,matricesRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,panTiltLimitsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource}=options;
+  // Sécurité photosensibilité : le plafond utilisateur est lui-même plafonné
+  // (vieux projet, preset ou entrée MIDI ne doivent jamais dépasser le max UI).
+  const strobeLimitSafe = clampStrobeLimit(strobeLimit);
   const arbSource = arbiterSource ?? 'quickshow';
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
@@ -1510,14 +1514,14 @@ if (fa.isLaser) {
             : _dimmerTrackActive
             ? false
             : forcedStrobe !== undefined ? forcedStrobe : ((isDrop || isChorus || sec === 'build') && active.strobe && pf.tier === 'primary');
-          const strobeSpeed = Math.min(strobeTrackOverride?.speed || trackStrobe?.speed || active.strobeSpeed || 10, strobeLimit);
+          const strobeSpeed = Math.min(strobeTrackOverride?.speed || trackStrobe?.speed || active.strobeSpeed || 10, strobeLimitSafe);
 
           // Shutter
           if(fa.shutterOffset!==null){const sAddr=pf.startAddress+fa.shutterOffset;
             if (useStrobe) {
               // Adaptive strobe speed: section-dependent multiplier
               const sectionMult = isDrop ? 1.5 : isChorus ? 1.2 : sec === 'build' ? 1.3 : sec === 'bridge' ? 1.0 : sec === 'verse' ? 0.8 : 0.5;
-              const adaptedSpeed = Math.min(strobeSpeed * sectionMult, strobeLimit);
+              const adaptedSpeed = Math.min(strobeSpeed * sectionMult, strobeLimitSafe);
               // Strobe track override: oscillate shutter between open/closed at the track speed
               if (strobeTrackOverride) {
                 const strobePhase = Math.sin(ct * Math.PI * 2 * adaptedSpeed);
@@ -1567,9 +1571,9 @@ if (fa.isLaser) {
               ? false
               : forcedStrobe !== undefined ? forcedStrobe : ((isDrop || isChorus) && active.strobe && pf.tier === 'primary');
             if (useStrobeNoShutter && fa.intensityOffset !== null) {
-              const baseSpeedNS = Math.min(strobeTrackOverride?.speed || trackStrobeNoShutter?.speed || active.strobeSpeed || 10, strobeLimit);
+              const baseSpeedNS = Math.min(strobeTrackOverride?.speed || trackStrobeNoShutter?.speed || active.strobeSpeed || 10, strobeLimitSafe);
               const sectionMultNS = isDrop ? 1.5 : isChorus ? 1.2 : sec === 'build' ? 1.3 : sec === 'bridge' ? 1.0 : sec === 'verse' ? 0.8 : 0.5;
-              const adaptedSpeedNS = Math.min(baseSpeedNS * sectionMultNS, strobeLimit);
+              const adaptedSpeedNS = Math.min(baseSpeedNS * sectionMultNS, strobeLimitSafe);
               const strobePhaseNS = Math.sin(ct * Math.PI * 2 * adaptedSpeedNS);
               const iAddrNS = pf.startAddress + fa.intensityOffset;
               chVals[iAddrNS] = strobePhaseNS >= 0 ? mapIntensityVal(dimmerVal, fa) : mapIntensityVal(0, fa);

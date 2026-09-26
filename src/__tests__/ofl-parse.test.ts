@@ -130,6 +130,8 @@ describe('parseOFLFixture — robustesse', () => {
   });
 
   it('ne produit aucun canal sans nom et aucun mode vide sur la bibliothèque réelle', async () => {
+    // I/O-bound (600+ fichiers lus) : timeout large, flaky à 5 s quand la
+    // suite complète sature le disque en parallèle.
     const lib = new FixtureLibrary();
     const r = await lib.loadOflDirectory(OFL_DIR);
     expect(r.added).toBeGreaterThanOrEqual(600);
@@ -145,5 +147,5 @@ describe('parseOFLFixture — robustesse', () => {
         }
       }
     }
-  });
+  }, 30000);
 });

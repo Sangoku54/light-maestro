@@ -19,6 +19,17 @@ import os from 'os';
 import { execSync } from 'child_process';
 import { app } from 'electron';
 
+// ─── Source OFL ────────────────────────────────────────────
+// Dépôt canonique : OpenLightingProject/open-fixture-library (branche
+// master, licence MIT). L'ancien dépôt `open-fixture-library/fixtures`
+// n'existe plus (404) — d'où ces URLs absolues vérifiées.
+const OFL_REPO = 'OpenLightingProject/open-fixture-library';
+const OFL_BRANCH = 'master';
+const OFL_ARCHIVE_URL = `https://github.com/${OFL_REPO}/archive/refs/heads/${OFL_BRANCH}.zip`;
+const OFL_COMMITS_API = `https://api.github.com/repos/${OFL_REPO}/commits/${OFL_BRANCH}`;
+// Racine dans le ZIP : open-fixture-library-master/fixtures/<fabricant>/<fixture>.json
+const OFL_EXTRACT_TOP = 'open-fixture-library-master';
+
 // ─── State ─────────────────────────────────────────────────
 
 let updateStatus: {
@@ -124,10 +135,7 @@ export async function checkForFixtureUpdates(
     const zipPath = path.join(os.tmpdir(), `light-maestro-ofl-${Date.now()}.zip`);
     const extractDir = path.join(os.tmpdir(), `light-maestro-ofl-extract-${Date.now()}`);
 
-    const downloaded = await downloadZip(
-      'https://github.com/open-fixture-library/fixtures/archive/refs/heads/main.zip',
-      zipPath
-    );
+    const downloaded = await downloadZip(OFL_ARCHIVE_URL, zipPath);
 
     if (!downloaded) {
       updateStatus.checking = false;
@@ -148,8 +156,8 @@ export async function checkForFixtureUpdates(
     }
 
     // 6. Copy only JSON fixture files to user data
-    //    ZIP structure: fixtures-main/fixtures/manufacturer/fixture.json
-    const sourceDir = path.join(extractDir, 'fixtures-main', 'fixtures');
+    //    ZIP structure: open-fixture-library-master/fixtures/manufacturer/fixture.json
+    const sourceDir = path.join(extractDir, OFL_EXTRACT_TOP, 'fixtures');
     const destDir = getOflFixturesDir();
 
     let newCount = 0;
@@ -240,7 +248,7 @@ function cleanup(fileOrDir: string): void {
 function fetchLatestSha(): Promise<string | null> {
   return new Promise((resolve) => {
     const req = https.get(
-      'https://api.github.com/repos/open-fixture-library/fixtures/commits/main',
+      OFL_COMMITS_API,
       {
         headers: {
           'User-Agent': 'LightMaestro-OFL-Updater/1.0',

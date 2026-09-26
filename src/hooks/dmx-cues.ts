@@ -304,6 +304,22 @@ function computeMovement(
 
 // ─── Strobe configuration ──────────────────────────────────────
 
+/**
+ * Plafond ABSOLU du strobe (même échelle que le slider UI, max 25) :
+ * photosensibilité — aucune valeur calculée ou saisie ne doit dépasser ce
+ * plafond, quel que soit le chemin moteur (autoscript statique ou live).
+ * Le réglage utilisateur (`strobeLimit`, défaut 10) s'applique EN PLUS,
+ * en dessous de ce plafond.
+ */
+export const STROBE_SAFE_MAX = 25;
+
+/** Plafonne une limite strobe saisie (projet, preset, MIDI) au plafond sûr. */
+export function clampStrobeLimit(limit: unknown): number {
+  const n = Number(limit);
+  if (!Number.isFinite(n)) return 10;
+  return Math.max(1, Math.min(STROBE_SAFE_MAX, Math.round(n)));
+}
+
 const STROBE_DISABLED_SECTIONS = new Set(['intro', 'verse', 'bridge', 'outro']);
 
 const STROBE_RATES: Record<string, [number, number]> = {
@@ -565,6 +581,10 @@ export interface ComputeDmxCuesOptions {
 export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
   const { cues, patchedFixtures, fixtureDefs, strobeLimit = 10, fixtureGroups = [], tierMultipliers } = options;
   if (cues.length === 0 || patchedFixtures.length === 0) return [];
+  // Sécurité photosensibilité : le plafond utilisateur est lui-même plafonné
+  // (un vieux projet ou une entrée MIDI ne doit jamais pousser le strobe
+  // au-delà du max du slider UI).
+  const safeStrobeLimit = clampStrobeLimit(strobeLimit);
 
 
 
@@ -618,7 +638,9 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
     // ── NEW: Atmosphere-aware parameters ──────────────
     const movementConfig = getMovementConfig(cue.section, cue.movement, cue.movementAmplitude, cue.movementSpeed);
     const enableStrobe = shouldStrobe(cue.section, cue.strobe, cue.strobeProbability);
-    const strobeRate = enableStrobe ? getStrobeRate(cue.section, cue.strobeProbability) : 0;
+    const strobeRate = enableStrobe
+      ? Math.min(getStrobeRate(cue.section, cue.strobeProbability), safeStrobeLimit)
+      : 0;
     const isDrop = cue.section.toLowerCase() === 'drop';
     const isChorus = cue.section.toLowerCase() === 'chorus';
     const sectionKey = cue.section.toLowerCase();

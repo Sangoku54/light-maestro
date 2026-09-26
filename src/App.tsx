@@ -8,6 +8,7 @@ import { TopBar } from './components/layout/TopBar';
 import { Sidebar } from './components/layout/Sidebar';
 import { QuickShowView } from './views/QuickShowView';
 import { ToastHost, toast } from './components/Toast';
+import { SafetyModal } from './components/SafetyModal';
 import { DesignView } from './views/DesignView';
 import { PerformanceView } from './views/PerformanceView';
 import { MasterClockBar } from './components/MasterClockBar';
@@ -224,6 +225,7 @@ const App: React.FC = () => {
   const { t } = useTranslation();
   const mode = useAppStore((s) => s.mode);
   const setMode = useAppStore((s) => s.setMode);
+  const safetyAccepted = useAppStore((s) => s.safetyAccepted);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // ─── Licence : charger l'état au démarrage (édition + limites) ────
@@ -625,6 +627,9 @@ const App: React.FC = () => {
         {/* Status Bar */}
         <StatusBar />
         <ToastHost />
+
+        {/* Avertissement photosensibilité : une fois, persisté (safetyAccepted) */}
+        {!safetyAccepted && <SafetyModal />}
 
         {/* ─── Close Guard Modal ──────────────────────────── */}
         {showCloseModal && (

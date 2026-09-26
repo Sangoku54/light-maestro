@@ -1039,8 +1039,11 @@ function setupAutoUpdater(): void {
 
   // Only enable auto-update when a real update channel is configured.
   // electron-builder writes app-update.yml next to the app only when a publish
-  // provider is active; without it, checkForUpdatesAndNotify() would 404
-  // against the (absent) GitHub release feed.
+  // provider is active. Le provider est `generic` (URL dans package.json >
+  // build.publish) : tant que l'URL pointe vers une infra inexistante, le
+  // check échoue en 404 → état 'error' affiché, JAMAIS de crash ni de
+  // fausse mise à jour. Runbook release : héberger latest.yml + .exe sous
+  // l'URL configurée, puis `npm run dist` SANS `--publish never`.
   const hasUpdateChannel = fs.existsSync(path.join(process.resourcesPath, 'app-update.yml'));
   if (!hasUpdateChannel) {
     console.log('[autoUpdater] No update channel (app-update.yml absent) — auto-update disabled');

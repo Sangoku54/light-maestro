@@ -145,6 +145,10 @@ interface AppState {
   markDirty: () => void;
   markClean: () => void;
 
+  // Photosensibilité : avertissement accepté (persisté — affiché une fois)
+  safetyAccepted: boolean;
+  acceptSafety: () => void;
+
   // Project identity (NOT persisted - session-only)
   projectName: string;
   setProjectName: (name: string) => void;
@@ -260,6 +264,9 @@ export const useAppStore = create<AppState>()(
       dirtyAt: 0,
       markDirty: () => set({ isDirty: true, dirtyAt: Date.now() }),
       markClean: () => set({ isDirty: false, dirtyAt: 0 }),
+
+      safetyAccepted: false,
+      acceptSafety: () => set({ safetyAccepted: true }),
 
       projectName: '',
       setProjectName: (name) => set({ projectName: name }),
@@ -459,6 +466,7 @@ export const useAppStore = create<AppState>()(
         quickSidebarTab: state.quickSidebarTab,
         designSidebarTab: state.designSidebarTab,
         performSidebarTab: state.performSidebarTab,
+        safetyAccepted: state.safetyAccepted,
         dmx: {
           universes: state.dmx.universes,
           grandMaster: state.dmx.grandMaster,

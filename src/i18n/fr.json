@@ -948,6 +948,16 @@
     "storeTitle": "Store Programmer ({{count}} ch)"
   },
   "masterClock": {
-    "abletonLink": "Ableton Link — sync avec logiciel DJ"
+    "abletonLink": "Ableton Link �? sync avec logiciel DJ"
+  },
+  "safety": {
+    "title": "⚠️ Sécurité — lisez avant de jouer",
+    "p1": "Les effets stroboscopiques peuvent déclencher des crises d'épilepsie photosensible, même chez des personnes sans antécédents. Prévenez toujours le public avant un show avec strobes.",
+    "p2": "Light Maestro plafonne le strobe au niveau sûr (réglage « strobe limit », 10 par défaut, 25 maximum). Ne le montez que si la salle et le public s'y prêtent.",
+    "p3": "Vous restez seul responsable de l'usage en public. En cas de doute : pas de strobe.",
+    "accept": "J'ai compris, ne plus afficher",
+    "creditsTitle": "Crédits",
+    "ofl": "Définitions de projecteurs : Open Fixture Library (licence MIT) — open-fixture-library.org",
+    "appLine": "Light Maestro — logiciel de pilotage lumière DMX"
   }
 }

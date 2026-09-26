@@ -113,6 +113,13 @@
     },
     "linux": {
       "target": "AppImage"
-    }
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://releases.lightmaestro.app/win",
+        "channel": "latest"
+      }
+    ]
   }
 }
