@@ -7,7 +7,7 @@
 // testable en node (vitest).
 
 import type { PatchedFixture, FixtureTier } from '../stores/showStore';
-import type { DmxFixtureDefinition } from '../hooks/dmx-cues';
+import type { DmxFixtureDefinition, DmxFixtureCapability } from '../hooks/dmx-cues';
 import { analyzeFixture, capMid, synthPatternCaps } from './fixture-analyzer';
 import { zeroDmxOffset } from './dmx-movement';
 import { generateAutoscript, BankManager, BANKS } from './autoloop-index';
@@ -85,7 +85,25 @@ export function toAutoloopFixtures(
     if (fa.shutterOffset !== null) channelMap['shutter'] = fa.shutterOffset;
     if (fa.effectOffset !== null) channelMap['effect'] = fa.effectOffset;
     if (fa.beamOffset !== null) channelMap['beam'] = fa.beamOffset;
+    // Strobe DÉDIÉ (jamais le shutter) : 0 = off, haute valeur = strobe.
+    if (fa.strobeOffset !== null) channelMap['strobe'] = fa.strobeOffset;
     fa.ledIntensityOffsets.forEach((off, i) => { channelMap[`led${i + 1}`] = off; });
+
+    // Capacités par canal : exploitation fine (couleur exacte sur la roue,
+    // gobo statique, insertion de prisme, master laser ouvert…).
+    const capsByChannel: Record<string, DmxFixtureCapability[]> = {};
+    const keepCaps = (logical: string, caps: DmxFixtureCapability[] | null | undefined) => {
+      if (caps && caps.length > 0) capsByChannel[logical] = caps;
+    };
+    keepCaps('wheel', fa.wheelCaps);
+    keepCaps('gobo', fa.goboCaps);
+    keepCaps('prism', fa.prismCaps);
+    keepCaps('strobe', fa.strobeCaps);
+    keepCaps('effect', fa.effectCaps);
+    keepCaps('pattern', fa.patternCaps);
+    keepCaps('laserMode', fa.laserModeCaps);
+    keepCaps('laserMaster', fa.laserMasterCaps);
+    keepCaps('laserColorGate', fa.laserColorGateCaps);
 
     const uniIdx = uniIds.indexOf(pf.universeId);
     // ── Laser : scan X/Y mappé vers pan/tilt (les PositionCue existants le
@@ -98,6 +116,8 @@ export function toAutoloopFixtures(
       if (fa.blankOffset !== null) channelMap['laserBlank'] = fa.blankOffset;
       if (fa.laserSpeedScanOffset !== null) channelMap['laserSpeedScan'] = fa.laserSpeedScanOffset;
       if (fa.laserSpeedPatternOffset !== null) channelMap['laserSpeedPattern'] = fa.laserSpeedPatternOffset;
+      if (fa.laserMasterOffset !== null) channelMap['laserMaster'] = fa.laserMasterOffset;
+      if (fa.laserColorGateOffset !== null) channelMap['laserColorGate'] = fa.laserColorGateOffset;
       fa.laserRotationOffsets.forEach((off, i) => { channelMap[`laserRot${i + 1}`] = off; });
     }
 
@@ -114,6 +134,8 @@ export function toAutoloopFixtures(
       isLaser: fa.isLaser,
       centerPanDmx,
       centerTiltDmx,
+      capsByChannel: Object.keys(capsByChannel).length > 0 ? capsByChannel : undefined,
+      dimmerRange: fa.intensityCapRange,
     });
   }
 

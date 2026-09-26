@@ -36,7 +36,9 @@ import {
   remoteStopScene,
   remoteToggleScene,
 } from '../engine/midi-actions';
+import { vcButtonPress, vcSetSliderFraction } from '../engine/virtual-console-runtime';
 import { useAppStore } from '../stores/appStore';
+import { usePerformStore } from '../stores/performStore';
 import { useShowStore } from '../stores/showStore';
 import { getLatencyMs } from '../utils/latency-meter';
 
@@ -53,7 +55,12 @@ export type RemoteCommand =
   | { type: 'scene'; id: string; action?: RemoteSceneAction }
   | { type: 'chaser'; id: string; action?: RemoteChaserAction }
   | { type: 'blackout'; on?: boolean }
-  | { type: 'grandMaster'; value?: number };
+  | { type: 'grandMaster'; value?: number }
+  /**
+   * Widget de la Console Virtuelle piloté à distance (POST /api/widget/:id).
+   * `slider` attend `value` (fraction 0..1 du range du fader).
+   */
+  | { type: 'widget'; id: string; action?: 'press' | 'release' | 'toggle' | 'slider'; value?: number };
 
 export interface RemoteSceneState {
   id: string;
@@ -135,6 +142,45 @@ function dispatchCommand(cmd: RemoteCommand): void {
       else if (action === 'next') remoteChaserNext(cmd.id);
       else if (action === 'previous') remoteChaserPrevious(cmd.id);
       else console.warn(`[remote-trigger] chaser : action inconnue "${String(action)}" (id=${cmd.id})`);
+      return;
+    }
+
+    case 'widget': {
+      // Widgets Console Virtuelle — délègue au runtime (registre indépendant
+      // de la page active : la tuile répond même si son onglet n'est pas ouvert).
+      const action = cmd.action ?? 'press';
+      if (action === 'slider') {
+        const v = clamp01(cmd.value);
+        if (v === null) {
+          console.warn('[remote-trigger] widget slider : value manquante ou hors [0,1] - commande ignorée');
+          return;
+        }
+        if (!vcSetSliderFraction(cmd.id, v)) {
+          console.warn(`[remote-trigger] widget slider introuvable ou non-slider (id=${cmd.id})`);
+        }
+        return;
+      }
+      if (action === 'release') {
+        if (!vcButtonPress(cmd.id, false)) {
+          console.warn(`[remote-trigger] widget introuvable (id=${cmd.id})`);
+        }
+        return;
+      }
+      if (action === 'toggle') {
+        const widget = usePerformStore.getState().vcWidgets.find((w) => w.id === cmd.id);
+        const flash = widget?.type === 'button' && widget.config?.flashMode === 'flash';
+        if (!vcButtonPress(cmd.id, true)) {
+          console.warn(`[remote-trigger] widget introuvable (id=${cmd.id})`);
+          return;
+        }
+        // Un bouton flash ne « vit » que pendant la pression : l'impulsion web
+        // est donc press immédiat + release (sinon il resterait allumé).
+        if (flash) vcButtonPress(cmd.id, false);
+        return;
+      }
+      if (!vcButtonPress(cmd.id, true)) {
+        console.warn(`[remote-trigger] widget introuvable (id=${cmd.id})`);
+      }
       return;
     }
 

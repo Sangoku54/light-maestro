@@ -67,6 +67,8 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     removeMapping: (id: string) => ipcRenderer.invoke('midi:removeMapping', id),
     startLearn: (target: any) => ipcRenderer.invoke('midi:startLearn', target),
     stopLearn: () => ipcRenderer.invoke('midi:stopLearn'),
+    // Feedback LED : entries = [{ type: 'widget'|'scene'|'chaser'|'blackout', id?, on }]
+    feedback: (entries: any) => ipcRenderer.invoke('midi:feedback', entries),
     onActivity: (callback: (a: { channel: number; type: string; note: number; value?: number }) => void) => {
       const handler = (_: any, data: any) => callback(data);
       ipcRenderer.on('midi:activity', handler);
@@ -109,6 +111,19 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     importFile: () => ipcRenderer.invoke('audio:import'),
   },
 
+  // All-In-One structure analysis (option B, offline — python externe)
+  allinone: {
+    check: () => ipcRenderer.invoke('allinone:check'),
+    analyze: (payload: { wavBase64: string; fileName: string; model?: string }) =>
+      ipcRenderer.invoke('allinone:analyze', payload),
+    cancel: () => ipcRenderer.invoke('allinone:cancel'),
+    onProgress: (callback: (msg: string) => void) => {
+      const handler = (_: any, msg: string) => callback(msg);
+      ipcRenderer.on('allinone:progress', handler);
+      return () => { ipcRenderer.removeListener('allinone:progress', handler); };
+    },
+  },
+
   // Dialog
   dialog: {
     openFile: (filters: any[]) => ipcRenderer.invoke('dialog:openFile', filters),
@@ -127,6 +142,7 @@ contextBridge.exposeInMainWorld('lightMaestro', {
   presets: {
     save: (presets: any[]) => ipcRenderer.invoke('presets:save', presets),
     load: () => ipcRenderer.invoke('presets:load'),
+    repairAudio: () => ipcRenderer.invoke('presets:repairAudio'),
   },
 
   // Last known-good audio per preset name (file-based, avoids localStorage quota)

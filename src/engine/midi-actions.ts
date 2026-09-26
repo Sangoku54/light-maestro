@@ -32,7 +32,8 @@
 import type { SavedChaser } from '../stores/showStore';
 import { useShowStore } from '../stores/showStore';
 import { useAppStore } from '../stores/appStore';
-import { usePerformStore } from '../stores/performStore';
+import { usePerformStore, applyWidgetSliderEffect } from '../stores/performStore';
+import { vcButtonPress } from './virtual-console-runtime';
 import { sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
 
@@ -713,46 +714,37 @@ export function midiWidgetAction(widgetId: string, property: string, value: numb
   try {
     const widget = usePerformStore.getState().vcWidgets.find((w) => w.id === widgetId);
     if (!widget) {
-      if (!warnedWidgets.has(widgetId)) {
-        warnedWidgets.add(widgetId);
-        console.warn(
-          `[midi] widget ${widgetId} : introuvable dans le Virtual Console — brancher via registerMidiWidgetHandler (dette M3, refactor VCButtonWidget)`
-        );
+      if (warnedWidgets.has(widgetId)) {
+        return;
       }
+      warnedWidgets.add(widgetId);
+      console.warn(
+        `[midi] widget ${widgetId} : introuvable dans le Virtual Console (id obsolète ou page purgée ?)`
+      );
       return;
     }
     const cfg = widget.config ?? {};
     const press = !(rawValue === 0); // undefined (PGM) = press
 
     if (widget.type === 'button') {
-      if (cfg.actionType === 'scene' && cfg.sceneId) {
-        if (press) midiPlayScene(cfg.sceneId);
-        else midiStopScene(cfg.sceneId);
-      } else if (cfg.actionType === 'chaser' && cfg.chaserId) {
-        if (press) midiPlayChaser(cfg.chaserId);
-        else midiStopChaser(cfg.chaserId);
-      } else if (cfg.actionType === 'blackout') {
-        const dmx = (window as any)?.lightMaestro?.dmx;
-        if (press) dmx?.blackout?.();
-        else dmx?.restore?.();
-      } else if (!warnedWidgets.has(widgetId)) {
+      // Scènes / chasers / blackout : même runtime que la tuile cliquée —
+      // fonctionne même si la page n'est pas active (widget non monté).
+      if (vcButtonPress(widgetId, press)) return;
+      if (!warnedWidgets.has(widgetId)) {
         warnedWidgets.add(widgetId);
         console.warn(
-          `[midi] widget ${widgetId} (actionType=${cfg.actionType}) : action non traduisible — registre requis (dette M3)`
+          `[midi] widget ${widgetId} (actionType=${cfg.actionType}) : action gérée par la vue (autoLoop / loadShow / playSong…) — utilisable seulement si la page de la console est affichée`
         );
       }
     } else if (widget.type === 'slider') {
-      const v255 = Math.round(Math.max(0, Math.min(1, Number.isFinite(value) ? value / 127 : 0)) * 255);
-      if (cfg.sliderFunction === 'channel' && cfg.channelAddress) {
-        dmxBridge.writeMerge(MIDI_SOURCE_ID, cfg.sliderUniverse ?? 0, { [cfg.channelAddress]: v255 });
-      } else if (cfg.sliderFunction === 'grandMaster') {
-        (window as any)?.lightMaestro?.dmx?.applyGrandMaster?.(v255 / 255);
-      } else if (!warnedWidgets.has(widgetId)) {
-        warnedWidgets.add(widgetId);
-        console.warn(
-          `[midi] widget slider ${widgetId} (sliderFunction=${cfg.sliderFunction}) : non supporté — registre requis (dette M3)`
-        );
-      }
+      // Miroir fader physique → widget virtuel : la valeur vit dans le store
+      // (vcWidgetValues) pour que l'écran suive le contrôleur Akai.
+      const lo = Number.isFinite(cfg.min as number) ? Number(cfg.min) : 0;
+      const hi = Number.isFinite(cfg.max as number) ? Number(cfg.max) : 255;
+      const ratio = Math.max(0, Math.min(1, Number.isFinite(value) ? value / 127 : 0));
+      const v = Math.round(lo + ratio * (hi - lo));
+      usePerformStore.getState().vcSetWidgetValue(widgetId, v);
+      applyWidgetSliderEffect(cfg, v, MIDI_SOURCE_ID);
     }
   } catch (e) {
     console.warn('[midi] widget : échec', e);

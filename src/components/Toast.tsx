@@ -10,6 +10,11 @@ export function toast(msg: string, kind: Toast['kind'] = 'ok') {
   else console.log(`[toast ${kind}] ${msg}`);
 }
 
+// Expose to non-React callers (Stage3D, ProgrammerBar…).
+(window as any).__lm_toast = (msg: string, kind?: string) => {
+  toast(msg, kind === 'err' ? 'err' : 'ok');
+};
+
 export const ToastHost: React.FC = () => {
   const [items, setItems] = useState<Toast[]>([]);
   useEffect(() => {

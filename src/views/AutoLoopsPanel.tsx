@@ -142,14 +142,29 @@ export const AutoLoopsPanel: React.FC = () => {
     });
   }, [patchedFixtures, fixtureDefs, seed, patchKey]);
 
+  const counts = useMemo(() => {
+    const map = new Map<AutoLoopKind, number>();
+    for (const l of library) map.set(l.kind, (map.get(l.kind) ?? 0) + 1);
+    return map;
+  }, [library]);
+
+  // Filtres « intelligents » : seuls les kinds RÉELLEMENT présents sont
+  // proposés (avec leur compte) — plus de bouton de filtre qui mène à une
+  // liste vide.
+  const availableKinds = useMemo(
+    () => LOOP_KIND_ORDER.filter((k) => (counts.get(k) ?? 0) > 0),
+    [counts],
+  );
+  const effectiveFilter = filter !== 'all' && (counts.get(filter) ?? 0) === 0 ? 'all' : filter;
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return library.filter((l) => {
-      if (filter !== 'all' && l.kind !== filter) return false;
+      if (effectiveFilter !== 'all' && l.kind !== effectiveFilter) return false;
       if (q && !l.name.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [library, filter, search]);
+  }, [library, effectiveFilter, search]);
 
   const grouped = useMemo(
     () =>
@@ -234,17 +249,18 @@ export const AutoLoopsPanel: React.FC = () => {
       <div className="flex items-center gap-1.5 px-3 pt-2 shrink-0 flex-wrap">
         <button
           onClick={() => setFilter('all')}
-          className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${filter === 'all' ? 'bg-purple-600/30 text-purple-300' : 'bg-gray-800/50 text-gray-500 hover:text-gray-300'}`}
+          className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${effectiveFilter === 'all' ? 'bg-purple-600/30 text-purple-300' : 'bg-gray-800/50 text-gray-500 hover:text-gray-300'}`}
         >
-          Toutes
+          Toutes <span className="text-[9px] opacity-60">{library.length}</span>
         </button>
-        {LOOP_KIND_ORDER.map((k) => (
+        {availableKinds.map((k) => (
           <button
             key={k}
             onClick={() => setFilter(k)}
-            className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${filter === k ? 'bg-purple-600/30 text-purple-300' : 'bg-gray-800/50 text-gray-500 hover:text-gray-300'}`}
+            className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${effectiveFilter === k ? 'bg-purple-600/30 text-purple-300' : 'bg-gray-800/50 text-gray-500 hover:text-gray-300'}`}
           >
-            {LOOP_KIND_LABEL[k]}
+            {LOOP_KIND_LABEL[k]}{' '}
+            <span className="text-[9px] opacity-60">{counts.get(k) ?? 0}</span>
           </button>
         ))}
         <input
@@ -323,7 +339,7 @@ export const AutoLoopsPanel: React.FC = () => {
         )}
       </div>
       {show3D && showFloating3D && (
-        <div className="fixed z-40 bg-black/90 rounded-xl border border-cyan-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, overflow: 'hidden' }}>
+        <div className="fixed z-40 bg-black/90 rounded-xl border border-cyan-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}>
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
             <span className="text-[11px] text-cyan-400 font-medium">🎥 Vue 3D — Boucles auto</span>
             <div className="flex items-center gap-1">

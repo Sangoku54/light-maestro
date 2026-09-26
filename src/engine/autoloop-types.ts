@@ -15,6 +15,8 @@
 /** Nombre de beats par mesure (signature 4/4, hypothèse de l'Autoloop SoundSwitch). */
 export const BEATS_PER_BAR = 4;
 
+import type { DmxFixtureCapability } from '../hooks/dmx-cues';
+
 /** Mode de répétition d'un Autoloop. */
 export type RepeatMode = 'infinite' | 'track_duration';
 
@@ -60,6 +62,17 @@ export interface AutoloopFixture {
   centerPanDmx?: number;
   /** Centre tilt DMX (128±offset) injecté par « Capturer » — déplace l'oscillation autour de la pose cible. */
   centerTiltDmx?: number;
+  /**
+   * Capacités DMX par canal logique (`wheel`, `gobo`, `prism`, `strobe`,
+   * `pattern`, `laserMaster`, `laserColorGate`…), injecté par le runtime pour
+   * une exploitation fine (couleur exacte sur la roue, gobo statique…).
+   */
+  capsByChannel?: Record<string, DmxFixtureCapability[]>;
+  /**
+   * Plage d'intensité d'un canal hybride « Dimmer/Strobe » — un dimmer écrit
+   * 0..255 doit y être remappé pour rester en zone intensité.
+   */
+  dimmerRange?: { min: number; max: number } | null;
 }
 
 /**
@@ -138,6 +151,15 @@ export interface AutoloopTimeline {
   category: FixtureCategory;
   keys: ChannelKey[];
   positionCue?: PositionCue | null;
+  /**
+   * Libellé lisible affiché dans l'UI (« Bleu », « Cercle 96 », …).
+   * Optionnel : les loops historiques (`autoscript-…`) n'en ont pas.
+   */
+  label?: string;
+  /** Banque thématique d'origine (`couleurs`/`effets`/`matrice`/`mix`). */
+  theme?: string;
+  /** Couleur d'accent `#rrggbb` pour l'UI (pastille du slot). */
+  swatch?: string;
 }
 
 /**

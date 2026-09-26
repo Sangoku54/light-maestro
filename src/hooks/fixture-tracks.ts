@@ -307,7 +307,12 @@ export function evalEfxNormalized(
     case 'Eight': rawPan = Math.sin(phase); rawTilt = Math.sin(phase * 2) * 0.5; break;
     case 'Square': { const s = seg * 4; const sIdx = Math.floor(s) % 4; const sFrac = s - Math.floor(s); const cs: [number, number][] = [[1,1],[-1,1],[-1,-1],[1,-1]]; const ce: [number, number][] = [[-1,1],[-1,-1],[1,-1],[1,1]]; rawPan = cs[sIdx][0] + (ce[sIdx][0] - cs[sIdx][0]) * sFrac; rawTilt = cs[sIdx][1] + (ce[sIdx][1] - cs[sIdx][1]) * sFrac; break; }
     case 'Triangle': { const ta = seg * 3; const ti = Math.floor(ta) % 3; const tf = ta - Math.floor(ta); const tv: [number, number][] = [[0,-1],[-0.866,0.5],[0.866,0.5]]; const tn = tv[(ti+1)%3]; rawPan = tv[ti][0] + (tn[0]-tv[ti][0])*tf; rawTilt = tv[ti][1] + (tn[1]-tv[ti][1])*tf; break; }
+    // 'Infinity' conservé pour compat (anciens effets sauvegardés) : même
+    // lemniscate que 'Eight' à un déphasage près — ne plus le proposer.
     case 'Infinity': rawPan = Math.cos(phase); rawTilt = Math.sin(phase * 2) * 0.5; break;
+    case 'Wave': { const lp = seg; const lx = lp < 0.5 ? (lp * 2) * 2 - 1 : (1 - (lp - 0.5) * 2) * 2 - 1; rawPan = lx; rawTilt = Math.sin(phase) * 0.5; break; }
+    case 'Bounce': rawPan = Math.sin(phase * 2) * 0.15; rawTilt = -Math.cos(phase); break;
+    case 'Cross': { const c = seg < 0.5 ? seg * 2 : (seg - 0.5) * 2; const tri = c < 0.5 ? (c * 2) * 2 - 1 : (1 - (c - 0.5) * 2) * 2 - 1; if (seg < 0.5) { rawPan = tri; rawTilt = 0; } else { rawPan = 0; rawTilt = tri; } break; }
     case 'Zigzag': { const z = seg * 2 - 1; rawPan = z; const zs = seg * 8; const zi = Math.floor(zs); const zf = zs - zi; rawTilt = zi % 2 === 0 ? -1 + zf * 2 : 1 - zf * 2; break; }
     case 'Spiral': { const sr = 0.2 + seg * 0.8; rawPan = Math.cos(phase) * sr; rawTilt = Math.sin(phase) * sr; break; }
     case 'DoubleCircle': { const dc = Math.cos(phase), ds = Math.sin(phase); const dc2 = Math.cos(phase + Math.PI) * 0.5, ds2 = Math.sin(phase + Math.PI) * 0.5; const b = (Math.sin(phase*3)+1)/2; rawPan = dc*(1-b)+dc2*b; rawTilt = ds*(1-b)+ds2*b; break; }
@@ -406,20 +411,24 @@ export function computeEfxOverrides(
     // position est continue en t, seule la pente change si speed change).
     const relTime = (currentTime * speed * 2) / (Math.PI * 2);
 
-    // Generate pan/tilt for this effect
-    const pt = generateEfxPanTilt(
-      effect.pattern,
-      relTime,
-      effect.width,
-      effect.height,
-      effect.rotation,
-      effect.xOffset,
-      effect.yOffset,
-    );
+    // Décalage « vague » : chaque fixture démarre l'effet avec un retard de
+    // phase (spread = fraction d'un cycle répartie sur tout le groupe).
+    const spread = effect.spread ?? 0;
+    const n = targetIds.length;
 
-    // Apply to all targets
-    for (const fid of targetIds) {
-      result.set(fid, pt);
+    // Generate pan/tilt for this effect — par fixture si spread > 0
+    for (let i = 0; i < n; i++) {
+      const fid = targetIds[i];
+      const t = n > 1 && spread > 0 ? relTime + (i * spread) / n : relTime;
+      result.set(fid, generateEfxPanTilt(
+        effect.pattern,
+        t,
+        effect.width,
+        effect.height,
+        effect.rotation,
+        effect.xOffset,
+        effect.yOffset,
+      ));
     }
   }
 

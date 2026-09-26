@@ -14,7 +14,7 @@ export const MasterClockBar: React.FC = () => {
   const setPlaying = useClockStore((s) => s.setPlaying);
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0d0d14] border-b border-gray-800/50 shrink-0">
+    <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0d0d14] border-b border-gray-800/50 shrink-0 flex-wrap">
       <Gauge size={14} className="text-cyan-400" />
       <span className="text-[11px] font-semibold text-gray-300">Clock</span>
       <span className={`text-[10px] px-1.5 py-0.5 rounded ${source === 'link' ? 'bg-cyan-600/20 text-cyan-300' : source === 'tap' ? 'bg-amber-600/20 text-amber-300' : source === 'midi' ? 'bg-purple-600/20 text-purple-300' : 'bg-gray-800 text-gray-400'}`}>{source}</span>

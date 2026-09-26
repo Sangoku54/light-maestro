@@ -10,6 +10,38 @@ import { persist } from 'zustand/middleware';
 import type { MtcState } from '@electron/midi/mtc';
 import { dmxBridge } from '../utils/dmx-bridge';
 import type { LoopRecipe } from '../engine/auto-loops';
+import { useAppStore } from './appStore';
+import { useShowStore } from './showStore';
+import { buildAkaiSurfaceWidgets, type AkaiSurfacePreset } from './vc-presets';
+
+/**
+ * Effets DMX d'un fader de la Console Virtuelle (appelé à la fois par le
+ * widget glissé à la souris et par un contrôleur MIDI en miroir).
+ * `sourceId` permet à chaque source (vc / midi) de garder sa propre
+ * contribution dans l'arbitrage `dmxBridge`.
+ */
+export function applyWidgetSliderEffect(
+  config: ConsoleWidgetConfig,
+  value: number,
+  sourceId = 'vc',
+): void {
+  try {
+    if (config.sliderFunction === 'grandMaster') {
+      if (typeof window !== 'undefined') {
+        (window as any)?.lightMaestro?.dmx?.applyGrandMaster(value / 255);
+      }
+      return;
+    }
+    if (config.sliderFunction === 'channel' && config.channelAddress) {
+      // Merge per source+universe so two sliders on the same universe don't
+      // drop each other (write-replace would keep only the last one).
+      // NB : univers = index moteur (0 = première univers du projet).
+      dmxBridge.writeMerge(sourceId, config.sliderUniverse ?? 0, {
+        [config.channelAddress]: value,
+      });
+    }
+  } catch { /* pas de matériel DMX (tests / aperçu) */ }
+}
 
 /**
  * Resolve the DMX engine universe index (0-based) for a Simple Desk universe id.
@@ -17,7 +49,6 @@ import type { LoopRecipe } from '../engine/auto-loops';
  */
 function resolveUniverseIndex(sdUniverseId: string): number {
   try {
-    const { useShowStore } = require('../stores/showStore');
     const universes = useShowStore.getState().universes || [];
     const idx = universes.findIndex((u: any) => String(u.id) === String(sdUniverseId));
     if (idx >= 0) return idx;
@@ -148,6 +179,7 @@ interface PerformState {
   // VC Actions
   vcAddPage: (name?: string) => void;
   vcDeletePage: (index: number) => void;
+  vcRenamePage: (index: number, name: string) => void;
   vcSetActivePage: (index: number) => void;
   vcAddWidget: (widget: Omit<ConsoleWidget, 'id'>) => string;
   vcUpdateWidget: (id: string, updates: Partial<ConsoleWidget>) => void;
@@ -157,6 +189,11 @@ interface PerformState {
   vcSetWidgets: (widgets: ConsoleWidget[]) => void;
   vcSetPages: (pages: VirtualConsolePage[]) => void;
   vcSetAddingWidget: (type: WidgetType | null) => void;
+  /** Valeur courante d'un fader (runtime, non persistée) — miroir MIDI inclus. */
+  vcWidgetValues: Record<string, number>;
+  vcSetWidgetValue: (id: string, value: number) => void;
+  /** Page pré-programmée type Akai MIDIMIX (frame + pads + faders). */
+  vcAddAkaiSurfacePage: (preset: AkaiSurfacePreset) => number;
 
   // Simple Desk Actions
   sdSetChannelValue: (channel: number, value: number) => void;
@@ -177,6 +214,7 @@ export const usePerformStore = create<PerformState>()(
   vcWidgets: [],
   vcGridSnap: true,
   addingWidget: null,
+  vcWidgetValues: {},
 
   sdUniverseId: 'u1',
   sdChannelValues: {},
@@ -201,7 +239,7 @@ export const usePerformStore = create<PerformState>()(
   vcAddPage: (name) => {
     const pageName = name || `Page ${get().vcPages.length + 1}`;
     set((s) => ({ vcPages: [...s.vcPages, { name: pageName }] }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   vcDeletePage: (index) => {
@@ -215,16 +253,25 @@ export const usePerformStore = create<PerformState>()(
       }));
     const newActive = Math.min(vcActivePage, newPages.length - 1);
     set({ vcPages: newPages, vcWidgets: newWidgets, vcActivePage: newActive });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   vcSetActivePage: (index) => set({ vcActivePage: index }),
+
+  vcRenamePage: (index, name) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    set((s) => ({
+      vcPages: s.vcPages.map((p, i) => (i === index ? { ...p, name: trimmed } : p)),
+    }));
+    useAppStore.getState().markDirty();
+  },
 
   vcAddWidget: (widget) => {
     const id = generateWidgetId();
     const newWidget: ConsoleWidget = { ...widget, id };
     set((s) => ({ vcWidgets: [...s.vcWidgets, newWidget] }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
     return id;
   },
 
@@ -232,14 +279,14 @@ export const usePerformStore = create<PerformState>()(
     set((s) => ({
       vcWidgets: s.vcWidgets.map((w) => (w.id === id ? { ...w, ...updates } : w)),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   vcDeleteWidget: (id) => {
     set((s) => ({
       vcWidgets: s.vcWidgets.filter((w) => w.id !== id),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   vcDuplicateWidget: (id) => {
@@ -254,22 +301,37 @@ export const usePerformStore = create<PerformState>()(
       y: original.y + 20,
     };
     set((s) => ({ vcWidgets: [...s.vcWidgets, copy] }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   vcSetGridSnap: (snap) => set({ vcGridSnap: snap }),
 
   vcSetWidgets: (widgets) => {
     set({ vcWidgets: widgets });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   vcSetPages: (pages) => {
     set({ vcPages: pages });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   vcSetAddingWidget: (type) => set({ addingWidget: type }),
+
+  vcSetWidgetValue: (id, value) =>
+    set((s) => ({ vcWidgetValues: { ...s.vcWidgetValues, [id]: value } })),
+
+  vcAddAkaiSurfacePage: (preset) => {
+    const pageIndex = get().vcPages.length;
+    const widgets = buildAkaiSurfaceWidgets(preset, pageIndex, generateWidgetId);
+    set((s) => ({
+      vcPages: [...s.vcPages, { name: 'Akai MIDIMIX' }],
+      vcWidgets: [...s.vcWidgets, ...widgets],
+      vcActivePage: pageIndex,
+    }));
+    useAppStore.getState().markDirty();
+    return pageIndex;
+  },
 
   // ── Simple Desk ──
 

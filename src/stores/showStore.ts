@@ -10,6 +10,9 @@ import type { MtcMarker } from '../engine/mtc-markers';
 import type { DmxCue } from '../hooks/dmx-cues';
 import { normalizeFolderName } from '../utils/scene-fixtures';
 import type { MusicianRoster } from '../utils/musicians';
+import type { FixtureSupport } from '../utils/supports';
+import { useAppStore } from './appStore';
+import { getLicenseLimits } from './licenseStore';
 
 // ─── Types ─────────────────────────────────────────────────
 
@@ -100,7 +103,7 @@ export interface ShowTrackItem {
 export interface ShowTrack {
   id: string;
   name: string;
-  type: 'scene' | 'chaser' | 'efx' | 'audio';
+  type: 'scene' | 'chaser' | 'efx' | 'audio' | 'matrix';
   items: ShowTrackItem[];
   muted: boolean;
   solo: boolean;
@@ -138,7 +141,7 @@ export interface SavedChaser {
 
 // ─── EFX Types ───────────────────────────────────────────
 
-export type EfxPattern = 'Circle' | 'Line' | 'Eight' | 'Square' | 'Triangle' | 'Infinity' | 'Zigzag' | 'Spiral' | 'DoubleCircle' | 'Heart';
+export type EfxPattern = 'Circle' | 'Line' | 'Eight' | 'Square' | 'Triangle' | 'Infinity' | 'Zigzag' | 'Spiral' | 'DoubleCircle' | 'Heart' | 'Wave' | 'Bounce' | 'Cross';
 
 export interface SavedEffect {
   id: string;
@@ -150,6 +153,9 @@ export interface SavedEffect {
   speed: number;
   xOffset: number;
   yOffset: number;
+  /** Décalage de phase entre fixtures (0..1 = fraction d'un cycle répartie
+   *  sur tout le groupe : 0 = synchronisées, 1 = vague complète sur un cycle). */
+  spread?: number;
   fixtureIds: string[];
   createdAt: string;
 }
@@ -180,6 +186,9 @@ export interface FixturePos {
   beamAngle?: number; // beam opening angle in radians (0.02-0.8)
   thumbnailScale?: number; // sprite scale multiplier (0.2-2.0, default 0.75)
   mountMode?: 'top' | 'ground' | 'rear' | 'hanging'; // beam direction: top=down, ground=up, rear=forward, hanging=horizontal vers le public
+  /** Support physique visible en 3D (pont/totem/trépied/sol). Absent = 'truss'
+   *  (rendu historique : rien de dessiné, projets existants inchangés). */
+  support?: FixtureSupport;
 }
 
 /**
@@ -353,6 +362,8 @@ interface ShowState {
   createScene: (name: string) => string;
   updateScene: (id: string, updates: Partial<Pick<SavedScene, 'name' | 'channels' | 'fadeIn' | 'fadeOut' | 'duration' | 'folder' | 'musicians' | 'stageScene'>>) => void;
   deleteScene: (id: string) => void;
+  /** Duplique une scène (canaux, fondus, dossier, EFX lié…) avec un nouvel id. Retourne le nouvel id ou null. */
+  duplicateScene: (id: string) => string | null;
   getScene: (id: string) => SavedScene | undefined;
   setScenes: (scenes: SavedScene[]) => void;
   setSceneFolders: (folders: string[]) => void;
@@ -447,7 +458,6 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
     // ── Licence : limite de fixtures (édition gratuite = 1 fixture) ──
     try {
-      const { getLicenseLimits } = require('./licenseStore');
       const limit = getLicenseLimits().maxFixtures;
       if (Number.isFinite(limit) && patchedFixtures.length >= limit) {
         return {
@@ -485,7 +495,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
     const newFixture: PatchedFixture = { ...fixture, id };
     set({ patchedFixtures: [...patchedFixtures, newFixture] });
     // Mark project dirty
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
     return { id };
   },
 
@@ -499,7 +509,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
     set((state) => ({
       patchedFixtures: state.patchedFixtures.filter((f) => f.id !== id),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   setFixtureName: (id, name) => {
@@ -508,7 +518,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
         f.id === id ? { ...f, name } : f
       ),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   moveFixture: (id, newAddress) => {
@@ -539,32 +549,31 @@ export const useShowStore = create<ShowState>((set, get) => ({
         f.id === id ? { ...f, startAddress: newAddress } : f
       ),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
     return {};
   },
 
   setPatchedFixtures: (fixtures) => {
     set({ patchedFixtures: fixtures });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   updateFixtureTier: (id, tier) => {
     set((state) => ({
       patchedFixtures: state.patchedFixtures.map((f) => (f.id === id ? { ...f, tier } : f)),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   setShowUniverses: (universes) => {
     set({ universes });
     saveUniverses(universes);
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   addShowUniverse: (config) => {
     // ── Licence : limite d'univers (gratuite + standard = 1 univers) ──
     try {
-      const { getLicenseLimits } = require('./licenseStore');
       const limit = getLicenseLimits().maxUniverses;
       if (Number.isFinite(limit) && get().universes.length >= limit) {
         return {
@@ -592,7 +601,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
         },
       ];
       saveUniverses(next);
-      try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+      useAppStore.getState().markDirty();
       return { universes: next };
     });
     return {};
@@ -607,7 +616,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
         patchedFixtures: state.patchedFixtures.filter((f) => f.universeId !== id),
       };
     });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   updateShowUniverse: (id, updates) => {
@@ -618,7 +627,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
       saveUniverses(next);
       return { universes: next };
     });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   getUniverseMap: (universeId) => {
@@ -669,16 +678,16 @@ export const useShowStore = create<ShowState>((set, get) => ({
         [id]: { ...(state.fixturePositions[id] || { x: 0.5, y: 0.3, h: 0.5, heading: 0 }), ...pos },
       },
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   setFixturePositions: (positions) => {
     set({ fixturePositions: positions });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
   setStageDims: (dims) => {
     set({ stageDims: dims });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   initFixturePosition: (id, fixtureType, index) => {
@@ -708,7 +717,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
     const id = `grp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const group: FixtureGroup = { id, name, fixtureIds, color };
     set((state) => ({ fixtureGroups: [...state.fixtureGroups, group] }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
     return id;
   },
 
@@ -716,7 +725,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
     set((state) => ({
       fixtureGroups: state.fixtureGroups.filter((g) => g.id !== groupId),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   renameGroup: (groupId, name) => {
@@ -725,7 +734,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
         g.id === groupId ? { ...g, name } : g
       ),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   updateGroupFixtures: (groupId, fixtureIds) => {
@@ -734,7 +743,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
         g.id === groupId ? { ...g, fixtureIds } : g
       ),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   getGroupsByUniverse: (universeId) => {
@@ -752,7 +761,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   setFixtureGroups: (groups) => {
     set({ fixtureGroups: groups });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   // ── Scenes ──
@@ -771,7 +780,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
       createdAt: new Date().toISOString(),
     };
     set((state) => ({ scenes: [...state.scenes, scene] }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
     return id;
   },
 
@@ -802,7 +811,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
         s.id === id ? { ...s, ...normalized } : s
       ),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   // Create an explicit folder. Returns the normalized name (or null when
@@ -813,7 +822,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
     const exists = get().sceneFolders.some((f) => f === n);
     if (exists) return null;
     set((state) => ({ sceneFolders: [...state.sceneFolders, n] }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
     return n;
   },
 
@@ -836,7 +845,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
           ? state.sceneFolders.filter((f) => f !== from)
           : [...state.sceneFolders.filter((f) => f !== from), to],
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   // Unassign every scene in a folder (never deletes scenes, folder stays).
@@ -848,7 +857,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
         normalizeFolderName(s.folder || '') === from ? { ...s, folder: undefined } : s
       ),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   // Delete a declared folder: removes it from the list + unassigns its scenes.
@@ -861,7 +870,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
       ),
       sceneFolders: state.sceneFolders.filter((f) => f !== from),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   deleteScene: (id) => {
@@ -870,7 +879,26 @@ export const useShowStore = create<ShowState>((set, get) => ({
       chasers: state.chasers.map((c) => ({ ...c, steps: c.steps.filter((st) => st.sceneId !== id) })),
       cueLists: state.cueLists.map((cl) => ({ ...cl, cues: cl.cues.filter((cu) => cu.sceneId !== id) })),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
+  },
+
+  duplicateScene: (id) => {
+    const src = get().scenes.find((s) => s.id === id);
+    if (!src) return null;
+    const taken = new Set(get().scenes.map((s) => s.name));
+    let name = `${src.name} (copie)`;
+    for (let n = 2; taken.has(name); n++) name = `${src.name} (copie ${n})`;
+    const copy: SavedScene = {
+      ...src,
+      id: generateSceneId(),
+      name,
+      channels: { ...src.channels },
+      musicians: src.musicians ? { ...src.musicians } : undefined,
+      createdAt: new Date().toISOString(),
+    };
+    set((state) => ({ scenes: [...state.scenes, copy] }));
+    useAppStore.getState().markDirty();
+    return copy.id;
   },
 
   getScene: (id) => {
@@ -880,12 +908,12 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   setScenes: (scenes) => {
     set({ scenes });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   setSceneFolders: (folders) => {
     set({ sceneFolders: folders.map((f) => normalizeFolderName(f)).filter(Boolean) });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   getSceneCount: () => get().scenes.length,
@@ -903,7 +931,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
       speed: 120,
     };
     set((state) => ({ chasers: [...state.chasers, chaser] }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
     return id;
   },
 
@@ -913,14 +941,14 @@ export const useShowStore = create<ShowState>((set, get) => ({
         c.id === id ? { ...c, ...updates } : c
       ),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   deleteChaser: (id) => {
     set((state) => ({
       chasers: state.chasers.filter((c) => c.id !== id),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   getChaser: (id) => {
@@ -929,7 +957,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   setChasers: (chasers) => {
     set({ chasers });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   getChaserCount: () => get().chasers.length,
@@ -953,7 +981,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
       createdAt: new Date().toISOString(),
     };
     set((state) => ({ effects: [...state.effects, effect] }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
     return id;
   },
 
@@ -998,14 +1026,14 @@ export const useShowStore = create<ShowState>((set, get) => ({
         e.id === id ? { ...e, ...updates } : e
       ),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   deleteEffect: (id) => {
     set((state) => ({
       effects: state.effects.filter((e) => e.id !== id),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   getEffect: (id) => {
@@ -1014,7 +1042,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   setEffects: (effects) => {
     set({ effects });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   // ── Cue Lists (theater-style) ──
@@ -1029,7 +1057,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
       currentCueIndex: -1,
     };
     set((state) => ({ cueLists: [...state.cueLists, cueList] }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
     return id;
   },
 
@@ -1039,14 +1067,14 @@ export const useShowStore = create<ShowState>((set, get) => ({
         cl.id === id ? { ...cl, ...updates } : cl
       ),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   deleteCueList: (id) => {
     set((state) => ({
       cueLists: state.cueLists.filter((cl) => cl.id !== id),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   getCueList: (id) => {
@@ -1055,7 +1083,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   setCueLists: (cueLists) => {
     set({ cueLists });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   getCueListCount: () => get().cueLists.length,
@@ -1072,7 +1100,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
       tracks: [],
     };
     set((state) => ({ shows: [...state.shows, show] }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
     return id;
   },
 
@@ -1082,14 +1110,14 @@ export const useShowStore = create<ShowState>((set, get) => ({
         s.id === id ? { ...s, ...updates } : s
       ),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   deleteShow: (id) => {
     set((state) => ({
       shows: state.shows.filter((s) => s.id !== id),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   getShow: (id) => {
@@ -1098,7 +1126,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   setShows: (shows) => {
     set({ shows });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   getShowCount: () => get().shows.length,
@@ -1114,7 +1142,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
       createdAt: new Date().toISOString(),
     };
     set((state) => ({ songPresets: [...state.songPresets, newPreset] }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
     return id;
   },
 
@@ -1122,7 +1150,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
     set((state) => ({
       songPresets: state.songPresets.filter((p) => p.id !== id),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   updateSongPreset: (id, updates) => {
@@ -1131,12 +1159,12 @@ export const useShowStore = create<ShowState>((set, get) => ({
         p.id === id ? { ...p, ...updates } : p
       ),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   setSongPresets: (presets) => {
     set({ songPresets: presets });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   // ── MTC markers (lot #15) — cues sur timecode ──
@@ -1145,7 +1173,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
   addMtcMarker: (marker) => {
     const id = `mtc-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     set((state) => ({ mtcMarkers: [...state.mtcMarkers, { ...marker, id }] }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
     return id;
   },
 
@@ -1153,19 +1181,19 @@ export const useShowStore = create<ShowState>((set, get) => ({
     set((state) => ({
       mtcMarkers: state.mtcMarkers.map((m) => (m.id === id ? { ...m, ...updates } : m)),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   deleteMtcMarker: (id) => {
     set((state) => ({
       mtcMarkers: state.mtcMarkers.filter((m) => m.id !== id),
     }));
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 
   setMtcMarkers: (markers) => {
     set({ mtcMarkers: markers });
-    try { const { useAppStore } = require('../stores/appStore'); useAppStore.getState().markDirty(); } catch { /* */ }
+    useAppStore.getState().markDirty();
   },
 }));
 

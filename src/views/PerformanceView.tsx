@@ -6,7 +6,7 @@ import {
   Plus, MousePointer2, ToggleLeft, GripHorizontal, Columns, Trash2,
   Copy, Maximize2, Minimize2, Square, Keyboard, Eye, EyeOff,
   ChevronUp, ChevronDown, Hash, Download, Upload, RotateCcw, Loader, Wifi,
-  Timer as TimerIcon, Radio
+  Timer as TimerIcon, Radio, Pencil
 } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { useShowStore, type SavedCueList, type CueListCue, type SongPreset, findBestSongPreset, presetHasAudio } from '../stores/showStore';
@@ -23,9 +23,12 @@ import { generateEfxPanTilt } from '../hooks/fixture-tracks';
 import { resolveAudioUrl } from '../utils/project-audio';
 import { importCustomFixtureDefs } from '../utils/custom-fixtures';
 import { timecodeToMs, msToTimecode, isValidTimecode } from '../engine/mtc-markers';
+import { registerMidiWidgetHandler, unregisterMidiWidgetHandler } from '../engine/midi-actions';
+import { vcButtonPress, vcDeactivate, vcOnRunChange } from '../engine/virtual-console-runtime';
 import { Stage3D } from './Stage3D';
 import {
   usePerformStore,
+  applyWidgetSliderEffect,
   ConsoleWidget,
   ConsoleWidgetConfig,
   WidgetType
@@ -131,18 +134,66 @@ const VirtualConsolePanel: React.FC = () => {
   const vcSetActivePage = usePerformStore((s) => s.vcSetActivePage);
   const vcAddPage = usePerformStore((s) => s.vcAddPage);
   const vcDeletePage = usePerformStore((s) => s.vcDeletePage);
+  const vcRenamePage = usePerformStore((s) => s.vcRenamePage);
   const vcSetGridSnap = usePerformStore((s) => s.vcSetGridSnap);
   const vcSetAddingWidget = usePerformStore((s) => s.vcSetAddingWidget);
+  const vcAddAkaiSurfacePage = usePerformStore((s) => s.vcAddAkaiSurfacePage);
 
   const [showPalette, setShowPalette] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; widgetId: string } | null>(null);
+  const [pageMenu, setPageMenu] = useState<{ x: number; y: number; index: number } | null>(null);
+  const [renamingPage, setRenamingPage] = useState<{ index: number; value: string } | null>(null);
   const [showWidgetConfig, setShowWidgetConfig] = useState<string | null>(null);
   const paletteRef = useRef<HTMLDivElement>(null);
+
+  /** Clic droit sur un onglet de page → renommage en ligne (ou menu). */
+  const startPageRename = useCallback((index: number) => {
+    setPageMenu(null);
+    setRenamingPage({ index, value: pages[index]?.name ?? '' });
+  }, [pages]);
+
+  const commitPageRename = useCallback(() => {
+    setRenamingPage((cur) => {
+      if (cur) {
+        const value = cur.value.trim();
+        if (value && value !== pages[cur.index]?.name) vcRenamePage(cur.index, value);
+      }
+      return null;
+    });
+  }, [pages, vcRenamePage]);
 
   // Cleanup: stop all audio when leaving Virtual Console (e.g. switching tabs)
   useEffect(() => {
     return () => { stopAllAudioPlayback(); };
   }, []);
+
+  /**
+   * Crée une page « surface Akai » pré-programmée : 8 pads scènes, 8 pads
+   * chasers, Blackout + boucles auto, 8 faders (GM + canaux DMX).
+   * Les boucles auto dépendent du patch → génération asynchrone du catalogue.
+   */
+  const handleAddAkaiSurface = async () => {
+    const showState = useShowStore.getState();
+    let loops: LoopRecipe[] = [];
+    try {
+      const pfs = showState.patchedFixtures;
+      if (pfs.length) {
+        const ids = [...new Set(pfs.map((f) => f.fixtureDefId))];
+        const defs = await loadFixtureDefinitions(ids);
+        loops = generateLoopLibrary(pfs, defs, {
+          count: 36,
+          seed: 0,
+          positions: showState.fixturePositions,
+        }).map(loopToRecipe);
+      }
+    } catch { /* catalogue indisponible → touches libres */ }
+
+    vcAddAkaiSurfacePage({
+      scenes: showState.scenes.map((s) => ({ id: s.id, name: s.name })),
+      chasers: showState.chasers.map((c) => ({ id: c.id, name: c.name })),
+      loops,
+    });
+  };
 
   // Floating 3D stage view
   const [showFloating3D, setShowFloating3D] = useState(false);
@@ -425,7 +476,9 @@ const VirtualConsolePanel: React.FC = () => {
             if (!efx) continue;
             const ids = efx.fixtureIds || [];
             const tSec = currentMs / 1000;
-            for (const fid of ids) {
+            const efxSpread = (efx as any).spread ?? 0;
+            for (let efxi = 0; efxi < ids.length; efxi++) {
+              const fid = ids[efxi];
               const pf = patchedFixtures.find((p: any) => p.id === fid);
               if (!pf) continue;
               const def = fixtureDefs.get(pf.fixtureDefId);
@@ -443,7 +496,8 @@ const VirtualConsolePanel: React.FC = () => {
               // L'ancienne copie locale tronquait les patterns (seuls 5 sur 10
               // bougeaient), sous-dosait amplitude/offsets et lisait la
               // rotation en unités /255 au lieu de degrés.
-              const tCycles = (tSec * (efx.speed || 0.5) * 2) / (Math.PI * 2);
+              const tBase = (tSec * (efx.speed || 0.5) * 2) / (Math.PI * 2);
+              const tCycles = ids.length > 1 && efxSpread > 0 ? tBase + (efxi * efxSpread) / ids.length : tBase;
               const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
                 efx.pattern, tCycles, efx.width ?? 0.5, efx.height ?? 0.5,
                 efx.rotation ?? 0, efx.xOffset ?? 0, efx.yOffset ?? 0,
@@ -621,6 +675,18 @@ const VirtualConsolePanel: React.FC = () => {
           <Trash2 size={14} />
         </button>
 
+        <div className="w-px h-5 bg-gray-800/60 mx-1" />
+
+        {/* Akai-style pre-programmed surface */}
+        <button
+          onClick={handleAddAkaiSurface}
+          className="px-2 py-1 rounded-md text-[11px] flex items-center gap-1.5 text-gray-300 hover:text-purple-300 hover:bg-white/5 border border-gray-800/60 transition-colors"
+          title={t('perform.vc.addAkaiSurfaceHint')}
+        >
+          <Sliders size={13} />
+          {t('perform.vc.addAkaiSurface')}
+        </button>
+
         {addingWidget && (
           <span className="text-[10px] text-amber-400 ml-2">
             {t('perform.vc.clickToPlace', { widget: addingWidget })}
@@ -629,20 +695,44 @@ const VirtualConsolePanel: React.FC = () => {
       </div>
 
       {/* Page Tabs */}
-      <div className="px-2 pt-1.5 flex items-center gap-0.5 shrink-0">
-        {pages.map((page, i) => (
-          <button
-            key={i}
-            onClick={() => vcSetActivePage(i)}
-            className={`px-4 py-1.5 rounded-t-md text-xs font-medium transition-all ${
-              activePage === i
-                ? 'bg-purple-600/20 text-purple-300 border-t border-x border-purple-500/30'
-                : 'text-gray-500 hover:text-gray-300'
-            }`}
-          >
-            {page.name}
-          </button>
-        ))}
+      <div className="px-2 pt-1.5 flex items-center gap-0.5 shrink-0 overflow-x-auto">
+        {pages.map((page, i) =>
+          renamingPage?.index === i ? (
+            <input
+              key={`rename-${i}`}
+              autoFocus
+              value={renamingPage.value}
+              onChange={(e) => setRenamingPage({ index: i, value: e.target.value })}
+              onBlur={commitPageRename}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commitPageRename(); }
+                else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setRenamingPage(null); }
+              }}
+              size={Math.max(6, Math.min(24, renamingPage.value.length + 1))}
+              className="px-2 py-1.5 rounded-t-md text-xs font-medium bg-purple-600/20 text-purple-200 border border-purple-500/40 outline-none"
+            />
+          ) : (
+            <button
+              key={i}
+              onClick={() => vcSetActivePage(i)}
+              onDoubleClick={() => startPageRename(i)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setPageMenu({ x: e.clientX, y: e.clientY, index: i });
+              }}
+              title={t('perform.vc.renamePage')}
+              className={`px-4 py-1.5 rounded-t-md text-xs font-medium transition-all ${
+                activePage === i
+                  ? 'bg-purple-600/20 text-purple-300 border-t border-x border-purple-500/30'
+                  : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {page.name}
+            </button>
+          ),
+        )}
         <button
           onClick={() => vcAddPage()}
           className="px-2 py-1.5 text-gray-600 hover:text-gray-400 text-xs"
@@ -700,6 +790,18 @@ const VirtualConsolePanel: React.FC = () => {
         />
       )}
 
+      {/* Page context menu — clic droit sur un onglet de page */}
+      {pageMenu && (
+        <PageContextMenu
+          x={pageMenu.x}
+          y={pageMenu.y}
+          canDelete={pages.length > 1}
+          onClose={() => setPageMenu(null)}
+          onRename={() => startPageRename(pageMenu.index)}
+          onDelete={() => { setPageMenu(null); vcDeletePage(pageMenu.index); }}
+        />
+      )}
+
       {/* Widget Config Modal (rendered at parent level so it survives contextMenu close) */}
       {showWidgetConfig && (() => {
         const widget = widgets.find(w => w.id === showWidgetConfig);
@@ -714,7 +816,7 @@ const VirtualConsolePanel: React.FC = () => {
       {showFloating3D && (
         <div
           className="fixed z-50 bg-black/95 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col"
-          style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, overflow: 'hidden' }}
+          style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}
         >
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
             <span className="text-[11px] text-purple-400 font-medium">🎬 Live 3D View</span>
@@ -809,6 +911,49 @@ const ContextMenuPopup: React.FC<{
   );
 };
 
+/** Menu clic droit d'un onglet de page : renommer (en ligne) / supprimer. */
+const PageContextMenu: React.FC<{
+  x: number; y: number;
+  canDelete: boolean;
+  onClose: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+}> = ({ x, y, canDelete, onClose, onRename, onDelete }) => {
+  const { t } = useTranslation();
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={menuRef}
+      className="fixed z-[100] bg-[#12121a] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
+      style={{ ...clampRect(x, y, 180, 120, window.innerWidth, window.innerHeight) }}
+    >
+      <button
+        onClick={onRename}
+        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20"
+      >
+        <Pencil size={12} /> {t('perform.vc.renamePage')}
+      </button>
+      <div className="border-t border-gray-800 my-1" />
+      <button
+        onClick={onDelete}
+        disabled={!canDelete}
+        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-red-600/20 disabled:opacity-30 disabled:cursor-not-allowed"
+      >
+        <Trash2 size={12} /> {t('perform.vc.deletePage')}
+      </button>
+    </div>
+  );
+};
+
 // ─── Widget Config Modal ───────────────────────────────────
 
 /**
@@ -877,6 +1022,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
   const chasers = useShowStore((s) => s.chasers);
   const songPresets = useShowStore((s) => s.songPresets);
   const storeShows = useShowStore((s) => s.shows);
+  const universes = useShowStore((s) => s.universes);
 
   const [config, setConfig] = useState({ ...widget.config });
   const [title, setTitle] = useState(widget.config.title || widget.type);
@@ -1171,12 +1317,31 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
               </div>
 
               {config.sliderFunction === 'channel' && (
-                <div>
-                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('perform.vc.channelAddress')}</label>
-                  <input type="number" min={1} max={512} value={config.channelAddress || 1}
-                    onChange={(e) => setConfig({ ...config, channelAddress: Number(e.target.value) })}
-                    className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300" />
-                </div>
+                <>
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('perform.vc.universe')}</label>
+                    <select value={config.sliderUniverse ?? 0}
+                      onChange={(e) => setConfig({ ...config, sliderUniverse: Number(e.target.value) })}
+                      className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300">
+                      {universes.length === 0 ? (
+                        <option value={0}>1</option>
+                      ) : (
+                        universes.map((u: any, i: number) => (
+                          <option key={String(u.id)} value={i}>
+                            {i + 1}{u.name ? ` · ${u.name}` : ''}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('perform.vc.channelAddress')}</label>
+                    <input type="number" min={1} max={512} value={config.channelAddress || 1}
+                      onChange={(e) => setConfig({ ...config, channelAddress: Number(e.target.value) })}
+                      className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300" />
+                  </div>
+                </>
               )}
 
               <div className="grid grid-cols-3 gap-3">
@@ -1511,16 +1676,18 @@ const VCButtonWidget: React.FC<{
   const scenes = useShowStore((s) => s.scenes);
   const chasers = useShowStore((s) => s.chasers);
   const songPresets = useShowStore((s) => s.songPresets);
-  const chaserTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const chaserRunningRef = useRef(false);
-  const sceneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sceneFadeRef = useRef<{ cancel: () => void } | null>(null);
   const autoAudioRef = useRef<HTMLAudioElement | null>(null);
   const autoRafRef = useRef<number>(0);
   const regeneratingRef = useRef(false);
   const playIntentRef = useRef(false);
   const [songPlayer, setSongPlayer] = useState<SongPreset | null>(null);
   const unregisterAudioRef = useRef<(() => void) | null>(null);
+
+  // La LED de la tuile suit l'état réel du runtime partagé (clic, MIDI,
+  // fin naturelle d'une scène) — le run survit au changement de page.
+  useEffect(() => vcOnRunChange((id, running) => {
+    if (id === widget.id) setActive(running);
+  }), [widget.id]);
 
   const { config } = widget;
   const color = config.color || '#a855f7';
@@ -1648,6 +1815,18 @@ const VCButtonWidget: React.FC<{
   const activate = () => {
     setActive(true);
     const currentState = useShowStore.getState();
+
+    // Scènes / chasers / blackout → runtime partagé (mêmes chemins que le
+    // pilotage MIDI, testable unitairement, survit au changement de page).
+    // La LED de la tuile suit l'état réel via vcOnRunChange.
+    if (
+      config.actionType === 'scene' ||
+      config.actionType === 'chaser' ||
+      config.actionType === 'blackout'
+    ) {
+      vcButtonPress(widget.id, true);
+      return;
+    }
 
     // DMX engine will be restarted by PlaySong/audioAutoScript handlers when needed
 
@@ -1857,156 +2036,6 @@ const VCButtonWidget: React.FC<{
       return;
     }
 
-    if (config.actionType === 'blackout') {
-      try { window.lightMaestro?.dmx?.blackout(); } catch { /* */ }
-      return;
-    }
-
-    if (config.actionType === 'scene' && config.sceneId) {
-      const scene = scenes.find((s) => s.id === config.sceneId);
-      if (scene) {
-        // Track active scene timers so deactivate can cancel
-        const fadeIn = scene.fadeIn || 0;
-        const fadeOut = scene.fadeOut || 0;
-        // Duration = total window INCLUDING fades (0 = hold forever)
-        const infinite = !scene.duration || scene.duration <= 0;
-        const hold = infinite ? 0 : Math.max(0, scene.duration - fadeIn - fadeOut);
-
-        const channels: Record<number, number> = {};
-        for (const [addr, val] of Object.entries(scene.channels)) channels[Number(addr)] = val;
-
-        // Calculate target values
-        const targetChannels = { ...channels };
-
-        const applyLevel = (level: number) => {
-          const scaled: Record<number, number> = {};
-          for (const [addr, val] of Object.entries(targetChannels)) {
-            scaled[Number(addr)] = Math.round(Number(val) * level);
-          }
-          sendChannelsToHardware(scaled, currentState.patchedFixtures, currentState.universes, 'vc').catch(() => {})
-        };
-
-        // Clear any existing scene timer
-        if (sceneTimerRef.current) { clearTimeout(sceneTimerRef.current); sceneTimerRef.current = null; }
-        (sceneFadeRef as any).current?.cancel?.();
-
-        if (fadeIn > 0) {
-          // Animate fade in
-          const start = performance.now();
-          let raf = 0;
-          const fadeInAnim = () => {
-            const elapsed = performance.now() - start;
-            const progress = Math.min(1, elapsed / fadeIn);
-            applyLevel(progress);
-            if (progress < 1) raf = requestAnimationFrame(fadeInAnim);
-            else {
-              applyLevel(1);
-              if (!infinite) scheduleFadeOut(hold);
-            }
-          };
-          (sceneFadeRef as any).current = { cancel: () => cancelAnimationFrame(raf) };
-          raf = requestAnimationFrame(fadeInAnim);
-        } else {
-          applyLevel(1);
-          if (!infinite) scheduleFadeOut(hold);
-        }
-
-        function scheduleFadeOut(delay: number) {
-          sceneTimerRef.current = setTimeout(() => {
-            if (fadeOut > 0) {
-              const start = performance.now();
-              let raf = 0;
-              const fadeOutAnim = () => {
-                const elapsed = performance.now() - start;
-                const progress = Math.min(1, elapsed / fadeOut);
-                applyLevel(1 - progress);
-                if (progress < 1) raf = requestAnimationFrame(fadeOutAnim);
-                else { applyLevel(0); setActive(false); }
-              };
-              (sceneFadeRef as any).current = { cancel: () => cancelAnimationFrame(raf) };
-              raf = requestAnimationFrame(fadeOutAnim);
-            } else {
-              applyLevel(0);
-              setActive(false);
-            }
-          }, delay);
-        };
-      }
-      return;
-    }
-
-    if (config.actionType === 'chaser' && config.chaserId) {
-      const chaser = chasers.find((c) => c.id === config.chaserId);
-      if (!chaser || chaser.steps.length === 0) return;
-      chaserRunningRef.current = true;
-      let stepIndex = 0;
-      const runStep = () => {
-        if (!chaserRunningRef.current) return;
-        const step = chaser.steps[stepIndex];
-        if (!step) { chaserRunningRef.current = false; return; }
-        const scene = scenes.find((s) => s.id === step.sceneId);
-        if (!scene) {
-          // Skip missing scene, go to next step
-          stepIndex = (stepIndex + 1) % chaser.steps.length;
-          chaserTimerRef.current = setTimeout(runStep, 100);
-          return;
-        }
-
-        // Step has its own timing OR fall back to scene timing (duration = total window incl fades)
-        const fadeIn = step.fadeIn ?? scene.fadeIn ?? 0;
-        const fadeOut = step.fadeOut ?? scene.fadeOut ?? 0;
-        const hold = step.hold ?? (scene.duration > 0 ? Math.max(0, scene.duration - fadeIn - fadeOut) : 500);
-
-        const targetChannels: Record<number, number> = {};
-        for (const [addr, val] of Object.entries(scene.channels)) targetChannels[Number(addr)] = Number(val);
-
-        const applyLevel = (level: number) => {
-          const scaled: Record<number, number> = {};
-          for (const [addr, val] of Object.entries(targetChannels)) scaled[Number(addr)] = Math.round(val * level);
-          sendChannelsToHardware(scaled, currentState.patchedFixtures, currentState.universes, 'vc').catch(() => {})
-        };
-
-        if (fadeIn > 0) {
-          const start = performance.now();
-          let raf = 0;
-          const anim = () => {
-            const p = Math.min(1, (performance.now() - start) / fadeIn);
-            applyLevel(p);
-            p < 1 ? raf = requestAnimationFrame(anim) : onHold();
-          };
-          raf = requestAnimationFrame(anim);
-        } else {
-          applyLevel(1);
-          onHold();
-        }
-
-        function onHold() {
-          chaserTimerRef.current = setTimeout(() => {
-            if (fadeOut > 0) {
-              const start = performance.now();
-              let raf = 0;
-              const anim = () => {
-                const p = Math.min(1, (performance.now() - start) / fadeOut);
-                applyLevel(1 - p);
-                p < 1 ? raf = requestAnimationFrame(anim) : nextStep();
-              };
-              raf = requestAnimationFrame(anim);
-            } else {
-              applyLevel(0);
-              nextStep();
-            }
-          }, hold);
-        }
-
-        function nextStep() {
-          stepIndex = (stepIndex + 1) % chaser.steps.length;
-          runStep();
-        }
-      };
-      runStep();
-      return;
-    }
-
     if (config.actionType === 'autoLoop' && config.autoLoopRecipe) {
       // Le toggle/flash est géré par `active` (handleClick/handleMouseUp) :
       // ici on démarre simplement ; `deactivate()` arrête la boucle.
@@ -2018,17 +2047,17 @@ const VCButtonWidget: React.FC<{
   const deactivate = () => {
     setActive(false);
     playIntentRef.current = false;
-    chaserRunningRef.current = false;
-    if (chaserTimerRef.current) {
-      clearTimeout(chaserTimerRef.current);
-      chaserTimerRef.current = null;
+    // Scènes / chasers / blackout → runtime partagé : annule timers et fades,
+    // éteint les canaux allumés (fadeOut de la scène respecté) et RESTAURE le
+    // blackout — l'inverse exact de l'activation.
+    if (
+      config.actionType === 'scene' ||
+      config.actionType === 'chaser' ||
+      config.actionType === 'blackout'
+    ) {
+      vcDeactivate(widget.id);
+      return;
     }
-    if (sceneTimerRef.current) {
-      clearTimeout(sceneTimerRef.current);
-      sceneTimerRef.current = null;
-    }
-    sceneFadeRef.current?.cancel();
-    sceneFadeRef.current = null;
     // Stop audioAutoScript playback
     if (autoAudioRef.current) {
       cancelAnimationFrame(autoRafRef.current);
@@ -2067,6 +2096,30 @@ const VCButtonWidget: React.FC<{
   useEffect(() => {
     return () => { if (config.actionType === 'autoLoop') stopAutoLoop(widget.id); };
   }, [config.actionType, widget.id]);
+
+  // Contrôleur MIDI physique (Akai…) → le VRAI composant (état visuel inclus).
+  // Registre exigé par midi-actions (dette M3) : sans ça, seul le fallback
+  // config — scene/chaser/blackout — serait piloté. Les handlers sont lus
+  // via une ref pour éviter une closure périmée à l'enregistrement.
+  const midiHandlersRef = useRef({ activate, deactivate });
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  midiHandlersRef.current = { activate, deactivate };
+
+  useEffect(() => {
+    registerMidiWidgetHandler(widget.id, (_property, _value, rawValue) => {
+      // rawValue undefined (Program Change) = press ; 0 = release.
+      const press = rawValue !== 0;
+      const { activate: on, deactivate: off } = midiHandlersRef.current;
+      if (isFlash) {
+        if (press) on(); else off();
+        return;
+      }
+      // Bouton toggle : le note-on bascule, la release est ignorée.
+      if (press) { if (activeRef.current) off(); else on(); }
+    });
+    return () => unregisterMidiWidgetHandler(widget.id);
+  }, [widget.id, isFlash]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (isFlash) {
@@ -2181,7 +2234,10 @@ const VCSliderWidget: React.FC<{
   onResizeStart: (e: React.MouseEvent) => void;
   onContextMenu: (x: number, y: number) => void;
 }> = ({ widget, onDragStart, onResizeStart, onContextMenu }) => {
-  const [value, setValue] = useState(128);
+  // Valeur partagée avec le store : survit au changement de page et sert de
+  // miroir pour un contrôleur MIDI (Akai) dont le fader pilote ce widget.
+  const value = usePerformStore((s) => s.vcWidgetValues[widget.id] ?? 128);
+  const vcSetWidgetValue = usePerformStore((s) => s.vcSetWidgetValue);
   const { config } = widget;
   const min = config.min ?? 0;
   const max = config.max ?? 255;
@@ -2190,17 +2246,8 @@ const VCSliderWidget: React.FC<{
 
   const handleChange = (newVal: number) => {
     const clamped = Math.max(min, Math.min(max, Math.round(newVal / step) * step));
-    setValue(clamped);
-
-    if (config.sliderFunction === 'grandMaster') {
-      try { window.lightMaestro?.dmx?.applyGrandMaster(clamped / 255); } catch { /* */ }
-    } else if (config.channelAddress) {
-      // Merge per channel so two sliders on the same universe don't drop
-      // each other (write-replace would keep only the last one).
-      // NB: universe is hard-coded to 1 (pre-existing bug, documented — the
-      // VC widget config does not store a target universe).
-      try { dmxBridge.writeMerge('vc', 1, { [config.channelAddress]: clamped }); } catch { /* */ }
-    }
+    vcSetWidgetValue(widget.id, clamped);
+    applyWidgetSliderEffect(config, clamped, 'vc');
   };
 
   return (
@@ -2264,7 +2311,9 @@ const VCSliderWidget: React.FC<{
 
       {/* Label */}
       <span className="text-[9px] text-gray-600 truncate max-w-full shrink-0">
-        {config.sliderFunction === 'grandMaster' ? 'GM' : `CH${config.channelAddress || '?'}`}
+        {config.sliderFunction === 'grandMaster'
+          ? 'GM'
+          : `${(config.sliderUniverse ?? 0) > 0 ? `U${(config.sliderUniverse ?? 0) + 1} ` : ''}CH${config.channelAddress || '?'}`}
       </span>
 
       {/* Resize handle */}
@@ -3066,6 +3115,8 @@ const MIDIMappingPanel: React.FC = () => {
   const [targetUniverseIdx, setTargetUniverseIdx] = useState(0);
   const [targetChannel, setTargetChannel] = useState(1);
   const [targetWidgetId, setTargetWidgetId] = useState('');
+  /** press = on/off pour un pad ; value = curseur 0-255 pour un fader. */
+  const [targetWidgetProperty, setTargetWidgetProperty] = useState<'press' | 'value'>('press');
 
   const activityTimer = useRef<number | null>(null);
 
@@ -3141,7 +3192,7 @@ const MIDIMappingPanel: React.FC = () => {
       case 'chaser': return targetChaserId ? { type: 'chaser', chaserId: targetChaserId, action: 'play' } : null;
       case 'cueList': return targetCueListId ? { type: 'cueList', cueListId: targetCueListId, action: 'go' } : null;
       case 'dmx': return { type: 'dmx-channel', universe: targetUniverseIdx, channel: targetChannel };
-      case 'widget': return targetWidgetId ? { type: 'widget', widgetId: targetWidgetId, property: 'flash' } : null;
+      case 'widget': return targetWidgetId ? { type: 'widget', widgetId: targetWidgetId, property: targetWidgetProperty } : null;
       default: return null;
     }
   };
@@ -3396,16 +3447,37 @@ const MIDIMappingPanel: React.FC = () => {
               <span className="text-[10px] text-gray-600">{t('perform.midi.learn.target')}</span>
               <select
                 value={targetWidgetId}
-                onChange={(e) => setTargetWidgetId(e.target.value)}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setTargetWidgetId(id);
+                  // Le type du widget décide de la sémantique par défaut :
+                  // fader → valeur 0-255, pad → pression on/off.
+                  const w = widgets.find((x) => x.id === id);
+                  setTargetWidgetProperty(w?.type === 'slider' ? 'value' : 'press');
+                }}
                 className="bg-[#0a0a0f] border border-gray-800/60 rounded-lg px-2 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-500/50 min-w-[160px]"
               >
                 <option value="">{t('perform.midi.learn.selectPlaceholder')}</option>
-                {widgets.length === 0 && <option value="" disabled>{t('perform.midi.learn.noWidgets')}</option>}
-                {widgets.map((w) => (
+                {widgets.filter((w) => w.type !== 'frame').length === 0 && <option value="" disabled>{t('perform.midi.learn.noWidgets')}</option>}
+                {widgets.filter((w) => w.type !== 'frame').map((w) => (
                   <option key={w.id} value={w.id}>
-                    {w.config && w.config.label ? w.config.label : w.type}
+                    {w.config && w.config.label ? `${w.config.label} (${w.type})` : w.type}
                   </option>
                 ))}
+              </select>
+            </div>
+          )}
+
+          {targetKind === 'widget' && targetWidgetId && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] text-gray-600">{t('perform.midi.learn.property')}</span>
+              <select
+                value={targetWidgetProperty}
+                onChange={(e) => setTargetWidgetProperty(e.target.value as 'press' | 'value')}
+                className="bg-[#0a0a0f] border border-gray-800/60 rounded-lg px-2 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-500/50 min-w-[160px]"
+              >
+                <option value="press">{t('perform.midi.learn.propertyPress')}</option>
+                <option value="value">{t('perform.midi.learn.propertyValue')}</option>
               </select>
             </div>
           )}
@@ -3469,12 +3541,12 @@ const MIDIMappingPanel: React.FC = () => {
       </div>
 
       {/* ── Table de mapping ── */}
-      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-gray-800/50 flex items-center justify-between">
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-x-auto">
+        <div className="px-4 py-2.5 border-b border-gray-800/50 flex items-center justify-between min-w-[560px]">
           <span className="text-xs font-medium text-gray-300">{t('perform.midi.mappings')}</span>
           <span className="text-[10px] text-gray-600">{mappings.length}</span>
         </div>
-        <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-gray-800/50 text-[10px] font-medium text-gray-500 uppercase tracking-wider">
+        <div className="grid grid-cols-12 gap-2 px-4 py-2 min-w-[560px] border-b border-gray-800/50 text-[10px] font-medium text-gray-500 uppercase tracking-wider">
           <span className="col-span-3">{t('perform.midi.columns.midi')}</span>
           <span className="col-span-2">{t('perform.midi.columns.channel')}</span>
           <span className="col-span-5">{t('perform.midi.columns.target')}</span>
@@ -3490,7 +3562,7 @@ const MIDIMappingPanel: React.FC = () => {
           mappings.map((m) => {
             const label = targetLabel(m.target);
             return (
-              <div key={m.id} className="grid grid-cols-12 gap-2 px-4 py-2 text-xs hover:bg-gray-800/20 border-b border-gray-800/20 last:border-0 items-center">
+              <div key={m.id} className="grid grid-cols-12 gap-2 px-4 py-2 min-w-[560px] text-xs hover:bg-gray-800/20 border-b border-gray-800/20 last:border-0 items-center">
                 <span className="col-span-3 text-gray-300 font-mono">
                   {midiTypeLabel(m.midiType)} {m.midiValue}
                 </span>
@@ -3626,6 +3698,15 @@ const RemotePanel: React.FC = () => {
     };
   }, [t]);
 
+  // Persiste la préférence de démarrage auto : le main la lit au lancement
+  // (`remote-prefs.json` dans userData) pour démarrer (ou non) le serveur LAN
+  // sans intervention. Stop = ne plus démarrer tout seul, Start = démarrer auto.
+  const persistAutoStart = (autoStart: boolean) => {
+    try {
+      void (window as any)?.lightMaestro?.storage?.set?.('remote-prefs', { autoStart });
+    } catch { /* best effort : la préférence n'empêche jamais le démarrage manuel */ }
+  };
+
   const handleStart = async () => {
     const api = getRemoteApi();
     if (!api || busy) return;
@@ -3641,6 +3722,7 @@ const RemotePanel: React.FC = () => {
       // P2-1 : si le démarrage a échoué (ex. EADDRINUSE), le serveur expose
       // lastError dans le statut - on le remonte à l'UI au lieu de rester muet.
       if (st.lastError) setError(st.lastError);
+      else persistAutoStart(true);
     } catch {
       setError(t('perform.remote.errors.start'));
     } finally {
@@ -3657,6 +3739,7 @@ const RemotePanel: React.FC = () => {
       const st = await api.stop();
       lastStatus.current = st;
       setStatus(st);
+      persistAutoStart(false);
     } catch {
       setError(t('perform.remote.errors.stop'));
     } finally {

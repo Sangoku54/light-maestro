@@ -18,6 +18,7 @@ import { useEffect, useRef } from 'react';
 import type { PatchedFixture, FixtureGroup, FixtureTier } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureCapability } from './dmx-cues';
 import { resolveTrackTargets, computeEfxOverrides, type EfxTrackRef, type FixtureTrack, type MovementBlock } from './fixture-tracks';
+import { computeMatrixTrackColors } from './rgb-matrix-playback';
 
 // ─── Color Track ref type (for DMX playback resolution) ──
 export interface ColorTrackRef {
@@ -456,9 +457,66 @@ export function computeSceneTrackOverrides(
   return controlled;
 }
 
+/**
+ * Crossfade dipless entre deux snapshots de scène (canaux bruts, pré-intensité).
+ *
+ * Règle anti-saccade : un canal absent d'un côté ne tombe JAMAIS à 0 — il
+ * garde sa dernière valeur envoyée (`held`), sinon la valeur de l'autre côté
+ * (tenue constante). Cas réel : une scène enregistrée avant l'ajout de
+ * fixtures ne contient pas leurs canaux ; sans ça elles plongent au noir et
+ * repartent en snap à chaque boucle.
+ *
+ * @param fromCh snapshot de départ (peut être partiel)
+ * @param toCh snapshot d'arrivée (peut être partiel)
+ * @param k 0..1 position dans la transition
+ * @param intensity multiplicateur appliqué en sortie (fade de l'item)
+ * @param held dernières valeurs brutes envoyées (tient lieu de mémoire)
+ */
+export function crossfadeSceneChannels(
+  fromCh: Record<number | string, number> | undefined,
+  toCh: Record<number | string, number> | undefined,
+  k: number,
+  intensity = 1,
+  held?: Record<number, number>,
+): Record<number, number> {
+  const out: Record<number, number> = {};
+  const addrs = new Set<number>();
+  for (const src of [fromCh, toCh, held]) {
+    if (!src) continue;
+    for (const key of Object.keys(src)) addrs.add(Number(key));
+  }
+  const kk = Math.max(0, Math.min(1, k));
+  for (const addr of addrs) {
+    const a = fromCh?.[addr] ?? held?.[addr] ?? toCh?.[addr] ?? 0;
+    const b = toCh?.[addr] ?? held?.[addr] ?? a;
+    out[addr] = Math.round((a * (1 - kk) + b * kk) * intensity);
+  }
+  return out;
+}
+
+/**
+ * Complète un snapshot brut avec les valeurs tenues (canaux connus mais
+ * absents du snapshot courant) pour qu'un chaser ne lâche jamais un canal
+ * en cours de route. Retourne un nouvel objet (ne mute pas).
+ */
+export function holdMissingChannels(
+  curCh: Record<number | string, number>,
+  held?: Record<number, number>,
+): Record<number, number> {
+  const out: Record<number, number> = { ...curCh };
+  if (held) {
+    for (const [key, v] of Object.entries(held)) {
+      const addr = Number(key);
+      if (!(addr in out)) out[addr] = v;
+    }
+  }
+  return out;
+}
+
 // Stage-aware pan/tilt clamping to keep beams on stage
 // ─── Extracted utilities (pure functions, no React) ──────
 import { evalEffect, toDmx, type EffectPattern } from '../engine/effect-engine';
+import { sectionMoveFor, sectionPhase01, sampleSectionLoop, phaseToIndexOffset, movementAmp } from '../engine/autoscript-loops';
 import type { RgbSegment } from '../engine/dmx-color';
 import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, findBestWheelCap, wheelDegeneratePosition } from '../engine/dmx-color';
 import type { ChannelAnalysis } from '../engine/fixture-analyzer';
@@ -567,6 +625,8 @@ export function useDmxPlayback(options: {
   showTracksRef?: React.MutableRefObject<ShowTrackRef[] | null>; // Show track takeover (full show over autoscript)
   showsRef?: React.MutableRefObject<Array<{ id: string; name?: string; duration: number; tracks: Array<{ type: string; items: Array<{ startTime: number; duration: number; resourceId: string; fadeIn?: number; fadeOut?: number }>; muted?: boolean }> }>>;
   sceneTracksRef?: React.MutableRefObject<SceneTrackRef[] | null>; // Scene track takeover (static scene config on its fixtures)
+  matrixTracksRef?: React.MutableRefObject<any[] | null>; // Matrix track lanes: couleur (+ strobe du motif) chevauchant l'autoscript
+  matricesRef?: React.MutableRefObject<any[]>; // Définitions de matrices RGB sauvegardées
   disabledFixturesRef?: React.MutableRefObject<Set<string>>; // Disabled fixture IDs
   fixturePositionsRef?: React.MutableRefObject<Record<string, { x: number; y: number; h?: number; zeroPan?: number; zeroTilt?: number; centerPan?: number; centerTilt?: number }>>; // For stage-aware pan/tilt + centre du mouvement (capture)
   panTiltLimitsRef?: React.MutableRefObject<{ pan: number; tilt: number; perFixture?: Record<string, { pan: number; tilt: number }> }>; // DMX half-amplitude limits for autoscript movement (128 = full)
@@ -576,7 +636,7 @@ export function useDmxPlayback(options: {
   forceDropRef?: React.MutableRefObject<boolean>; // Force next tick to use drop parameters
   arbiterSource?: string; // Output-arbiter source id this engine writes as (default 'quickshow')
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,showTracksRef,showsRef,sceneTracksRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,panTiltLimitsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,showTracksRef,showsRef,sceneTracksRef,matrixTracksRef,matricesRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,panTiltLimitsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource}=options;
   const arbSource = arbiterSource ?? 'quickshow';
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
@@ -855,6 +915,15 @@ export function useDmxPlayback(options: {
         patchedFixturesRef.current,
         fixtureGroupsRef?.current || [],
       );
+      // Pistes matrice : la couleur du motif (et son strobe éventuel) prend le
+      // dessus sur l'autoscript, mais le mouvement et le dimmer restent à lui.
+      const matrixTrack = computeMatrixTrackColors(
+        matrixTracksRef?.current,
+        ct,
+        fixtureGroupsRef?.current || [],
+        matricesRef?.current || [],
+      );
+      for (const [fid, hex] of matrixTrack.colors) colorTrackColors.set(fid, hex);
       // (diag colorTrack retiré prod — gardé seulement si __DEBUG__)
 
       // Find active cue: direct latest-before-ct, NO section grouping
@@ -914,9 +983,18 @@ export function useDmxPlayback(options: {
       let nextCueDmx:Array<{universe:number;channelValues:Record<number,number>}>|null=null;
       if(nextCue&&active){const gap=nextCue.time-active.time;if(gap>0&&gap<0.3){const window=Math.min(0.15,gap*0.5);const start=nextCue.time-window;if(ct>=start){crossfadeT=Math.min(1,(ct-start)/window);}}}
       // Pre-compute strobe overrides early so they're available for crossfade
-      const strobeOverridesEarly = strobeTracksRef?.current && strobeTracksRef.current.length > 0
-        ? computeStrobeTrackOverrides(strobeTracksRef.current, ct, patchedFixturesRef.current, fixtureGroupsRef?.current || [])
-        : null;
+      let strobeOverridesEarly: Map<string, { active: boolean; speed: number }> | null =
+        strobeTracksRef?.current && strobeTracksRef.current.length > 0
+          ? computeStrobeTrackOverrides(strobeTracksRef.current, ct, patchedFixturesRef.current, fixtureGroupsRef?.current || [])
+          : null;
+      // Le strobe du motif matrice s'ajoute là où aucune piste strobe explicite
+      // ne pilote déjà la fixture.
+      if (matrixTrack.strobe.size > 0) {
+        if (!strobeOverridesEarly) strobeOverridesEarly = new Map();
+        for (const [fid, v] of matrixTrack.strobe) {
+          if (!strobeOverridesEarly.has(fid)) strobeOverridesEarly.set(fid, v);
+        }
+      }
       if(crossfadeT>0&&nextCue){
         try{
           // Track takeover in crossfade snapshot: the blend must not mix autoscript
@@ -1642,7 +1720,20 @@ if (fa.isLaser) {
               const zpos = fixturePositions?.[pf.id];
                 const zeroPd = zpos ? zeroDmxOffset(zpos.centerPan, 'pan') : 0;
                 const zeroTd = zpos ? zeroDmxOffset(zpos.centerTilt, 'tilt') : 0;
-              if(amplitude>0){for(let m=0;m<motorCount;m++){const motorPhase=m*(Math.PI*2/motorCount);const speedMult=Math.max(0.1,Math.min(2.5,active.movementSpeed??1));
+              if(amplitude>0){
+                // Boucle de mouvement section-aware (engine/autoscript-loops) :
+                // la cue porte les bornes de sa section → la trajectoire est
+                // lue dans une vraie boucle (échantillonnage anti-aliasé,
+                // cycles verrouillés sur les beats, raccord de fin de section).
+                // Sans bornes (anciens presets) → calcul analytique historique.
+                const moveLoop = !trackMovement ? sectionMoveFor(active as any, motorCount) : null;
+                const loopPhase01 = moveLoop ? sectionPhase01(active as any, ct) : 0;
+                const loopOffset = moveLoop ? phaseToIndexOffset(
+                  (trackMovement ? 0 : movementPhase) +
+                  (spatialPattern && !trackMovement ? spatialPhaseFor(fixturePositions?.[pf.id], spatialPattern, mobileIdx) : 0),
+                  moveLoop,
+                ) : 0;
+                for(let m=0;m<motorCount;m++){const motorPhase=m*(Math.PI*2/motorCount);const speedMult=Math.max(0.1,Math.min(2.5,active.movementSpeed??1));
                 // Crossfade movement params: blend toward next cue (clamped)
                 const curAmp = amplitude; const curSpd = speedMult;
                 const nextSpdClamped = Math.max(0.1,Math.min(2.5,(nextCue as any)?.movementSpeed ?? curSpd));
@@ -1655,13 +1746,16 @@ if (fa.isLaser) {
                   ? Math.max(0.1,Math.min(2.5,curSpd*(1-crossfadeT) + nextSpdClamped*crossfadeT))
                   : curSpd);
                 const phase=(ct*Math.PI*2*blendSpd)+motorPhase+(trackMovement?0:movementPhase)+(spatialPattern&&!trackMovement?spatialPhaseFor(fixturePositions?.[pf.id],spatialPattern,mobileIdx):0);
-                const [px, py] = evalEffect(effPattern as EffectPattern, phase, 0);
+                const [px, py] = moveLoop
+                  ? sampleSectionLoop(moveLoop, loopPhase01, m, loopOffset)
+                  : evalEffect(effPattern as EffectPattern, phase, 0);
                 const pfl = panTiltLimits.perFixture?.[pf.id];
                 // Fixture-track movement blocks are user-authored (higher priority than autoscript): do not clamp them.
                 const panLimit = trackMovement ? 128 : (pfl?.pan ?? panTiltLimits.pan);
                 const tiltLimit = trackMovement ? 128 : (pfl?.tilt ?? panTiltLimits.tilt);
                 if(m<panCount){
-                  const raw = Math.max(0,Math.min(255,Math.round(128+zeroPd + (amplitude>0 ? px*blendAmp : 0))));
+                  const ampPan = movementAmp(blendAmp, 128 + zeroPd, panLimit);
+                  const raw = Math.max(0,Math.min(255,Math.round(128+zeroPd + px*ampPan)));
                   const fp = fixturePositions?.[pf.id];
                   // Fixture avec centre capturé : on ne rencentre PAS vers la zone
                   // de scène (clampPanToStage annulerait le point visé) — on ne
@@ -1672,7 +1766,8 @@ if (fa.isLaser) {
                   if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: pv, tilt: 128 }), pan: pv });
                 }
                 if(m<tiltCount){
-                  const raw = Math.max(0,Math.min(255,Math.round(128+zeroTd + (amplitude>0 ? py*blendAmp : 0))));
+                  const ampTilt = movementAmp(blendAmp, 128 + zeroTd, tiltLimit);
+                  const raw = Math.max(0,Math.min(255,Math.round(128+zeroTd + py*ampTilt)));
                   const fp = fixturePositions?.[pf.id];
                   let tv = (zeroTd !== 0 && fp) ? raw : (fp ? clampTiltToStage(raw, fp.y) : raw);
                   tv = Math.max(128 + zeroTd - tiltLimit, Math.min(128 + zeroTd + tiltLimit, tv));
@@ -2202,7 +2297,10 @@ export function computeDmxForCue(
         const amplitude = trackMovement
           ? trackMovement.amplitude
           : (cue as any).movementAmplitude !== undefined
-            ? Math.min(128, Math.max(0, Math.round((cue as any).movementAmplitude)))
+            // Parité avec le live : l'amplitude de la cue est modulée par le tier
+            // (primary 100 %, secondary 72 %, tertiary 42 %) — avant, le preset
+            // matérialisé bougeait plus fort que le live.
+            ? Math.min(128, Math.max(0, Math.round((cue as any).movementAmplitude * (pf.tier === 'primary' ? 1 : pf.tier === 'secondary' ? 0.72 : 0.42))))
             : pf.tier === 'primary' ? 90 : pf.tier === 'secondary' ? 70 : 40;
         if (amplitude > 0) {
           // Spatial choreography: keep crossfade snapshots coherent with the live tick
@@ -2217,6 +2315,16 @@ export function computeDmxForCue(
             }
           }
           const phase = cue.time * Math.PI * 2 * speedMult + (spatialPattern && !trackMovement ? spatialPhaseFor(fixturePositions?.[pf.id], spatialPattern, mobileIdx) : 0);
+          // Boucle de mouvement section-aware (même kernel que le live) :
+          // la matérialisation d'un preset suit donc exactement le rendu live.
+          const moveLoop = !trackMovement ? sectionMoveFor(cue as any, motorCount) : null;
+          const loopPhase01 = moveLoop ? sectionPhase01(cue as any, cue.time) : 0;
+          const loopOffset = moveLoop
+            ? phaseToIndexOffset(
+                spatialPattern && !trackMovement ? spatialPhaseFor(fixturePositions?.[pf.id], spatialPattern, mobileIdx) : 0,
+                moveLoop,
+              )
+            : 0;
           for (let m = 0; m < motorCount; m++) {
             const motorPhase = m * (Math.PI * 2 / motorCount);
             const movSec = (() => {
@@ -2272,17 +2380,24 @@ export function computeDmxForCue(
               case 'tiltOnly': px = 0; py = Math.sin(phase); break;
               default: px = Math.sin(phase * .35) * .5; py = Math.cos(phase * .3 + motorPhase) * .5;
             }
+            // Source de vérité : la boucle section-aware (normalisée, raccordée)
+            // quand la cue porte ses bornes, sinon le calcul analytique ci-dessus.
+            if (moveLoop) {
+              [px, py] = sampleSectionLoop(moveLoop, loopPhase01, m, loopOffset);
+            }
             if (m < panCount) {
               const rp = fixturePositions?.[pf.id];
               const zPd = zeroDmxOffset(rp?.centerPan, 'pan');
-              const raw = Math.max(0, Math.min(255, Math.round(128 + zPd + px * amplitude)));
+              const ampPan = movementAmp(amplitude, 128 + zPd, 128);
+              const raw = Math.max(0, Math.min(255, Math.round(128 + zPd + px * ampPan)));
               const fp = fixturePositions?.[pf.id];
               chVals[pf.startAddress + fa.panOffsets[m]] = (zPd !== 0 && fp) ? raw : (fp ? clampPanToStage(raw, fp.x) : raw);
             }
             if (m < tiltCount) {
               const rp = fixturePositions?.[pf.id];
               const zTd = zeroDmxOffset(rp?.centerTilt, 'tilt');
-              const raw = Math.max(0, Math.min(255, Math.round(128 + zTd + py * amplitude)));
+              const ampTilt = movementAmp(amplitude, 128 + zTd, 128);
+              const raw = Math.max(0, Math.min(255, Math.round(128 + zTd + py * ampTilt)));
               const fp = fixturePositions?.[pf.id];
               chVals[pf.startAddress + fa.tiltOffsets[m]] = (zTd !== 0 && fp) ? raw : (fp ? clampTiltToStage(raw, fp.y) : raw);
             }

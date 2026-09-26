@@ -68,6 +68,12 @@ export function useAudioFileLoader() {
     setState(s => ({ ...s, file: null, audioBuffer: null, analysis, isAnalyzing: false, currentTime: 0, error: null }));
   }, []);
 
+  /** Patch l'analyse en place SANS toucher au fichier/audio chargé
+   *  (ex. remplacement des sections + grille tempo par un import All-In-One). */
+  const patchAnalysis = useCallback((patch: Partial<TrackAnalysis>) => {
+    setState(s => (s.analysis ? { ...s, analysis: { ...s.analysis, ...patch } } : s));
+  }, []);
+
   const restoreWithAudio = useCallback(async (analysis: TrackAnalysis, dataUrl: string) => {
     setState(s => ({ ...s, isAnalyzing: true, error: null }));
     try {
@@ -177,7 +183,7 @@ export function useAudioFileLoader() {
     }
   }, [state.audioBuffer, state.isPlaying, getAudioContext]);
 
-  return { ...state, loadFile, loadWithAnalysis, restoreAnalysis, restoreWithAudio, play, pause, stop, seek, clear };
+  return { ...state, loadFile, loadWithAnalysis, restoreAnalysis, restoreWithAudio, patchAnalysis, play, pause, stop, seek, clear };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -196,6 +202,9 @@ interface AudioFileUploadProps {
   onInsertEntity?: (startTime: number, endTime: number, entityType: 'scene' | 'chaser' | 'cuelist' | 'efx', entityId: string) => void;
   sections?: TrackSection[];
   onSections?: TrackSection[];
+  /** Quand false, masque la barre de lecture (un transport dédié est
+   *  affiché ailleurs, ex. bas de page QuickShow). Défaut true. */
+  showTransport?: boolean;
   onSectionsChange?: (sections: TrackSection[]) => void;
   /** Magnétisme : aligne les séparatrices de sections sur les beats détectés. Défaut ON. */
   snapToBeats?: boolean;
@@ -205,7 +214,7 @@ interface AudioFileUploadProps {
   effects?: { id: string; name: string }[];
 }
 
-export const AudioFileUpload: React.FC<AudioFileUploadProps> = ({ onFileLoaded, onInsertColor, onInsertDimmer, onInsertStrobe, compact, externalState, onSelectionChange, onSectionClick, onInsertEntity, sections, onSectionsChange, snapToBeats, scenes, chasers, cueLists, effects }) => {
+export const AudioFileUpload: React.FC<AudioFileUploadProps> = ({ onFileLoaded, onInsertColor, onInsertDimmer, onInsertStrobe, compact, externalState, onSelectionChange, onSectionClick, onInsertEntity, sections, showTransport, onSectionsChange, snapToBeats, scenes, chasers, cueLists, effects }) => {
   const internalState = useAudioFileLoader();
   const { file, analysis, isAnalyzing, isPlaying, currentTime, error, loadFile, play, pause, stop, seek, clear } = externalState || internalState;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -274,7 +283,8 @@ export const AudioFileUpload: React.FC<AudioFileUploadProps> = ({ onFileLoaded, 
           energyCurve={analysis.energyCurve} lowCurve={analysis.lowCurve} />
       </div>
 
-      {/* Playback bar */}
+      {/* Playback bar (masquable : transport déporté en bas de page QuickShow) */}
+      {showTransport !== false && (
       <div className="flex items-center gap-2">
         <button onClick={() => seek(0)} className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Début (↖)">
           <SkipBack size={14} />
@@ -300,6 +310,7 @@ export const AudioFileUpload: React.FC<AudioFileUploadProps> = ({ onFileLoaded, 
           <Upload size={14} />
         </button>
       </div>
+      )}
     </div>
   );
 };

@@ -10,6 +10,9 @@
  * - Toute commande entrante est émise au renderer via
  *   `mainWindow.webContents.send('remote:command', command)` - la fenêtre cible
  *   est fournie par le main via `setMainWindow()`.
+ * - Routes POST : `/api/scene/:id`, `/api/chaser/:id`,
+ *   `/api/widget/:id` (Console Virtuelle : press | release | toggle |
+ *   slider + `value` 0..1), `/api/blackout`, `/api/grandmaster`.
  * - Le main câble les canaux IPC : `remote:start` / `remote:stop` /
  *   `remote:getStatus` (handles) et `remote:state` (push du snapshot).
  *   Ici, aucune importation runtime d'electron (import type uniquement) :
@@ -79,10 +82,20 @@ export type RemoteCommand =
   | { type: 'scene'; id: string; action: 'play' | 'stop' | 'toggle' }
   | { type: 'chaser'; id: string; action: 'play' | 'stop' | 'next' | 'previous' }
   | { type: 'blackout'; on: boolean }
-  | { type: 'grandMaster'; value: number };
+  | { type: 'grandMaster'; value: number }
+  /**
+   * Widget de la Console Virtuelle (bouton OU fader).
+   * - press/release : momentané (sensibilité flash des boutons)
+   * - toggle        : bascule (bouton momentané = press immédiat suivi de release
+   *                   côté renderer)
+   * - slider        : pilotage du fader par `value` (fraction 0..1 du range
+   *                   [min, max] du widget)
+   */
+  | { type: 'widget'; id: string; action: 'press' | 'release' | 'toggle' | 'slider'; value?: number };
 
 const SCENE_ACTIONS = new Set(['play', 'stop', 'toggle']);
 const CHASER_ACTIONS = new Set(['play', 'stop', 'next', 'previous']);
+const WIDGET_ACTIONS = new Set(['press', 'release', 'toggle', 'slider']);
 const MAX_BODY_BYTES = 64 * 1024;
 
 export class RemoteServer {
@@ -252,6 +265,14 @@ export class RemoteServer {
           return this.handleChaser(res, id, body);
         });
       }
+      const widget = /^\/api\/widget\/([^/]+)$/.exec(url.pathname);
+      if (widget) {
+        return this.readJsonBody(req, res, (body) => {
+          const id = this.safeDecode(widget[1]);
+          if (id === null) return this.sendJson(res, 400, { ok: false, error: 'invalid id' });
+          return this.handleWidget(res, id, body);
+        });
+      }
       if (url.pathname === '/api/blackout') {
         return this.readJsonBody(req, res, (body) => this.handleBlackout(res, body));
       }
@@ -280,6 +301,28 @@ export class RemoteServer {
       return this.sendJson(res, 400, { ok: false, error: "action must be 'play' | 'stop' | 'next' | 'previous'" });
     }
     if (!this.emitCommand({ type: 'chaser', id, action: action as 'play' | 'stop' | 'next' | 'previous' })) {
+      return this.sendJson(res, 503, { ok: false, error: 'renderer indisponible' });
+    }
+    this.sendJson(res, 200, { ok: true });
+  }
+
+  /** Widget de la Console Virtuelle : bouton (press/release/toggle) ou fader (slider). */
+  private handleWidget(res: http.ServerResponse, id: string, body: unknown): void {
+    const b = body as { action?: unknown; value?: unknown } | null;
+    const rawAction = typeof b?.action === 'string' ? b.action : 'press';
+    if (!WIDGET_ACTIONS.has(rawAction)) {
+      return this.sendJson(res, 400, { ok: false, error: "action must be 'press' | 'release' | 'toggle' | 'slider'" });
+    }
+    const action = rawAction as 'press' | 'release' | 'toggle' | 'slider';
+    let value: number | undefined;
+    if (action === 'slider') {
+      const v = b?.value;
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1) {
+        return this.sendJson(res, 400, { ok: false, error: "value must be a number in [0, 1] when action='slider'" });
+      }
+      value = v;
+    }
+    if (!this.emitCommand({ type: 'widget', id, action, value })) {
       return this.sendJson(res, 503, { ok: false, error: 'renderer indisponible' });
     }
     this.sendJson(res, 200, { ok: true });

@@ -23,9 +23,19 @@ export interface RgbMatrix {
   enabled: boolean;
 }
 
+export interface RgbMatrixStats {
+  /** Fixtures du groupe ciblées par la matrice. */
+  total: number;
+  /** Fixtures effectivement écrites en DMX (RGB résolu). */
+  resolved: number;
+}
+
 interface RgbMatrixStore {
   matrices: RgbMatrix[];
   activeMatrixId: string | null;
+  /** Dernier diagnostic du moteur de lecture (par matrice). */
+  stats: Record<string, RgbMatrixStats>;
+  setStats: (id: string, stats: RgbMatrixStats) => void;
   createMatrix: (name: string, groupId: string) => void;
   updateMatrix: (id: string, updates: Partial<RgbMatrix>) => void;
   deleteMatrix: (id: string) => void;
@@ -44,6 +54,14 @@ export const useRgbMatrixStore = create<RgbMatrixStore>()(
     (set) => ({
       matrices: [],
       activeMatrixId: null,
+      stats: {},
+
+      setStats: (id, stats) =>
+        set(s => {
+          const prev = s.stats[id];
+          if (prev && prev.total === stats.total && prev.resolved === stats.resolved) return s;
+          return { stats: { ...s.stats, [id]: stats } };
+        }),
 
       createMatrix: (name, groupId) => {
         const id = `rgbm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -59,10 +77,15 @@ export const useRgbMatrixStore = create<RgbMatrixStore>()(
         })),
 
       deleteMatrix: (id) =>
-        set(s => ({
-          matrices: s.matrices.filter(m => m.id !== id),
-          activeMatrixId: s.activeMatrixId === id ? null : s.activeMatrixId,
-        })),
+        set(s => {
+          const stats = { ...s.stats };
+          delete stats[id];
+          return {
+            matrices: s.matrices.filter(m => m.id !== id),
+            activeMatrixId: s.activeMatrixId === id ? null : s.activeMatrixId,
+            stats,
+          };
+        }),
 
       setActiveMatrix: (id) => set({ activeMatrixId: id }),
 

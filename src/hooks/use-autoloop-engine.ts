@@ -14,9 +14,9 @@ import { useClockStore } from '../stores/clockStore';
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from './dmx-cues';
 import {
   toAutoloopFixtures,
-  buildSoundswitchBanks,
   defaultColorCues,
 } from '../engine/autoloop-runtime';
+import { buildThemedBanks } from '../engine/autoloop-themes';
 import { AutoloopPlaybackEngine } from '../engine/autoloop-engine';
 import { BankManager } from '../engine/autoloop-banks';
 import { createAutoLoopOutput } from '../engine/autoloop-adapter';
@@ -102,7 +102,7 @@ export function useAutoloopEngine(bpm = 120): AutoloopEngineApi {
       setBanks(null);
       return;
     }
-    const b = buildSoundswitchBanks(fixtures);
+    const b = buildThemedBanks(fixtures);
     setBanks(b);
     const output = createAutoLoopOutput(patchedFixtures, universes);
     engineRef.current = new AutoloopPlaybackEngine(output, bpmRef.current);

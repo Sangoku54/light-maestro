@@ -2,11 +2,14 @@
 import React, { useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import { clampRect } from '../components/clampedpopup';
 import { useTranslation } from 'react-i18next';
-import { Save, FolderOpen, Download, RefreshCw, Undo2, Redo2, Trash2, Zap, ZapOff, Pencil, Plus, Palette, Sun, Layers, Upload, Music, Crosshair, Snowflake, Sparkles } from 'lucide-react';
+import { Save, FolderOpen, Download, RefreshCw, Undo2, Redo2, Trash2, Zap, ZapOff, Pencil, Plus, Palette, Sun, Layers, Upload, Music, Crosshair, Snowflake, Sparkles, Play, Pause, Square, SkipBack, SkipForward, Wrench } from 'lucide-react';
 import { useAppStore, type CustomPalette, type ColorPreset } from '../stores/appStore';
 import { useShowStore, type PatchedFixture, type SongPreset, type View3DState } from '../stores/showStore';
+import { useRgbMatrixStore } from '../stores/rgbmatrixStore';
+import { collectActiveMatrixIds, renderMatrixFrame, syncMatrixEnabled, restoreMatrixEnabled } from '../hooks/rgb-matrix-playback';
 import { useClockStore } from '../stores/clockStore';
 import { RichTooltip } from '../components/RichTooltip';
+import { ColorPickerModal } from '../components/ColorPickerModal';
 import { AudioFileUpload, useAudioFileLoader } from '../hooks/useAudioFileLoader';
 import { TrackAnalysis, TrackSection, SECTION_COLORS, keyToPalette, SectionAnalysis, AtmosphereType } from '../hooks/audio-analysis';
 import type { GenreProfile } from '../hooks/audio-analysis';
@@ -14,17 +17,20 @@ import { computeFixtureTrackOverrides, computeEfxOverrides, type FixtureTrack } 
 import { loadFixtureDefinitions, clearFixtureDefCache, type DmxCue, type DmxFixtureDefinition } from '../hooks/dmx-cues';
 import { useDmxPlayback, computeDmxForCue, computeColorTrackColors, type ColorTrackRef, type DimmerTrackRef, computeDimmerTrackOverrides, computeStrobeTrackOverrides, computeChaserTrackOverrides, type ChaserTrackRef, computeSceneTrackOverrides, computeShowTrackOverrides } from '../hooks/dmx-playback';
 import { analyzeChannels } from '../engine/fixture-analyzer';
+import { dmxBridge } from '../utils/dmx-bridge';
 import { halfDegToDmxOffset, SPATIAL_BY_SECTION } from '../engine/dmx-movement';
-import { DEFAULT_ROSTER, normalizeRoster, type MusicianRoster } from '../utils/musicians';
+import { setSectionChain } from '../engine/autoscript-loops';
+import { normalizeRoster, type MusicianRoster } from '../utils/musicians';
 import { importCustomFixtureDefs } from '../utils/custom-fixtures';
 import { pickAudioUrl, audioBufferToWavDataUrl } from '../utils/audio-cache';
+import { mapAllInOneToSections, parseAllInOneJson } from '../utils/allinone-import';
 import { lastAudioLoad, lastAudioRemember } from '../utils/last-audio';
 import { MasterClockBar } from '../components/MasterClockBar';
 import type { StageScene } from '../stores/showStore';
 import { AutoLoopsPanel } from './AutoLoopsPanel';
 import { Stage3D } from './Stage3D';
 import TrackTimeline from './TrackTimeline';
-import type { EfxTrack, EfxTrackEntry, ColorTrack, ColorTrackEntry, StrobeTrack, StrobeTrackEntry, DimmerTrack, DimmerTrackEntry, ChaserTrack, ChaserTrackEntry, ShowTrack, ShowTrackEntry, SceneTrack, SceneTrackEntry } from './TrackTimeline';
+import type { EfxTrack, EfxTrackEntry, ColorTrack, ColorTrackEntry, StrobeTrack, StrobeTrackEntry, DimmerTrack, DimmerTrackEntry, ChaserTrack, ChaserTrackEntry, ShowTrack, ShowTrackEntry, SceneTrack, SceneTrackEntry, MatrixTrack, MatrixTrackEntry } from './TrackTimeline';
 
 type EnrichedCue = DmxCue;
 
@@ -50,7 +56,7 @@ const PromptModal: React.FC<{
       onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); }}
     >
       <div
-        className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[320px] p-4"
+        className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[320px] max-w-[95vw] p-4"
         onClick={(e) => e.stopPropagation()}
       >
         <p className="text-sm font-semibold text-gray-200 mb-3">{title}</p>
@@ -266,6 +272,10 @@ function complementaryPair(hex: string): [string, string] {
 }
 
 function resolvePaletteColors(paletteName: string, cfg?: any): string[] {
+  // Schéma 'user' : palette personnalisée stockée dans cfg.userPreset.
+  if (paletteName === 'user' && Array.isArray(cfg?.userPreset) && cfg.userPreset.length > 0) {
+    return cfg.userPreset;
+  }
   const autoKey = cfg?.detectedKey;
   const autoPal = autoKey ? keyToPalette[autoKey] : undefined;
   const pal = paletteName === 'auto' ? (autoPal || 'party') : paletteName;
@@ -720,6 +730,14 @@ export function genCues(
         : (cfg.colorScheme === 'auto' && DEFAULT_SECTION_PALETTES[section.type])
           ? DEFAULT_SECTION_PALETTES[section.type]
           : basePal;
+      // Rotation de palette par régénération : le bouton Régénérer décale le
+      // point de départ des couleurs de chaque section (seed 0/absent =
+      // comportement historique inchangé). Le cyclage est conservé, seules
+      // les teintes de départ changent — variation visible immédiate.
+      const seedKey = regenSeed ?? 0;
+      const regenColorShift = (!seedKey || seedKey === '0' || sectionPal.length < 2)
+        ? 0
+        : Math.abs(hash(`${section.type}_${section.startTime}_${seedKey}_color`)) % sectionPal.length;
       const density = SECTION_DENSITY[section.type] || 1;
       const localInterval = interval / density;
       const numCues = Math.max(1, Math.floor(dur / localInterval));
@@ -797,7 +815,7 @@ export function genCues(
         // Drop/chorus changent vite (tranché), verse/intro tiennent plus longtemps.
         const beatDur = localInterval * beatDivision / 4; // durée d'un temps (s) — utilise local pour densité
         const sectionColorIdx = Math.floor((t - section.startTime) / (holdBeats * beatDur));
-        const paletteIdx = sectionColorIdx % Math.max(1, sectionPal.length);
+        const paletteIdx = (sectionColorIdx + regenColorShift) % Math.max(1, sectionPal.length);
         prevColor = sectionPal[paletteIdx];
         // Gradient interpolation: blend start→end color across section duration
         const gradient = cfg.customGradients?.[section.type] as { start: string; end: string } | undefined;
@@ -884,6 +902,10 @@ export function genCues(
         cues.push({
           time: t,
           section: section.type,
+          // Bornes de section : permettent au moteur de lire une VRAIE boucle
+          // de mouvement (voir engine/autoscript-loops) calée sur les beats.
+          sectionStart: section.startTime,
+          sectionEnd: section.endTime,
           effect: `${section.type} #${i + 1}`,
           intensity: dropAnticipation && !(cfg.intensity && cfg.intensity !== 'dynamic') ? 'high' : prevIntensity,
           colors: sectionPal,
@@ -936,6 +958,8 @@ export function genCues(
         cues.push({
           time: t,
           section: section.type,
+          sectionStart: section.startTime,
+          sectionEnd: section.endTime,
           effect: `${section.type} #${i + 1}`,
           intensity: profile.intensity,
           colors: sectionPal,
@@ -948,6 +972,7 @@ export function genCues(
           strobeProbability: profile.strobeProbability,
           dimmerPulseOnBeat: profile.dimmerPulseOnBeat,
           musicStyle: genre,
+          bpm,
         });
       }
     }
@@ -1010,6 +1035,15 @@ export function genCues(
       deduped.push(cue);
     }
   }
+  // Chaîne des sections + pattern de départ de chacune : le moteur construit
+  // alors les boucles de mouvement section-aware et raccorde section → section
+  // sur la valeur réelle (voir engine/autoscript-loops).
+  const firstMovements: Record<number, string> = {};
+  for (const cue of deduped) {
+    if (cue.sectionStart === undefined || !cue.movement) continue;
+    if (firstMovements[cue.sectionStart] === undefined) firstMovements[cue.sectionStart] = cue.movement;
+  }
+  setSectionChain(sections, firstMovements);
   return deduped;
 }
 
@@ -1271,8 +1305,8 @@ const ColorPresetsPanel: React.FC = () => {
 
   // Resolve active palette colors
   const activeColors = useMemo(
-    () => resolvePaletteColors(qs.colorScheme || 'auto', { musicStyle: qs.musicStyle }),
-    [qs.colorScheme, qs.musicStyle],
+    () => resolvePaletteColors(qs.colorScheme || 'auto', { musicStyle: qs.musicStyle, userPreset: qs.userPreset }),
+    [qs.colorScheme, qs.musicStyle, qs.userPreset],
   );
 
   // Change a single color in the active palette (updates userPreset + switches to 'user' scheme)
@@ -1282,20 +1316,20 @@ const ColorPresetsPanel: React.FC = () => {
     setQs({ userPreset: newColors, colorScheme: 'user' });
   }, [activeColors, setQs]);
 
+  // Modale couleur Light Maestro (les inputs natifs cachés + clic programmatique
+  // ne déclenchent pas fiablement l'événement change sous Electron).
+  const [colorModal, setColorModal] = useState<
+    | { mode: 'add-active' }
+    | { mode: 'edit-active'; idx: number }
+    | { mode: 'add-section'; section: keyof CustomPalette }
+    | { mode: 'edit-section'; section: keyof CustomPalette; idx: number }
+    | null
+  >(null);
+
   // Add a color to the active palette
   const handleAddActiveColor = useCallback(() => {
-    const inp = document.createElement('input');
-    inp.type = 'color';
-    inp.value = '#ffffff';
-    inp.style.position = 'fixed';
-    inp.style.opacity = '0';
-    document.body.appendChild(inp);
-    inp.click();
-    inp.onchange = () => {
-      document.body.removeChild(inp);
-      setQs({ userPreset: [...activeColors, inp.value], colorScheme: 'user' });
-    };
-  }, [activeColors, setQs]);
+    setColorModal({ mode: 'add-active' });
+  }, []);
 
   // Remove a color from the active palette
   const handleRemoveActiveColor = useCallback((idx: number) => {
@@ -1315,35 +1349,13 @@ const ColorPresetsPanel: React.FC = () => {
 
   // Per-section: add a color
   const handleSectionAddColor = useCallback((sectionType: keyof CustomPalette) => {
-    const inp = document.createElement('input');
-    inp.type = 'color';
-    inp.value = SECTION_COLORS[sectionType] || '#ff0064';
-    inp.style.position = 'fixed';
-    inp.style.opacity = '0';
-    document.body.appendChild(inp);
-    inp.click();
-    inp.onchange = () => {
-      document.body.removeChild(inp);
-      setCustomPalette({ [sectionType]: [...(customPal[sectionType] || []).slice(0, 5), inp.value] });
-    };
-  }, [customPal, setCustomPalette]);
+    setColorModal({ mode: 'add-section', section: sectionType });
+  }, []);
 
   // Per-section: edit a color
   const handleSectionColorEdit = useCallback((sectionType: keyof CustomPalette, idx: number) => {
-    const inp = document.createElement('input');
-    inp.type = 'color';
-    inp.value = (customPal[sectionType] || [])[idx] || '#ff0000';
-    inp.style.position = 'fixed';
-    inp.style.opacity = '0';
-    document.body.appendChild(inp);
-    inp.click();
-    inp.onchange = () => {
-      document.body.removeChild(inp);
-      const arr = [...(customPal[sectionType] || [])];
-      arr[idx] = inp.value;
-      setCustomPalette({ [sectionType]: arr });
-    };
-  }, [customPal, setCustomPalette]);
+    setColorModal({ mode: 'edit-section', section: sectionType, idx });
+  }, []);
 
   // Per-section: remove a color
   const handleSectionColorRemove = useCallback((sectionType: keyof CustomPalette, idx: number) => {
@@ -1430,22 +1442,10 @@ const ColorPresetsPanel: React.FC = () => {
               {activeColors.map((color, i) => (
                 <div key={i} className="relative group">
                   <button
-                    onClick={() => {
-                      const inp = document.createElement('input');
-                      inp.type = 'color';
-                      inp.value = color;
-                      inp.style.position = 'fixed';
-                      inp.style.opacity = '0';
-                      document.body.appendChild(inp);
-                      inp.click();
-                      inp.onchange = () => {
-                        document.body.removeChild(inp);
-                        handleActiveColorChange(i, inp.value);
-                      };
-                    }}
+                    onClick={() => setColorModal({ mode: 'edit-active', idx: i })}
                     className="w-10 h-10 rounded-full border-2 border-gray-600 hover:border-purple-400 hover:scale-110 transition-all cursor-pointer shadow-lg"
                     style={{ backgroundColor: color }}
-                    title={`${color} - clic pour modifier`}
+                    title="Clic pour modifier"
                   />
                   <button
                     onClick={(e) => { e.stopPropagation(); handleRemoveActiveColor(i); }}
@@ -1455,14 +1455,6 @@ const ColorPresetsPanel: React.FC = () => {
                     ×
                   </button>
                 </div>
-              ))}
-            </div>
-            {/* Color hex list */}
-            <div className="mt-3 flex flex-wrap gap-1">
-              {activeColors.map((color, i) => (
-                <code key={i} className="text-[9px] bg-gray-900/60 px-1.5 py-0.5 rounded text-gray-500 font-mono">
-                  {color}
-                </code>
               ))}
             </div>
           </div>
@@ -1626,6 +1618,41 @@ const ColorPresetsPanel: React.FC = () => {
           onOk={(name) => { addColorPreset(name, activeColors); setPromptOpen(false); }}
         />
       )}
+      {colorModal && (() => {
+        const initial =
+          colorModal.mode === 'edit-active' ? (activeColors[colorModal.idx] || '#ffffff')
+          : colorModal.mode === 'edit-section' ? ((customPal[colorModal.section] || [])[colorModal.idx] || '#ffffff')
+          : colorModal.mode === 'add-section' ? (SECTION_COLORS[colorModal.section] || '#ff0064')
+          : '#ffffff';
+        const title =
+          colorModal.mode === 'add-active' ? 'Ajouter une couleur'
+          : colorModal.mode === 'edit-active' ? 'Modifier la couleur'
+          : colorModal.mode === 'add-section' ? `Ajouter — ${colorModal.section}`
+          : `Modifier — ${colorModal.section}`;
+        return (
+          <ColorPickerModal
+            title={title}
+            initial={initial}
+            onClose={() => setColorModal(null)}
+            onPick={(color) => {
+              if (colorModal.mode === 'add-active') {
+                setQs({ userPreset: [...activeColors, color], colorScheme: 'user' });
+              } else if (colorModal.mode === 'edit-active') {
+                handleActiveColorChange(colorModal.idx, color);
+              } else if (colorModal.mode === 'add-section') {
+                const st = colorModal.section;
+                setCustomPalette({ [st]: [...(customPal[st] || []).slice(0, 5), color] });
+              } else {
+                const st = colorModal.section;
+                const arr = [...(customPal[st] || [])];
+                arr[colorModal.idx] = color;
+                setCustomPalette({ [st]: arr });
+              }
+              setColorModal(null);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 };
@@ -1691,8 +1718,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [disabledFixtures, setDisabledFixtures] = useState<Set<string>>(new Set());
   const disabledFixturesRef = useRef<Set<string>>(new Set());
   // Vue 3D par preset (pont + musiciens)
-  const [qsMusicians, setQsMusicians] = useState<MusicianRoster>(DEFAULT_ROSTER);
-  const [qsStageScene, setQsStageScene] = useState<StageScene>('rear-front');
+  const [qsMusicians, setQsMusicians] = useState<MusicianRoster>({});
+  const [qsStageScene, setQsStageScene] = useState<StageScene>('empty');
   // Camera + toolbar state of the floating 3D view. Persisted with the preset
   // so that reloading the preset restores the view the user configured.
   const [qsView3D, setQsView3D] = useState<View3DState | undefined>(undefined);
@@ -1716,6 +1743,10 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [sceneTracks, setSceneTracks] = useState<SceneTrack[]>([]);
   const sceneTracksRef = useRef<SceneTrack[]>([]);
   sceneTracksRef.current = sceneTracks as any;
+  const [matrixTracks, setMatrixTracks] = useState<MatrixTrack[]>([]);
+  const matrixTracksRef = useRef<MatrixTrack[]>([]);
+  matrixTracksRef.current = matrixTracks as any;
+  const matricesRef = useRef<any[]>([]);
   const [fixtureTracks, setFixtureTracks] = useState<FixtureTrack[]>([]);
   const fixtureTracksRef = useRef<FixtureTrack[]>([]);
   fixtureTracksRef.current = fixtureTracks;
@@ -1771,6 +1802,12 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const entityChaserList = useMemo(() => chaserEntities.map(c => ({ id: c.id, name: c.name })), [chaserEntities]);
   const entityCueListList = useMemo(() => cueListEntities.map(cl => ({ id: cl.id, name: cl.name })), [cueListEntities]);
   const entityEffectList = useMemo(() => effectEntities.map(e => ({ id: e.id, name: e.name })), [effectEntities]);
+  const matrixEntities = useRgbMatrixStore(s => s.matrices);
+  const entityMatrixList = useMemo(
+    () => matrixEntities.map(m => ({ id: m.id, name: m.name, groupId: m.groupId })),
+    [matrixEntities],
+  );
+  matricesRef.current = matrixEntities as any;
 
   useEffect(() => {
     (window as any).__lm_loadAudioFile = async (file: File) => { await audioFile.loadFile(file); audioFile.play(); };
@@ -1998,6 +2035,162 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setSectionModal({ idx });
   }, []);
 
+  /* ─── Structure IA — All-In-One systématique (option B, offline) ───
+   * Par défaut : à chaque nouvel audio analysé, si l'outil externe est
+   * dispo (python + all-in-one-infer), sa structure remplace celle du
+   * moteur local. Sinon on garde le moteur local, sans bloquer.
+   */
+  // Par défaut : moteur interne SEUL — aucun Python lancé d'office.
+  // L'auto-IA est un choix explicite (case « auto »), persisté en local.
+  const [aiAuto, setAiAuto] = useState(() => {
+    try { return localStorage.getItem('lm-ai-auto') === '1'; } catch { return false; }
+  });
+  /** Sections IA conservées à part + source affichée (bascule IA/Local sans recalcul). */
+  const [aiSections, setAiSections] = useState<TrackSection[] | null>(null);
+  const [sectionSource, setSectionSource] = useState<'ai' | 'local'>('ai');
+  /** Modèle IA : ensemble précis (8 folds, lent) ou fold unique rapide (~8x plus vite). */
+  const [aiModel, setAiModel] = useState(() => {
+    try { return localStorage.getItem('lm-ai-model') || 'harmonix-all'; }
+    catch { return 'harmonix-all'; }
+  });
+  const [aiStatus, setAiStatus] = useState<{ phase: 'idle' | 'checking' | 'running' | 'error'; msg: string }>({ phase: 'idle', msg: '' });
+  /** Outil IA détecté (true), absent (false) ou pas encore vérifié (null).
+   *  Quand il est là, l'UI ne parle que de Structure IA : le moteur local
+   *  reste un filet invisible, jamais mentionné. */
+  const [aiAvailable, setAiAvailable] = useState<boolean | null>(null);
+  const aiAppliedKeyRef = useRef<string | null>(null);
+  const aiRunningRef = useRef(false);
+  /** Choix manuel explicite de l'utilisateur (bascule IA/Local) : l'auto ne l'écrase jamais. */
+  const userPickedLocalRef = useRef(false);
+
+  const applyAllInOneJson = useCallback((jsonText: string) => {
+    const mapped = mapAllInOneToSections(parseAllInOneJson(jsonText), resolvedAnalysis?.duration);
+    setAiSections(mergeAdjacentSections(mapped.sections));
+    setSectionSource('ai');
+    console.info(
+      '[allinone-import]',
+      mapped.sections.map((s) => `${s.type} ${s.startTime.toFixed(2)}-${s.endTime.toFixed(2)}`).join(' | '),
+      `bpm=${mapped.bpm ?? '?'} beats=${mapped.beats?.length ?? 0}`,
+    );
+    pushHistory();
+    setSections(mergeAdjacentSections(mapped.sections));
+    if (resolvedAnalysis) {
+      audioFile.patchAnalysis({
+        sections: mapped.sections,
+        ...(mapped.bpm !== undefined ? { bpm: Math.round(mapped.bpm) } : {}),
+        ...(mapped.beats ? { beats: mapped.beats, beatPositions: mapped.beatPositions ?? mapped.beats } : {}),
+        ...(mapped.downbeats ? { downbeats: mapped.downbeats } : {}),
+      });
+    }
+    return mapped;
+  }, [audioFile, pushHistory, resolvedAnalysis]);
+
+  const runAiStructure = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) userPickedLocalRef.current = false; // lancement manuel = l'utilisateur veut l'IA
+    const api = (window as any).lightMaestro?.allinone;
+    if (!api) {
+      setAiAvailable(false);
+      if (!silent) setAiStatus({ phase: 'error', msg: 'Structure IA : app desktop requise (indisponible dans le navigateur).' });
+      return;
+    }
+    if (!resolvedAnalysis || !audioFile.audioBuffer) {
+      if (!silent) setAiStatus({ phase: 'error', msg: 'Structure IA : charge d\u2019abord un audio.' });
+      return;
+    }
+    if (aiRunningRef.current) return;
+    aiRunningRef.current = true;
+    try {
+      if (!silent) setAiStatus({ phase: 'checking', msg: 'Structure IA : vérification de l\u2019outil…' });
+      const check = await api.check();
+      if (!check?.ok) {
+        setAiAvailable(false);
+        if (!silent) setAiStatus({ phase: 'error', msg: `Structure IA indisponible — ${check?.detail || 'outil introuvable'}` });
+        return;
+      }
+      setAiAvailable(true);
+      setAiStatus({ phase: 'running', msg: 'Structure IA : analyse en cours (séparation + modèle, plusieurs minutes)…' });
+      const wavDataUrl = audioBufferToWavDataUrl(audioFile.audioBuffer);
+      const commaIdx = wavDataUrl.indexOf(',');
+      const r = await api.analyze({
+        wavBase64: commaIdx > 0 ? wavDataUrl.slice(commaIdx + 1) : wavDataUrl,
+        fileName: resolvedAnalysis.fileName || 'audio.wav',
+        model: aiModel,
+      });
+      if (!r?.ok || !r.json) {
+        setAiStatus({ phase: 'error', msg: `Structure IA échouée — ${r?.error || 'erreur inconnue'}.` });
+        fillLocalSections();
+        return;
+      }
+      const mapped = applyAllInOneJson(r.json);
+      aiAppliedKeyRef.current = `${resolvedAnalysis.fileName || ''}#${Math.round(resolvedAnalysis.duration || 0)}#${aiModel}`;
+      setAiStatus({ phase: 'idle', msg: `Structure IA appliquée : ${mapped.sections.length} sections${r.cached ? ' (cache)' : ''}.` });
+    } catch (e: any) {
+      setAiStatus({ phase: 'error', msg: `Structure IA échouée — ${e?.message || e}.` });
+      fillLocalSections();
+    } finally {
+      aiRunningRef.current = false;
+    }
+  }, [aiModel, aiRunningRef, applyAllInOneJson, audioFile, fillLocalSections, resolvedAnalysis]);
+
+  const cancelAiStructure = useCallback(() => {
+    try { (window as any).lightMaestro?.allinone?.cancel?.(); } catch {}
+    aiRunningRef.current = false;
+    setAiStatus({ phase: 'idle', msg: 'Structure IA annulée.' });
+    fillLocalSections();
+  }, [fillLocalSections]);
+
+  /* Bascule IA ↔ Local : les deux jeux sont gardés en mémoire, aucun recalcul.
+   * L'historique (undo) couvre chaque bascule. */
+  const switchSectionSource = useCallback((src: 'ai' | 'local') => {
+    if (src === sectionSource) return;
+    if (src === 'ai' && !aiSections) return;
+    userPickedLocalRef.current = src === 'local';
+    pushHistory();
+    if (src === 'ai' && aiSections) setSections(aiSections);
+    else fillLocalSections(true);
+    setSectionSource(src);
+  }, [aiSections, fillLocalSections, pushHistory, sectionSource]);
+
+  // Nouveau morceau : on oublie le résultat IA précédent (l'auto le régénère si active).
+  const audioKeyForSource = resolvedAnalysis
+    ? `${resolvedAnalysis.fileName || ''}#${Math.round(resolvedAnalysis.duration || 0)}`
+    : null;
+  const lastAudioKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (audioKeyForSource && lastAudioKeyRef.current !== audioKeyForSource) {
+      lastAudioKeyRef.current = audioKeyForSource;
+      userPickedLocalRef.current = false;
+      setAiSections(null);
+      setSectionSource('ai');
+    }
+  }, [audioKeyForSource]);
+
+  // Progression relayée par le main (stderr du script).
+  useEffect(() => {
+    const api = (window as any).lightMaestro?.allinone;
+    if (!api?.onProgress) return;
+    const off = api.onProgress((msg: string) => {
+      if (aiRunningRef.current) setAiStatus({ phase: 'running', msg: `Structure IA : ${msg}` });
+    });
+    return () => { try { off?.(); } catch {} };
+  }, []);
+
+  // Vérification de l'outil : UNIQUEMENT à la demande (clic « Structure IA »
+  // ou lancement auto) — pas au montage, sinon chaque ouverture de l'onglet
+  // démarre `python -c "import allin1_infer"` (PyTorch → 50 %+ CPU pour rien).
+
+  // Systématique : lance l'IA à chaque nouvel audio (si auto + pas déjà appliqué).
+  // Silencieux : si l'outil est absent, rien ne s'affiche, les sections restent telles quelles.
+  useEffect(() => {
+    if (!aiAuto || !resolvedAnalysis?.duration) return;
+    if (userPickedLocalRef.current) return; // choix manuel Local : on n'écrase pas
+    const key = `${resolvedAnalysis.fileName || ''}#${Math.round(resolvedAnalysis.duration)}#${aiModel}`;
+    if (aiAppliedKeyRef.current === key || aiRunningRef.current) return;
+    const t = setTimeout(() => { void runAiStructure({ silent: true }); }, 1500);
+    return () => clearTimeout(t);
+  }, [aiAuto, aiModel, resolvedAnalysis, runAiStructure]);
+
   /* ─── Preset file dialog loader ───────────────── */
   const [presetsDropdown, setPresetsDropdown] = useState(false);
   const [savedPresets, setSavedPresets] = useState<Array<{ name: string; timestamp: string; data?: any } & Partial<SongPreset>>>([]);
@@ -2026,6 +2219,41 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     if (syncMode === 'tap' && tapBpm > 0) return tapBpm;
     return resolvedAnalysis?.bpm || masterBpm || 120;
   }, [syncMode, manualBpm, tapBpm, resolvedAnalysis, masterBpm, masterSource]);
+
+  /* ─── Import structure All-In-One (option B, offline) ───
+   * JSON produit par `python scripts/allinone_import.py song.wav` :
+   * on remplace les sections + la grille tempo/temps de l'analyse locale,
+   * on garde forme d'onde et courbes d'énergie déjà chargées.
+   */
+  const importAllInOneFile = useCallback(() => {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = '.json,application/json';
+    inp.onchange = async () => {
+      const pf = inp.files?.[0];
+      if (!pf) return;
+      try {
+        const text = await pf.text();
+        const probe = parseAllInOneJson(text);
+        const probeMapped = mapAllInOneToSections(probe, resolvedAnalysis?.duration);
+        if (
+          resolvedAnalysis?.duration &&
+          Math.abs(resolvedAnalysis.duration - probeMapped.duration) > 0.5
+        ) {
+          console.warn(
+            `[allinone-import] durée locale (${resolvedAnalysis.duration.toFixed(2)}s) ≠ JSON (${probeMapped.duration.toFixed(2)}s) : même fichier audio des deux côtés ?`,
+          );
+        }
+        applyAllInOneJson(text);
+        aiAppliedKeyRef.current = `${resolvedAnalysis?.fileName || ''}#${Math.round(resolvedAnalysis?.duration || 0)}#${aiModel}`;
+        setAiStatus({ phase: 'idle', msg: `Structure IA importée : ${probeMapped.sections.length} sections.` });
+      } catch (e) {
+        console.error('All-In-One import failed:', e);
+        setAiStatus({ phase: 'error', msg: 'Import All-In-One échoué (JSON invalide ?).' });
+      }
+    };
+    inp.click();
+  }, [aiModel, applyAllInOneJson, resolvedAnalysis]);
 
   const loadPresetFile = useCallback(() => {
     return new Promise<void>((resolve) => {
@@ -2068,17 +2296,18 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
             const inStore = (existingAudio as string) || '';
             console.error(`[loadPresetFile] name="${presetName}" textSize=${textSize} inFileAudio=${inFile.length !== 0} inFileLen=${inFile.length} inStoreAudio=${inStore.length !== 0} inStoreLen=${inStore.length}`);
             audioDataUrl = pickAudioUrl(data.audioDataBase64, existingAudio) ?? '';
-            let audioSrc = audioDataUrl === inFile ? 'file' : audioDataUrl === inStore ? 'store' : 'none';
             // Dernier filet : le « dernier bon audio » enregistré pour ce nom
             // (IPC last-audio.json) quand ni le fichier ni le store n'ont le son.
             if (!audioDataUrl) {
               const lastGood = (await lastAudioLoad())[presetName]?.base64;
               if (lastGood) {
                 audioDataUrl = lastGood;
-                audioSrc = 'lastGood';
                 console.error(`[loadPresetFile] lastGoodAudio: len=${lastGood.length}`);
               }
             }
+            const audioSrc = !audioDataUrl ? 'none'
+              : audioDataUrl === inFile && inFile ? 'file'
+              : audioDataUrl === inStore && inStore ? 'store' : 'lastGood';
             console.error(`[loadPresetFile] pickedAudio: ${audioDataUrl.length !== 0} len=${audioDataUrl.length} src=${audioSrc}`);
             if (audioDataUrl) {
               try {
@@ -2089,8 +2318,22 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
                 audioFile.restoreAnalysis(data.analysis);
               }
             } else {
-              console.error('[loadPresetFile] NO AUDIO — restoreAnalysis only');
-              audioFile.restoreAnalysis(data.analysis);
+              // Le preset n'embarque aucun son : si la session a déjà le bon
+              // audio chargé, on le GARDE (restoreAnalysis le jetterait avec
+              // file=null/audioBuffer=null). Sinon on restaure l'analyse seule.
+              const sessionName = audioFile.analysis?.fileName || audioFile.file?.name || '';
+              const presetAudioName = data.analysis?.fileName || '';
+              const sessionDur = audioFile.analysis?.duration || 0;
+              const presetDur = data.analysis?.duration || 0;
+              const sameAudio = (audioFile.file || audioFile.audioBuffer) &&
+                (sessionName !== '' && sessionName === presetAudioName ||
+                  (sessionDur > 0 && Math.abs(sessionDur - presetDur) < 1));
+              if (sameAudio) {
+                console.error('[loadPresetFile] NO AUDIO in file — keeping session audio, preset data applied on top');
+              } else {
+                console.error('[loadPresetFile] NO AUDIO anywhere — restoreAnalysis only. Rechargez le fichier audio dans la sidebar puis ré-exportez le preset pour ré-embarquer le son.');
+                audioFile.restoreAnalysis(data.analysis);
+              }
             }
             setHasEverHadAnalysis(true);
           }
@@ -2548,6 +2791,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     showTracksRef: showTracksRef as any,
     showsRef,
     sceneTracksRef: sceneTracksRef as any,
+    matrixTracksRef: matrixTracksRef as any,
+    matricesRef: matricesRef as any,
     disabledFixturesRef: disabledFixturesRef as any,
     panTiltLimitsRef,
     fixturePositionsRef,
@@ -2569,11 +2814,16 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     return map;
   }, [sections]);
 
-  /* ─── Init sections from analysis ────────────────── */
-  useEffect(() => {
-    if (resolvedAnalysis?.sections && sections.length === 0) {
+  /* ─── Sections locales (filet invisible) ───────────
+   * Remplit les sections depuis l'analyse locale. Utilisé quand l'outil IA
+   * est absent, quand l'auto IA est coupée, ou en repli si l'IA échoue.
+   * Quand l'IA est dispo + auto, on NE remplit PAS de sections provisoires :
+   * l'audio charge (forme d'onde) et un message "Analyse IA en cours…" s'affiche.
+   */
+  function fillLocalSections(force = false) {
+    if (resolvedAnalysis?.sections && (sections.length === 0 || force)) {
       setSections(mergeAdjacentSections(resolvedAnalysis.sections));
-    } else if (sections.length === 0 && resolvedAnalysis?.duration && resolvedAnalysis.duration > 0) {
+    } else if ((sections.length === 0 || force) && resolvedAnalysis?.duration && resolvedAnalysis.duration > 0) {
       // Auto-generate sections when audio has no analyzed sections
       const dur = resolvedAnalysis.duration;
       const energyCurve = resolvedAnalysis.energyCurve || [];
@@ -2625,6 +2875,15 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       }
       setSections(mergeAdjacentSections(autoSecs));
     }
+  }
+
+  /* ─── Init sections : moteur interne d'abord ───
+   * Les sections locales s'affichent immédiatement au chargement. L'IA, si
+   * elle est active, remplace ensuite (second temps) — jamais l'inverse.
+   */
+  useEffect(() => {
+    if (sections.length > 0 || !resolvedAnalysis) return;
+    fillLocalSections();
   }, [resolvedAnalysis]);
 
   /* ─── EFX handlers ──────────────────────────────── */
@@ -2709,6 +2968,9 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [sceneInsertMenu, setSceneInsertMenu] = useState<{ trackId: string; time: number; x: number; y: number } | null>(null);
   const [sceneEntryMenu, setSceneEntryMenu] = useState<{ trackId: string; entry: SceneTrackEntry; x: number; y: number } | null>(null);
   const [scenePickModal, setScenePickModal] = useState<{ trackId: string; entryId?: string } | null>(null);
+  const [matrixInsertMenu, setMatrixInsertMenu] = useState<{ trackId: string; time: number; x: number; y: number } | null>(null);
+  const [matrixEntryMenu, setMatrixEntryMenu] = useState<{ trackId: string; entry: MatrixTrackEntry; x: number; y: number } | null>(null);
+  const [matrixPickModal, setMatrixPickModal] = useState<{ trackId: string; entryId?: string; atTime?: number } | null>(null);
 
   // Resolve target fixture names for display + DMX filtering
   const efxTargetFixtureNames = useMemo(() => {
@@ -2720,6 +2982,57 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     }
     return fixtures.filter(f => efxTargetFixtureIds.includes(f.id)).map(f => f.name);
   }, [efxTargetType, efxTargetGroupId, efxTargetFixtureIds]);
+
+  // Ids des fixtures ciblées par la modale EFX (groupe ou fixture unique).
+  const efxHighlightFixtureIds = useMemo(() => {
+    if (efxTargetType === 'group') {
+      const g = fixtureGroups.find(g => g.id === efxTargetGroupId);
+      return g ? [...g.fixtureIds] : [];
+    }
+    return [...efxTargetFixtureIds];
+  }, [efxTargetType, efxTargetGroupId, efxTargetFixtureIds, fixtureGroups]);
+
+  /* Surbrillance de la cible EFX : allume les fixtures sélectionnées tant que
+   * la modale est ouverte (dimmer à fond, ou blanc si pas de dimmer), via une
+   * source dédiée de l'arbiter — rendu à la fermeture, sans toucher aux cues.
+   */
+  useEffect(() => {
+    if (!efxTrackModal || efxHighlightFixtureIds.length === 0) {
+      try { dmxBridge.release('efx-highlight'); } catch {}
+      return;
+    }
+    try {
+      const byUniverse = new Map<number, Record<number, number>>();
+      for (const fid of efxHighlightFixtureIds) {
+        const pf = patchedFixtures.find(p => p.id === fid);
+        if (!pf) continue;
+        const uniIdx = universes.findIndex(u => u.id === pf.universeId);
+        if (uniIdx < 0) continue;
+        const def = fixtureDefs.get(pf.fixtureDefId);
+        const fa = analyzeChannels(pf, def);
+        const frame = byUniverse.get(uniIdx) || {};
+        if (fa.intensityOffset !== null && fa.intensityOffset !== undefined) {
+          frame[pf.startAddress + fa.intensityOffset] = 255;
+        } else if (fa.rgbOffsets && fa.rgbOffsets.length > 0) {
+          for (const off of fa.rgbOffsets.slice(0, 3)) frame[pf.startAddress + off] = 255;
+        }
+        byUniverse.set(uniIdx, frame);
+      }
+      let written = 0;
+      for (const [uniIdx, frame] of byUniverse) {
+        if (Object.keys(frame).length > 0) {
+          dmxBridge.writeMerge('efx-highlight', uniIdx, frame);
+          written++;
+        }
+      }
+      if (written === 0) {
+        console.warn('[efx-highlight] aucun canal résolu pour', efxHighlightFixtureIds);
+      }
+    } catch (e) {
+      console.error('[efx-highlight] failed:', e);
+    }
+    return () => { try { dmxBridge.release('efx-highlight'); } catch {} };
+  }, [efxTrackModal, efxHighlightFixtureIds, patchedFixtures, fixtureDefs, universes]);
 
   // Effets custom correspondant au groupe / à la fixture choisis (aucun filtre en
   // mode édition d'une section pour un simple swap).
@@ -3436,6 +3749,67 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
     setScenePickModal({ trackId, entryId: entry.id });
   }, []);
 
+  /* ─── Matrix Track handlers (matrice RGB : prend la main via le moteur rgb-matrix) ─── */
+  const handleAddMatrixTrack = useCallback(() => {
+    pushHistory();
+    const trackId = `matrix-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setMatrixTracks(prev => [...prev, { id: trackId, name: `Matrix Track ${prev.length + 1}`, entries: [] }]);
+    setMatrixPickModal({ trackId });
+  }, [pushHistory]);
+  const handleDeleteMatrixTrack = useCallback((trackId: string) => {
+    pushHistory();
+    setMatrixTracks(prev => prev.filter(t => t.id !== trackId));
+  }, [pushHistory]);
+  const handleInsertMatrixToTrack = useCallback((trackId: string, time: number, matrixId: string, matrixName?: string, modifyEntryId?: string) => {
+    pushHistory();
+    const matrix = useRgbMatrixStore.getState().matrices.find((m: any) => m.id === matrixId);
+    const defDur = 10;
+    setMatrixTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      if (modifyEntryId) {
+        const entries = t.entries.map(e => e.id === modifyEntryId ? { ...e, matrixId, matrixName: matrixName || matrix?.name } : e);
+        return { ...t, entries };
+      }
+      const entry: MatrixTrackEntry = { id: `matrix-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, time, endTime: time + defDur, matrixId, matrixName: matrixName || matrix?.name };
+      return { ...t, entries: [...t.entries, entry] };
+    }));
+    setMatrixInsertMenu(null);
+  }, [pushHistory]);
+  const handleRemoveMatrixEntry = useCallback((trackId: string, entryId: string) => {
+    pushHistory();
+    setMatrixTracks(prev => prev.map(t => t.id === trackId ? { ...t, entries: t.entries.filter(e => e.id !== entryId) } : t));
+    setMatrixEntryMenu(null);
+  }, [pushHistory]);
+  const handleMatrixEntryChange = useCallback((trackId: string, entryIndex: number, newTime: number, newEndTime: number) => {
+    pushHistory();
+    setMatrixTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      const entries = [...t.entries];
+      if (entryIndex >= 0 && entryIndex < entries.length) entries[entryIndex] = { ...entries[entryIndex], time: newTime, endTime: newEndTime };
+      return { ...t, entries };
+    }));
+  }, [pushHistory]);
+  const handleMatrixTrackContextMenu = useCallback((trackId: string, time: number, clientX: number, clientY: number) => {
+    setMatrixInsertMenu({ trackId, time, x: clientX, y: clientY });
+  }, []);
+  const handleMatrixEntryClick = useCallback((trackId: string, entry: MatrixTrackEntry) => {}, []);
+  const handleMatrixEntryContextMenu = useCallback((trackId: string, entry: MatrixTrackEntry, clientX: number, clientY: number) => {
+    setMatrixEntryMenu({ trackId, entry, x: clientX, y: clientY });
+  }, []);
+  const handlePickMatrixForTrack = useCallback((trackId: string, matrixId: string, matrixName?: string, entryId?: string) => {
+    handleInsertMatrixToTrack(trackId, matrixPickModal?.atTime ?? 0, matrixId, matrixName, entryId);
+    setMatrixPickModal(null);
+  }, [handleInsertMatrixToTrack, matrixPickModal]);
+  const handleRenameMatrixEntry = useCallback((trackId: string, entry: MatrixTrackEntry, label: string) => {
+    pushHistory();
+    setMatrixTracks(prev => prev.map(t => t.id === trackId ? { ...t, entries: t.entries.map(e => e.id === entry.id ? { ...e, label: (label || '').trim() || undefined } : e) } : t));
+    setMatrixEntryMenu(null);
+  }, [pushHistory]);
+  const handleModifyMatrixEntry = useCallback((trackId: string, entry: MatrixTrackEntry) => {
+    setMatrixEntryMenu(null);
+    setMatrixPickModal({ trackId, entryId: entry.id });
+  }, []);
+
   /* ─── Insert entity handler ──────────────────────── */
   const handleInsertEntity = useCallback((startTime: number, endTime: number, entityType: string, entityId: string) => {
     pushHistory();
@@ -3754,6 +4128,28 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               <button onClick={() => { setPresetsDropdown(false); setPromptAction('export'); }} className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2">
                 <Download className="w-3 h-3" /> Export to file...
               </button>
+              <button
+                onClick={async () => {
+                  setPresetsDropdown(false);
+                  const api = (window as any).lightMaestro?.presets;
+                  if (!api?.repairAudio) { console.error('Repair API indisponible (navigateur ?)'); return; }
+                  const report = await api.repairAudio();
+                  if (!report) return; // dialogue annulé
+                  const lines = [
+                    `Dossier : ${report.folder}`,
+                    `${report.total} preset(s) — OK : ${report.alreadyOk.length}, réparés : ${report.repaired.length}, sans audio retrouvée : ${report.missing.length}, erreurs : ${report.errors.length}`,
+                  ];
+                  for (const r of report.repaired) lines.push(`✔ ${r.file} (${(r.audioLen / 1048576).toFixed(1)} Mo ré-embarqués)`);
+                  for (const m of report.missing) lines.push(`✘ ${m.file} : audio « ${m.expectedAudio} » introuvable — rechargez-le puis ré-exportez`);
+                  for (const e of report.errors) lines.push(`⚠ ${e.file} : ${e.error}`);
+                  console.error('[repairAudio]\n' + lines.join('\n'));
+                  alert(lines.join('\n'));
+                }}
+                className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2"
+                title="Scanne un dossier de .lmpreset et ré-embarque le son manquant depuis le cache"
+              >
+                <Wrench className="w-3 h-3" /> Réparer l'audio des presets…
+              </button>
               {savedPresets.length > 0 && <div className="border-t border-gray-800 my-0.5" />}
               {savedPresets.map((p, i) => (
                 <div key={i} className="flex items-center hover:bg-gray-800">
@@ -3991,6 +4387,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           onSectionClick={onSectionClick}
           onSectionsChange={(next) => { pushHistory(); setSections(next); }}
           sections={sections}
+          showTransport={false}
           snapToBeats={snapToBeats}
           onInsertEntity={handleInsertEntity}
           scenes={entitySceneList}
@@ -4046,6 +4443,11 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           onSceneEntryClick={handleSceneEntryClick}
           onSceneEntryContextMenu={handleSceneEntryContextMenu}
           onSceneEntryChange={handleSceneEntryChange}
+          matrixTracks={matrixTracks}
+          onMatrixTrackContextMenu={handleMatrixTrackContextMenu}
+          onMatrixEntryClick={handleMatrixEntryClick}
+          onMatrixEntryContextMenu={handleMatrixEntryContextMenu}
+          onMatrixEntryChange={handleMatrixEntryChange}
           onSectionsChange={(newSecs: TrackSection[]) => { pushHistory(); setSections(newSecs); }}
           onAutoScriptContextMenu={(time, _x, _y) => {
             pushHistory();
@@ -4111,7 +4513,17 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
       {/* Section editor bar */}
       <div className="px-3 py-2 border-t border-gray-800/50 bg-[#0d0d14] flex items-center gap-1.5 flex-wrap">
-        {sections.length > 0 && (
+        {/* Matrix Tracks list editor bar */}
+      {matrixTracks.length > 0 && (
+        <div className="flex gap-1.5 text-[10px] text-gray-400">
+          {matrixTracks.map((t, i) => (
+            <span key={t.id} className="underline cursor-pointer hover:text-pink-300">
+              {t.name}
+            </span>
+          ))}
+        </div>
+      )}
+      {sections.length > 0 && (
           <>
             <span className="text-[10px] text-gray-500 mr-1">{t('sections') || 'Sections'}:</span>
             {sections.map((s, i) => {
@@ -4137,6 +4549,89 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               );
             })}
           </>
+        )}
+        <button
+          onClick={() => { void runAiStructure(); }}
+          disabled={aiStatus.phase === 'running' || aiStatus.phase === 'checking'}
+          title="Structure IA (All-In-One, offline) : analyse le morceau chargé et remplace les sections."
+          className="ml-2 px-2 py-0.5 rounded text-[10px] text-emerald-400 border border-emerald-700/50 hover:bg-emerald-400/10 cursor-pointer flex items-center gap-1 disabled:opacity-40"
+        >
+          <Sparkles className="w-3 h-3" />
+          {aiStatus.phase === 'running' ? 'IA…' : aiStatus.phase === 'checking' ? '…' : 'Structure IA'}
+        </button>
+        {(aiStatus.phase === 'running' || aiStatus.phase === 'checking') && (
+          <button
+            onClick={cancelAiStructure}
+            className="px-2 py-0.5 rounded text-[10px] text-red-400 border border-red-700/50 hover:bg-red-400/10 cursor-pointer"
+          >
+            Annuler
+          </button>
+        )}
+        {aiSections && (
+          <div
+            title="Choisir le jeu de sections : IA ou moteur local (les deux sont gardés, sans recalcul)"
+            className="flex items-center rounded border border-gray-700 overflow-hidden text-[10px]"
+          >
+            {(['ai', 'local'] as const).map((src) => (
+              <button
+                key={src}
+                onClick={() => switchSectionSource(src)}
+                className={`px-2 py-0.5 uppercase tracking-wide transition-colors ${
+                  sectionSource === src
+                    ? 'bg-emerald-600/30 text-emerald-200'
+                    : 'text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {src === 'ai' ? 'IA' : 'Local'}
+              </button>
+            ))}
+          </div>
+        )}
+        {aiAvailable === true && (
+          <>
+            <label
+              title="Lancer la Structure IA automatiquement à chaque nouvel audio"
+              className="flex items-center gap-1 px-1 text-[10px] text-gray-500 cursor-pointer select-none"
+            >
+              <input
+                type="checkbox"
+                checked={aiAuto}
+                onChange={(e) => {
+                  setAiAuto(e.target.checked);
+                  try { localStorage.setItem('lm-ai-auto', e.target.checked ? '1' : '0'); } catch {}
+                }}
+                className="accent-emerald-500"
+              />
+              auto
+            </label>
+            <select
+              value={aiModel}
+              onChange={(e) => {
+                setAiModel(e.target.value);
+                try { localStorage.setItem('lm-ai-model', e.target.value); } catch {}
+              }}
+              title="Modèle IA : ensemble précis (lent) ou fold unique rapide"
+              className="px-1 py-0.5 rounded text-[10px] text-gray-400 bg-gray-800/50 border border-gray-700"
+            >
+              <option value="harmonix-all">IA précise</option>
+              <option value="harmonix-fold0">IA rapide</option>
+            </select>
+          </>
+        )}
+        {aiStatus.msg && (
+          <span className={`text-[10px] ${aiStatus.phase === 'error' ? 'text-amber-400' : 'text-gray-500'}`}>
+            {aiStatus.msg}
+          </span>
+        )}
+        {aiAvailable !== true && (
+          <button
+            onClick={importAllInOneFile}
+            title="Importer une structure All-In-One (.json produit par scripts/allinone_import.py)"
+            className="px-2 py-0.5 rounded text-[10px] text-emerald-400/70 border border-emerald-700/30 hover:bg-emerald-400/10 cursor-pointer flex items-center gap-1"
+          >
+            <Upload className="w-3 h-3" />
+            JSON
+          </button>
         )}
         <button
           onClick={openEfxTrackModal}
@@ -4191,6 +4686,14 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           Scenes Track
         </button>
         <button
+          onClick={handleAddMatrixTrack}
+          className="ml-1 px-2 py-0.5 rounded text-[10px] text-pink-400 border border-pink-700/50 hover:bg-pink-400/10 cursor-pointer flex items-center gap-1"
+          title="Piste matrice : joue une matrice RGB qui prend la main sur son groupe pendant sa plage"
+        >
+          <Plus className="w-3 h-3" />
+          Matrice Track
+        </button>
+        <button
           onClick={() => setFadeModal(!fadeModal)}
           className="ml-1 px-2 py-0.5 rounded text-[10px] text-purple-400 border border-purple-700/50 hover:bg-purple-400/10 cursor-pointer flex items-center gap-1"
           title="Fondu"
@@ -4223,6 +4726,43 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         )}
       </div>
 
+      {/* Transport — tout en bas, sous les boutons +Track : jamais masqué par les modales */}
+      <div className="px-3 py-2 border-t border-gray-800/50 bg-[#0d0d14] flex items-center gap-2 shrink-0">
+        <button onClick={() => audioFile.seek(0)} className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Début">
+          <SkipBack size={14} />
+        </button>
+        <button onClick={audioFile.isPlaying ? audioFile.pause : audioFile.play} className="p-2 rounded-full bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 transition-colors" title={audioFile.isPlaying ? 'Pause (Espace)' : 'Lecture (Espace)'}>
+          {audioFile.isPlaying ? <Pause size={16} /> : <Play size={16} />}
+        </button>
+        <button onClick={() => audioFile.stop()} className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Stop">
+          <Square size={14} />
+        </button>
+        <button onClick={() => audioFile.seek(resolvedAnalysis?.duration || 0)} className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Fin">
+          <SkipForward size={14} />
+        </button>
+        <span className="text-[11px] text-gray-400 font-mono w-20 text-right">
+          {`${Math.floor(audioFile.currentTime / 60)}:${Math.floor(audioFile.currentTime % 60).toString().padStart(2, '0')}`}
+        </span>
+        <div
+          className="flex-1 h-1.5 bg-gray-800 rounded-full cursor-pointer"
+          onClick={e => {
+            const dur = resolvedAnalysis?.duration || 0;
+            if (dur <= 0) return;
+            const r = e.currentTarget.getBoundingClientRect();
+            audioFile.seek(((e.clientX - r.left) / r.width) * dur);
+          }}
+        >
+          <div
+            className="h-full bg-purple-500 rounded-full"
+            style={{ width: `${(resolvedAnalysis?.duration ? Math.min(1, audioFile.currentTime / resolvedAnalysis.duration) : 0) * 100}%` }}
+          />
+        </div>
+        <span className="text-[11px] text-gray-500 font-mono w-20">
+          {resolvedAnalysis ? `${Math.floor(resolvedAnalysis.duration / 60)}:${Math.floor(resolvedAnalysis.duration % 60).toString().padStart(2, '0')}` : '--:--'}
+        </span>
+        <span className="text-[10px] text-pink-400 ml-1">{effectiveBpm} BPM</span>
+      </div>
+
       {/* Section picker — remplacé par modale précise (garde compatibilité si ouvert via timeline) */}
       {picker !== null && !sectionModal && (() => { setSectionModal({ idx: picker.idx }); setPicker(null); return null; })()}
       {/* Section modal précise */}
@@ -4232,7 +4772,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         const dur = resolvedAnalysis?.duration || 120;
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setSectionModal(null)}>
-            <div className="bg-[#12121a] border border-gray-700 rounded-xl p-5 w-[380px] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-[#12121a] border border-gray-700 rounded-xl p-5 w-[380px] max-w-[95vw] shadow-2xl" onClick={(e) => e.stopPropagation()}>
               <h4 className="text-sm font-bold text-white mb-3">Section — précision</h4>
               <div className="space-y-3">
                 <div>
@@ -4428,7 +4968,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setEfxEntryMenu(null)}>
           <div
             ref={efxEntryMenuRef}
-            className="bg-[#1a1a2e] border border-cyan-700/50 rounded-xl shadow-2xl py-3 w-[340px]"
+            className="bg-[#1a1a2e] border border-cyan-700/50 rounded-xl shadow-2xl py-3 w-[340px] max-w-[95vw]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 py-1.5 text-[11px] text-cyan-400 uppercase tracking-wider border-b border-gray-800">
@@ -4505,7 +5045,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setColorEntryMenu(null)}>
           <div
             ref={colorEntryMenuRef}
-            className="bg-[#1a1a2e] border border-pink-700/50 rounded-xl shadow-2xl py-3 w-[360px]"
+            className="bg-[#1a1a2e] border border-pink-700/50 rounded-xl shadow-2xl py-3 w-[360px] max-w-[95vw]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 py-1.5 text-[11px] text-pink-400 uppercase tracking-wider border-b border-gray-800">
@@ -4571,7 +5111,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
       {showFloating3D && (
         <div
           className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col"
-          style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, overflow: 'hidden' }}
+          style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}
         >
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
             <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D View</span>
@@ -4605,7 +5145,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
       {efxTrackModal && (
         <>
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
-            <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
+            <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-4">
                 <span className="text-sm font-semibold text-gray-200">{efxEditTarget ? 'Modifier la section EFX' : 'New EFX Track'}</span>
                 <button onClick={() => { setEfxTrackModal(false); setEfxEditTarget(null); }} className="text-gray-500 hover:text-white">✕</button>
@@ -4689,6 +5229,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               {efxTargetFixtureNames.length > 0 && (
                 <div className="text-[10px] text-cyan-400/70 mb-4 bg-cyan-400/5 border border-cyan-400/10 rounded-lg px-3 py-2">
                   Target: <span className="text-gray-300">{efxTargetFixtureNames.length} fixture{efxTargetFixtureNames.length > 1 ? 's' : ''}</span>
+                  <span className="text-yellow-300/80 ml-2">💡 allumée(s) en surbrillance</span>
                   <span className="text-gray-600 ml-2 max-w-[250px] truncate inline-block align-bottom">
                     ({efxTargetFixtureNames.slice(0, 5).join(', ')}{efxTargetFixtureNames.length > 5 ? `... +${efxTargetFixtureNames.length - 5}` : ''})
                   </span>
@@ -4777,7 +5318,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setStrobeEntryMenu(null)}>
           <div
             ref={strobeEntryMenuRef}
-            className="bg-[#1a1a2e] border border-purple-700/50 rounded-xl shadow-2xl py-3 w-[360px]"
+            className="bg-[#1a1a2e] border border-purple-700/50 rounded-xl shadow-2xl py-3 w-[360px] max-w-[95vw]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 py-1.5 text-[11px] text-purple-400 uppercase tracking-wider border-b border-gray-800">
@@ -4858,7 +5399,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setDimmerEntryMenu(null)}>
           <div
             ref={dimmerEntryMenuRef}
-            className="bg-[#1a1a2e] border border-orange-700/50 rounded-xl shadow-2xl py-3 w-[360px]"
+            className="bg-[#1a1a2e] border border-orange-700/50 rounded-xl shadow-2xl py-3 w-[360px] max-w-[95vw]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 py-1.5 text-[11px] text-orange-400 uppercase tracking-wider border-b border-gray-800">
@@ -4937,7 +5478,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
       {chaserEntryMenu && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setChaserEntryMenu(null)}>
           <div
-            className="bg-[#1a1a2e] border border-emerald-700/50 rounded-xl shadow-2xl py-3 w-[360px]"
+            className="bg-[#1a1a2e] border border-emerald-700/50 rounded-xl shadow-2xl py-3 w-[360px] max-w-[95vw]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 py-1.5 text-[11px] text-emerald-400 uppercase tracking-wider border-b border-gray-800">
@@ -4979,7 +5520,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
       {colorTrackModal && (
         <>
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
-            <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
+            <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-4">
                 <span className="text-sm font-semibold text-gray-200">{colorEditTarget ? 'Modifier la section Color' : 'New Color Track'}</span>
                 <button onClick={() => { setColorTrackModal(false); setColorEditTarget(null); }} className="text-gray-500 hover:text-white">✕</button>
@@ -5102,7 +5643,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
       {strobeTrackModal && (
         <>
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
-            <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
+            <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-4">
                 <span className="text-sm font-semibold text-gray-200">{strobeEditTarget ? 'Modifier la section Strobe' : 'New Strobe Track'}</span>
                 <button onClick={() => { setStrobeTrackModal(false); setStrobeEditTarget(null); }} className="text-gray-500 hover:text-white">✕</button>
@@ -5218,7 +5759,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
       {dimmerTrackModal && (
         <>
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
-            <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
+            <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-4">
                 <span className="text-sm font-semibold text-gray-200">{dimmerEditTarget ? 'Modifier la section Dimmer' : 'New Dimmer Track'}</span>
                 <button onClick={() => { setDimmerTrackModal(false); setDimmerEditTarget(null); }} className="text-gray-500 hover:text-white">✕</button>
@@ -5344,7 +5885,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         <>
           <div className="fixed inset-0 z-40" onClick={() => setChaserPickModal(null)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
-            <div className="bg-[#1a1a2e] border border-emerald-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
+            <div className="bg-[#1a1a2e] border border-emerald-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm font-semibold text-gray-200">{chaserPickModal.entryId ? 'Modifier la section chaser' : 'Sélectionner un chaser'}</span>
                 <button onClick={() => setChaserPickModal(null)} className="text-gray-500 hover:text-white">✕</button>
@@ -5388,7 +5929,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         <>
           <div className="fixed inset-0 z-40" onClick={() => setShowPickModal(null)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
-            <div className="bg-[#1a1a2e] border border-amber-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
+            <div className="bg-[#1a1a2e] border border-amber-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm font-semibold text-gray-200">{showPickModal.entryId ? 'Modifier la section show' : 'Sélectionner un show'}</span>
                 <button onClick={() => setShowPickModal(null)} className="text-gray-500 hover:text-white">✕</button>
@@ -5431,7 +5972,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
       )}
       {showEntryMenu && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowEntryMenu(null)}>
-          <div className="bg-[#1a1a2e] border border-amber-700/50 rounded-xl shadow-2xl py-3 w-[360px]" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-[#1a1a2e] border border-amber-700/50 rounded-xl shadow-2xl py-3 w-[360px] max-w-[95vw]" onClick={(e) => e.stopPropagation()}>
             <div className="px-4 py-1.5 text-[11px] text-amber-400 uppercase tracking-wider border-b border-gray-800">{showEntryMenu.entry.label || showEntryMenu.entry.showName || 'Show'} — {showEntryMenu.entry.time.toFixed(2)}s → {showEntryMenu.entry.endTime.toFixed(2)}s</div>
             <div className="px-4 pt-3">
               <label className="text-[10px] text-gray-500">Nom de la section</label>
@@ -5468,7 +6009,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         <>
           <div className="fixed inset-0 z-40" onClick={() => setScenePickModal(null)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
-            <div className="bg-[#1a1a2e] border border-cyan-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
+            <div className="bg-[#1a1a2e] border border-cyan-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm font-semibold text-gray-200">{scenePickModal.entryId ? 'Modifier la section scène' : 'Sélectionner une scène'}</span>
                 <button onClick={() => setScenePickModal(null)} className="text-gray-500 hover:text-white">✕</button>
@@ -5537,7 +6078,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
       {sceneEntryMenu && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setSceneEntryMenu(null)}>
           <div
-            className="bg-[#1a1a2e] border border-cyan-700/50 rounded-xl shadow-2xl py-3 w-[360px]"
+            className="bg-[#1a1a2e] border border-cyan-700/50 rounded-xl shadow-2xl py-3 w-[360px] max-w-[95vw]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 py-1.5 text-[11px] text-cyan-400 uppercase tracking-wider border-b border-gray-800">
@@ -5571,6 +6112,127 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               <button onClick={() => handleRemoveSceneEntry(sceneEntryMenu.trackId, sceneEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">Supprimer</button>
             </div>
             <button onClick={() => setSceneEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">Fermer</button>
+          </div>
+        </div>
+      )}
+      {matrixPickModal && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setMatrixPickModal(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
+            <div className="bg-[#1a1a2e] border border-pink-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold text-gray-200">{matrixPickModal.entryId ? 'Modifier la section matrice' : 'Sélectionner une matrice'}</span>
+                <button onClick={() => setMatrixPickModal(null)} className="text-gray-500 hover:text-white">✕</button>
+              </div>
+
+              <p className="text-[10px] text-gray-500 leading-relaxed mb-4">
+                La matrice RGB prend le dessus sur son groupe de fixtures pendant sa plage (motif, couleurs, vitesse définis dans Matrice RGB), puis rend la main à l'autoscript.
+              </p>
+
+              {entityMatrixList.length === 0 ? (
+                <div className="text-[11px] text-gray-600 py-6 text-center border border-dashed border-gray-800 rounded-lg">
+                  Aucune matrice sauvegardée.<br />
+                  <span className="text-gray-500">Créez-en une dans Matrice RGB, puis réessayez.</span>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {entityMatrixList.map((mx) => {
+                    const grp = fixtureGroups.find(g => g.id === mx.groupId);
+                    const n = grp ? grp.fixtureIds.length : 0;
+                    return (
+                      <button
+                        key={mx.id}
+                        onClick={() => handlePickMatrixForTrack(matrixPickModal.trackId, mx.id, mx.name, matrixPickModal.entryId)}
+                        className="w-full text-left px-3 py-2 rounded-lg bg-gray-800/40 border border-gray-700/40 hover:border-pink-500/50 hover:bg-pink-500/10 text-xs text-gray-300 flex items-center gap-2 transition-all"
+                      >
+                        <span className="text-pink-400">🔳</span>
+                        <span className="flex-1">{mx.name}</span>
+                        <span className="text-[9px] text-gray-500">{grp ? grp.name : 'groupe inconnu'} · {n} fixtures</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="flex justify-end mt-4">
+                <button onClick={() => setMatrixPickModal(null)}
+                  className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
+                  Fermer
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+      {matrixInsertMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setMatrixInsertMenu(null)} />
+          <div
+            className="fixed z-50 bg-[#1a1a2e] border border-pink-700/50 rounded-lg shadow-xl py-1 min-w-[180px]"
+            style={{ ...clampRect(matrixInsertMenu.x, matrixInsertMenu.y, 220, 140, window.innerWidth, window.innerHeight) }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1.5 text-[10px] text-pink-400 uppercase tracking-wider border-b border-gray-800">
+              Matrix Track — {matrixInsertMenu.time.toFixed(2)}s
+            </div>
+            <button
+              onClick={() => { const tid = matrixInsertMenu.trackId, at = matrixInsertMenu.time; setMatrixInsertMenu(null); setMatrixPickModal({ trackId: tid, atTime: at }); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-pink-300 hover:bg-gray-800"
+            >
+              Importer une matrice ici
+            </button>
+            <button
+              onClick={() => { handleDeleteMatrixTrack(matrixInsertMenu.trackId); setMatrixInsertMenu(null); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
+            >
+              Supprimer la piste
+            </button>
+            <button
+              onClick={() => setMatrixInsertMenu(null)}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
+            >
+              Annuler
+            </button>
+          </div>
+        </>
+      )}
+      {matrixEntryMenu && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setMatrixEntryMenu(null)}>
+          <div
+            className="bg-[#1a1a2e] border border-pink-700/50 rounded-xl shadow-2xl py-3 w-[360px] max-w-[95vw]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-1.5 text-[11px] text-pink-400 uppercase tracking-wider border-b border-gray-800">
+              {matrixEntryMenu.entry.label || matrixEntryMenu.entry.matrixName || 'Matrice'} — {matrixEntryMenu.entry.time.toFixed(2)}s → {matrixEntryMenu.entry.endTime.toFixed(2)}s
+            </div>
+            <div className="px-4 pt-3">
+              <label className="text-[10px] text-gray-500">Nom de la section</label>
+              <input defaultValue={matrixEntryMenu.entry.label || matrixEntryMenu.entry.matrixName || ''} id="__matrix_label" placeholder={matrixEntryMenu.entry.matrixName || 'Matrice'} className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
+            </div>
+            <div className="flex gap-2 px-4 py-3">
+              <button onClick={() => {
+                const label = (document.getElementById('__matrix_label') as HTMLInputElement).value;
+                handleRenameMatrixEntry(matrixEntryMenu.trackId, matrixEntryMenu.entry, label);
+              }} className="flex-1 py-1.5 rounded bg-pink-600/20 text-pink-300 text-xs hover:bg-pink-600/30">Renommer</button>
+              <button onClick={() => handleModifyMatrixEntry(matrixEntryMenu.trackId, matrixEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Changer de matrice</button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 px-4 py-0">
+              <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={matrixEntryMenu.entry.time} id="__matrix_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={matrixEntryMenu.entry.endTime} id="__matrix_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+            </div>
+            <div className="flex gap-2 px-4 pb-2 pt-3">
+              <button onClick={() => {
+                const st = Number((document.getElementById('__matrix_start') as HTMLInputElement).value);
+                const en = Number((document.getElementById('__matrix_end') as HTMLInputElement).value);
+                const dur = resolvedAnalysis?.duration || 9999;
+                if (!Number.isFinite(st) || !Number.isFinite(en) || en <= st || st < 0 || en > dur) return;
+                const idx = matrixTracks.find(t => t.id === matrixEntryMenu.trackId)?.entries.findIndex(e => e.id === matrixEntryMenu.entry.id) ?? -1;
+                if (idx >= 0) handleMatrixEntryChange(matrixEntryMenu.trackId, idx, st, en);
+                setMatrixEntryMenu(null);
+              }} className="flex-1 py-1.5 rounded bg-pink-600 text-white text-xs hover:bg-pink-500">Appliquer</button>
+              <button onClick={() => handleRemoveMatrixEntry(matrixEntryMenu.trackId, matrixEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">Supprimer</button>
+            </div>
+            <button onClick={() => setMatrixEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">Fermer</button>
           </div>
         </div>
       )}

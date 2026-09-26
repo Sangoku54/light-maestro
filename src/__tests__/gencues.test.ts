@@ -174,6 +174,27 @@ describe('genCues', () => {
     }
   });
 
+  it('different regenSeed rotates section colors visibly', () => {
+    const sections = makeSections();
+    const analysis = makeAnalysis();
+    // Premier cue de chaque chorus pour plusieurs seeds : au moins 2 teintes distinctes
+    const firstChorusColors = new Set<string>();
+    for (let seed = 1; seed <= 8; seed++) {
+      const run = genCues(sections, 128, 4, defaultCfg(), [], seed, analysis);
+      const first = run.find((c: any) => c.section === 'chorus');
+      if (first) firstChorusColors.add(first.color);
+    }
+    expect(firstChorusColors.size).toBeGreaterThan(1);
+  });
+
+  it('absent/zero regenSeed keeps legacy colors (no rotation)', () => {
+    const sections = makeSections();
+    const analysis = makeAnalysis();
+    const runUndef = genCues(sections, 128, 4, defaultCfg(), [], undefined, analysis);
+    const runZero = genCues(sections, 128, 4, defaultCfg(), [], 0, analysis);
+    expect(runUndef.map((c: any) => c.color)).toEqual(runZero.map((c: any) => c.color));
+  });
+
   it('different regenSeed produces different effects/movement', () => {
     const sections = makeSections();
     const analysis = makeAnalysis();

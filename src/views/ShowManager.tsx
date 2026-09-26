@@ -7,8 +7,11 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useShowStore, type ShowData, type ShowTrack, type ShowTrackItem } from '../stores/showStore';
+import { useRgbMatrixStore } from '../stores/rgbmatrixStore';
+import { syncMatrixEnabled, restoreMatrixEnabled } from '../hooks/rgb-matrix-playback';
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from '../hooks/dmx-cues';
 import { generateEfxPanTilt } from '../hooks/fixture-tracks';
+import { crossfadeSceneChannels, holdMissingChannels } from '../hooks/dmx-playback';
 import { sendChannelsToHardware } from '../utils/dmx-helpers';
 import { collectCustomFixtureDefs, importCustomFixtureDefs } from '../utils/custom-fixtures';
 import { sceneTouchesFixture } from '../utils/scene-fixtures';
@@ -41,7 +44,10 @@ export const ShowManager: React.FC = () => {
   const chasers = useShowStore((s) => s.chasers);
   const songPresets = useShowStore((s) => s.songPresets);
   const effects = useShowStore((s) => s.effects);
+  const matrices = useRgbMatrixStore((s) => s.matrices);
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  // Matrices activées par la lecture (item matrix en plage) : matrixId → enabled précédent (restauré à la sortie).
+  const matrixForcedRef = useRef(new Map<string, boolean>());
   const fixtureDefCacheRef = useRef<Map<string, DmxFixtureDefinition>>(new Map());
   const createShow = useShowStore((s) => s.createShow);
   const updateShow = useShowStore((s) => s.updateShow);
@@ -77,6 +83,10 @@ export const ShowManager: React.FC = () => {
   const audioBuffersRef = useRef<Map<string, AudioBuffer>>(new Map());
   const audioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const playheadTimeRef = useRef<number>(0);
+  const startedAudiosRef = useRef<Set<string>>(new Set());
+  // Dernières valeurs brutes envoyées par item chaser (anti-saccade : un canal
+  // absent d'une scène garde sa valeur au lieu de plonger à 0).
+  const chaserHeldRef = useRef<Map<string, Record<number, number>>>(new Map());
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const rulerRef = useRef<HTMLDivElement>(null);
@@ -136,6 +146,8 @@ export const ShowManager: React.FC = () => {
     if (playTimerRef.current) { cancelAnimationFrame(playTimerRef.current); playTimerRef.current = null; }
     for (const src of audioSourcesRef.current) { try { src.stop(); } catch {} }
     audioSourcesRef.current = [];
+    // Restaure l'état des matrices activées par la lecture
+    restoreMatrixEnabled(matrixForcedRef.current);
     setPlayState('stopped');
     setPlayheadTime(0);
     playheadTimeRef.current = 0;
@@ -179,12 +191,15 @@ export const ShowManager: React.FC = () => {
 
     getAudioCtx(); // ensure context exists (unlocks audio on first user gesture)
 
-    const startTime = isResuming ? playheadTime : 0;
+    // Démarre toujours à la tête de lecture (0 après un stop, position cliquée sinon).
+    const startTime = playheadTime;
     playStartRef.current = performance.now() - startTime;
     playheadTimeRef.current = startTime;
 
-    // Track which audio items have been started (prevent duplicates)
-    const startedAudios = new Set<string>();
+    // Track which audio items have been started (prevent duplicates).
+    // En ref (pas en closure) pour survivre aux seeks pendant la lecture.
+    const startedAudios = startedAudiosRef.current;
+    startedAudios.clear();
 
     const tick = () => {
       const currentMs = performance.now() - playStartRef.current;
@@ -195,6 +210,10 @@ export const ShowManager: React.FC = () => {
       // Aggregate all active DMX values for this frame (HTP merge) — single write
       // évite que chaque scène n'écrase la précédente dans le même source (bug show multi-scènes)
       const merged: Record<number, number> = {};
+      // Items chaser actifs cette frame (purge de la mémoire de tenue en fin de tick).
+      const activeChaserIds = new Set<string>();
+      // Items matrix actifs : les matrices sont rendues par le moteur global rgb-matrix.
+      const activeMatrixIds = new Set<string>();
       const merge = (vals: Record<number, number>) => {
         for (const [addrStr, v] of Object.entries(vals)) {
           const a = Number(addrStr);
@@ -252,32 +271,79 @@ export const ShowManager: React.FC = () => {
             }
           }
 
-          // ── Chaser Item ──
+          // ── Chaser Item (crossfade dipless entre steps) ──
+          // Sans recouvrement, chaque frontière step→step faisait : ancien step à 0
+          // pile quand le nouveau part de 0 (creux au noir + snap pan/tilt).
+          // Ici la transition occupe T = min(fadeOut_prev, fadeIn_suivant) : le
+          // step sortant glisse vers le suivant (interpolation des canaux, donc
+          // les faisceaux glissent au lieu de sauter). Si un fondu vaut 0, on
+          // garde le comportement historique (coupe franche voulue).
           if (track.type === 'chaser') {
             const chaser = chasers.find((c) => c.id === item.resourceId);
             if (chaser && chaser.steps.length > 0) {
-              const totalCycle = chaser.steps.reduce((sum, s) => sum + s.fadeIn + s.hold + s.fadeOut, 0);
+              const durs = chaser.steps.map((s) => s.fadeIn + s.hold + s.fadeOut);
+              const totalCycle = durs.reduce((a, b) => a + b, 0);
               if (totalCycle <= 0) continue;
               const cyclePos = elapsed % totalCycle;
               let accumulated = 0;
-              for (const step of chaser.steps) {
-                const stepDur = step.fadeIn + step.hold + step.fadeOut;
-                if (cyclePos >= accumulated && cyclePos < accumulated + stepDur) {
-                  const stepElapsed = cyclePos - accumulated;
-                  let si = 1;
-                  if (stepElapsed < step.fadeIn && step.fadeIn > 0) si = stepElapsed / step.fadeIn;
-                  else if (stepElapsed > stepDur - step.fadeOut && step.fadeOut > 0) si = 1 - (stepElapsed - (stepDur - step.fadeOut)) / step.fadeOut;
-                  const stepScene = scenes.find((s) => s.id === step.sceneId);
-                  if (stepScene) {
-                    const faded: Record<number, number> = {};
-                    for (const [addr, val] of Object.entries(stepScene.channels)) faded[Number(addr)] = Math.round(val * si * intensity);
-                    merge(faded);
-                  }
-                  break;
+              let stepIdx = 0;
+              for (let si2 = 0; si2 < durs.length; si2++) {
+                if (cyclePos < accumulated + durs[si2]) { stepIdx = si2; break; }
+                accumulated += durs[si2];
+                stepIdx = si2;
+              }
+              const n = chaser.steps.length;
+              const step = chaser.steps[stepIdx];
+              const stepDur = durs[stepIdx];
+              const stepElapsed = cyclePos - accumulated;
+              const prev = chaser.steps[(stepIdx - 1 + n) % n];
+              const next = chaser.steps[(stepIdx + 1) % n];
+              const tIn = Math.min(step.fadeIn || 0, prev.fadeOut || 0);
+              const tOut = Math.min(step.fadeOut || 0, next.fadeIn || 0);
+              const sc = scenes.find((s) => s.id === step.sceneId);
+              const scPrev = scenes.find((s) => s.id === prev.sceneId);
+              const scNext = scenes.find((s) => s.id === next.sceneId);
+              const held = chaserHeldRef.current.get(item.id);
+              activeChaserIds.add(item.id);
+              // Snapshot brut (pré-intensité) pour la tenue : les fondus de
+              // l'item s'appliquent à l'envoi, pas au stockage.
+              const rememberRaw = (raw: Record<number, number>) => {
+                chaserHeldRef.current.set(item.id, { ...raw });
+              };
+              if (sc?.channels && tIn > 0 && stepElapsed < tIn && scPrev?.channels) {
+                const rawPrev = holdMissingChannels(scPrev.channels, held);
+                const rawCur = holdMissingChannels(sc.channels, held);
+                rememberRaw(rawCur);
+                merge(crossfadeSceneChannels(rawPrev, rawCur, stepElapsed / tIn, intensity, held));
+              } else if (sc?.channels && tOut > 0 && stepElapsed > stepDur - tOut && scNext?.channels) {
+                const rawCur = holdMissingChannels(sc.channels, held);
+                const rawNext = holdMissingChannels(scNext.channels, held);
+                rememberRaw(rawCur);
+                merge(crossfadeSceneChannels(rawCur, rawNext, (stepElapsed - (stepDur - tOut)) / tOut, intensity, held));
+              } else {
+                let si = 1;
+                if (stepElapsed < step.fadeIn && step.fadeIn > 0) si = stepElapsed / step.fadeIn;
+                else if (stepElapsed > stepDur - step.fadeOut && step.fadeOut > 0) si = 1 - (stepElapsed - (stepDur - step.fadeOut)) / step.fadeOut;
+                if (sc) {
+                  const raw = holdMissingChannels(
+                    Object.fromEntries(Object.entries(sc.channels).map(([addr, val]) => [Number(addr), val * si])),
+                    held,
+                  );
+                  rememberRaw(raw);
+                  const faded: Record<number, number> = {};
+                  for (const [addr, val] of Object.entries(raw)) faded[Number(addr)] = Math.round(val * intensity);
+                  merge(faded);
                 }
-                accumulated += stepDur;
               }
             }
+          }
+
+          // ── Matrix Item ──
+          // La matrice est rendue par le moteur global (rgb-matrix) : il suffit
+          // de l'activer pendant la plage de l'item (mêmes prérogatives que les
+          // autres tracks : mute respecté, restauration à la sortie de plage).
+          if (track.type === 'matrix') {
+            activeMatrixIds.add(item.resourceId);
           }
 
           // ── EFX Item ──
@@ -287,11 +353,14 @@ export const ShowManager: React.FC = () => {
             if (effect && effect.fixtureIds.length > 0) {
               const allPatched = currentState.patchedFixtures;
               const targetFixtures = allPatched.filter((f) => effect.fixtureIds.includes(f.id));
-              for (const pf of targetFixtures) {
+              const efxSpread = (effect as any).spread ?? 0;
+              for (let efi = 0; efi < targetFixtures.length; efi++) {
+                const pf = targetFixtures[efi];
                 // Math EXACTE du moteur (fixture-tracks.ts) : identique au preview.
                 // L'ancienne copie locale tronquait les patterns (Square+ figés
                 // au centre) et sous-dosait amplitude/offsets.
-                const tCycles = (elapsed / 1000 * (effect.speed || 0.5) * 2) / (Math.PI * 2);
+                const tBase = (elapsed / 1000 * (effect.speed || 0.5) * 2) / (Math.PI * 2);
+                const tCycles = targetFixtures.length > 1 && efxSpread > 0 ? tBase + (efi * efxSpread) / targetFixtures.length : tBase;
                 const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
                   effect.pattern, tCycles, effect.width || 1, effect.height || 1,
                   effect.rotation || 0, effect.xOffset || 0, effect.yOffset || 0,
@@ -329,6 +398,13 @@ export const ShowManager: React.FC = () => {
           }
         }
       }
+      // Purge la mémoire de tenue des items chaser sortis de plage (un retour
+      // ultérieur repartira des valeurs présentes, sans plonger à 0).
+      for (const id of chaserHeldRef.current.keys()) {
+        if (!activeChaserIds.has(id)) chaserHeldRef.current.delete(id);
+      }
+      // Sync edge-triggered des matrices : activation en plage, restauration hors plage.
+      syncMatrixEnabled([...activeMatrixIds], matrixForcedRef.current);
       // Single HTP-merged write for the whole frame — toutes les scènes superposées jouent ensemble
       if (Object.keys(merged).length > 0) {
         sendChannelsToHardware(merged, currentState.patchedFixtures, currentState.universes, 'show-manager').catch(() => {});
@@ -375,7 +451,7 @@ export const ShowManager: React.FC = () => {
     const id = 'trk-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     const newTrack: ShowTrack = {
       id,
-      name: type === 'scene' ? 'Scene Track' : type === 'chaser' ? 'Chaser Track' : type === 'efx' ? 'EFX Track' : 'Audio Track',
+      name: type === 'scene' ? 'Scene Track' : type === 'chaser' ? 'Chaser Track' : type === 'efx' ? 'EFX Track' : type === 'matrix' ? 'Matrix Track' : 'Audio Track',
       type,
       items: [],
       muted: false,
@@ -409,8 +485,28 @@ export const ShowManager: React.FC = () => {
     });
   };
 
-  const handleAddItemToTrack = (trackId: string, resourceId: string, name: string, duration?: number, audioFileBase64?: string, fadeIn?: number, fadeOut?: number) => {
-    if (!selectedShow) return;
+  // Recale la durée d'un item audio sur le son réellement décodé (en fond) :
+  // si l'analyse du preset manquait, la tuile naît à 30s par défaut — on la
+  // redimensionne dès que le décodage donne la vraie longueur (> 1s d'écart).
+  const correctAudioItemDuration = (trackId: string, itemId: string | null, startTime: number, assumedMs: number, b64?: string) => {
+    if (!itemId || !b64) return;
+    getAudioBuffer(b64).then((buffer) => {
+      const realMs = Math.round(buffer.duration * 1000);
+      if (!Number.isFinite(realMs) || realMs <= 0 || Math.abs(realMs - assumedMs) <= 1000) return;
+      const st = useShowStore.getState();
+      const show = st.shows.find((s) => s.tracks.some((t) => t.id === trackId));
+      if (!show) return;
+      st.updateShow(show.id, {
+        tracks: show.tracks.map((t) => t.id === trackId
+          ? { ...t, items: t.items.map((it) => it.id === itemId ? { ...it, duration: realMs } : it) }
+          : t),
+        ...(startTime + realMs > show.duration ? { duration: startTime + realMs } : {}),
+      });
+    }).catch(() => {});
+  };
+
+  const handleAddItemToTrack = (trackId: string, resourceId: string, name: string, duration?: number, audioFileBase64?: string, fadeIn?: number, fadeOut?: number): string | null => {
+    if (!selectedShow) return null;
     const itemId = 'tmi-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     const itemDur = duration ?? 5000;
     const newItem: ShowTrackItem = {
@@ -438,6 +534,7 @@ export const ShowManager: React.FC = () => {
     }
     updateShow(selectedShow.id, updates);
     setAddItemTrackId(null);
+    return itemId;
   };
 
   const handleDeleteItem = (itemId: string) => {
@@ -593,6 +690,19 @@ export const ShowManager: React.FC = () => {
     updateShow(selectedShow.id, { duration: Math.max(5000, newDuration) });
   };
 
+  // Seek comme dans QuickShow : recale l'horloge (pas seulement l'état) et
+  // coupe les sources audio en cours pour éviter les chevauchements. Marche
+  // à l'arrêt, en pause comme en lecture (le tick repart de la nouvelle base).
+  const seekTo = useCallback((time: number) => {
+    const t = Math.max(0, Math.min(time, effectiveDuration));
+    for (const src of audioSourcesRef.current) { try { src.stop(); } catch {} }
+    audioSourcesRef.current = [];
+    startedAudiosRef.current.clear();
+    playStartRef.current = performance.now() - t;
+    playheadTimeRef.current = t;
+    setPlayheadTime(t);
+  }, [effectiveDuration]);
+
   const handleTimelineClick = (e: React.MouseEvent) => {
     if (draggingItem || resizingItem) return;
     if (timelineMoveRef.current) { timelineMoveRef.current = false; return; }
@@ -602,10 +712,7 @@ export const ShowManager: React.FC = () => {
     const x = e.clientX - rect.left + el.scrollLeft;
     const contentWidth = el.scrollWidth || rect.width || 1;
     const time = (x / contentWidth) * effectiveDuration;
-    setPlayheadTime(Math.max(0, Math.min(time, effectiveDuration)));
-    if (playState === 'paused') {
-      playStartRef.current = performance.now() - time;
-    }
+    seekTo(time);
   };
 
   // ── Sync ruler scroll ──
@@ -717,6 +824,7 @@ export const ShowManager: React.FC = () => {
     chaser: '#22c55e',
     efx: '#f59e0b',
     audio: '#3b82f6',
+    matrix: '#ec4899',
   };
 
   const TRACK_ICONS: Record<string, string> = {
@@ -724,12 +832,13 @@ export const ShowManager: React.FC = () => {
     chaser: '🎞️',
     efx: '✨',
     audio: '🎵',
+    matrix: '🔳',
   };
 
   // ── If no show selected, show list ──
   if (!selectedShow) {
     return (
-      <div className="h-full flex flex-col bg-[#0a0a0f]">
+      <div className="h-full flex-1 min-w-0 flex flex-col bg-[#0a0a0f]">
         <div className="px-4 pt-3 pb-2 flex items-center gap-3 border-b border-gray-800/50">
           <span className="text-sm font-bold text-white">Show Manager</span>
           <div className="flex-1" />
@@ -751,26 +860,24 @@ export const ShowManager: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
               {shows.map((show) => (
                 <div
                   key={show.id}
                   onClick={() => { setSelectedShowId(show.id); stopPlayback(); }}
-                  className="bg-[#0d0d14] border border-gray-700 rounded-xl p-4 cursor-pointer hover:border-purple-500/40 transition-all group"
+                  className="bg-[#0d0d14] border border-gray-700 rounded-lg px-2 py-1.5 cursor-pointer hover:border-purple-500/40 transition-all group"
                 >
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-sm font-bold text-gray-200 truncate flex-1">{show.name}</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-semibold text-gray-200 truncate flex-1">{show.name}</h3>
                     <button
                       onClick={(e) => { e.stopPropagation(); setDeleteConfirm(show.id); }}
                       className="p-1 text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={12} />
                     </button>
                   </div>
-                  <div className="text-[10px] text-gray-500 space-y-0.5">
-                    <div>{show.tracks.length} track{show.tracks.length !== 1 ? 's' : ''}</div>
-                    <div>Duration: {fmtTime(show.duration)}</div>
-                    <div>{show.audioFileName ? `🎵 ${show.audioFileName}` : 'No audio'}</div>
+                  <div className="text-[10px] text-gray-500 truncate">
+                    {show.tracks.length} track{show.tracks.length !== 1 ? 's' : ''} · {fmtTime(show.duration)}{show.audioFileName ? ` · 🎵 ${show.audioFileName}` : ''}
                   </div>
                 </div>
               ))}
@@ -795,12 +902,12 @@ export const ShowManager: React.FC = () => {
   }
 
   return (
-    <div className="h-full flex flex-col bg-[#0a0a0f]">
+    <div className="h-full flex-1 min-w-0 flex flex-col bg-[#0a0a0f]">
       {/* ── Top Bar: Show name, controls ── */}
-      <div className="px-3 py-2 border-b border-gray-800/50 flex items-center gap-3 shrink-0 bg-[#0d0d14]">
+      <div className="px-3 py-2 border-b border-gray-800/50 flex items-center gap-3 shrink-0 bg-[#0d0d14] flex-wrap">
         <button
           onClick={() => { setSelectedShowId(null); stopPlayback(); }}
-          className="p-1 text-gray-500 hover:text-gray-300"
+          className="p-1 text-gray-500 hover:text-gray-300 shrink-0"
           title={t('showManager.backToShows')}
         >
           <SkipBack size={16} />
@@ -813,7 +920,7 @@ export const ShowManager: React.FC = () => {
           onChange={(e) => setEditShowName(e.target.value)}
           onBlur={handleShowNameChange}
           onKeyDown={(e) => { if (e.key === 'Enter') handleShowNameChange(); }}
-          className="bg-transparent text-sm font-bold text-white outline-none border-b border-transparent hover:border-gray-700 focus:border-purple-500/50 w-48"
+          className="bg-transparent text-sm font-bold text-white outline-none border-b border-transparent hover:border-gray-700 focus:border-purple-500/50 w-32 sm:w-48 min-w-0"
           placeholder="Show Name"
         />
 
@@ -961,7 +1068,7 @@ export const ShowManager: React.FC = () => {
       </div>
 
       {/* ── Add Track Bar ── */}
-      <div className="px-3 py-2 border-b border-gray-800/50 bg-[#0d0d14] flex items-center gap-3 shrink-0">
+      <div className="px-3 py-2 border-b border-gray-800/50 bg-[#0d0d14] flex items-center gap-3 shrink-0 flex-wrap">
         <span className="text-xs font-bold text-gray-300 uppercase tracking-wider">Add Track:</span>
         <button onClick={() => handleAddTrack('scene')}
           className="px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-600/30 text-purple-300 hover:bg-purple-600/40 border border-purple-500/30 flex items-center gap-1.5 transition-colors">
@@ -978,6 +1085,10 @@ export const ShowManager: React.FC = () => {
         <button onClick={() => handleAddTrack('efx')}
           className="px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-600/30 text-cyan-300 hover:bg-cyan-600/40 border border-cyan-500/30 flex items-center gap-1.5 transition-colors">
           <Crosshair size={14} /> EFX Track
+        </button>
+        <button onClick={() => handleAddTrack('matrix')}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-pink-600/30 text-pink-300 hover:bg-pink-600/40 border border-pink-500/30 flex items-center gap-1.5 transition-colors">
+          <Square size={14} /> Matrix Track
         </button>
         <span className="text-[10px] text-gray-600 ml-auto">Drag items from sidebar onto tracks</span>
       </div>
@@ -1137,6 +1248,7 @@ export const ShowManager: React.FC = () => {
                     const resourceName = (() => {
                       if (track.type === 'scene') return scenes.find((s) => s.id === item.resourceId)?.name || item.name;
                       if (track.type === 'chaser') return chasers.find((c) => c.id === item.resourceId)?.name || item.name;
+                      if (track.type === 'matrix') return matrices.find((m) => m.id === item.resourceId)?.name || item.name;
                       return item.name;
                     })();
 
@@ -1155,6 +1267,13 @@ export const ShowManager: React.FC = () => {
                           for (const pf of patchedFixtures) if (sceneTouchesFixture(sc, pf)) ids.add(pf.id);
                         }
                         return ids.size;
+                      }
+                      if (track.type === 'matrix') {
+                        const m = matrices.find((mm) => mm.id === item.resourceId);
+                        if (!m) return 0;
+                        const g = useShowStore.getState().fixtureGroups.find((gg) => gg.id === m.groupId);
+                        if (!g) return 0;
+                        return patchedFixtures.filter((pf) => g.fixtureIds.includes(pf.id)).length;
                       }
                       return 0;
                     })();
@@ -1300,8 +1419,15 @@ export const ShowManager: React.FC = () => {
             const totalCycle = c.steps.reduce((sum, s) => sum + s.fadeIn + s.hold + s.fadeOut, 0);
             return { id: c.id, name: c.name, duration: totalCycle || 10000 };
           });
-          if (track.type === 'audio') return songPresets.map((p) => ({ id: p.id, name: p.audioFileName || p.name, duration: 30000, audioFileBase64: p.audioFileBase64 }));
+          // Durée réelle depuis l'analyse du preset (secondes → ms), repli 30s :
+          // une durée codée en dur écrasait tout le contenu à gauche quand le show est plus long.
+          if (track.type === 'audio') return songPresets.map((p) => {
+            const sec = (p as any).trackAnalysis?.duration;
+            const durMs = Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : 30000;
+            return { id: p.id, name: p.audioFileName || p.name, duration: durMs, audioFileBase64: p.audioFileBase64 };
+          });
           if (track.type === 'efx') return effects.map((e) => ({ id: e.id, name: e.name, duration: 4000 }));
+          if (track.type === 'matrix') return matrices.map((m) => ({ id: m.id, name: `${m.name} (${m.pattern} · ${m.cols}×${m.rows})`, duration: 10000 }));
           return [];
         })();
         return (
@@ -1324,7 +1450,11 @@ export const ShowManager: React.FC = () => {
                 resources.map((res) => (
                   <button
                     key={res.id}
-                    onClick={() => handleAddItemToTrack(track.id, res.id, res.name, (res as any).duration, (res as any).audioFileBase64)}
+                    onClick={() => {
+                      const t0 = playheadTime;
+                      const id = handleAddItemToTrack(track.id, res.id, res.name, (res as any).duration, (res as any).audioFileBase64);
+                      if (track.type === 'audio') correctAudioItemDuration(track.id, id, t0, (res as any).duration ?? 30000, (res as any).audioFileBase64);
+                    }}
                     className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 flex items-center gap-2 transition-colors"
                   >
                     <span className="text-sm">{TRACK_ICONS[track.type] || '📋'}</span>
@@ -1440,7 +1570,13 @@ export const ShowManager: React.FC = () => {
             {selTrack?.type === 'audio' && songPresets.map((p) => (
               <button
                 key={p.id}
-                onClick={() => handleAddItemToTrack(selectedTrackId, p.id, p.audioFileName || p.name, 30000, p.audioFileBase64)}
+                onClick={() => {
+                  const sec = (p as any).trackAnalysis?.duration;
+                  const durMs = Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : 30000;
+                  const t0 = playheadTime;
+                  const id = handleAddItemToTrack(selectedTrackId, p.id, p.audioFileName || p.name, durMs, p.audioFileBase64);
+                  correctAudioItemDuration(selectedTrackId, id, t0, durMs, p.audioFileBase64);
+                }}
                 className="px-3 py-1.5 rounded-lg text-xs bg-blue-600/10 border border-blue-500/20 text-blue-300 hover:bg-blue-600/20 transition-colors"
               >
                 🎵 {p.audioFileName || p.name}

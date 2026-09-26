@@ -9,6 +9,7 @@ import type { EfxPattern } from '../stores/showStore';
 const PATTERNS: EfxPattern[] = [
   'Circle', 'Line', 'Eight', 'Square', 'Triangle',
   'Infinity', 'Zigzag', 'Spiral', 'DoubleCircle', 'Heart',
+  'Wave', 'Bounce', 'Cross',
 ];
 
 const fixtures = [
@@ -46,6 +47,26 @@ describe('EFX preview == moteur (parité stricte)', () => {
     }
   });
 
+  it('aucun doublon : chaque pattern trace une forme distincte (cf. Eight/Infinity)', () => {
+    // Échantillonne chaque pattern sur un cycle et compare les signatures.
+    // Seule exception connue et assumée : Infinity == Eight déphasé (compat legacy).
+    const signature = (p: EfxPattern): string => {
+      const pts: string[] = [];
+      for (let i = 0; i < 16; i++) {
+        const { x, y } = evalEfxNormalized(p, i / 16, 1, 1, 0, 0, 0);
+        pts.push(`${x.toFixed(2)},${y.toFixed(2)}`);
+      }
+      return pts.join('|');
+    };
+    const sigs = new Map<string, EfxPattern[]>();
+    for (const p of PATTERNS) {
+      const s = signature(p);
+      sigs.set(s, [...(sigs.get(s) || []), p]);
+    }
+    const dupes = [...sigs.entries()].filter(([, ps]) => ps.length > 1);
+    expect(dupes).toEqual([]);
+  });
+
   it('base de temps absolue : même instant => même sortie quelle que soit la fenêtre d\u2019entrée', () => {
     const effects = [{ id: 'eff-1', pattern: 'Circle', speed: 0.5, width: 1, height: 1, rotation: 0, xOffset: 0, yOffset: 0 }];
     const mkTracks = (s: number, en: number) => [
@@ -60,5 +81,43 @@ describe('EFX preview == moteur (parité stricte)', () => {
     const a = computeEfxOverrides(mkTracks(0, 10) as any, 7, effects as any, fixtures as any, []);
     const b = computeEfxOverrides(mkTracks(4, 14) as any, 7, effects as any, fixtures as any, []);
     expect(a.get('fx-1')).toEqual(b.get('fx-1'));
+  });
+
+  it('spread = 0 : toutes les fixtures synchronisées (comportement historique)', () => {
+    const effects = [{ id: 'eff-1', pattern: 'Circle', speed: 0.5, width: 1, height: 1, rotation: 0, xOffset: 0, yOffset: 0, spread: 0 }];
+    const tracks = [{
+      id: 'et1', name: 'EFX 1',
+      entries: [{ id: 'e1', time: 0, endTime: 10, effectId: 'eff-1' }],
+      targetFixtures: { type: 'fixture', fixtureIds: ['fx-1', 'fx-2', 'fx-3'] },
+    }];
+    const fxs = [
+      { id: 'fx-1', startAddress: 1 }, { id: 'fx-2', startAddress: 11 }, { id: 'fx-3', startAddress: 21 },
+    ];
+    const m = computeEfxOverrides(tracks as any, 3.7, effects as any, fxs as any, []);
+    expect(m.get('fx-1')).toEqual(m.get('fx-2'));
+    expect(m.get('fx-2')).toEqual(m.get('fx-3'));
+  });
+
+  it('spread = 1 : vague complète — chaque fixture déphasée de 1/N cycle', () => {
+    const effects = [{ id: 'eff-1', pattern: 'Circle', speed: 0.5, width: 1, height: 1, rotation: 0, xOffset: 0, yOffset: 0, spread: 1 }];
+    const tracks = [{
+      id: 'et1', name: 'EFX 1',
+      entries: [{ id: 'e1', time: 0, endTime: 10, effectId: 'eff-1' }],
+      targetFixtures: { type: 'fixture', fixtureIds: ['fx-1', 'fx-2', 'fx-3', 'fx-4'] },
+    }];
+    const fxs = [
+      { id: 'fx-1', startAddress: 1 }, { id: 'fx-2', startAddress: 11 },
+      { id: 'fx-3', startAddress: 21 }, { id: 'fx-4', startAddress: 31 },
+    ];
+    const t = 3.7;
+    const m = computeEfxOverrides(tracks as any, t, effects as any, fxs as any, []);
+    // Les 4 fixtures voient 4 phases distinctes (0, 0.25, 0.5, 0.75 ajouté au temps de base)
+    const relTime = (t * 0.5 * 2) / (Math.PI * 2);
+    const ids = ['fx-1', 'fx-2', 'fx-3', 'fx-4'];
+    ids.forEach((fid, i) => {
+      expect(m.get(fid)).toEqual(generateEfxPanTilt('Circle', relTime + i / 4, 1, 1, 0, 0, 0));
+    });
+    // Et elles ne sont pas toutes identiques (vrai déphasage, pas un no-op)
+    expect(m.get('fx-1')).not.toEqual(m.get('fx-3'));
   });
 });

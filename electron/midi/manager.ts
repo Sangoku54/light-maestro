@@ -355,6 +355,80 @@ export class MidiManager extends EventEmitter {
     this.emit('learnStopped');
   }
 
+  // ─── Feedback LED (port sortie) ─────────────────────────────
+
+  /**
+   * Envoie un message brut sur le port sortie ouvert (aucun envoi sans port).
+   * Jamais appelé depuis le callback RtMidi entrant : uniquement via
+   * l'IPC `midi:feedback` (état des tuiles poussé par le renderer).
+   * @returns true si le message est bien parti.
+   */
+  private sendRawFeedback(message: number[]): boolean {
+    if (!this.output || !Array.isArray(message) || message.length === 0) return false;
+    try {
+      this.output.sendMessage(message);
+      return true;
+    } catch (e) {
+      console.warn('[midi] échec envoi feedback:', e instanceof Error ? e.message : e);
+      return false;
+    }
+  }
+
+  /**
+   * Clé d'une cible pour l'appariement feedback : `widget:<id>`,
+   * `scene:<id>`, `chaser:<id>`, `blackout:`. Les cibles non « LED »
+   * (dmx-channel, grandMaster, autoscript…) retournent null.
+   */
+  private static feedbackKey(t: MidiTarget): string | null {
+    switch (t.type) {
+      case 'widget':
+        // Seule la propriété « press » pilote une LED ; « value » (fader)
+        // n'a pas de retour automatique (les MIDIMIX ne sont pas motorisés).
+        return (t.property ?? 'press') === 'press' ? `widget:${t.widgetId}` : null;
+      case 'scene': return `scene:${t.sceneId}`;
+      case 'chaser': return `chaser:${t.chaserId}`;
+      case 'blackout': return 'blackout:';
+      default: return null;
+    }
+  }
+
+  /**
+   * Applique l'état des tuiles aux LEDs des contrôleurs : pour chaque mapping
+   * avec `feedback !== false` dont la cible est présente dans `entries`,
+   * envoie note-on/CC à 127 (ON) ou 0 (OFF) sur le port sortie.
+   *
+   * Le renderer pousse l'état COMPLET (tuiles off incluses) quand il change :
+   * une LED restée allumée après redémarrage/arrêt d'une tuile s'éteint donc
+   * ici. Une cible absente des entries = état inconnu → aucun envoi.
+   *
+   * @returns nombre de messages MIDI envoyés.
+   */
+  sendFeedbackState(entries: Array<{ type: string; id?: string; on: boolean }>): number {
+    if (!Array.isArray(entries) || entries.length === 0) return 0;
+    const state = new Map<string, boolean>();
+    for (const e of entries) {
+      if (!e || typeof e.type !== 'string' || typeof e.on !== 'boolean') continue;
+      state.set(`${e.type}:${e.id ?? ''}`, e.on);
+    }
+    let count = 0;
+    for (const m of this.mapping) {
+      if (m.feedback === false) continue;
+      const key = MidiManager.feedbackKey(m.target);
+      if (key === null) continue;
+      const on = state.get(key);
+      if (on === undefined) continue; // état inconnu → on ne devine pas
+      const value = on ? 127 : 0;
+      const status = m.midiChannel >= 1 && m.midiChannel <= 16 ? m.midiChannel - 1 : 0;
+      if (m.midiType === 'note') {
+        if (this.sendRawFeedback([0x90 | status, m.midiValue, value])) count++;
+      } else if (m.midiType === 'cc') {
+        if (this.sendRawFeedback([0xB0 | status, m.midiValue, value])) count++;
+      }
+      // program change : pas de LED réversible, ignoré
+    }
+    return count;
+  }
+
   // ─── Incoming MIDI ──────────────────────────────────────
 
   private handleMidiMessage(message: number[]): void {

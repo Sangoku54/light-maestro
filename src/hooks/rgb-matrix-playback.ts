@@ -2,105 +2,210 @@ import { useEffect, useRef } from 'react';
 import { useRgbMatrixStore } from '../stores/rgbmatrixStore';
 import { useShowStore } from '../stores/showStore';
 import { dmxBridge } from '../utils/dmx-bridge';
+import { loadFixtureDefinitions } from './dmx-cues';
+import { analyzeChannels, mapIntensityVal, capMid } from '../engine/fixture-analyzer';
+import { findBestWheelCap, wheelDegeneratePosition } from '../engine/dmx-color';
+import { getPatternColor, hexToRgb } from '../engine/rgb-matrix-patterns';
 
-function hexToRgb(hex: string): [number, number, number] {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return [r, g, b];
+export interface MatrixTrackEntryLike {
+  time: number;
+  endTime: number;
+  matrixId: string;
 }
 
-function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
-  const i = Math.floor(h * 6);
-  const f = h * 6 - i;
-  const p = v * (1 - s);
-  const q = v * (1 - f * s);
-  const t = v * (1 - (1 - f) * s);
-  let r: number, g: number, b: number;
-  switch (i % 6) {
-    case 0: r = v; g = t; b = p; break;
-    case 1: r = q; g = v; b = p; break;
-    case 2: r = p; g = v; b = t; break;
-    case 3: r = p; g = q; b = v; break;
-    case 4: r = t; g = p; b = v; break;
-    default: r = v; g = p; b = q;
+/** Matrices actives à l'instant t (secondes) sur des pistes matrix. */
+export function collectActiveMatrixIds(
+  tracks: Array<{ entries: MatrixTrackEntryLike[] }> | null | undefined,
+  timeSec: number,
+): string[] {
+  if (!tracks || tracks.length === 0) return [];
+  const out = new Set<string>();
+  for (const t of tracks) {
+    for (const e of t.entries ?? []) {
+      const s = Math.min(e.time, e.endTime);
+      const en = Math.max(e.time, e.endTime);
+      if (timeSec >= s && timeSec < en && e.matrixId) out.add(e.matrixId);
+    }
   }
-  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+  return [...out];
 }
 
-function getPatternColor(
-  pattern: string,
-  col: number, row: number,
-  cols: number, rows: number,
-  phase: number,
-  startRgb: [number, number, number],
-  endRgb: [number, number, number],
-  width: number,
-): [number, number, number] {
-  const cellCount = cols * rows;
-  const cellIndex = row * cols + col;
+export interface MatrixTrackLike { entries: MatrixTrackEntryLike[] }
 
-  let pos: number;
-  switch (pattern) {
-    case 'chase': {
-      const chasePos = ((phase + cellIndex / cellCount) % 1 + 1) % 1;
-      const threshold = 1 - width / 100;
-      if (chasePos < threshold) return [0, 0, 0];
-      pos = (chasePos - threshold) / (1 - threshold);
-      break;
+export interface MatrixTrackColorResult {
+  /** fixtureId → couleur hex du motif de la matrice (chevauche la couleur autoscript). */
+  colors: Map<string, string>;
+  /** fixtureId → strobe, uniquement si le motif de la matrice est 'strobe'. */
+  strobe: Map<string, { active: boolean; speed: number }>;
+}
+
+/**
+ * Couleurs par fixture pour les pistes matrice actives à `currentTime`.
+ * Ne fournit QUE la couleur (et le strobe du motif le cas échéant) : le
+ * mouvement et le dimmer restent la propriété de l'autoscript.
+ */
+export function computeMatrixTrackColors(
+  tracks: MatrixTrackLike[] | null | undefined,
+  currentTime: number,
+  fixtureGroups: Array<{ id: string; fixtureIds: string[] }>,
+  matrices: Array<{
+    id: string; groupId: string; pattern: string; cols: number; rows: number;
+    speed: number; startColor: string; endColor: string; width: number;
+  }>,
+): MatrixTrackColorResult {
+  const colors = new Map<string, string>();
+  const strobe = new Map<string, { active: boolean; speed: number }>();
+  if (!tracks || tracks.length === 0) return { colors, strobe };
+
+  for (const t of tracks) {
+    for (const e of t.entries ?? []) {
+      const s = Math.min(e.time, e.endTime);
+      const en = Math.max(e.time, e.endTime);
+      if (!(currentTime >= s && currentTime < en)) continue;
+      const mx = matrices.find(m => m.id === e.matrixId);
+      if (!mx) continue;
+      const grp = fixtureGroups.find(g => g.id === mx.groupId);
+      if (!grp) continue;
+      const cellCount = Math.max(1, mx.cols * mx.rows);
+      const startRgb = hexToRgb(mx.startColor);
+      const endRgb = hexToRgb(mx.endColor);
+      const phase = currentTime * mx.speed;
+      const last = Math.min(grp.fixtureIds.length, cellCount);
+      for (let i = 0; i < last; i++) {
+        const col = i % mx.cols;
+        const row = Math.floor(i / mx.cols);
+        const isStrobe = mx.pattern === 'strobe';
+        // Motif strobe : la couleur reste pleine, c'est le shutter qui clignote.
+        // Sans ça, couleur et shutter moduleraient ensemble (double flash).
+        const [r, g, b] = isStrobe
+          ? startRgb
+          : getPatternColor(mx.pattern, col, row, mx.cols, mx.rows, phase, startRgb, endRgb, mx.width);
+        const hex = '#' + [r, g, b]
+          .map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0'))
+          .join('');
+        colors.set(grp.fixtureIds[i], hex);
+        if (isStrobe) {
+          strobe.set(grp.fixtureIds[i], { active: true, speed: Math.max(1, Math.min(10, 2 + mx.speed * 6)) });
+        }
+      }
     }
-    case 'wave': {
-      const wavePos = ((phase + row / rows) % 1 + 1) % 1;
-      const threshold = 1 - width / 100;
-      if (wavePos < threshold) return [0, 0, 0];
-      pos = (wavePos - threshold) / (1 - threshold);
-      break;
-    }
-    case 'burst': {
-      const cx = (cols - 1) / 2, cy = (rows - 1) / 2;
-      const dist = Math.sqrt(Math.pow(col - cx, 2) + Math.pow(row - cy, 2));
-      const maxDist = Math.sqrt(cx * cx + cy * cy) || 1;
-      const burstPos = ((phase + dist / maxDist) % 1 + 1) % 1;
-      const threshold = 1 - width / 100;
-      if (burstPos < threshold) return [0, 0, 0];
-      pos = (burstPos - threshold) / (1 - threshold);
-      break;
-    }
-    case 'gradient': {
-      pos = cellIndex / Math.max(1, cellCount - 1);
-      break;
-    }
-    case 'rainbow': {
-      const h = ((phase + cellIndex / cellCount) % 1 + 1) % 1;
-      return hsvToRgb(h, 1, 1);
-    }
-    case 'random': {
-      const seed = Math.sin(cellIndex * 127.1 + Math.floor(phase * 10) * 43758.5453) * 43758.5453;
-      const r = seed - Math.floor(seed);
-      return hsvToRgb(r, 0.8, 1);
-    }
-    case 'pulse': {
-      const pulseVal = 0.3 + 0.7 * Math.abs(Math.sin(phase * Math.PI));
-      return [Math.round(startRgb[0] * pulseVal), Math.round(startRgb[1] * pulseVal), Math.round(startRgb[2] * pulseVal)];
-    }
-    case 'strobe': {
-      const strobeVal = Math.sin(phase * Math.PI * 12) > 0 ? 1 : 0;
-      return [Math.round(startRgb[0] * strobeVal), Math.round(startRgb[1] * strobeVal), Math.round(startRgb[2] * strobeVal)];
-    }
-    default:
-      return startRgb;
   }
+  return { colors, strobe };
+}
 
-  const r = Math.round(startRgb[0] + (endRgb[0] - startRgb[0]) * pos);
-  const g = Math.round(startRgb[1] + (endRgb[1] - startRgb[1]) * pos);
-  const b = Math.round(startRgb[2] + (endRgb[2] - startRgb[2]) * pos);
-  return [r, g, b];
+/**
+ * Rend une frame DMX complète pour une matrice à la phase donnée (pur, synchrone).
+ * Mêmes règles auto que le lecteur live : RGB/roue + dimmer + shutter.
+ * Retourne universIdx → canaux, plus le nombre de fixtures résolues.
+ */
+export function renderMatrixFrame(
+  matrix: { pattern: string; cols: number; rows: number; speed: number; startColor: string; endColor: string; width: number },
+  phaseSec: number,
+  groupFixtures: Array<{ id: string; fixtureDefId: string; universeId: string; startAddress: number }>,
+  defOf: (fixtureDefId: string) => any | undefined,
+  universeIndexOf: (universeId: string) => number,
+  wheelTimeSec: number,
+): { perUniverse: Map<number, Record<number, number>>; resolved: number } {
+  const perUniverse = new Map<number, Record<number, number>>();
+  let resolved = 0;
+  const { cols, rows } = matrix;
+  const cellCount = Math.max(1, cols * rows);
+  const startRgb = hexToRgb(matrix.startColor);
+  const endRgb = hexToRgb(matrix.endColor);
+
+  for (let i = 0; i < Math.min(groupFixtures.length, cellCount); i++) {
+    const fixture = groupFixtures[i];
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+
+    const [r, g, b] = getPatternColor(
+      matrix.pattern, col, row, cols, rows,
+      phaseSec, startRgb, endRgb, matrix.width,
+    );
+
+    const def = defOf(fixture.fixtureDefId);
+    if (!def) continue;
+    let fa: ReturnType<typeof analyzeChannels>;
+    try {
+      fa = analyzeChannels(fixture as any, def);
+    } catch { continue; }
+    const lit = r > 0 || g > 0 || b > 0;
+    const rgb = fa.rgbOffsets;
+    const hasRgb = !!rgb && rgb.length > 0;
+    const hasWheel = !fa.isLaser && fa.wheelOffset !== null && fa.wheelOffset !== undefined
+      && fa.wheelOffset >= 0 && (fa.wheelCaps?.length ?? 0) > 0;
+    if (!hasRgb && !hasWheel) continue;
+
+    const uniIdx = universeIndexOf(fixture.universeId);
+    if (uniIdx < 0) continue;
+    const addr = fixture.startAddress;
+    let uniVals = perUniverse.get(uniIdx);
+    if (!uniVals) { uniVals = {}; perUniverse.set(uniIdx, uniVals); }
+    if (hasRgb) {
+      if (rgb![0] !== undefined) uniVals[addr + rgb![0]] = r;
+      if (rgb![1] !== undefined) uniVals[addr + rgb![1]] = g;
+      if (rgb![2] !== undefined) uniVals[addr + rgb![2]] = b;
+    } else if (lit && hasWheel) {
+      const cellHex = '#' + [r, g, b].map(v => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('');
+      let wheelVal: number | null = null;
+      try {
+        wheelVal = wheelDegeneratePosition(fa.wheelCaps ?? [], fa, cellHex, wheelTimeSec);
+      } catch { wheelVal = null; }
+      if (wheelVal === null || wheelVal === undefined) {
+        const best = findBestWheelCap(fa.wheelCaps ?? [], cellHex);
+        wheelVal = best ? capMid(best) : null;
+      }
+      if (wheelVal !== null && wheelVal !== undefined) uniVals[addr + fa.wheelOffset!] = wheelVal;
+    }
+    if (fa.intensityOffset !== null && fa.intensityOffset !== undefined && fa.intensityOffset >= 0) {
+      uniVals[addr + fa.intensityOffset] = mapIntensityVal(lit ? 255 : 0, fa);
+    }
+    if (lit && fa.shutterOffset !== null && fa.shutterOffset !== undefined && fa.shutterOffset >= 0) {
+      uniVals[addr + fa.shutterOffset] = 255;
+    }
+    resolved++;
+  }
+  return { perUniverse, resolved };
+}
+
+/**
+ * Active les matrices données (edge-triggered, mémorise l'état précédent),
+ * à appeler à chaque frame de lecture avec les ids en plage.
+ */
+export function syncMatrixEnabled(activeIds: string[], stash: Map<string, boolean>): void {
+  try {
+    const mx = useRgbMatrixStore.getState();
+    for (const mid of activeIds) {
+      const m = mx.matrices.find((mm) => mm.id === mid);
+      if (!m || m.enabled || stash.has(mid)) continue;
+      stash.set(mid, m.enabled);
+      mx.updateMatrix(mid, { enabled: true });
+    }
+    for (const [mid, prev] of stash) {
+      if (activeIds.includes(mid)) continue;
+      stash.delete(mid);
+      mx.updateMatrix(mid, { enabled: prev });
+    }
+  } catch {}
+}
+
+/** Restaure les matrices activées par la lecture (stop). */
+export function restoreMatrixEnabled(stash: Map<string, boolean>): void {
+  try {
+    const mx = useRgbMatrixStore.getState();
+    for (const [mid, prev] of stash) mx.updateMatrix(mid, { enabled: prev });
+    stash.clear();
+  } catch {}
 }
 
 export function useRgbMatrixPlayback() {
   const rafRef = useRef<number>(0);
   const startTimeRef = useRef<number>(0);
   const lastFrameRef = useRef<number>(0);
+  // Cache des définitions (le tick RAF est synchrone : chargement en
+  // tâche de fond, les fixtures s'allument dès que leur def est résolue).
+  const defCacheRef = useRef(new Map<string, any>());
+  const lastStatsPushRef = useRef<number>(0);
 
   useEffect(() => {
     startTimeRef.current = performance.now();
@@ -130,53 +235,43 @@ export function useRgbMatrixPlayback() {
       // per universe instead of one setChannel per RGB channel.
       const perUniverse = new Map<number, Record<number, number>>();
 
+      const pushStats = now - lastStatsPushRef.current > 500;
+      if (pushStats) lastStatsPushRef.current = now;
+
       for (const matrix of matrices) {
         const group = groups.find(g => g.id === matrix.groupId);
-        if (!group) continue;
+        if (!group) {
+          if (pushStats) useRgbMatrixStore.getState().setStats(matrix.id, { total: 0, resolved: 0 });
+          continue;
+        }
 
         const groupFixtures = fixtures.filter(f => group.fixtureIds.includes(f.id));
-        if (groupFixtures.length === 0) continue;
-
-        const { cols, rows } = matrix;
-        const cellCount = cols * rows;
-        const phase = elapsed * matrix.speed;
-        const startRgb = hexToRgb(matrix.startColor);
-        const endRgb = hexToRgb(matrix.endColor);
-
-        for (let i = 0; i < Math.min(groupFixtures.length, cellCount); i++) {
-          const fixture = groupFixtures[i];
-          const col = i % cols;
-          const row = Math.floor(i / cols);
-
-          const [r, g, b] = getPatternColor(
-            matrix.pattern, col, row, cols, rows,
-            phase, startRgb, endRgb, matrix.width,
-          );
-
-          const defChannels = (fixture as any).channels || (fixture as any).definition?.channels;
-          if (!defChannels || !Array.isArray(defChannels)) continue;
-
-          let rCh = -1, gCh = -1, bCh = -1;
-          for (let ci = 0; ci < defChannels.length; ci++) {
-            const ch = defChannels[ci];
-            const chName = (ch.name || ch.channel || '').toLowerCase();
-            if ((chName === 'red' || chName.includes('red')) && rCh === -1) rCh = ci;
-            else if ((chName === 'green' || chName.includes('green')) && gCh === -1) gCh = ci;
-            else if ((chName === 'blue' || chName.includes('blue')) && bCh === -1) bCh = ci;
-          }
-
-          if (rCh >= 0 && gCh >= 0 && bCh >= 0) {
-            const uniIdx = universes.findIndex(u => u.id === fixture.universeId);
-            if (uniIdx >= 0) {
-              const addr = fixture.startAddress;
-              let uniVals = perUniverse.get(uniIdx);
-              if (!uniVals) { uniVals = {}; perUniverse.set(uniIdx, uniVals); }
-              uniVals[addr + rCh] = r;
-              uniVals[addr + gCh] = g;
-              uniVals[addr + bCh] = b;
-            }
-          }
+        if (groupFixtures.length === 0) {
+          if (pushStats) useRgbMatrixStore.getState().setStats(matrix.id, { total: 0, resolved: 0 });
+          continue;
         }
+
+        // Précharge en tâche de fond les définitions manquantes du groupe
+        const missingDefIds = [...new Set(groupFixtures.map(f => f.fixtureDefId))].filter(id => !defCacheRef.current.has(id));
+        if (missingDefIds.length > 0) {
+          loadFixtureDefinitions(missingDefIds).then(defs => {
+            for (const [k, v] of defs) defCacheRef.current.set(k, v);
+          }).catch(() => {});
+        }
+
+        const { perUniverse: frame, resolved: resolvedCount } = renderMatrixFrame(
+          matrix,
+          elapsed * matrix.speed,
+          groupFixtures,
+          (id) => defCacheRef.current.get(id),
+          (uid) => universes.findIndex(u => u.id === uid),
+          elapsed,
+        );
+        for (const [uniIdx, vals] of frame) {
+          const prev = perUniverse.get(uniIdx) ?? {};
+          perUniverse.set(uniIdx, { ...prev, ...vals });
+        }
+        if (pushStats) useRgbMatrixStore.getState().setStats(matrix.id, { total: groupFixtures.length, resolved: resolvedCount });
       }
 
       // Send one arbitrated frame per universe through the output arbiter

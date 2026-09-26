@@ -392,8 +392,8 @@ function computeNoveltyCurve(frames: SpectralFrame[]): number[] {
   const n = frames.length;
   const novelty: number[] = new Array(n).fill(0);
 
-  const kernelHalf = 8;
-  const sigma = 2.0;
+  const kernelHalf = 4;
+  const sigma = 1.5;
 
   for (let i = kernelHalf; i < n - kernelHalf; i++) {
     let nov = 0;
@@ -402,8 +402,18 @@ function computeNoveltyCurve(frames: SpectralFrame[]): number[] {
       const left = frames[i + k];
       const right = frames[i - k];
       if (!left || !right) continue;
-      const leftFeat = [left.bands.sub, left.bands.bass, left.bands.lowMid, left.bands.mid, left.bands.high, left.centroid / 8000];
-      const rightFeat = [right.bands.sub, right.bands.bass, right.bands.lowMid, right.bands.mid, right.bands.high, right.centroid / 8000];
+      const leftFeat = [
+        left.bands.sub, left.bands.bass, left.bands.lowMid, left.bands.mid, left.bands.high,
+        left.centroid / 8000,
+        left.rms,
+        left.flatness,
+      ];
+      const rightFeat = [
+        right.bands.sub, right.bands.bass, right.bands.lowMid, right.bands.mid, right.bands.high,
+        right.centroid / 8000,
+        right.rms,
+        right.flatness,
+      ];
       const dist = 1 - cosineSimilarity(leftFeat, rightFeat);
       nov += weight * dist;
     }
@@ -412,10 +422,10 @@ function computeNoveltyCurve(frames: SpectralFrame[]): number[] {
 
   for (let i = 1; i < n; i++) {
     const sf = spectralFlux(frames[i - 1].mag, frames[i].mag);
-    novelty[i] = 0.4 * novelty[i] + 0.6 * sf;
+    novelty[i] = 0.3 * novelty[i] + 0.7 * sf;
   }
 
-  const smoothed = smooth(novelty, 5);
+  const smoothed = smooth(novelty, 3);
   return normalize(smoothed);
 }
 
@@ -431,20 +441,23 @@ export function detectSectionBoundaries(
   spectralCentroidCurve: number[],
   analysisRate: number,
   duration: number,
-  minSectionSec: number = 3,
+  minSectionSec: number = 2,
 ): number[] {
   const n = noveltyCurve.length;
   if (n < 4) return [0, n - 1];
 
   // Pass 1: global adaptive threshold (percentile-based, not std)
   const sorted = [...noveltyCurve].sort((a, b) => a - b);
+  const p50 = sorted[Math.floor(n * 0.50)];
   const p75 = sorted[Math.floor(n * 0.75)];
   const p90 = sorted[Math.floor(n * 0.90)];
   const p95 = sorted[Math.floor(n * 0.95)];
-  const globalThreshold = Math.max(0.15, p75 * 0.5 + p90 * 0.5);
+  const p99 = sorted[Math.floor(n * 0.99)];
+  // Lower threshold: p50*0.3 + p75*0.4 + p90*0.3 catches more transitions
+  const globalThreshold = Math.max(0.08, p50 * 0.3 + p75 * 0.4 + p90 * 0.3);
 
   const minGap = Math.floor(analysisRate * minSectionSec);
-  const adaptiveWindow = Math.floor(analysisRate * 2);
+  const adaptiveWindow = Math.floor(analysisRate * 1.0); // Reduced from 1.5s
 
   // Pass 1: collect all candidate peaks above global threshold
   const candidates: number[] = [];
@@ -461,6 +474,7 @@ export function detectSectionBoundaries(
     }
     if (isLocalMax) candidates.push(i);
   }
+  dlog('  candidates:', candidates.length, 'peaks above', globalThreshold.toFixed(3));
 
   // Pass 2: spectral contrast check — reject weak boundaries
   const boundaries: number[] = [0];
@@ -469,8 +483,8 @@ export function detectSectionBoundaries(
   for (const i of candidates) {
     if (i - lastBoundary < minGap) continue;
 
-    // Spectral contrast: compare energy + centroid before/after
-    const halfWin = Math.floor(analysisRate * 1.5);
+    // Spectral contrast: compare energy + centroid + bass before/after
+    const halfWin = Math.floor(analysisRate * 0.8); // Reduced window
     const ba = Math.max(0, i - halfWin);
     const bb = i;
     const aa = i;
@@ -488,12 +502,18 @@ export function detectSectionBoundaries(
     const bassContrast = Math.abs(afterB - beforeB) / Math.max(0.01, Math.max(afterB, beforeB));
 
     const contrastScore = energyContrast * 0.5 + centroidContrast * 0.3 + bassContrast * 0.2;
-    // Lower threshold for strong novelty peaks (Bug #2: was 0.04/0.08/0.15)
-    const contrastThreshold = noveltyCurve[i] > p95 ? 0.03 : noveltyCurve[i] > p90 ? 0.06 : 0.10;
+    // Much lower thresholds: stronger novelty peaks need very little contrast
+    const contrastThreshold = noveltyCurve[i] > p99 ? 0.008 :
+                              noveltyCurve[i] > p95 ? 0.015 :
+                              noveltyCurve[i] > p90 ? 0.025 :
+                              noveltyCurve[i] > p75 ? 0.04 : 0.055;
 
     if (contrastScore > contrastThreshold) {
       boundaries.push(i);
       lastBoundary = i;
+      dlog('  boundary at', r4(i / analysisRate), 'novelty=', noveltyCurve[i].toFixed(3), 'contrast=', contrastScore.toFixed(3), 'thresh=', contrastThreshold.toFixed(3));
+    } else {
+      dlog('  REJECTED at', r4(i / analysisRate), 'novelty=', noveltyCurve[i].toFixed(3), 'contrast=', contrastScore.toFixed(3), 'thresh=', contrastThreshold.toFixed(3));
     }
   }
 
@@ -764,52 +784,125 @@ export function classifySections(
     }
 
     // ── Bridge : non-répété ET énergie contrastée (sous la moyenne).
-    // On assouplit les seuils : énergie < 0.95*mean suffit, et z < 0.3
-    // (au lieu de < 0) permet d'inclure les segments légèrement en dessous
-    // de la moyenne qui ne sont pas des drops.
     if (!isRepeated && seg.energy < globalMeanEnergy * 0.95 && z < 0.3) {
       result[i].type = 'bridge';
       continue;
     }
 
-    // ── Verse : classe(s) répétée(s) d'énergie moyenne/basse.
+    // ── Verse : classe(s) répétée(s) d'énergie moyenne/basse (pas le chorus principal).
     if (isRepeated && seg.energy < globalMeanEnergy * 1.1) {
       result[i].type = 'verse';
       continue;
     }
 
-    // ── Repli.
-    if (seg.energy < globalMeanEnergy) {
-      result[i].type = isRepeated ? 'verse' : 'bridge';
-    } else {
-      result[i].type = isRepeated ? 'verse' : (seg.energy >= globalMeanEnergy * 1.1 ? 'chorus' : 'verse');
+    // ── Repeated but high energy (secondary chorus / pre-chorus) ──
+    if (isRepeated) {
+      result[i].type = 'chorus';
+      continue;
+    }
+
+    // ── Non-repeated sections: classify by energy/timbre + position ──
+    const relativePos = midPos; // 0.0 to 1.0
+    
+    // High energy + bright = chorus (anywhere but especially middle)
+    const isHighEnergy = seg.energy >= globalMeanEnergy * 1.15;
+    const isBright = seg.centroidNorm > 0.55;
+    const isBassHeavy = seg.bassRatio > 0.65;
+    
+    if (isHighEnergy && (isBright || !isBassHeavy)) {
+      result[i].type = 'chorus';
+    } 
+    // Quiet sections = bridge (unless at very end = outro)
+    else if (seg.energy < globalMeanEnergy * 0.65) {
+      result[i].type = relativePos > 0.85 ? 'outro' : 'bridge';
+    }
+    // Mid-energy: position-based (verse early, bridge middle, pre-chorus late)
+    else {
+      if (relativePos < 0.3) {
+        result[i].type = 'verse'; // early = verse
+      } else if (relativePos > 0.75) {
+        result[i].type = seg.energy > globalMeanEnergy ? 'chorus' : 'bridge'; // late = chorus/bridge
+      } else {
+        result[i].type = 'verse'; // middle = verse
+      }
     }
   }
 
-  // ── Garde-fou structural : intro GARANTIE au tout début ──
-  // Le premier segment est toujours une intro : une génération d'autoscript
-  // doit démarrer sur une section calme, même si le morceau démarre fort
-  // (drop d'ouverture, attaque immédiate…). On prolonge ce bloc intro tant
-  // que le calme persiste (bloc contigu, critère strict), puis on interdit
-  // toute intro tardive/parasite.
-  result[0].type = 'intro';
-  let introRunEnd = 1;
-  for (let i = 1; i < N; i++) {
-    const introMid = (segments[i].startT + segments[i].endT) / 2 / duration;
-    if (introMid >= 0.3) break;
-    const introQuiet = segments[i].energy < globalMeanEnergy * 0.85 && energyZ(i) < 0.5;
-    if (!introQuiet) break;
-    result[i].type = 'intro';
-    introRunEnd = i + 1;
+  // ── Stabilisation par label : un motif répété = un rôle de base unique ──
+  // Évite les alternances verse/chorus/verse "au hasard" à l'intérieur du même
+  // label structurel quand les énergies sont proches du seuil. Seuls les
+  // événements (intro/outro/drop/build) peuvent déroger, pas les rôles.
+  const labelEnergySum = new Map<string, number>();
+  const labelEnergyCnt = new Map<string, number>();
+  for (let i = 0; i < N; i++) {
+    const l = structuralLabels[i] || '?';
+    labelEnergySum.set(l, (labelEnergySum.get(l) ?? 0) + segments[i].energy);
+    labelEnergyCnt.set(l, (labelEnergyCnt.get(l) ?? 0) + 1);
   }
-  for (let i = introRunEnd; i < N; i++) {
-    if (result[i].type === 'intro') result[i].type = result[i].isRepeated ? 'verse' : 'bridge';
+  const labelRole = new Map<string, 'chorus' | 'verse'>();
+  for (const [l, sum] of labelEnergySum) {
+    if ((labelCounts.get(l) ?? 0) <= 1) continue;
+    const avg = sum / Math.max(1, labelEnergyCnt.get(l) ?? 1);
+    // Le label répété dominant ne devient chorus que s'il dépasse vraiment
+    // la moyenne ; sinon (ex. un couplet répété sans refrain détecté) il
+    // reste couplet. Les autres labels répétés exigent une marge plus nette.
+    const isTop = !!highestRepeatedClass && l === highestRepeatedClass.label;
+    const thresh = isTop ? 1.02 : 1.10;
+    labelRole.set(l, avg >= globalMeanEnergy * thresh ? 'chorus' : 'verse');
+  }
+  for (let i = 0; i < N; i++) {
+    const role = labelRole.get(structuralLabels[i] || '?');
+    if (!role) continue;
+    const t = result[i].type;
+    if (t === 'verse' || t === 'chorus') result[i].type = role;
+  }
+
+  // ── Intro FORCÉE : le morceau commence toujours par une intro ──
+  // Le 1er segment est l'intro (même s'il est énergique ou répété).
+  // Extension uniquement sur les segments contigus de MÊME label, sous la
+  // moyenne et dans les premiers 30% / 60s (vraie intro calme prolongée).
+  if (N >= 1) {
+    result[0].type = 'intro';
+    const MAX_FORCED_INTRO_ABS = 60;
+    const INTRO_POS_MAX = 0.30;
+    const firstSegLabel = structuralLabels[0];
+    let introRunEnd = 1;
+    for (let i = 1; i < N; i++) {
+      const segMid = (segments[i].startT + segments[i].endT) / 2;
+      const segPos = segMid / duration;
+      if (segPos > INTRO_POS_MAX || segMid >= MAX_FORCED_INTRO_ABS) break;
+      if (structuralLabels[i] !== firstSegLabel) break;
+      if (segments[i].energy >= globalMeanEnergy) break;
+      result[i].type = 'intro';
+      introRunEnd = i + 1;
+    }
+    // Reclassify any later false intros
+    for (let i = introRunEnd; i < N; i++) {
+      if (result[i].type === 'intro') result[i].type = result[i].isRepeated ? 'verse' : 'bridge';
+    }
+  }
+
+  // ── Outro FORCÉE : le morceau se termine toujours par une outro ──
+  // Le dernier segment est l'outro. Extension vers l'arrière uniquement sur
+  // les segments contigus de MÊME label, sous la moyenne, dans les
+  // derniers 20% / 60s (vraie sortie calme prolongée).
+  if (N > 1) {
+    const MAX_FORCED_OUTRO_ABS = 60;
+    const OUTRO_POS_MIN = 0.80;
+    const lastSegLabel = structuralLabels[N - 1];
+    result[N - 1].type = 'outro';
+    for (let i = N - 2; i >= 0; i--) {
+      const segMid = (segments[i].startT + segments[i].endT) / 2;
+      const segPos = segMid / duration;
+      if (segPos < OUTRO_POS_MIN || (duration - segMid) >= MAX_FORCED_OUTRO_ABS) break;
+      if (structuralLabels[i] !== lastSegLabel) break;
+      if (segments[i].energy >= globalMeanEnergy) break;
+      result[i].type = 'outro';
+    }
   }
 
   // ── Garde-fou temporel : pas d'outro au milieu de la piste ──
-  // Un bloc outro contigu en fin de morceau (longue sortie calme) est
-  // conservé intégralement ; seuls les outros isolés en plein milieu sont
-  // reclassés (verse/bridge), pour garder une sortie propre et longue.
+  // (nettoie les faux outros créés par la classification principale)
   let outroRunStart = N;
   for (let j = N - 1; j >= 0; j--) {
     if (result[j].type === 'outro') outroRunStart = j;
@@ -1696,6 +1789,13 @@ function classifyAtmosphere(sectionAnalyses: SectionAnalysis[], bpm: number): At
 // 14. MAIN: analyzeAudioBuffer — entry point
 // ═══════════════════════════════════════════════════════════
 
+// Debug flag — set to true to log analysis pipeline
+const DEBUG_ANALYSIS = true;
+
+function dlog(...args: unknown[]) {
+  if (DEBUG_ANALYSIS) console.log('[ANALYSIS]', ...args);
+}
+
 /** Yield to the event loop so the renderer watchdog can ping the main process.
  *  Without this, long synchronous analysis blocks the watchdog → FAIL-SAFE BLACKOUT. */
 function yieldToEventLoop(): Promise<void> {
@@ -1787,7 +1887,25 @@ export async function analyzeAudioBuffer(
 
   // ══ Phase B: Novelty curve & section boundaries ══
   const noveltyCurve = computeNoveltyCurve(spectralFrames);
-  const boundaries = detectSectionBoundaries(noveltyCurve, normEnergy, normLow, spectralCentroidCurve, analysisRate, duration, 3);
+  dlog('noveltyCurve:', noveltyCurve.length, 'pts, max=', Math.max(...noveltyCurve).toFixed(3));
+  
+  // Dynamic minSectionSec: vise 8-12 sections musicales (phrases ~15-30s),
+  // avec une durée mini ~9-12s pour éviter les micro-sections de 6-7s.
+  const targetSections = Math.max(8, Math.min(12, Math.floor(duration / 20)));
+  const avgSectionSec = duration / targetSections;
+  const dynamicMinSectionSec = Math.max(9, Math.min(12, avgSectionSec / 2));
+  dlog('targetSections:', targetSections, 'avgSectionSec:', avgSectionSec.toFixed(1), 'minSectionSec:', dynamicMinSectionSec.toFixed(1));
+  const boundaries = detectSectionBoundaries(noveltyCurve, normEnergy, normLow, spectralCentroidCurve, analysisRate, duration, dynamicMinSectionSec);
+  dlog('boundaries (initial):', boundaries.map(b => r4(b / analysisRate)), '→', boundaries.length - 1, 'sections');
+
+  // Fallback: si trop peu de frontières, réessaie avec 6s mini (reste musical).
+  if (boundaries.length < 5) {
+    const fallbackBoundaries = detectSectionBoundaries(noveltyCurve, normEnergy, normLow, spectralCentroidCurve, analysisRate, duration, 6);
+    if (fallbackBoundaries.length > boundaries.length) {
+      boundaries.splice(0, boundaries.length, ...fallbackBoundaries);
+      dlog('boundaries (fallback):', fallbackBoundaries.map(b => r4(b / analysisRate)), '→', fallbackBoundaries.length - 1, 'sections');
+    }
+  }
 
   // ══ Phase C: Build segments with spectral features ══
   // Bug #6 fix: extract real spectral flatness curve from spectralFrames
@@ -1846,38 +1964,111 @@ export async function analyzeAudioBuffer(
 
   await yieldToEventLoop();
 
-  // ══ Phase D: Self-similarity matrix & pattern detection ══
+  // ══ Phase D: Beat tracking FIRST (needed for section alignment) ══
+  // Bass ODF at 50 Hz using fast time-domain band energy
+  const beatRate = 50;
+  const bassOdf = smoothODF(computeBassODFFast(data, sampleRate, beatRate));
+
+  const { beats, bpm, beatStrengths } = trackBeats(bassOdf, beatRate, normLow, normMid, normHigh, energyCurve, duration);
+
+  const nFrames = Math.floor(data.length / hopSize);
+  const downbeats = detectDownbeats(beats, beatStrengths, spectralFrames, analysisRate);
+  dlog('beats:', beats.length, 'bpm:', bpm, 'downbeats:', downbeats.length);
+
+  // ══ Phase E: Self-similarity matrix & pattern detection ══
   const ssm = computeSegmentSimilarityMatrix(segments);
-  const structuralLabels = detectRepeatingPatterns(ssm, 0.7);
+  // Lower threshold (0.55) + adaptive: more discriminating for fine-grained structure
+  const structuralLabels = detectRepeatingPatterns(ssm, 0.55);
+  dlog('structuralLabels:', structuralLabels, 'unique:', new Set(structuralLabels).size);
+  
+  // Debug: if all same label, force differentiation by energy peaks
+  const uniqueLabels = new Set(structuralLabels);
+  if (uniqueLabels.size === 1 && segments.length > 3) {
+    // Re-label by energy: high energy = B, low = A, medium = C
+    const energies = segments.map(s => s.energy);
+    const maxE = Math.max(...energies);
+    const minE = Math.min(...energies);
+    const midE = (maxE + minE) / 2;
+    for (let i = 0; i < structuralLabels.length; i++) {
+      if (energies[i] > midE * 1.1) structuralLabels[i] = 'B';
+      else if (energies[i] < midE * 0.9) structuralLabels[i] = 'A';
+      else structuralLabels[i] = 'C';
+    }
+    dlog('structuralLabels (relabelled):', structuralLabels);
+  }
 
-  // ══ Phase E: Classify sections (spectral + repetition) ══
-  const classified = classifySections(segments, duration, structuralLabels);
+  // ══ Phase F: Align section boundaries to downbeats ══
+  // Snap les FRONTIÈRES partagées (pas chaque segment indépendamment) pour
+  // garantir des sections contiguës, monotones, sans chevauchement ni trou.
+  const MIN_SNAP_GAP = 4; // secondes mini entre deux frontières snappées
+  const rawBoundsSec = boundaries.map(b => r4(b / analysisRate));
+  const snappedBounds: number[] = [];
+  let prevB = -Infinity;
+  for (let bi = 0; bi < rawBoundsSec.length; bi++) {
+    const t = rawBoundsSec[bi];
+    // Première frontière = 0, dernière = duration (pas de snap).
+    if (bi === 0) { snappedBounds.push(0); prevB = 0; continue; }
+    if (bi === rawBoundsSec.length - 1) { snappedBounds.push(r4(duration)); prevB = duration; continue; }
+    let best = t;
+    let bestD = Infinity;
+    for (const db of downbeats) {
+      const d = Math.abs(db - t);
+      if (d < bestD && d <= 2.0) { bestD = d; best = db; }
+    }
+    // Monotonie + gap mini : sinon on garde la valeur d'origine repoussée.
+    if (best <= prevB + MIN_SNAP_GAP) best = Math.max(t, prevB + MIN_SNAP_GAP);
+    if (best >= duration) best = duration;
+    best = r4(best);
+    snappedBounds.push(best);
+    prevB = best;
+  }
+  const alignedSegments: SegmentFeatures[] = [];
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const startT = snappedBounds[i] ?? seg.startT;
+    const endT = Math.min(duration, snappedBounds[i + 1] ?? seg.endT);
+    alignedSegments.push({ ...seg, startT, endT });
+  }
+  dlog('alignedBounds:', snappedBounds);
+  dlog('alignedSegments:', alignedSegments.map(s => `${r4(s.startT)}-${r4(s.endT)}`));
 
-  // ══ Phase F: Merge adjacent same-type sections ══
-  // Bug #5 fix: limit merge duration to 30% of total to prevent giant blocks
-  const maxMergeDuration = duration * 0.30;
+  // ══ Phase G: Classify sections (spectral + repetition) ══
+  const classified = classifySections(alignedSegments, duration, structuralLabels);
+  dlog('classified:', classified.map(c => `${c.type} (rep=${c.isRepeated}, label=${c.structuralLabel})`));
+
+  // ══ Phase H: Merge adjacent same-type sections ══
+  // Fusionne les voisins de même type quand ils partagent le même label,
+  // OU quand le bloc fusionné reste court (< 24s) : évite les fragments
+  // verse,verse / chorus,chorus qui font "hasard".
+  const maxMergeDuration = duration * 0.20;
   const mergedTypes: TrackSection['type'][] = [classified[0]?.type || 'unknown'];
-  const mergedSegs: SegmentFeatures[] = [segments[0]];
+  const mergedSegs: SegmentFeatures[] = [alignedSegments[0]];
   const mergedLabels: string[] = [structuralLabels[0] || '?'];
 
   for (let i = 1; i < classified.length; i++) {
-    const wouldBeDuration = segments[i].endT - mergedSegs[mergedSegs.length - 1].startT;
-    if (classified[i].type === mergedTypes[mergedTypes.length - 1] &&
-        wouldBeDuration < maxMergeDuration) {
+    const wouldBeDuration = alignedSegments[i].endT - mergedSegs[mergedSegs.length - 1].startT;
+    const sameType = classified[i].type === mergedTypes[mergedTypes.length - 1];
+    const sameLabel = structuralLabels[i] === mergedLabels[mergedLabels.length - 1];
+    // Intro/outro ne fusionnent qu'entre elles quand c'est le même motif
+    // (évite intro+intro ou outro+outro fragmentés, sans absorber les voisins).
+    const boundaryType = classified[i].type === 'intro' || classified[i].type === 'outro'
+      || mergedTypes[mergedTypes.length - 1] === 'intro' || mergedTypes[mergedTypes.length - 1] === 'outro';
+    if (sameType && (sameLabel || (!boundaryType && wouldBeDuration < 24)) && wouldBeDuration < maxMergeDuration) {
       mergedSegs[mergedSegs.length - 1] = {
         ...mergedSegs[mergedSegs.length - 1],
-        endF: segments[i].endF,
-        endT: segments[i].endT,
-        energy: r4((mergedSegs[mergedSegs.length - 1].energy + segments[i].energy) / 2),
+        endF: alignedSegments[i].endF,
+        endT: alignedSegments[i].endT,
+        energy: r4((mergedSegs[mergedSegs.length - 1].energy + alignedSegments[i].energy) / 2),
       };
     } else {
       mergedTypes.push(classified[i].type);
-      mergedSegs.push(segments[i]);
+      mergedSegs.push(alignedSegments[i]);
       mergedLabels.push(structuralLabels[i] || '?');
     }
   }
+  dlog('merged:', mergedTypes, '→', mergedTypes.length, 'sections');
 
-  // ══ Phase G: Build output sections ══
+  // ══ Phase I: Build output sections ══
   const sections: TrackSection[] = [];
   for (let si = 0; si < mergedSegs.length; si++) {
     const seg = mergedSegs[si];
@@ -1892,21 +2083,7 @@ export async function analyzeAudioBuffer(
 
   await yieldToEventLoop();
 
-  // ══ Phase H: Beat tracking (bass ODF 25 Hz time-domain + harmonic sum) ══
-  // Spectral ODF (10 Hz, FFT-based) for onset detection — unchanged
-  const odf = computeOnsetFunction(spectralFrames);
-  // Bass ODF at 25 Hz using fast time-domain band energy (no FFT → no renderer freeze)
-  const beatRate = 50;  // 50 Hz: 20ms/frame → lag at 120 BPM = 25 frames, 2.6 BPM resolution
-                        // (was 25 Hz / 5 BPM resolution). Safe since analyzeAudioBuffer is async
-                        // with yieldToEventLoop (commit a7bc132).
-  const bassOdf = smoothODF(computeBassODFFast(data, sampleRate, beatRate));
-
-  const { beats, bpm, beatStrengths } = trackBeats(bassOdf, beatRate, normLow, normMid, normHigh, energyCurve, duration);
-
-  const nFrames = Math.floor(data.length / hopSize);
-  const downbeats = detectDownbeats(beats, beatStrengths, spectralFrames, analysisRate);
-
-  // ══ Phase I: Onset detection (multi-band flux) ══
+// ══ Phase J: Onset detection (multi-band flux) ══
   const onsets: number[] = [];
   for (let i = 3; i < nFrames; i++) {
     const flux = Math.max(0, normEnergy[i] - normEnergy[i - 1]) * 0.4 +
@@ -1924,7 +2101,7 @@ export async function analyzeAudioBuffer(
     if (fi < nFrames) onsetCurve[fi] = 1;
   }
 
-  // ══ Phase J: Vocal curve ══
+  // ══ Phase K: Vocal curve ══
   const vocalCurve: number[] = [];
   for (let frame = 0; frame < nFrames; frame++) {
     const a = normLow[frame] + normMid[frame] + normHigh[frame];
@@ -1936,7 +2113,7 @@ export async function analyzeAudioBuffer(
     vocalCurve.push(Math.min(1, g / (a / 3 + 0.001)));
   }
 
-  // ══ Phase K: Genre, key, section analysis, atmosphere ══
+  // ══ Phase L: Genre, key, section analysis, atmosphere ══
   const genre = detectGenre(normEnergy, normLow, normMid, normHigh, bpm, beats, spectralCentroidCurve, spectralFluxCurve, rmsCurve, rawBassRatio);
 
   await yieldToEventLoop();

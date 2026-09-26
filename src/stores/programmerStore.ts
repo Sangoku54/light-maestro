@@ -51,7 +51,19 @@ export const useProgrammerStore = create<ProgrammerState>((set, get) => ({
       return { channels: next, isActive: Object.keys(next).length > 0 };
     }),
 
-  clear: () => set({ channels: {}, isActive: false }),
+  clear: () => {
+    // Backup avant purge : les chemins de sauvegarde (Store / Save Scene /
+    // Rec Scène) lisent ce snapshot si le programmeur a été vidé entre-temps
+    // (preview scène, reset 3D…) — sinon la Target disparaît silencieusement.
+    // NB : l'horodatage est stocké à part (`__lm_programmerBackupAt`) — ne
+    // JAMAIS comme clé du map de canaux (`at` polluerait Number(k)=NaN).
+    const prev = get().channels;
+    if (Object.keys(prev).length > 0) {
+      (globalThis as any).__lm_programmerBackup = { ...prev };
+      (globalThis as any).__lm_programmerBackupAt = Date.now();
+    }
+    set({ channels: {}, isActive: false });
+  },
 
   hasChannel: (addr) => get().channels[addr] !== undefined,
 

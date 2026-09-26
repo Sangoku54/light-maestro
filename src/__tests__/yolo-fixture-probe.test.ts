@@ -17,6 +17,9 @@ import { FixtureLibrary } from '@electron/fixtures/library';
 import { analyzeChannels } from '../engine/fixture-analyzer';
 import { classifyGoboCap } from '../engine/gobo-engine';
 import { computeDmxForCue } from '../hooks/dmx-playback';
+import { toAutoloopFixtures } from '../engine/autoloop-runtime';
+import { buildThemedBanks } from '../engine/autoloop-themes';
+import { sectionMoveFor } from '../engine/autoscript-loops';
 import { auditFixtureCoverage, formatCoverageWarning } from '../engine/fixture-coverage';
 // @ts-ignore — le fichier contient du JSX, genCues est du TS pur
 import { genCues } from '../views/QuickShowView';
@@ -33,6 +36,8 @@ describe('Yolo.lmproj — analyse des fixtures patchées (moteur réel)', () => 
   let patched: any[];
   let customDefs: Map<string, any>;
   let ukingDef: any;
+  let universes: any[] = [];
+  let positions: Record<string, { centerPan?: number; centerTilt?: number }> | undefined;
 
   // Preset Yolo + analyse (pour le générateur de cues)
   let presetQ: any = null;
@@ -48,6 +53,8 @@ describe('Yolo.lmproj — analyse des fixtures patchées (moteur réel)', () => 
       console.log(`[YOLO-PROBE] projet au format enveloppe LMZPROJ1 — ${packed.blobs.length} blob(s) audio embarqué(s)`);
     }
     patched = proj.showStore.patchedFixtures || [];
+    universes = proj.showStore.universes || [];
+    positions = proj.showStore.fixturePositions;
     customDefs = new Map((proj.customFixtures || []).map((d: any) => [d.id, d]));
 
     lib = new FixtureLibrary();
@@ -423,6 +430,99 @@ describe('Yolo.lmproj — analyse des fixtures patchées (moteur réel)', () => 
     }
   });
 
+  it('autoscript : les boucles section-aware font vraiment bouger les moteurs (Yolo)', () => {
+    const defs = new Map<any, any>();
+    for (const pf of patched) {
+      defs.set(pf.fixtureDefId, pf.fixtureDefId.startsWith('custom-')
+        ? customDefs.get(pf.fixtureDefId)
+        : lib.get(pf.fixtureDefId));
+    }
+    const qs = presetQ?.quickShow ?? {};
+    const cfg = {
+      musicStyle: qs.musicStyle || 'dance',
+      colorScheme: qs.colorScheme || 'auto',
+      intensity: qs.intensity || 'dynamic',
+      movement: qs.movement || 'dynamic',
+      beatDivision: qs.beatDivision || 4,
+      audioReactive: qs.audioReactive !== false,
+      sectionAware: qs.sectionAware !== false,
+      customPalette: qs.customPalette ?? [],
+    };
+    let sections: any[];
+    let bpm: number;
+    if (presetQ?.sections?.length && analysis) {
+      sections = presetQ.sections.map((s: any) => ({ type: s.type, startTime: s.startTime, endTime: s.endTime, energy: s.energy ?? 0.5, color: s.color ?? '#888' }));
+      bpm = analysis.bpm || 120;
+    } else {
+      sections = [
+        { type: 'intro', startTime: 0, endTime: 15, energy: 0.3, color: '#888' },
+        { type: 'verse', startTime: 15, endTime: 35, energy: 0.5, color: '#888' },
+        { type: 'build', startTime: 35, endTime: 45, energy: 0.7, color: '#888' },
+        { type: 'chorus', startTime: 45, endTime: 70, energy: 0.9, color: '#888' },
+        { type: 'drop', startTime: 70, endTime: 90, energy: 0.95, color: '#888' },
+      ];
+      bpm = 120;
+    }
+
+    const cues: any[] = genCues(sections, bpm, cfg.beatDivision, cfg, [], 7, analysis);
+    expect(cues.length).toBeGreaterThan(0);
+
+    // 1. Chaque cue porte ses bornes de section → le moteur a une vraie boucle.
+    const bounded = cues.filter((c) => typeof c.sectionStart === 'number' && typeof c.sectionEnd === 'number');
+    expect(bounded.length, `${cues.length - bounded.length} cue(s) sans bornes de section`).toBe(cues.length);
+    for (const cue of bounded) {
+      expect(cue.sectionEnd, `cue @${cue.time} : fin ≤ début`).toBeGreaterThan(cue.sectionStart);
+      expect(sectionMoveFor(cue, 2), `cue @${cue.time} sans boucle`).not.toBeNull();
+    }
+
+    // 2. Sweep complet : agréger pan/tilt réellement émis par fixture.
+    const fixtures = patched
+      .map((pf) => ({ pf, fa: analyzeChannels(pf, defs.get(pf.fixtureDefId)) }))
+      .filter((f) => f.fa.panOffsets.length > 0 || f.fa.tiltOffsets.length > 0);
+    const panSeq = new Map<string, number[]>();
+    const tiltSeq = new Map<string, number[]>();
+    const pushTo = (map: Map<string, number[]>, id: string, v: number) => {
+      let arr = map.get(id);
+      if (!arr) { arr = []; map.set(id, arr); }
+      arr.push(v);
+    };
+    for (const cue of cues) {
+      const dmx = computeDmxForCue({ ...cue, energy: cue.energy }, patched, defs, [{ id: 'universe-1' }], {
+        primary: 100, secondary: 70, tertiary: 40, other: 40,
+      } as any);
+      const written: Record<number, number> = {};
+      for (const d of dmx) Object.assign(written, d.channelValues);
+      for (const { pf, fa } of fixtures) {
+        const po = fa.panOffsets[0];
+        const to = fa.tiltOffsets[0];
+        if (po !== undefined) pushTo(panSeq, pf.id, written[pf.startAddress + po] ?? 0);
+        if (to !== undefined) pushTo(tiltSeq, pf.id, written[pf.startAddress + to] ?? 0);
+      }
+    }
+
+    // 3. Aucun moteur figé, aucune valeur plaquée sur une butée (headroom respecté).
+    const failures: string[] = [];
+    for (const { pf } of fixtures) {
+      for (const [axis, seq] of [
+        ['pan', panSeq.get(pf.id) ?? []],
+        ['tilt', tiltSeq.get(pf.id) ?? []],
+      ] as const) {
+        if (seq.length === 0) { failures.push(`${pf.name}: ${axis} jamais écrit`); continue; }
+        const swingV = Math.max(...seq) - Math.min(...seq);
+        const distinct = new Set(seq).size;
+        if (swingV < 25) failures.push(`${pf.name}: ${axis} quasi figé (swing=${swingV})`);
+        if (distinct < 3) failures.push(`${pf.name}: ${axis} figé sur ${distinct} valeur(s)`);
+        const pinned = seq.filter((v) => v === 0 || v === 255).length;
+        if (pinned > seq.length * 0.1) {
+          failures.push(`${pf.name}: ${axis} écrasé contre une butée (${pinned}/${seq.length} ticks)`);
+        }
+      }
+    }
+    console.log(`[YOLO-AUTOSCRIPT] ${cues.length} cues · ${panSeq.size} moteurs pan suivis`);
+    expect(failures.slice(0, 8)).toEqual([]);
+    expect(failures.length, `${failures.length} problème(s) de mouvement autoscript`).toBe(0);
+  });
+
   it('sweep timeline complet : chaque fixture est éclairée, aucune valeur hors plage', () => {
     const defs = new Map<any, any>();
     for (const pf of patched) {
@@ -540,6 +640,99 @@ describe('Yolo.lmproj — analyse des fixtures patchées (moteur réel)', () => 
       // L'analyse moteur doit produire un audit exploitable pour toute fixture résolue.
       expect(report.totalChannels).toBeGreaterThan(0);
     }
+  });
+
+  it('autoloops thématiques : 128 loops exploitent le patch (aucun bouton inactif)', () => {
+    const defs = new Map<string, any>();
+    for (const pf of patched) {
+      const def = pf.fixtureDefId.startsWith('custom-') ? customDefs.get(pf.fixtureDefId) : lib.get(pf.fixtureDefId);
+      expect(def, `${pf.name} : def non résolue`).toBeTruthy();
+      defs.set(pf.fixtureDefId, def);
+    }
+    const fx = toAutoloopFixtures(patched, defs, universes, positions);
+    expect(fx.length, 'toutes les fixtures patchées doivent entrer dans les loops').toBe(patched.length);
+    const banks = buildThemedBanks(fx);
+
+    // ── Structure : 4 × 32, tout rempli, tout dans les bornes ──
+    const problems: string[] = [];
+    for (const row of banks.banks) {
+      expect(row.length).toBe(32);
+      for (const loop of row) {
+        if (!loop) { problems.push('slot vide'); continue; }
+        if (loop.keys.length === 0) problems.push(`${loop.id}: aucune clé`);
+        for (const k of loop.keys) {
+          if (k.value < 0 || k.value > 255) problems.push(`${loop.id}: valeur ${k.value}`);
+          if (k.beat < 0 || k.beat > loop.bars * 4) problems.push(`${loop.id}: beat ${k.beat}`);
+        }
+      }
+    }
+    expect(problems.slice(0, 10)).toEqual([]);
+
+    const swing = (loop: any, addr: number): number => {
+      let min = 255;
+      let max = 0;
+      let seen = false;
+      for (const k of loop.keys) {
+        if (Number(k.channel) !== addr) continue;
+        seen = true;
+        if (k.value < min) min = k.value;
+        if (k.value > max) max = k.value;
+      }
+      return seen ? max - min : -1;
+    };
+    const reacts = (loop: any, f: any): boolean => {
+      for (const off of Object.values(f.channelMap) as number[]) {
+        if (swing(loop, f.address + off) > 0) return true;
+      }
+      return false;
+    };
+    const headroom = (center: number | undefined): number => {
+      const c = center ?? 128;
+      return Math.min(c, 255 - c);
+    };
+
+    // ── Banque Effets : les 21 patterns de mouvement bougent VRAIMENT ──
+    const MOVE_SLOTS = 21;
+    const SLOT_PAN_ONLY = 12;
+    const SLOT_TILT_ONLY = 13;
+    const moveFailures: string[] = [];
+    for (let slot = 0; slot < MOVE_SLOTS; slot++) {
+      const loop = banks.get(1, slot)!;
+      for (const f of fx) {
+        const panOff = f.channelMap['pan'];
+        const tiltOff = f.channelMap['tilt'];
+        if (slot !== SLOT_TILT_ONLY && panOff !== undefined) {
+          const need = Math.min(60, 2 * headroom(f.centerPanDmx));
+          if (swing(loop, f.address + panOff) < need) {
+            moveFailures.push(`« ${loop.label} » / ${f.id}: pan ${swing(loop, f.address + panOff)} < ${need}`);
+          }
+        }
+        if (slot !== SLOT_PAN_ONLY && tiltOff !== undefined) {
+          const need = Math.min(60, 2 * headroom(f.centerTiltDmx));
+          if (swing(loop, f.address + tiltOff) < need) {
+            moveFailures.push(`« ${loop.label} » / ${f.id}: tilt ${swing(loop, f.address + tiltOff)} < ${need}`);
+          }
+        }
+      }
+    }
+    expect(moveFailures.slice(0, 8)).toEqual([]);
+    expect(moveFailures.length, `${moveFailures.length} axe(s) figé(s)`).toBe(0);
+
+    // ── Strobe / Respiration : AUCUNE fixture muette (fallbacks) ──
+    const lightFailures: string[] = [];
+    for (const slot of [21, 22, 23, 24]) {
+      const loop = banks.get(1, slot)!;
+      for (const f of fx) {
+        if (!reacts(loop, f)) lightFailures.push(`« ${loop.label} » / ${f.id}`);
+      }
+    }
+    expect(lightFailures.slice(0, 8)).toEqual([]);
+    expect(lightFailures.length, `${lightFailures.length} fixture(s) muette(s)`).toBe(0);
+
+    console.log(
+      `[YOLO-AUTOLOOP] 128 loops · ${MOVE_SLOTS} mouvements validés sur ${fx.length} fixtures · ` +
+      `strobe/respiration 13/13 sans muet`,
+    );
   });
 });
 

@@ -75,6 +75,9 @@ export const SongPresetPlayer: React.FC<{
   const totalDurRef = useRef(0);
 
   const overrideCuesRef = useRef<any[]>([]);
+  // Fixtures décochées dans l'autoscript QuickShow : le widget doit les
+  // ignorer exactement comme le playback live (même ref moteur).
+  const disabledFixturesRef = useRef<Set<string>>(new Set());
   const fixtureTracksRef = useRef<any[]>([]);
   const efxTracksRef = useRef<any[]>([]);
   const effectsRef = useRef<any[]>([]);
@@ -87,6 +90,14 @@ export const SongPresetPlayer: React.FC<{
   const scenesRef = useRef<any[]>([]);
 
   // Keep live store refs in sync (used by the playback engine each frame)
+  // (preset.disabledFixtures est un tableau sérialisé — les vieux presets n'ont pas le champ → tout joue).
+  disabledFixturesRef.current = new Set(
+    Array.isArray((preset as any).disabledFixtures)
+      ? (preset as any).disabledFixtures
+      : (preset as any).disabledFixtures instanceof Set
+        ? [...(preset as any).disabledFixtures]
+        : [],
+  );
   effectsRef.current = effects || [];
   fixtureGroupsRef.current = fixtureGroups || [];
   chasersRef.current = useShowStore.getState().chasers || [];
@@ -284,6 +295,7 @@ export const SongPresetPlayer: React.FC<{
     universes,
     dmxOutputEnabled: true,
     arbiterSource: 'song-preset',
+    disabledFixturesRef,
     overrideCuesRef,
     fixtureTracksRef,
     efxTracksRef,

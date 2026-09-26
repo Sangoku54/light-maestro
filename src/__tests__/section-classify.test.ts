@@ -152,10 +152,10 @@ describe('classifySections — drop et build', () => {
 });
 
 describe('classifySections — structure narrative garantie', () => {
-  it('un morceau qui démarre fort commence quand même par une intro', () => {
-    // Démarrage énergique (drop d'ouverture / attaque immédiate) : le tout
-    // premier segment est fort, mais la génération doit TOUJOURS démarrer
-    // par une intro calme côté lightshow.
+  it('un morceau qui démarre fort commence quand même par une intro forcée', () => {
+    // Exigence produit : le morceau commence TOUJOURS par une intro
+    // (même sur drop d'ouverture / attaque immédiate) et se termine
+    // TOUJOURS par une outro.
     const { segments, labels } = makeSegments([
       { t0: 0, t1: 10, e: 0.9, l: 'X' },  // démarrage chaud
       { t0: 10, t1: 30, e: 0.5, l: 'A' },
@@ -165,6 +165,7 @@ describe('classifySections — structure narrative garantie', () => {
     ]);
     const r = classifySections(segments, 80, labels);
     expect(r[0].type).toBe('intro');
+    expect(r[r.length - 1].type).toBe('outro');
   });
 
   it('une intro longue calme reste un bloc intro contigu (pas découpée en verse)', () => {

@@ -15,6 +15,7 @@ import { AudioCaptureProvider } from './hooks/useAudioCapture';
 import { useAudioFileLoader } from './hooks/useAudioFileLoader';
 import { useRgbMatrixPlayback } from './hooks/rgb-matrix-playback';
 import { useMidiTriggers } from './hooks/midi-trigger';
+import { useMidiFeedback } from './hooks/use-midi-feedback';
 import { useRemoteTriggers } from './hooks/remote-trigger';
 import { useMtcTriggers } from './hooks/mtc-trigger';
 import { useOscTriggers } from './hooks/osc-trigger';
@@ -146,6 +147,12 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
         mtcMarkers: showState.mtcMarkers,
       },
       vcWidgets: widgets,
+      // Pages AVANT les widgets (un widget référence un pageIndex) : sans elles,
+      // la page « Akai MIDIMIX » et ses onglets disparaîtraient à la réouverture
+      // alors que ses widgets sont bien rechargés.
+      vcPages: perfState.vcPages,
+      vcActivePage: perfState.vcActivePage,
+      vcGridSnap: perfState.vcGridSnap,
       version: 1,
       timestamp: new Date().toISOString(),
     };
@@ -232,6 +239,9 @@ const App: React.FC = () => {
 
   // MIDI triggers — global (scènes/chasers/cuelists/autoscript/widgets)
   useMidiTriggers();
+
+  // Feedback MIDI (LED des pads du contrôleur) — état des tuiles poussé au main
+  useMidiFeedback();
 
   // Remote web LAN (lot #17) — commandes HTTP du serveur + push d'état
   useRemoteTriggers();
@@ -434,25 +444,39 @@ const App: React.FC = () => {
           const { presetName: _discardedPreset, projectName: _discardedProj, ...restAppStore } = data.appStore;
           useAppStore.setState(restAppStore);
         }
-        // Restore virtual console widgets
+        // Console virtuelle : PAGES d'abord (chaque widget référence un
+        // pageIndex — sans pages restaurées, la page « Akai MIDIMIX » serait
+        // invisible même si ses widgets sont rechargés), puis widgets.
+        // Le localStorage ne sert que de filet pour les vieux .lmproj.
+        let legacyPerf: any = null;
+        try {
+          const raw = localStorage.getItem('light-maestro-perform');
+          if (raw) legacyPerf = JSON.parse(raw)?.state ?? null;
+        } catch { /* pas de source de migration */ }
+
+        const filePages = Array.isArray(data.vcPages) && data.vcPages.length > 0 ? data.vcPages : null;
+        const legacyPages = Array.isArray(legacyPerf?.vcPages) && legacyPerf.vcPages.length > 0
+          ? legacyPerf.vcPages
+          : null;
+        const vcPages = filePages ?? legacyPages ?? [{ name: 'Main' }, { name: 'Spots' }, { name: 'Wash' }];
+        usePerformStore.getState().vcSetPages(vcPages);
+        if (typeof data.vcGridSnap === 'boolean') usePerformStore.getState().vcSetGridSnap(data.vcGridSnap);
+        const savedActivePage = Number(data.vcActivePage);
+        usePerformStore.getState().vcSetActivePage(
+          Number.isFinite(savedActivePage)
+            ? Math.max(0, Math.min(vcPages.length - 1, savedActivePage))
+            : 0,
+        );
+
         if (data.vcWidgets) {
           try { data.vcWidgets = await resolveWidgetAudio(data.vcWidgets, getAudio); } catch { /* blob absent */ }
         }
         if (data.vcWidgets) {
           usePerformStore.getState().vcSetWidgets(data.vcWidgets);
-        } else {
-          // Migration fallback: old .lmproj without vcWidgets → try localStorage
-          try {
-            const raw = localStorage.getItem('light-maestro-perform');
-            if (raw) {
-              const parsed = JSON.parse(raw);
-              const oldWidgets = parsed?.state?.vcWidgets;
-              if (Array.isArray(oldWidgets) && oldWidgets.length > 0) {
-                usePerformStore.getState().vcSetWidgets(oldWidgets);
-                useAppStore.getState().markDirty();
-              }
-            }
-          } catch { /* no migration source */ }
+        } else if (Array.isArray(legacyPerf?.vcWidgets) && legacyPerf.vcWidgets.length > 0) {
+          // Migration : vieux .lmproj sans vcWidgets → localStorage
+          usePerformStore.getState().vcSetWidgets(legacyPerf.vcWidgets);
+          useAppStore.getState().markDirty();
         }
         useAppStore.getState().markClean();
       } catch (e) { console.error('Failed to open project:', e); }

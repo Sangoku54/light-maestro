@@ -230,6 +230,25 @@ export interface SceneTrack {
   entries: SceneTrackEntry[];
 }
 
+// ── Matrix Track types (matrice RGB : prend la main via le moteur rgb-matrix
+// pendant sa plage, comme chaser/show/scene) ──
+
+export interface MatrixTrackEntry {
+  id: string;
+  time: number;
+  endTime: number;
+  matrixId: string;
+  matrixName?: string;
+  /** Custom display label (renamed section). */
+  label?: string;
+}
+
+export interface MatrixTrack {
+  id: string;
+  name: string;
+  entries: MatrixTrackEntry[];
+}
+
 interface TrackTimelineProps {
   cues: Cue[];
   dmxCues?: DmxCue[];
@@ -239,6 +258,9 @@ interface TrackTimelineProps {
   sections: TrackSection[];
   patchedFixtures: PatchedFixture[];
   bpm: number;
+  /** Magnétisme : aligne les temps draggés/créés sur les beats (barres
+   *  verticales). Désactivable depuis la top barre du QuickShow. Défaut ON. */
+  snapToBeats?: boolean;
   /** EFX tracks to render below the AutoScript track */
   efxTracks?: EfxTrack[];
   /** Called when user right-clicks on an EFX track row */
@@ -299,6 +321,16 @@ interface TrackTimelineProps {
   onSceneEntryContextMenu?: (trackId: string, entry: SceneTrackEntry, clientX: number, clientY: number) => void;
   /** Called when user drag-resizes or drag-moves a scene entry */
   onSceneEntryChange?: (trackId: string, entryIndex: number, newTime: number, newEndTime: number) => void;
+  /** Matrix tracks to render below scene tracks */
+  matrixTracks?: MatrixTrack[];
+  /** Called when user right-clicks on a matrix track row */
+  onMatrixTrackContextMenu?: (trackId: string, time: number, clientX: number, clientY: number) => void;
+  /** Called when user left-clicks a matrix entry */
+  onMatrixEntryClick?: (trackId: string, entry: MatrixTrackEntry) => void;
+  /** Called when user right-clicks a matrix entry */
+  onMatrixEntryContextMenu?: (trackId: string, entry: MatrixTrackEntry, clientX: number, clientY: number) => void;
+  /** Called when user drag-resizes or drag-moves a matrix entry */
+  onMatrixEntryChange?: (trackId: string, entryIndex: number, newTime: number, newEndTime: number) => void;
   /** Show tracks — prennent le dessus sur l'autoscript (comme chaser) */
   showTracks?: ShowTrack[];
   onShowTrackContextMenu?: (trackId: string, time: number, clientX: number, clientY: number) => void;
@@ -345,6 +377,7 @@ const DIMMER_TRACK_HEIGHT = 26;
 const CHASER_TRACK_HEIGHT = 26;
 const SHOW_TRACK_HEIGHT = 26;
 const SCENE_TRACK_HEIGHT = 26;
+const MATRIX_TRACK_HEIGHT = 26;
 const LABEL_WIDTH = 90;
 
 const fmt = (s: number) =>
@@ -578,6 +611,26 @@ function findSceneEntryAt(
   return best;
 }
 
+function findMatrixEntryAt(
+  track: MatrixTrack,
+  timeAtX: number,
+  duration: number,
+): MatrixTrackEntry | null {
+  const threshold = Math.min(2, duration * 0.05);
+  let best: MatrixTrackEntry | null = null;
+  let bestDist = Infinity;
+  for (const entry of track.entries) {
+    const entryMid = (entry.time + entry.endTime) / 2;
+    const halfLen = (entry.endTime - entry.time) / 2 + 0.1;
+    const d = Math.abs(entryMid - timeAtX);
+    if (d < halfLen + threshold && d < bestDist) {
+      best = entry;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
 // ─── Component ────────────────────────────────────────────
 
 const TrackTimeline: React.FC<TrackTimelineProps> = ({
@@ -589,6 +642,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   sections,
   patchedFixtures,
   bpm,
+  snapToBeats,
   efxTracks,
   onEfxTrackContextMenu,
   onEfxEntryClick,
@@ -624,6 +678,11 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   onSceneEntryClick,
   onSceneEntryContextMenu,
   onSceneEntryChange,
+  matrixTracks,
+  onMatrixTrackContextMenu,
+  onMatrixEntryClick,
+  onMatrixEntryContextMenu,
+  onMatrixEntryChange,
   onSectionsChange,
   onAutoScriptContextMenu,
   fixtureTracks,
@@ -700,6 +759,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const numChaserTracks = chaserTracks?.length ?? 0;
   const numShowTracks = showTracks?.length ?? 0;
   const numSceneTracks = sceneTracks?.length ?? 0;
+  const numMatrixTracks = matrixTracks?.length ?? 0;
   const TIER_ORDER: Record<string, number> = { primary: 0, secondary: 1, tertiary: 2, other: 3 };
   const [collapsedTiers, setCollapsedTiers] = useState<Set<string>>(new Set());
   // Sort fixtures by tier, compute header positions
@@ -714,7 +774,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
     }
     return { sorted: sorted, list, count: list.length };
   }, [patchedFixtures, collapsedTiers]);
-  const totalHeight = HEADER_HEIGHT + tieredLayout.count * TRACK_HEIGHT + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT + numDimmerTracks * DIMMER_TRACK_HEIGHT + numChaserTracks * CHASER_TRACK_HEIGHT + numShowTracks * SHOW_TRACK_HEIGHT + numSceneTracks * SCENE_TRACK_HEIGHT;
+  const totalHeight = HEADER_HEIGHT + tieredLayout.count * TRACK_HEIGHT + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT + numDimmerTracks * DIMMER_TRACK_HEIGHT + numChaserTracks * CHASER_TRACK_HEIGHT + numShowTracks * SHOW_TRACK_HEIGHT + numSceneTracks * SCENE_TRACK_HEIGHT + numMatrixTracks * MATRIX_TRACK_HEIGHT;
 
   // Helper: resolve Y position to display row (header or fixture)
   const resolveDisplayRow = useCallback((y: number) => {
@@ -898,6 +958,16 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
     entryEndTime: number;
   } | null>(null);
 
+  // ── Matrix entry drag state (parallel to scene drag) ──
+  const matrixDragRef = useRef<{
+    trackId: string;
+    entryIndex: number;
+    mode: 'move' | 'resize-left' | 'resize-right';
+    startX: number;
+    entryTime: number;
+    entryEndTime: number;
+  } | null>(null);
+
   // ── Cue lookup for hover/click ───────────────────────
   const getCueAtPosition = useCallback(
     (clientX: number, clientY: number): { cue: Cue; fixtureName?: string; efxEntry?: EfxTrackEntry; trackName?: string } | null => {
@@ -905,7 +975,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
       if (!c) return null;
       const rect = c.getBoundingClientRect();
       const x = clientX - rect.left - LABEL_WIDTH;
-      const y = clientY - rect.top;
+      const y = clientY - rect.top + c.scrollTop;
       if (x < 0 || y < HEADER_HEIGHT) return null;
 
       const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
@@ -982,6 +1052,18 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   );
 
   // ── Event handlers ───────────────────────────────────
+  // Magnétisme : snap des temps sur les beats (barres verticales du canvas).
+  // Config via ref (valeurs toujours fraîches, aucun rebind des handlers).
+  const snapCfgRef = useRef({ on: true, beat: 0.5 });
+  snapCfgRef.current = {
+    on: snapToBeats ?? true,
+    beat: 60 / Math.max(40, Math.min(300, bpm || 120)),
+  };
+  const snapT = (t: number): number => {
+    const cfg = snapCfgRef.current;
+    if (!cfg.on || !(cfg.beat > 0)) return t;
+    return Math.max(0, Math.min(duration, Math.round(t / cfg.beat) * cfg.beat));
+  };
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
       // Fixture track drag selection — use refs, never stale
@@ -1018,7 +1100,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         if (dwb3 <= 0) return;
         const dt = ((e.clientX - drg.initialX) / dwb3) * duration;
         const dur = drg.blockDur;
-        const newStart = Math.max(0, Math.min(duration - dur, drg.startTime + dt));
+        const newStart = snapT(Math.max(0, Math.min(duration - dur, drg.startTime + dt)));
         const newEnd = newStart + dur;
         const ft = fixtureTracks[drg.trackIdx];
         if (ft) {
@@ -1046,14 +1128,16 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         const dx = (e.clientX - efxDragRef.current.startX) / drawW * duration;
         const drag = efxDragRef.current;
         if (drag.mode === 'move') {
-          const newTime = Math.max(0, drag.entryTime + dx);
-          const newEnd = drag.entryEndTime + dx;
+          const newTime = snapT(Math.max(0, drag.entryTime + dx));
+          const newEnd = newTime + (drag.entryEndTime - drag.entryTime);
           onEfxEntryChange?.(drag.trackId, drag.entryIndex, { time: newTime, endTime: newEnd });
         } else if (drag.mode === 'resize-left') {
-          const newTime = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const rawL = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const newTime = Math.min(drag.entryEndTime - 0.1, snapT(rawL));
           onEfxEntryChange?.(drag.trackId, drag.entryIndex, { time: newTime });
         } else if (drag.mode === 'resize-right') {
-          const newEnd = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const rawR = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const newEnd = Math.max(drag.entryTime + 0.2, snapT(rawR));
           onEfxEntryChange?.(drag.trackId, drag.entryIndex, { endTime: newEnd });
         }
         return;
@@ -1068,14 +1152,16 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         const dx = (e.clientX - colorDragRef.current.startX) / drawW * duration;
         const drag = colorDragRef.current;
         if (drag.mode === 'move') {
-          const newTime = Math.max(0, drag.entryTime + dx);
-          const newEnd = drag.entryEndTime + dx;
+          const newTime = snapT(Math.max(0, drag.entryTime + dx));
+          const newEnd = newTime + (drag.entryEndTime - drag.entryTime);
           onColorEntryChange?.(drag.trackId, drag.entryIndex, newTime, newEnd);
         } else if (drag.mode === 'resize-left') {
-          const newTime = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const rawL = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const newTime = Math.min(drag.entryEndTime - 0.1, snapT(rawL));
           onColorEntryChange?.(drag.trackId, drag.entryIndex, newTime, drag.entryEndTime);
         } else if (drag.mode === 'resize-right') {
-          const newEnd = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const rawR = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const newEnd = Math.max(drag.entryTime + 0.2, snapT(rawR));
           onColorEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
         }
         return;
@@ -1090,14 +1176,16 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         const dx = (e.clientX - strobeDragRef.current.startX) / drawW * duration;
         const drag = strobeDragRef.current;
         if (drag.mode === 'move') {
-          const newTime = Math.max(0, drag.entryTime + dx);
-          const newEnd = drag.entryEndTime + dx;
+          const newTime = snapT(Math.max(0, drag.entryTime + dx));
+          const newEnd = newTime + (drag.entryEndTime - drag.entryTime);
           onStrobeEntryChange?.(drag.trackId, drag.entryIndex, newTime, newEnd);
         } else if (drag.mode === 'resize-left') {
-          const newTime = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const rawL = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const newTime = Math.min(drag.entryEndTime - 0.1, snapT(rawL));
           onStrobeEntryChange?.(drag.trackId, drag.entryIndex, newTime, drag.entryEndTime);
         } else if (drag.mode === 'resize-right') {
-          const newEnd = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const rawR = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const newEnd = Math.max(drag.entryTime + 0.2, snapT(rawR));
           onStrobeEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
         }
         return;
@@ -1112,14 +1200,16 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         const dx = (e.clientX - dimmerDragRef.current.startX) / drawW * duration;
         const drag = dimmerDragRef.current;
         if (drag.mode === 'move') {
-          const newTime = Math.max(0, drag.entryTime + dx);
-          const newEnd = drag.entryEndTime + dx;
+          const newTime = snapT(Math.max(0, drag.entryTime + dx));
+          const newEnd = newTime + (drag.entryEndTime - drag.entryTime);
           onDimmerEntryChange?.(drag.trackId, drag.entryIndex, newTime, newEnd);
         } else if (drag.mode === 'resize-left') {
-          const newTime = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const rawL = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const newTime = Math.min(drag.entryEndTime - 0.1, snapT(rawL));
           onDimmerEntryChange?.(drag.trackId, drag.entryIndex, newTime, drag.entryEndTime);
         } else if (drag.mode === 'resize-right') {
-          const newEnd = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const rawR = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const newEnd = Math.max(drag.entryTime + 0.2, snapT(rawR));
           onDimmerEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
         }
         return;
@@ -1134,14 +1224,16 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         const dx = (e.clientX - chaserDragRef.current.startX) / drawW * duration;
         const drag = chaserDragRef.current;
         if (drag.mode === 'move') {
-          const newTime = Math.max(0, drag.entryTime + dx);
-          const newEnd = drag.entryEndTime + dx;
+          const newTime = snapT(Math.max(0, drag.entryTime + dx));
+          const newEnd = newTime + (drag.entryEndTime - drag.entryTime);
           onChaserEntryChange?.(drag.trackId, drag.entryIndex, newTime, newEnd);
         } else if (drag.mode === 'resize-left') {
-          const newTime = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const rawL = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const newTime = Math.min(drag.entryEndTime - 0.1, snapT(rawL));
           onChaserEntryChange?.(drag.trackId, drag.entryIndex, newTime, drag.entryEndTime);
         } else if (drag.mode === 'resize-right') {
-          const newEnd = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const rawR = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const newEnd = Math.max(drag.entryTime + 0.2, snapT(rawR));
           onChaserEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
         }
         return;
@@ -1156,14 +1248,16 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         const dx = (e.clientX - showDragRef.current.startX) / drawW * duration;
         const drag = showDragRef.current;
         if (drag.mode === 'move') {
-          const newTime = Math.max(0, drag.entryTime + dx);
-          const newEnd = drag.entryEndTime + dx;
+          const newTime = snapT(Math.max(0, drag.entryTime + dx));
+          const newEnd = newTime + (drag.entryEndTime - drag.entryTime);
           onShowEntryChange?.(drag.trackId, drag.entryIndex, newTime, newEnd);
         } else if (drag.mode === 'resize-left') {
-          const newTime = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const rawL = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const newTime = Math.min(drag.entryEndTime - 0.1, snapT(rawL));
           onShowEntryChange?.(drag.trackId, drag.entryIndex, newTime, drag.entryEndTime);
         } else if (drag.mode === 'resize-right') {
-          const newEnd = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const rawR = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const newEnd = Math.max(drag.entryTime + 0.2, snapT(rawR));
           onShowEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
         }
         return;
@@ -1178,15 +1272,41 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         const dx = (e.clientX - sceneDragRef.current.startX) / drawW * duration;
         const drag = sceneDragRef.current;
         if (drag.mode === 'move') {
-          const newTime = Math.max(0, drag.entryTime + dx);
-          const newEnd = drag.entryEndTime + dx;
+          const newTime = snapT(Math.max(0, drag.entryTime + dx));
+          const newEnd = newTime + (drag.entryEndTime - drag.entryTime);
           onSceneEntryChange?.(drag.trackId, drag.entryIndex, newTime, newEnd);
         } else if (drag.mode === 'resize-left') {
-          const newTime = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const rawL = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const newTime = Math.min(drag.entryEndTime - 0.1, snapT(rawL));
           onSceneEntryChange?.(drag.trackId, drag.entryIndex, newTime, drag.entryEndTime);
         } else if (drag.mode === 'resize-right') {
-          const newEnd = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const rawR = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const newEnd = Math.max(drag.entryTime + 0.2, snapT(rawR));
           onSceneEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
+        }
+        return;
+      }
+
+      // Matrix entry drag/resize (parallel to scene)
+      if (matrixDragRef.current) {
+        const c = containerRef.current; if (!c) return;
+        const rect = c.getBoundingClientRect();
+        const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
+        if (drawW <= 0) return;
+        const dx = (e.clientX - matrixDragRef.current.startX) / drawW * duration;
+        const drag = matrixDragRef.current;
+        if (drag.mode === 'move') {
+          const newTime = snapT(Math.max(0, drag.entryTime + dx));
+          const newEnd = newTime + (drag.entryEndTime - drag.entryTime);
+          onMatrixEntryChange?.(drag.trackId, drag.entryIndex, newTime, newEnd);
+        } else if (drag.mode === 'resize-left') {
+          const rawL = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const newTime = Math.min(drag.entryEndTime - 0.1, snapT(rawL));
+          onMatrixEntryChange?.(drag.trackId, drag.entryIndex, newTime, drag.entryEndTime);
+        } else if (drag.mode === 'resize-right') {
+          const rawR = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const newEnd = Math.max(drag.entryTime + 0.2, snapT(rawR));
+          onMatrixEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
         }
         return;
       }
@@ -1202,7 +1322,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         const dx = e.clientX - resize.startX;
         const dt = (dx / drawW) * duration;
         const rawTime = Math.max(0, Math.min(duration, resize.startTime + dt));
-        const newTime = rawTime;
+        const newTime = snapT(rawTime);
         const sorted = [...sections].sort((a,b)=>a.startTime-b.startTime);
         // retrouve l'index trié correspondant à sectionIndex (sections peut ne pas être trié, on map par id/start)
         const target = sections[resize.sectionIndex];
@@ -1283,7 +1403,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
         const c = containerRef.current; if (c) {
           const rect = c.getBoundingClientRect();
           const mx = e.clientX - rect.left;
-          const my = e.clientY - rect.top;
+          const my = e.clientY - rect.top + c.scrollTop;
           if (my >= HEADER_HEIGHT && mx < LABEL_WIDTH) {
             const di = Math.floor((my - HEADER_HEIGHT) / TRACK_HEIGHT);
             if (di >= 0 && di < tieredLayout.list.length) {
@@ -1477,7 +1597,7 @@ if (editBlock) { setEditBlock(null); return; }
       if (!c) return;
       const rect = c.getBoundingClientRect();
       const x = e.clientX - rect.left - LABEL_WIDTH;
-      const y = e.clientY - rect.top;
+      const y = e.clientY - rect.top + c.scrollTop;
       if (x < 0) return;
 
       const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
@@ -1552,10 +1672,41 @@ if (editBlock) { setEditBlock(null); return; }
         }
       }
 
+      // Matrix entry hit test (left-click selects + seeks)
+      if (matrixTracks && matrixTracks.length > 0) {
+        const mT = matrixTracks;
+        const eT = efxTracks || [];
+        const sT = strobeTracks || [];
+        const dT = dimmerTracks || [];
+        const cT = chaserTracks || [];
+        const shT = showTracks || [];
+        const scT = sceneTracks || [];
+        const efxBase = HEADER_HEIGHT + fixtureAreaHeight + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT;
+        const colorBase = efxBase + eT.length * EFX_TRACK_HEIGHT;
+        const strobeBase = colorBase + (colorTracks?.length ?? 0) * COLOR_TRACK_HEIGHT;
+        const dimmerBase = strobeBase + sT.length * STROBE_TRACK_HEIGHT;
+        const chaserBase = dimmerBase + dT.length * DIMMER_TRACK_HEIGHT;
+        const showBase = chaserBase + cT.length * CHASER_TRACK_HEIGHT;
+        const sceneBase = showBase + shT.length * SHOW_TRACK_HEIGHT;
+        const matrixBase = sceneBase + scT.length * SCENE_TRACK_HEIGHT;
+        if (y >= matrixBase && y < matrixBase + mT.length * MATRIX_TRACK_HEIGHT) {
+          const mIdx = Math.floor((y - matrixBase) / MATRIX_TRACK_HEIGHT);
+          if (mIdx >= 0 && mIdx < mT.length) {
+            const mTrack = mT[mIdx];
+            const entry = mTrack.entries.find(en => timeAtX >= en.time && timeAtX <= en.endTime);
+            if (entry && onMatrixEntryClick) {
+              onMatrixEntryClick(mTrack.id, entry);
+              onSeek(entry.time);
+              return;
+            }
+          }
+        }
+      }
+
       // Seek to position
       onSeek(Math.max(0, Math.min(duration, timeAtX)));
     },
-    [duration, getCueAtPosition, onSeek, efxTracks, onEfxEntryClick, dimmerTracks, onDimmerEntryClick, chaserTracks, onChaserEntryClick, sceneTracks, onSceneEntryClick, showTracks, colorTracks, strobeTracks, fixtureAreaHeight, energyCurve],
+    [duration, getCueAtPosition, onSeek, efxTracks, onEfxEntryClick, dimmerTracks, onDimmerEntryClick, chaserTracks, onChaserEntryClick, sceneTracks, onSceneEntryClick, matrixTracks, onMatrixEntryClick, showTracks, colorTracks, strobeTracks, fixtureAreaHeight, energyCurve],
   );
 
   const handleContextMenu = useCallback(
@@ -1564,7 +1715,7 @@ if (editBlock) { setEditBlock(null); return; }
       if (!c) return;
       const rect = c.getBoundingClientRect();
       const x = e.clientX - rect.left - LABEL_WIDTH;
-      const y = e.clientY - rect.top;
+      const y = e.clientY - rect.top + c.scrollTop;
 
       const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
       if (x < 0 || drawW <= 0) return;
@@ -1598,7 +1749,7 @@ if (editBlock) { setEditBlock(null); return; }
         if (onAutoScriptContextMenu) {
           e.preventDefault();
           onAutoScriptContextMenu(
-            Math.max(0, Math.min(duration, timeAtX)),
+            snapT(Math.max(0, Math.min(duration, timeAtX))),
             e.clientX,
             e.clientY,
           );
@@ -1619,7 +1770,7 @@ if (editBlock) { setEditBlock(null); return; }
           } else {
             onEfxTrackContextMenu?.(
               eTrack.id,
-              Math.max(0, Math.min(duration, timeAtX)),
+              snapT(Math.max(0, Math.min(duration, timeAtX))),
               e.clientX,
               e.clientY,
             );
@@ -1640,7 +1791,7 @@ if (editBlock) { setEditBlock(null); return; }
             } else {
               onColorTrackContextMenu?.(
                 cTrack.id,
-                Math.max(0, Math.min(duration, timeAtXc)),
+                snapT(Math.max(0, Math.min(duration, timeAtXc))),
                 e.clientX,
                 e.clientY,
               );
@@ -1660,7 +1811,7 @@ if (editBlock) { setEditBlock(null); return; }
             if (sEntry && onStrobeEntryContextMenu) {
               onStrobeEntryContextMenu(sTrack.id, sEntry, e.clientX, e.clientY);
             } else {
-              onStrobeTrackContextMenu?.(sTrack.id, Math.max(0, Math.min(duration, timeAtX2)), e.clientX, e.clientY);
+              onStrobeTrackContextMenu?.(sTrack.id, snapT(Math.max(0, Math.min(duration, timeAtX2))), e.clientX, e.clientY);
             }
           }
         }
@@ -1677,7 +1828,7 @@ if (editBlock) { setEditBlock(null); return; }
             if (dEntry && onDimmerEntryContextMenu) {
               onDimmerEntryContextMenu(dTrack.id, dEntry, e.clientX, e.clientY);
             } else {
-              onDimmerTrackContextMenu?.(dTrack.id, Math.max(0, Math.min(duration, timeAtX3)), e.clientX, e.clientY);
+              onDimmerTrackContextMenu?.(dTrack.id, snapT(Math.max(0, Math.min(duration, timeAtX3))), e.clientX, e.clientY);
             }
           }
         }
@@ -1694,7 +1845,7 @@ if (editBlock) { setEditBlock(null); return; }
             if (cEntry && onChaserEntryContextMenu) {
               onChaserEntryContextMenu(cTrack.id, cEntry, e.clientX, e.clientY);
             } else {
-              onChaserTrackContextMenu?.(cTrack.id, Math.max(0, Math.min(duration, timeAtX4)), e.clientX, e.clientY);
+              onChaserTrackContextMenu?.(cTrack.id, snapT(Math.max(0, Math.min(duration, timeAtX4))), e.clientX, e.clientY);
             }
             return;
           }
@@ -1712,7 +1863,7 @@ if (editBlock) { setEditBlock(null); return; }
             if (sEntry && onShowEntryContextMenu) {
               onShowEntryContextMenu(sTrack.id, sEntry, e.clientX, e.clientY);
             } else {
-              onShowTrackContextMenu?.(sTrack.id, Math.max(0, Math.min(duration, timeAtX5)), e.clientX, e.clientY);
+              onShowTrackContextMenu?.(sTrack.id, snapT(Math.max(0, Math.min(duration, timeAtX5))), e.clientX, e.clientY);
             }
             return;
           }
@@ -1730,14 +1881,32 @@ if (editBlock) { setEditBlock(null); return; }
             if (scEntry && onSceneEntryContextMenu) {
               onSceneEntryContextMenu(scTrack.id, scEntry, e.clientX, e.clientY);
             } else {
-              onSceneTrackContextMenu?.(scTrack.id, Math.max(0, Math.min(duration, timeAtX6)), e.clientX, e.clientY);
+              onSceneTrackContextMenu?.(scTrack.id, snapT(Math.max(0, Math.min(duration, timeAtX6))), e.clientX, e.clientY);
+            }
+            return;
+          }
+        }
+        // Check matrix tracks (below scene)
+        const matrixTrackBaseY = sceneTrackBaseY + scTracks.length * SCENE_TRACK_HEIGHT;
+        const mTracks = matrixTracks || [];
+        if (y >= matrixTrackBaseY && mTracks.length > 0) {
+          const mIdx = Math.floor((y - matrixTrackBaseY) / MATRIX_TRACK_HEIGHT);
+          if (mIdx >= 0 && mIdx < mTracks.length) {
+            e.preventDefault();
+            const timeAtX7 = (x / drawW) * duration;
+            const mTrack = mTracks[mIdx];
+            const mEntry = findMatrixEntryAt(mTrack, timeAtX7, duration);
+            if (mEntry && onMatrixEntryContextMenu) {
+              onMatrixEntryContextMenu(mTrack.id, mEntry, e.clientX, e.clientY);
+            } else {
+              onMatrixTrackContextMenu?.(mTrack.id, snapT(Math.max(0, Math.min(duration, timeAtX7))), e.clientX, e.clientY);
             }
             return;
           }
         }
       }
     },
-    [duration, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, tieredLayout, energyCurve, onAutoScriptContextMenu, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu, onDimmerTrackContextMenu, onDimmerEntryContextMenu, onChaserTrackContextMenu, onChaserEntryContextMenu, onShowTrackContextMenu, onShowEntryContextMenu, onSceneTrackContextMenu, onSceneEntryContextMenu],
+    [duration, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, matrixTracks, tieredLayout, energyCurve, onAutoScriptContextMenu, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu, onDimmerTrackContextMenu, onDimmerEntryContextMenu, onChaserTrackContextMenu, onChaserEntryContextMenu, onShowTrackContextMenu, onShowEntryContextMenu, onSceneTrackContextMenu, onSceneEntryContextMenu, onMatrixTrackContextMenu, onMatrixEntryContextMenu],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -1751,7 +1920,7 @@ if (editBlock) { setEditBlock(null); return; }
       const c = containerRef.current; if (!c) return;
       const rect = c.getBoundingClientRect();
       const x = e.clientX - rect.left - LABEL_WIDTH;
-      const y = e.clientY - rect.top;
+      const y = e.clientY - rect.top + c.scrollTop;
       if (y < HEADER_HEIGHT) return;
       const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
       if (drawW <= 0) return;
@@ -1781,7 +1950,7 @@ if (editBlock) { setEditBlock(null); return; }
       if (cb2) {
         var rb2 = cb2.getBoundingClientRect();
         var xb2 = e.clientX - rb2.left - LABEL_WIDTH;
-        var yb2 = e.clientY - rb2.top;
+        var yb2 = e.clientY - rb2.top + cb2.scrollTop;
         var dwb2 = (rb2.width - LABEL_WIDTH) * zoomLevel;
         if (yb2 >= HEADER_HEIGHT && xb2 >= 0 && dwb2 > 0) {
           var tb2 = Math.floor((yb2 - HEADER_HEIGHT) / TRACK_HEIGHT);
@@ -2126,12 +2295,64 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
+    // -- Matrix entry drag detection (below scene) --
+    {
+      const c9 = containerRef.current;
+      if (c9 && onMatrixEntryChange) {
+        const rect9 = c9.getBoundingClientRect();
+        const x9 = e.clientX - rect9.left - LABEL_WIDTH;
+        const y9 = e.clientY - rect9.top;
+        const drawW9 = rect9.width - LABEL_WIDTH;
+        const eT9 = efxTracks || [];
+        const sT9 = strobeTracks || [];
+        const dT9 = dimmerTracks || [];
+        const cT9 = chaserTracks || [];
+        const shT9 = showTracks || [];
+        const scT9 = sceneTracks || [];
+        const mT9 = matrixTracks || [];
+        if (mT9.length > 0 && drawW9 > 0 && x9 >= 0 && y9 >= HEADER_HEIGHT) {
+          const efxBase9 = HEADER_HEIGHT + fixtureAreaHeight + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT;
+          const colorBase9 = efxBase9 + eT9.length * EFX_TRACK_HEIGHT;
+          const strobeBase9 = colorBase9 + (colorTracks?.length ?? 0) * COLOR_TRACK_HEIGHT;
+          const dimmerBase9 = strobeBase9 + sT9.length * STROBE_TRACK_HEIGHT;
+          const chaserBase9 = dimmerBase9 + dT9.length * DIMMER_TRACK_HEIGHT;
+          const showBase9 = chaserBase9 + cT9.length * CHASER_TRACK_HEIGHT;
+          const sceneBase9 = showBase9 + shT9.length * SHOW_TRACK_HEIGHT;
+          const matrixBase9 = sceneBase9 + scT9.length * SCENE_TRACK_HEIGHT;
+          if (y9 >= matrixBase9 && y9 < matrixBase9 + mT9.length * MATRIX_TRACK_HEIGHT) {
+            const mIdx = Math.floor((y9 - matrixBase9) / MATRIX_TRACK_HEIGHT);
+            if (mIdx >= 0 && mIdx < mT9.length) {
+              const mTrack = mT9[mIdx];
+              for (let ei = 0; ei < mTrack.entries.length; ei++) {
+                const entry = mTrack.entries[ei];
+                const ex1 = (entry.time / duration) * drawW9;
+                const ex2 = (entry.endTime / duration) * drawW9;
+                const EDGE = 5;
+                if (Math.abs(x9 - ex1) < EDGE) {
+                  matrixDragRef.current = { trackId: mTrack.id, entryIndex: ei, mode: 'resize-left', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (Math.abs(x9 - ex2) < EDGE) {
+                  matrixDragRef.current = { trackId: mTrack.id, entryIndex: ei, mode: 'resize-right', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (x9 > ex1 + EDGE && x9 < ex2 - EDGE) {
+                  matrixDragRef.current = { trackId: mTrack.id, entryIndex: ei, mode: 'move', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     if (!onSectionsChange) return;
     const c = containerRef.current;
     if (!c) return;
     const rect = c.getBoundingClientRect();
     const x = e.clientX - rect.left - LABEL_WIDTH;
-    const y = e.clientY - rect.top;
+    const y = e.clientY - rect.top + c.scrollTop;
     if (x < 0 || y < HEADER_HEIGHT) return;
 
     const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
@@ -2158,7 +2379,7 @@ if (editBlock) { setEditBlock(null); return; }
         return;
       }
     }
-  }, [sections, duration, onSectionsChange, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, energyCurve, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange, onChaserEntryChange, onShowEntryChange, onSceneEntryChange, fixtureAreaHeight]);
+  }, [sections, duration, onSectionsChange, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, matrixTracks, energyCurve, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange, onChaserEntryChange, onShowEntryChange, onSceneEntryChange, onMatrixEntryChange, fixtureAreaHeight]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Clear EFX drag
@@ -2200,6 +2421,12 @@ if (editBlock) { setEditBlock(null); return; }
     // Scene entry drag end
     if (sceneDragRef.current) {
       sceneDragRef.current = null;
+      return;
+    }
+
+    // Matrix entry drag end
+    if (matrixDragRef.current) {
+      matrixDragRef.current = null;
       return;
     }
 
@@ -3580,6 +3807,90 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
+    // ── Matrix tracks — matrice RGB via le moteur global ──
+    if (numMatrixTracks > 0) {
+      const eT = efxTracks || [];
+      const cT = colorTracks || [];
+      const sT = strobeTracks || [];
+      const dT = dimmerTracks || [];
+      const cChT = chaserTracks || [];
+      const shT = showTracks || [];
+      const scT = sceneTracks || [];
+      const efxBase = autoY + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT;
+      const colorBase = efxBase + cT.length * COLOR_TRACK_HEIGHT;
+      const strobeBase = colorBase + sT.length * STROBE_TRACK_HEIGHT;
+      const dimmerBase = strobeBase + dT.length * DIMMER_TRACK_HEIGHT;
+      const chaserBase = dimmerBase + cChT.length * CHASER_TRACK_HEIGHT;
+      const showTrackBaseY = chaserBase;
+      const sceneTrackBaseY = showTrackBaseY + shT.length * SHOW_TRACK_HEIGHT;
+      const matrixTrackBaseY = sceneTrackBaseY + scT.length * SCENE_TRACK_HEIGHT;
+      for (let ci = 0; ci < numMatrixTracks; ci++) {
+        const cTrack = matrixTracks![ci];
+        const trackY = matrixTrackBaseY + ci * MATRIX_TRACK_HEIGHT;
+        ctx.fillStyle = ci % 2 === 0 ? 'rgba(236, 72, 153, 0.06)' : 'rgba(236, 72, 153, 0.03)';
+        ctx.fillRect(LABEL_WIDTH, trackY, drawW, MATRIX_TRACK_HEIGHT);
+        ctx.strokeStyle = 'rgba(236, 72, 153, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY);
+        ctx.lineTo(w, trackY);
+        ctx.stroke();
+        ctx.fillStyle = '#f472b6';
+        ctx.font = '9px -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+        const cLabel = cTrack.name.length > 11 ? cTrack.name.substring(0, 10) + '…' : cTrack.name;
+        ctx.fillText('MTX: ' + cLabel, 6, trackY + 12);
+        const cEntry0 = cTrack.entries[0];
+        let cTargetLabel = '';
+        if (cEntry0) {
+          cTargetLabel = '🔳 ' + (cEntry0.label || cEntry0.matrixName || '').slice(0, 10);
+        } else {
+          cTargetLabel = 'clic droit pour importer';
+        }
+        if (cTargetLabel) {
+          ctx.fillStyle = '#6b7280';
+          ctx.font = '8px -apple-system, sans-serif';
+          ctx.fillText(cTargetLabel, 72, trackY + 12);
+        }
+        ctx.strokeStyle = 'rgba(75, 85, 99, 0.1)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY + MATRIX_TRACK_HEIGHT);
+        ctx.lineTo(w, trackY + MATRIX_TRACK_HEIGHT);
+        ctx.stroke();
+        for (const entry of cTrack.entries) {
+          const ex = LABEL_WIDTH + (entry.time / duration) * drawW;
+          const endX = LABEL_WIDTH + (entry.endTime / duration) * drawW;
+          const entryW = Math.max(4, endX - ex);
+          if (ex < LABEL_WIDTH - 10 || ex > w + 10) continue;
+          const pad = 3;
+          const barY = trackY + pad;
+          const barH = MATRIX_TRACK_HEIGHT - pad * 2;
+          ctx.fillStyle = '#ec4899';
+          ctx.globalAlpha = 0.85;
+          ctx.beginPath();
+          ctx.roundRect(ex, barY, entryW, barH, 3);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = '#f9a8d4';
+          ctx.beginPath();
+          ctx.roundRect(ex, barY, 3, barH, [3, 0, 0, 3]);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.roundRect(endX - 3, barY, 3, barH, [0, 3, 3, 0]);
+          ctx.fill();
+          if (entryW > 44) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 7px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            const nameLabel = (entry.label || entry.matrixName || 'matrix').length > 14 ? (entry.label || entry.matrixName || 'matrix').substring(0, 13) + '…' : (entry.label || entry.matrixName || 'matrix');
+            ctx.fillText(nameLabel, ex + entryW / 2, trackY + MATRIX_TRACK_HEIGHT / 2 + 3);
+          }
+          ctx.fillStyle = '#f9a8d4'; const diamondSize = 3; ctx.beginPath(); ctx.moveTo(ex, barY + barH / 2 - diamondSize); ctx.lineTo(ex + diamondSize, barY + barH / 2); ctx.lineTo(ex, barY + barH / 2 + diamondSize); ctx.lineTo(ex - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(endX, barY + barH / 2 - diamondSize); ctx.lineTo(endX + diamondSize, barY + barH / 2); ctx.lineTo(endX, barY + barH / 2 + diamondSize); ctx.lineTo(endX - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill();
+        }
+      }
+    }
+
     // ── Section separators (vertical lines) ─────────
     // Une ligne verticale bien visible à chaque frontière de section, comme les
     // séparations de la piste audio. Halo sombre + trait coloré plein pour
@@ -3654,6 +3965,8 @@ if (editBlock) { setEditBlock(null); return; }
     numChaserTracks,
     sceneTracks,
     numSceneTracks,
+    matrixTracks,
+    numMatrixTracks,
     fixtureTracks,
     disabledFixtures,
     ftSelStart,
@@ -3668,8 +3981,8 @@ if (editBlock) { setEditBlock(null); return; }
       {/* ── Fixture Enable/Disable Checkboxes ── */}
       <div
         ref={containerRef}
-        className="w-full rounded-lg overflow-hidden border border-gray-800/50 cursor-pointer select-none relative"
-        style={{ height: `${totalHeight}px`, backgroundColor: '#0a0a0f' }}
+        className="w-full rounded-lg overflow-x-hidden overflow-y-auto border border-gray-800/50 cursor-pointer select-none relative"
+        style={{ height: `${totalHeight}px`, maxHeight: '56vh', backgroundColor: '#0a0a0f' }}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         onMouseDown={handleMouseDown}

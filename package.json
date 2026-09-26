@@ -12,6 +12,7 @@
     "dev:electron": "tsc -p tsconfig.electron.json && electron .",
     "build": "tsc -p tsconfig.electron.json && vite build && node scripts/copy-static.cjs",
     "test": "vitest run",
+    "allinone": "python scripts/allinone_import.py --help",
     "start": "tsc -p tsconfig.electron.json && vite build && electron .",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder --publish never"
@@ -69,6 +70,9 @@
     "files": [
       "dist/**/*",
       "resources/**/*",
+      "assets/logo/icon-512.png",
+      "assets/logo/icon.ico",
+      "scripts/allinone_import.py",
       "node_modules/**/*",
       "package.json"
     ],
@@ -81,6 +85,7 @@
       "resources/**/*"
     ],
     "win": {
+      "icon": "assets/logo/icon.ico",
       "target": [
         {
           "target": "nsis",

@@ -29,6 +29,21 @@ app.commandLine.appendSwitch('disable-features', 'Autofill');
 if (!app.isPackaged) app.commandLine.appendSwitch('disable-http-cache');
 process.env.UV_THREADPOOL_SIZE = '8';
 app.setPath('userData', path.join(app.getPath('appData'), 'light-maestro'));
+// Taskbar grouping/pinning on Windows (doit matcher l'appId du build).
+if (process.platform === 'win32') app.setAppUserModelId('com.lightmaestro.app');
+
+/** Icône de fenêtre (barre des tâches en dev) — PNG du dossier assets/logo/. */
+function resolveWindowIcon(): string | undefined {
+  const candidates = [
+    path.join(app.getAppPath(), 'assets', 'logo', 'icon-512.png'),
+    path.join(process.resourcesPath, 'app', 'assets', 'logo', 'icon-512.png'),
+    path.join(process.cwd(), 'assets', 'logo', 'icon-512.png'),
+  ];
+  for (const c of candidates) {
+    try { if (fs.existsSync(c)) return c; } catch {}
+  }
+  return undefined;
+}
 
 // ─── Crash reporter (native minidumps, local only — Phase 1) ───
 if (app.isPackaged) {
@@ -197,11 +212,13 @@ function createWindow() {
   // In production, ensure dist exists before showing window
   if (!isDev) ensureBuilt();
 
+  const windowIcon = resolveWindowIcon();
   mainWindow = new BrowserWindow({
     show: false,
-    minWidth: 1024,
-    minHeight: 700,
+    minWidth: 900,
+    minHeight: 600,
     title: 'Light Maestro',
+    ...(windowIcon ? { icon: windowIcon } : {}),
     backgroundColor: '#0a0a0f',
     // Frameless title bar with native window controls (min/max/close) kept
     // as an overlay: no white Windows title bar, but the window can still be
@@ -221,6 +238,26 @@ function createWindow() {
   });
   remoteServer.setMainWindow(mainWindow);
   oscServer.setMainWindow(mainWindow);
+
+  // ─── Démarrage auto du serveur Remote (LAN :8080) ────────────────────────
+  // Le panneau Remote est utilisable dès le lancement (URLs + jeton disponibles
+  // sans action manuelle). Préférence persistée dans userData
+  // (`remote-prefs.json`, écrite par le panneau : Stop = autoStart:false,
+  // Start = autoStart:true). Toute erreur (ex. EADDRINUSE) est exposée via
+  // `lastError` dans `remote:getStatus` — pas de crash au démarrage.
+  try {
+    const prefsPath = path.join(app.getPath('userData'), 'remote-prefs.json');
+    const prefs = fs.existsSync(prefsPath)
+      ? (JSON.parse(fs.readFileSync(prefsPath, 'utf-8')) as { autoStart?: boolean } | null)
+      : null;
+    if (prefs && prefs.autoStart === false) {
+      console.log('[remote] démarrage auto désactivé (remote-prefs.autoStart=false)');
+    } else {
+      remoteServer.start();
+    }
+  } catch (e) {
+    console.warn('[remote] démarrage auto impossible :', e instanceof Error ? e.message : e);
+  }
 
   // Show the main window once its first frame is painted, keeping the
   // animated splash visible until then (with a minimum display time so the
@@ -633,6 +670,27 @@ ipcMain.handle('audio:import', async () => {
   return { fileName: path.basename(filePath), filePath, dataUrl };
 });
 
+// ─── IPC Handlers: All-In-One structure (option B, offline) ───
+// Le renderer envoie le WAV décodé (base64) ; le main exécute
+// scripts/allinone_import.py et renvoie le JSON de structure.
+ipcMain.handle('allinone:check', async () => {
+  const { checkAllInOne } = await import('./audio/allinone');
+  return checkAllInOne();
+});
+
+ipcMain.handle('allinone:analyze', async (event, payload: { wavBase64: string; fileName: string; model?: string }) => {
+  const { analyzeAllInOne } = await import('./audio/allinone');
+  const sender = event.sender;
+  return analyzeAllInOne(payload.wavBase64, payload.fileName || 'audio.wav', (msg) => {
+    try { sender.send('allinone:progress', msg); } catch {}
+  }, { model: payload.model });
+});
+
+ipcMain.handle('allinone:cancel', async () => {
+  const { cancelAllInOne } = await import('./audio/allinone');
+  return cancelAllInOne();
+});
+
 // ─── IPC Handlers: MIDI ──────────────────────────────────────
 ipcMain.handle('midi:listDevices', async () => midiManager.listDevices());
 ipcMain.handle('midi:connect', async (_, deviceId: string) => midiManager.connect(deviceId));
@@ -643,6 +701,12 @@ ipcMain.handle('midi:addMapping', async (_, mapping: MidiMapping) => midiManager
 ipcMain.handle('midi:removeMapping', async (_, id: string) => midiManager.removeMapping(id));
 ipcMain.handle('midi:startLearn', async (_, target: MidiTarget) => midiManager.startLearn(target));
 ipcMain.handle('midi:stopLearn', async () => midiManager.stopLearn());
+// Feedback LED : le renderer pousse l'état des tuiles (scènes/chasers/blackout
+// et boutons de la Console Virtuelle), le main le projette sur les mappings
+// `feedback !== false` vers le port sortie ouvert (cf. MidiManager).
+ipcMain.handle('midi:feedback', (_event, entries: unknown) =>
+  midiManager.sendFeedbackState(Array.isArray(entries) ? (entries as Array<{ type: string; id?: string; on: boolean }>) : []),
+);
 
 // ─── IPC Handlers: Licence ───────────────────────────────────
 ipcMain.handle('license:getState', () => licenseStore.getState());
@@ -839,6 +903,69 @@ ipcMain.handle('presets:save', async (_, presets: any[]) => {
 });
 ipcMain.handle('presets:load', async () => {
   try { if (fs.existsSync(presetsPath)) return JSON.parse(fs.readFileSync(presetsPath, 'utf-8')); return []; } catch (e) { console.error('Failed to load presets:', e); return []; }
+});
+
+// ─── Batch repair: ré-embarque l'audio manquant des .lmpreset ───
+// Certains .lmpreset ont été exportés SANS son (confirmation "sans audio"
+// validée, ou vieux build) : le poids vient alors de l'analyse, pas d'un MP3.
+// Pour chaque fichier sans `audioDataBase64`, on cherche le dernier bon audio
+// connu (last-audio.json, clé = nom du preset) et on le ré-embarque (raw
+// base64, sans préfixe data:). Écriture atomique (tmp + rename). Ne touche
+// jamais aux fichiers déjà OK ni à leur contenu hors audio.
+ipcMain.handle('presets:repairAudio', async () => {
+  const pick = await dialog.showOpenDialog(mainWindow!, {
+    title: 'Dossier de presets à réparer (.lmpreset)',
+    properties: ['openDirectory'],
+  });
+  if (pick.canceled || pick.filePaths.length === 0) return null;
+  const folder = pick.filePaths[0];
+  let lastAudio: Record<string, { base64?: string; fileName?: string }> = {};
+  try {
+    if (fs.existsSync(lastAudioPath)) lastAudio = JSON.parse(fs.readFileSync(lastAudioPath, 'utf-8')) || {};
+  } catch {}
+  const report: {
+    folder: string;
+    total: number;
+    alreadyOk: string[];
+    repaired: { file: string; preset: string; audioLen: number }[];
+    missing: { file: string; preset: string; expectedAudio: string }[];
+    errors: { file: string; error: string }[];
+  } = { folder, total: 0, alreadyOk: [], repaired: [], missing: [], errors: [] };
+  let files: string[] = [];
+  try {
+    files = fs.readdirSync(folder).filter((f) => f.toLowerCase().endsWith('.lmpreset'));
+  } catch (e: any) {
+    return { ...report, errors: [{ file: folder, error: `Lecture dossier impossible : ${e?.message || e}` }] };
+  }
+  report.total = files.length;
+  for (const file of files) {
+    const full = path.join(folder, file);
+    try {
+      const data = JSON.parse(fs.readFileSync(full, 'utf-8'));
+      const inFile = typeof data.audioDataBase64 === 'string' ? data.audioDataBase64 : '';
+      if (inFile.length > 0) { report.alreadyOk.push(file); continue; }
+      const presetName: string = data?.quickShow?.name || file.replace(/\.lmpreset$/i, '');
+      const entry = lastAudio[presetName];
+      const raw = typeof entry?.base64 === 'string' ? entry.base64 : '';
+      const stripped = raw.includes(',') ? raw.slice(raw.indexOf(',') + 1) : raw;
+      if (stripped.length === 0) {
+        report.missing.push({
+          file,
+          preset: presetName,
+          expectedAudio: (data?.analysis?.fileName as string) || '(nom audio inconnu)',
+        });
+        continue;
+      }
+      data.audioDataBase64 = stripped;
+      const tmp = `${full}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+      fs.renameSync(tmp, full);
+      report.repaired.push({ file, preset: presetName, audioLen: stripped.length });
+    } catch (e: any) {
+      report.errors.push({ file, error: `${e?.message || e}` });
+    }
+  }
+  return report;
 });
 
 // ─── IPC Handlers: Last known-good audio per preset name (file-based) ──

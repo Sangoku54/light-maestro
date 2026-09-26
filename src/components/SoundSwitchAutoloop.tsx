@@ -2,17 +2,23 @@ import React from 'react';
 import { Play, Square, ChevronLeft, ChevronRight, Layers, SkipForward } from 'lucide-react';
 import { useAutoloopEngine } from '../hooks/use-autoloop-engine';
 import { PER_BANK } from '../engine/autoloop-banks';
+import { BANK_THEMES } from '../engine/autoloop-themes';
 
 /**
  * Boucles auto — contrôles des boucles automatiques 4×32.
  *
- * Surface compacte branchée sur `useAutoloopEngine` : navigation dans la
- * matrice 4×32, lecture/arrêt quantisés au barline, override, et bascule du
- * mode de répétition (Infinite / Track Duration).
+ * Surface compacte branchée sur `useAutoloopEngine` : 4 banques THÉMATIQUES
+ * (Couleurs / Effets / Matrice RGB / Mix), navigation dans la matrice 4×32,
+ * lecture/arrêt quantisés au barline, override, et bascule du mode de
+ * répétition (Infinite / Track Duration).
+ *
+ * Chaque slot affiche le LIBELLÉ de la boucle (+ sa couleur d'accent) :
+ * aucun bouton anonyme, aucun slot vide (le générateur remplit les 32 emplacements).
  */
 export const SoundSwitchAutoloop: React.FC = () => {
   const api = useAutoloopEngine(120);
   const { ready, playing, repeatMode, activeBank, activeSlot, activeLoop, banks } = api;
+  const theme = BANK_THEMES[activeBank];
 
   if (!ready) {
     return (
@@ -27,7 +33,7 @@ export const SoundSwitchAutoloop: React.FC = () => {
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <Layers className="w-4 h-4 text-cyan-400" />
-          <h3 className="text-xs font-semibold text-gray-200">Boucles auto — 4×32</h3>
+          <h3 className="text-xs font-semibold text-gray-200">Boucles auto — 4 banques × 32</h3>
         </div>
         <button
           onClick={() =>
@@ -44,19 +50,20 @@ export const SoundSwitchAutoloop: React.FC = () => {
         </button>
       </div>
 
-      {/* Banques (4) — sélection de banque */}
+      {/* Banques (4) — thèmes nommés, sélection de banque */}
       <div className="flex items-center gap-1 mb-2">
-        {[0, 1, 2, 3].map((bank) => (
+        {BANK_THEMES.map((meta, bank) => (
           <button
-            key={bank}
+            key={meta.id}
             onClick={() => api.select(bank, 0)}
+            title={meta.hint}
             className={`flex-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
               activeBank === bank
                 ? 'bg-cyan-600/30 text-cyan-300 border border-cyan-500/30'
-                : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-transparent'
+                : `bg-gray-800/50 hover:text-gray-300 border border-transparent ${meta.accent} opacity-60 hover:opacity-100`
             }`}
           >
-            B{bank + 1}
+            {meta.label}
           </button>
         ))}
       </div>
@@ -64,18 +71,29 @@ export const SoundSwitchAutoloop: React.FC = () => {
       {/* Grille 32 slots de la banque active */}
       {banks && (
         <div className="mb-2">
-          <div className="grid grid-cols-8 gap-1">
+          <div className="grid grid-cols-4 sm:grid-cols-8 gap-1">
             {Array.from({ length: PER_BANK }, (_, slot) => {
               const loop = banks.get(activeBank, slot);
               const isActive = activeSlot === slot && loop !== null;
               const isEmpty = loop === null;
+              const swatch = loop?.swatch;
               return (
                 <button
                   key={slot}
-                  onClick={() => !isEmpty && api.select(activeBank, slot)}
+                  onClick={() => {
+                    if (isEmpty) return;
+                    api.select(activeBank, slot);
+                    // Clic = charger ET jouer : sinon un slot cliqué à l'arrêt
+                    // « ne fait rien » et semble inactif.
+                    if (!playing) api.play();
+                  }}
                   disabled={isEmpty}
-                  title={loop ? `${loop.id} · ${loop.bars}b · ${loop.category}` : `Slot ${slot + 1} vide`}
-                  className={`h-7 rounded text-[9px] font-mono font-medium transition-all border flex flex-col items-center justify-center leading-none ${
+                  title={
+                    loop
+                      ? `${loop.label ?? loop.id} · ${loop.bars} bars · ${loop.category} · slot ${slot + 1}`
+                      : `Slot ${slot + 1} vide`
+                  }
+                  className={`h-7 px-1 rounded text-[8px] font-medium transition-all border flex items-center justify-center gap-1 leading-none ${
                     isActive
                       ? 'bg-cyan-500 text-white border-cyan-400 shadow shadow-cyan-500/30'
                       : isEmpty
@@ -83,13 +101,20 @@ export const SoundSwitchAutoloop: React.FC = () => {
                       : 'bg-gray-800/60 text-gray-400 border-gray-700/50 hover:bg-gray-700 hover:text-gray-200 hover:border-gray-600'
                   }`}
                 >
-                  <span>{slot + 1}</span>
-                  {loop && <span className="text-[7px] opacity-70">{loop.bars}b</span>}
+                  {swatch && (
+                    <span
+                      className="w-1.5 h-1.5 rounded-sm shrink-0 border border-black/40"
+                      style={{ background: swatch }}
+                    />
+                  )}
+                  <span className="truncate">{loop ? (loop.label ?? loop.id) : slot + 1}</span>
                 </button>
               );
             })}
           </div>
-          <div className="mt-1 text-[9px] text-gray-600 text-center">Banque {activeBank + 1} — 32 slots · {banks.get(activeBank, activeSlot)?.category ?? '—'}</div>
+          <div className="mt-1 text-[9px] text-gray-600 text-center truncate">
+            {theme.label} — 32 slots · {banks.get(activeBank, activeSlot)?.category ?? '—'}
+          </div>
         </div>
       )}
 
@@ -134,7 +159,8 @@ export const SoundSwitchAutoloop: React.FC = () => {
       {/* Loop actif */}
       {activeLoop && (
         <div className="mt-1.5 text-[10px] text-gray-500 truncate">
-          {activeLoop.id} · {activeLoop.bars} bars · {activeLoop.category} · Banque {activeBank + 1} Slot {activeSlot + 1}/32
+          {activeLoop.label ?? activeLoop.id} · {activeLoop.bars} bars · {activeLoop.category} ·{' '}
+          {theme.label} {activeSlot + 1}/32
         </div>
       )}
     </div>
