@@ -48,17 +48,26 @@ describe('projet démo embarqué', () => {
     expect(ss.scenes.length).toBe(6);
   });
 
-  it('preset 1-Waiting présent, avec audio embarqué résolvable', async () => {
+  it('preset Yolo présent, avec audio embarqué résolvable', async () => {
     const { data, blobs } = await loadDemo();
     const presets = data.showStore.songPresets;
     expect(presets.length).toBe(1);
-    expect(presets[0].name).toBe('1-Waiting');
+    expect(presets[0].name).toBe('Yolo');
     expect(typeof presets[0].audioRef).toBe('string');
     const blob = blobs.find((b) => b.key === presets[0].audioRef);
     expect(blob, 'blob audio du preset').toBeDefined();
     expect(blob!.audioFileBase64.length).toBeGreaterThan(1_000_000);
   });
 
+  it('page Démo : 9 tuiles (1 preset + 6 scènes + chaser + blackout)', async () => {
+    const { data } = await loadDemo();
+    expect(data.vcPages).toEqual([{ name: 'Démo' }]);
+    expect(data.vcWidgets.length).toBe(9);
+    const kinds = (data.vcWidgets as any[]).map((w) => w.config?.actionType).sort();
+    expect(kinds).toEqual(
+      ['blackout', 'chaser', 'playSong', 'scene', 'scene', 'scene', 'scene', 'scene', 'scene'].sort(),
+    );
+  });
   it('aucune référence pendante (chaser, show, groupes, tuiles, positions)', async () => {
     const { data } = await loadDemo();
     const ss = data.showStore;

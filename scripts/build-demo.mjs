@@ -1,9 +1,11 @@
 /**
- * Construit le projet démo embarqué à partir de `LM/Yolo.lmproj` :
+ * Construit le projet démo embarqué à partir de `LM/Yolo.lmproj` +
+ * `LM/Yolo.lmpreset` (audio) :
  *  - retire les 2 lasers (TONIO LASER RGB ALIEN, TONIO LASER 4W) + les 3
  *    scènes laser + les canaux DMX de leurs plages d'adressage ;
- *  - ne garde que le preset "1-Waiting" (seul avec audio embarqué) + son blob ;
- *  - ne garde que la tuile console qui le lance ;
+ *  - preset vitrine "Yolo" : données musicales du .lmproj (ids stables pour
+ *    les tuiles) + audio embarqué depuis le .lmpreset (seule source portable) ;
+ *  - page console « Démo » : bouton YOLO + 6 scènes + chaser + blackout ;
  *  - customFixtures sérialisées en vrai tableau (import compatible).
  *
  * Sortie : `resources/demo/Light-Maestro-Demo.lmproj` (embarqué dans l'exe,
@@ -11,6 +13,7 @@
  *
  * Usage : `node scripts/build-demo.mjs` (relancé à chaque refresh démo).
  */
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -19,10 +22,17 @@ import { unpackProject, packProject } from '../dist/electron/project-envelope.js
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, '..');
 const SRC = path.join(root, 'LM', 'Yolo.lmproj');
+const PRESET_FILE = path.join(root, 'LM', 'Yolo.lmpreset');
 const DEST = path.join(root, 'resources', 'demo', 'Light-Maestro-Demo.lmproj');
 
 const LASER_DEF_IDS = new Set(['custom-tonio-laser-rgb-alien', 'custom-tonio-laser-4w']);
-const KEEP_PRESET = '1-Waiting';
+const KEEP_PRESET = 'Yolo';
+
+/** Clé blob stable = même règle que `audioKeyOf` (src/utils/project-audio.ts). */
+function audioKeyOfRaw(b64) {
+  const clean = b64.includes(',') ? b64.slice(b64.indexOf(',') + 1) : b64;
+  return 'audio-' + crypto.createHash('sha256').update(Buffer.from(clean, 'base64')).digest('hex').slice(0, 16);
+}
 
 const { content, blobs } = await unpackProject(SRC);
 const data = JSON.parse(content);
@@ -92,21 +102,56 @@ for (const sh of ss.shows ?? []) {
   }
 }
 
-// 4) Presets : seul 1-Waiting (audio embarqué) ; tuiles : son bouton
+// 4) Preset vitrine : données du .lmproj (ids stables) + audio du .lmpreset.
+//    Le preset embarqué dans Yolo.lmproj n'a pas d'audio portable (référence
+//    userData) ; le .lmpreset, lui, embarque le MP3 (13 Mo).
 const keptPresets = (ss.songPresets ?? []).filter((p) => p.name === KEEP_PRESET);
 if (keptPresets.length !== 1) throw new Error(`preset "${KEEP_PRESET}" introuvable`);
+const preset = keptPresets[0];
+const presetFileRaw = fs.readFileSync(PRESET_FILE, 'utf-8');
+const presetFile = JSON.parse(presetFileRaw);
+const presetFileData = Array.isArray(presetFile) ? (presetFile[0]?.data ?? presetFile[0]) : presetFile;
+const fileAudio = presetFileData.audioDataBase64 || presetFileData.audioFileBase64 || '';
+if (!fileAudio || fileAudio.length < 1000) throw new Error(`audio absent de ${PRESET_FILE}`);
+const audioKey = audioKeyOfRaw(fileAudio);
+preset.audioRef = audioKey;
+delete preset.audioFileBase64;
+preset.audioFileName = presetFileData.audioFileName || preset.audioFileName || 'Yolo.mp3';
 ss.songPresets = keptPresets;
-const neededAudioRefs = new Set(
-  keptPresets.map((p) => p.audioRef).filter((r) => typeof r === 'string' && r.length > 0),
-);
-const keptBlobs = (blobs ?? []).filter((b) => neededAudioRefs.has(b.key));
-if (keptBlobs.length !== neededAudioRefs.size) {
-  throw new Error(`blob audio manquant pour ${[...neededAudioRefs].join(',')}`);
-}
-data.vcWidgets = (data.vcWidgets ?? []).filter(
-  (w) => w?.config?.actionType === 'playSong' && w.config?.songName === KEEP_PRESET,
-);
-console.log(`- tuiles gardées : ${data.vcWidgets.length}`);
+const keptBlobs = [{ key: audioKey, audioFileBase64: fileAudio }];
+console.log(`- preset ${KEEP_PRESET} + audio ${(fileAudio.length / 1048576).toFixed(1)} Mo b64 (${audioKey})`);
+
+// 5) Page console « Démo » : bouton YOLO + 6 scènes + chaser + blackout.
+//    (Le .lmproj d'origine n'a que des tuiles playSong ; une vitrine avec une
+//    seule tuile ne montre rien du pilotage manuel.)
+const demoWidgets = [];
+const sceneOrder = ['Wash 1 strobe', 'Wash 2 strobe', 'Wash 3 strobe', '6 arm strobe', '2 gobos Strobes', 'Thierry'];
+const btn = (id, x, y, w, config) => ({
+  id, type: 'button', x, y, width: w, height: 48, pageIndex: 0, config,
+});
+demoWidgets.push(btn('demo-play-yolo', 20, 20, 220, {
+  actionType: 'playSong', color: '#ec4899', flashMode: 'toggle', label: 'YOLO',
+  songId: preset.id, songName: preset.name, title: 'button',
+}));
+sceneOrder.forEach((name, i) => {
+  const sc = (ss.scenes ?? []).find((s) => s.name === name);
+  if (!sc) throw new Error(`scène démo manquante : ${name}`);
+  demoWidgets.push(btn(`demo-scene-${i}`, 20 + (i % 3) * 120, 80 + Math.floor(i / 3) * 60, 100, {
+    actionType: 'scene', color: '#a855f7', flashMode: 'toggle', sceneId: sc.id, label: name, title: 'button',
+  }));
+});
+const chaser = (ss.chasers ?? [])[0];
+if (!chaser) throw new Error('chaser démo manquant');
+demoWidgets.push(btn('demo-chaser', 20, 200, 220, {
+  actionType: 'chaser', color: '#22c55e', flashMode: 'toggle', chaserId: chaser.id, label: chaser.name, title: 'button',
+}));
+demoWidgets.push(btn('demo-blackout', 260, 200, 100, {
+  actionType: 'blackout', color: '#ef4444', flashMode: 'toggle', label: 'Blackout', title: 'button',
+}));
+data.vcWidgets = demoWidgets;
+data.vcPages = [{ name: 'Démo' }];
+data.vcActivePage = 0;
+console.log(`- tuiles démo : ${demoWidgets.length} (1 preset + 6 scènes + chaser + blackout)`);
 
 // 5) customFixtures : tableau (format attendu par importCustomFixtureDefs),
 //    sans les defs laser.
