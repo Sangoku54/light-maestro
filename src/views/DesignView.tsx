@@ -958,6 +958,11 @@ const SceneList: React.FC = () => {
             onClick={() => {
               (window as any).__lm_renameScene = true;
               setSelectedSceneId(ctxMenu.sceneId);
+              // Écriture synchrone + replay : comme le clic tuile — si la
+              // scène est déjà sélectionnée, l'éditeur doit quand même
+              // re-pusher ses canaux (faisceaux allumés pour modifier).
+              (window as any).__lm_selectedSceneId = ctxMenu.sceneId;
+              (window as any).__lm_sceneReplayAt = Date.now();
               setCtxMenu((c) => ({ ...c, visible: false }));
             }}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-200 transition-colors flex items-center gap-2"
@@ -967,6 +972,12 @@ const SceneList: React.FC = () => {
           <button
             onClick={() => {
               setSelectedSceneId(ctxMenu.sceneId);
+              // Écriture synchrone + replay : comme le clic tuile — « Modifier »
+              // doit ALLUMER les faisceaux (push des canaux vers le moteur),
+              // même si la scène est déjà sélectionnée (sinon rien ne se passe
+              // et on modifie dans le noir).
+              (window as any).__lm_selectedSceneId = ctxMenu.sceneId;
+              (window as any).__lm_sceneReplayAt = Date.now();
               setCtxMenu((c) => ({ ...c, visible: false }));
             }}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-200 transition-colors flex items-center gap-2"
