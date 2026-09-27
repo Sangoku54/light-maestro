@@ -1226,7 +1226,7 @@ const SceneEditor: React.FC = () => {
     if (!isScenePreviewVisible) {
       // Preview masqué : coupe la boucle sans blackout (pas de transient qui
       // re-pinnerait les canaux) et relâche la source pour la lecture live.
-      console.debug('[ScenePreview] preview masquée (mode/onglet) — pas de push');
+      console.debug(`[ScenePreview] preview masquée (mode/onglet) — pas de push (mode=${appMode} tab=${designTab})`);
       stopSceneEfxLoop({ blackout: false });
       try { dmxBridge.release('scene-efx'); } catch {}
       // Le menu scène écrit aussi via la source 'default' (LTP 50) au clic sur
