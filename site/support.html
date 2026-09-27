@@ -41,7 +41,7 @@
         <h3 class="h3">Audio & Quick Show</h3>
         <details open style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">La détection de BPM est fausse</summary><p style="margin-top:8px">Re-analysez après avoir coupé les silences / intros longues, ou forcez le BPM (tap tempo). L'algo est adaptatif mais un morceau à tempo variable reste un challenge.</p></details>
         <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">Strobe trop agressif</summary><p style="margin-top:8px">Safety limiter ON dans Quick Show (max flash/s), et piste Strobe dédiée avec plafond. En live : Grand Master ou Blackout instantané.</p></details>
-        <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">Fichiers .lmpreset / .lmshow / .lmproj ?</summary><p style="margin-top:8px"><b>.lmpreset</b> = preset audio+DMX, <b>.lmshow</b> = show réutilisable, <b>.lmproj</b> = projet complet (JSON ouvert, autosave 45s).</p></details>
+        <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">Fichiers .lmpreset / .lmshow / .lmproj ?</summary><p style="margin-top:8px"><b>.lmpreset</b> = preset audio+DMX, <b>.lmshow</b> = show réutilisable, <b>.lmproj</b> = projet complet (JSON ouvert).</p></details>
       </div>
     </div>
     <div class="grid grid-2" style="margin-top:16px">
@@ -53,7 +53,7 @@
       </div>
       <div class="card">
         <h3 class="h3">Projets & sauvegarde</h3>
-        <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">J'ai fermé sans sauvegarder</summary><p style="margin-top:8px">Autosave silencieux toutes les 45s + garde-fou “Save & Quit / Discard” à la fermeture. Si dirty, l'app vous demande.</p></details>
+        <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">J'ai fermé sans sauvegarder</summary><p style="margin-top:8px">Garde-fou “Save & Quit / Discard” à la fermeture. Si dirty, l'app vous demande.</p></details>
         <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">Projet illisible sur une autre machine</summary><p style="margin-top:8px">Les fixtures customs sont embarquées dans le .lmproj depuis la v1.0.25 — plus de “fixture manquante”. Assurez-vous d'être en ≥1.0.25 des deux côtés.</p></details>
         <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">Où sont mes fichiers ?</summary><p style="margin-top:8px"><span class="mono">%APPDATA%/Light Maestro</span> (Windows) — projets, presets, logs. Sauvegardez ce dossier pour backup complet.</p></details>
       </div>
