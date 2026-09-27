@@ -329,6 +329,7 @@ interface Fixture3D {
   _zeroTiltDeg: number;         // point zéro tilt VISUEL (degrés) : décalage du faisceau dans la 3D
   lastPan?: number;             // dernier byte pan vu (pour « capturer le centre du mouvement »)
   lastTilt?: number;            // dernier byte tilt vu (pour « capturer le centre du mouvement »)
+  _smoothI?: number;            // intensité lissée 0..1 (anti-marches de fade, cf. updateDmxState)
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -2167,6 +2168,17 @@ export const Stage3D: React.FC<{
       if (blackout) intensity = 0;
       if (disabledRef.current.has(f3d.id)) intensity = 0;
       intensity = intensity * (grandMaster / 255);
+
+      // Lissage d'intensité : la 3D lit le DMX par pas (poll 60 Hz désynchro
+      // des écritures) — un fade apparaît en marches sans ça, comme le
+      // pan/tilt avant le settle. Même constante de temps que le settle
+      // (≈3 frames de retard, imperceptible) ; désactivé sous strobe pour
+      // ne pas ramollir le blink 50%.
+      const smoothK = strobeHz > 0 ? 1 : Math.min(1, dt * 25);
+      const prevI = typeof f3d._smoothI === 'number' ? f3d._smoothI : intensity / 255;
+      const smoothI = prevI + (intensity / 255 - prevI) * smoothK;
+      f3d._smoothI = smoothI;
+      intensity = smoothI * 255;
 
       // Apply strobe blink
       if (strobeHz > 0) {

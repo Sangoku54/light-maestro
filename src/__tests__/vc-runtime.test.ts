@@ -148,6 +148,32 @@ describe('runtime Console Virtuelle — scène', () => {
     expect(vcIsRunning('w-fade')).toBe(false);
     expect(last()).toEqual({ 4: 0 });
   });
+
+  it('fade-in : rampe monotone à pas fins (pas de marches visibles en 3D)', () => {
+    // Scène dédiée : fadeIn long (1 s) pour mesurer la granularité.
+    useShowStore.setState({
+      scenes: [
+        { id: 's-long', name: 'Long', channels: { 4: 255 }, fadeIn: 1000, fadeOut: 0, duration: 0 },
+      ] as any,
+    } as any);
+    usePerformStore.setState({
+      vcWidgets: [widget('w-long', { actionType: 'scene', sceneId: 's-long' })],
+    } as any);
+    vcActivateScene('w-long', 's-long');
+    // 16 ms/frame (fallback setTimeout sous vitest) sur 1100 ms
+    const levels: number[] = [];
+    for (let t = 0; t < 1100; t += 16) {
+      vi.advanceTimersByTime(16);
+      const v = last()?.[4];
+      if (typeof v === 'number') levels.push(v);
+    }
+    expect(levels.length).toBeGreaterThan(30); // écrit à chaque frame
+    for (let i = 1; i < levels.length; i++) {
+      expect(levels[i]).toBeGreaterThanOrEqual(levels[i - 1]); // monotone
+      expect(levels[i] - levels[i - 1]).toBeLessThanOrEqual(8); // pas fins
+    }
+    expect(levels[levels.length - 1]).toBe(255); // pleine puissance atteinte
+  });
 });
 
 describe('runtime Console Virtuelle — extinction à la désactivation (P0)', () => {
