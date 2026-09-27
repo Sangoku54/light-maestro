@@ -5,7 +5,7 @@
 //     dimmer pulse). Small, predictable, used as the building block.
 //  2. generateLoopLibrary() — a rich, seeded "near-infinite" catalog of loop
 //     variations (named palettes × movement patterns × speeds), inspired by
-//     SoundSwitch's LoopAuto. Re-run with a different seed → a different set.
+//     les boucles auto (LoopAuto). Re-run with a different seed → a different set.
 //
 // A loop is a sequence of DMX frames (absolute address → value). Each frame is
 // a self-contained lighting state; the frames repeat (forward/backward/bounce)

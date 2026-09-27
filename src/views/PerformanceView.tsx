@@ -2466,7 +2466,7 @@ function genCuesLocal(a: TrackAnalysis): CueInput[] {
   const barDuration = beatDuration * 4; // 4/4 time
   const sceneDuration = barDuration * 2; // 2 bars per scene
 
-  // Color palettes per section type (SoundSwitch-style)
+  // Color palettes per section type (autoloop-style)
   const PALETTES: Record<string, string[]> = {
     intro:  ['#1a5276', '#2980b9', '#3498db', '#5dade2', '#85c1e9'],
     verse:  ['#6c3483', '#8e44ad', '#a569bd', '#bb8fce', '#d2b4de'],

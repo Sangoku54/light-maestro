@@ -6,7 +6,7 @@ import { useAppStore } from '../stores/appStore';
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from '../hooks/dmx-cues';
 import { generateLoopLibrary, materializeAutoLoops, purgeAutoLoops, LOOP_KIND_LABEL, LOOP_KIND_ORDER, type AutoLoop, type AutoLoopKind } from '../engine/auto-loops';
 import { midiPlayChaser, midiStopChaser } from '../engine/midi-actions';
-import { SoundSwitchAutoloop } from '../components/SoundSwitchAutoloop';
+import { AutoLoopBanks } from '../components/AutoLoopBanks';
 import { Stage3D } from './Stage3D';
 import { Maximize2, X } from 'lucide-react';
 
@@ -225,7 +225,7 @@ export const AutoLoopsPanel: React.FC = () => {
   return (
     <div className="h-full flex flex-col relative">
       {/* Boucles auto — banques 4×32 + lecture quantifiée */}
-      <SoundSwitchAutoloop />
+      <AutoLoopBanks />
 
       {/* Header */}
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-gray-800 shrink-0">

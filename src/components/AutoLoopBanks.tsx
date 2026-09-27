@@ -16,7 +16,7 @@ import { BANK_THEMES } from '../engine/autoloop-themes';
  * Chaque slot affiche le LIBELLÉ de la boucle (+ sa couleur d'accent) :
  * aucun bouton anonyme, aucun slot vide (le générateur remplit les 32 emplacements).
  */
-export const SoundSwitchAutoloop: React.FC = () => {
+export const AutoLoopBanks: React.FC = () => {
   const api = useAutoloopEngine(120);
   const { ready, playing, repeatMode, activeBank, activeSlot, activeLoop, banks } = api;
   const theme = BANK_THEMES[activeBank];

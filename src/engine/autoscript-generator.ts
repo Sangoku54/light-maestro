@@ -1,10 +1,10 @@
-// ─── Autoloop SoundSwitch 2.9 — Module 2 : générateur « Autoscript » ───────
+// ─── Autoloop — Module 2 : générateur « Autoscript » ───────
 //
 // Port TypeScript pur (zéro dépendance React/Electron/`window`/stores/hooks)
 // du module `generator.py` du prototype Python. Ce module ne fait qu'importer
 // les types figés de `autoloop-types` (module 1) : il ne les redéfinit jamais.
 //
-// Clone de la fonction « Autoloop » de SoundSwitch 2.9 : à partir d'un jeu de
+// Générateur de boucles auto : à partir d'un jeu de
 // cues (positions + attributs), d'une liste de fixtures et d'une catégorie
 // cible, on produit une `AutoloopTimeline` — une timeline continue alignée sur
 // les bars, remplie de keyframes DMX (`ChannelKey`) triés par `beat`.
@@ -63,7 +63,7 @@ export const MIN_ATTRIBUTE_SPACING_BARS = 2;
 
 /** Entrée du générateur : cues, fixtures et règles cibles d'un Autoloop. */
 export interface AutoscriptInput {
-  /** Durée cible du loop en bars (8/16/32/64/128 chez SoundSwitch ; ≥ 1 accepté). */
+  /** Durée cible du loop en bars (8/16/32/64/128 ; ≥ 1 accepté). */
   targetBars: number;
   /** Fixtures disponibles (le générateur filtre par catégorie). */
   fixtures: AutoloopFixture[];
@@ -280,7 +280,7 @@ function scheduleAttributes(
 /**
  * Planifie les cues de strobe sur les frontières de bar (beats multiples de 4).
  *
- * Un strobe de SoundSwitch « pique » sur les temps forts : on les place donc sur
+  * Un strobe « pique » sur les temps forts : on les place donc sur
  * les frontières de bar (beat 0, 4, 8, …) pour une synchronisation musicale
  * naturelle. Chaque cue produit une seule impulsion (snap), répartie à raison
  * d'au plus un strobe par bar pour ne pas saturer visuellement.
@@ -578,7 +578,7 @@ export function generateAutoscript(input: AutoscriptInput): AutoloopTimeline {
   const colorCues = attributeCues.filter((c) => c.attribute === 'color');
   const otherCues = attributeCues.filter((c) => c.attribute !== 'color');
 
-  // ── Pistes de contrôle (Control Tracks SoundSwitch) : intensité + strobe. ──
+  // ── Pistes de contrôle (intensité + strobe) : ──
   // Extraites de `attributeCues` si elles portent l'attribut dédié, sinon des
   // listes dédiées fournies explicitement par l'hôte (dimmerCues / strobeCues).
   const dimmerCues = input.dimmerCues

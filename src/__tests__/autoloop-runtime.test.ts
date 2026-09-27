@@ -5,7 +5,7 @@ import {
   defaultColorCues,
   defaultPositionCues,
   defaultLaserBeamCues,
-  buildSoundswitchBanks,
+  buildAutoloopBanks,
   generateBankLoops,
   DEFAULT_BANK_CONFIGS,
 } from '../engine/autoloop-runtime';
@@ -109,7 +109,7 @@ describe('toAutoloopFixtures', () => {
   });
 });
 
-describe('buildSoundswitchBanks', () => {
+describe('buildAutoloopBanks', () => {
   it('construit une matrice 4×32 avec des loops dans les banques', () => {
     const fixtures = toAutoloopFixtures(
       [
@@ -119,7 +119,7 @@ describe('buildSoundswitchBanks', () => {
       defsOf(mover, wash),
       universes,
     );
-    const banks = buildSoundswitchBanks(fixtures);
+    const banks = buildAutoloopBanks(fixtures);
 
     expect(banks).toBeInstanceOf(BankManager);
     expect(banks.banks.length).toBe(BANKS);
@@ -148,7 +148,7 @@ describe('buildSoundswitchBanks', () => {
     expect(defaultPositionCues().map((p) => p.shape)).toEqual(['circle', 'figure_eight']);
   });
 
-  it('cues laser SoundSwitch : rotations + vitesses oscillantes (plus de 160 figé)', () => {
+  it('cues laser : rotations + vitesses oscillantes (plus de 160 figé)', () => {
     const cues = defaultLaserBeamCues();
     const attrs = cues.map((c) => c.attribute);
     expect(attrs).toContain('laserRot1');

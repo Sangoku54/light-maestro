@@ -1,4 +1,4 @@
-// ─── Autoloop SoundSwitch 2.9 — Module 4 : banques et modes de performance ──
+// ─── Autoloop — Module 4 : banques et modes de performance ──
 //
 // Port TypeScript pur (zéro dépendance React/Electron/`window`) du module
 // `banks.py` du prototype Python. Ce module importe UNIQUEMENT ses types depuis
@@ -7,12 +7,11 @@
 // Responsabilités
 // ---------------
 // Ce module implémente la couche de stockage et de navigation des Autoloops,
-// ainsi que les deux mécanismes de performance propres à SoundSwitch 2.9 :
+// ainsi que les deux mécanismes de performance des banques :
 //
 // * **Matrice 4 × 32** : `BANKS` (4) banques contenant chacune `PER_BANK`
-//   (32) emplacements, soit **128 Autoloops** au total. Le terme « loop groups »
-//   n'existe pas dans SoundSwitch 2.9 : on parle de *banques* (banks) et
-//   d'*emplacements* (slots).
+//   (32) emplacements, soit **128 Autoloops** au total. On parle de *banques*
+//   (banks) et d'*emplacements* (slots).
 //
 // * **Mode exclusif** : verrouiller une banque restreint la sélection à cette
 //   seule banque (voir `BankManager.lockBank`). `lockedBank === null` correspond
@@ -25,10 +24,10 @@
 
 import { AutoloopTimeline, RepeatMode } from './autoloop-types';
 
-/** Nombre de banques (SoundSwitch 2.9 : 4 banques). */
+/** Nombre de banques (4 banques). */
 export const BANKS = 4;
 
-/** Nombre d'emplacements par banque (SoundSwitch 2.9 : 32 slots). */
+/** Nombre d'emplacements par banque (32 slots). */
 export const PER_BANK = 32;
 
 /** Nombre total d'emplacements, parcourus dans l'ordre « banque puis slot ». */

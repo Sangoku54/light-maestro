@@ -1,7 +1,7 @@
 /**
  * Scene Engine — Playback system for scenes, chasers, cue lists
  *
- * Combines QLC+'s robust scene/chaser system with SoundSwitch's
+ * Combines a robust scene/chaser system with
  * beat-synced playback and audio-reactive parameters.
  */
 

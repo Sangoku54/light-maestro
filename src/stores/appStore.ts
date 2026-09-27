@@ -1,7 +1,7 @@
 /**
  * Global state management with Zustand
  *
- * Three modes (SoundSwitch-inspired):
+ * Three modes (autoscript / manual / hybrid):
  * - quick: DJ-friendly, minimal controls, auto-script focus
  * - design: Full editor, scenes, chasers, cue lists
  * - perform: Virtual Console, MIDI control, live performance

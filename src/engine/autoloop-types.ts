@@ -1,4 +1,4 @@
-// ─── Autoloop SoundSwitch 2.9 — Module 1 : modèle de données + maths ────────
+// ─── Autoloop — Module 1 : modèle de données + maths ────────
 //
 // Port TypeScript pur (zéro dépendance React/Electron/`window`) du module
 // `models.py` du prototype Python. Ce fichier EST le contrat figé : les
@@ -12,7 +12,7 @@
 //
 // Ce module ne contient que des types et leurs mathématiques associées.
 
-/** Nombre de beats par mesure (signature 4/4, hypothèse de l'Autoloop SoundSwitch). */
+/** Nombre de beats par mesure (signature 4/4, hypothèse des boucles auto). */
 export const BEATS_PER_BAR = 4;
 
 import type { DmxFixtureCapability } from '../hooks/dmx-cues';
@@ -23,7 +23,7 @@ export type RepeatMode = 'infinite' | 'track_duration';
 /**
  * Catégorie de fixtures ciblée par un Autoloop.
  *
- * SoundSwitch regroupe les fixtures en « Washes » (faisceaux larges) et
+  * Les boucles auto regroupent les fixtures en « Washes » (faisceaux larges) et
  * « Spots » (faisceaux serrés mobiles). Un Autoloop ne pilote qu'une
  * catégorie à la fois.
  *

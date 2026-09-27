@@ -1,6 +1,6 @@
 // ─── Show Storage — Save/Load light shows
 //
-// QLC+ uses XML (.qxw), SoundSwitch uses proprietary format.
+// QLC+ uses XML (.qxw), proprietary formats exist elsewhere.
 // We use JSON for readability and ease of editing, with SQLite for
 // efficient scene/chaser indexing in large shows.
 

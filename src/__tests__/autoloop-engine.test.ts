@@ -103,7 +103,7 @@ describe('timelineLengthBeats', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('generateAutoscript', () => {
-  it('produit une timeline non vide, triée par beat, avec un id SoundSwitch', () => {
+  it('produit une timeline non vide, triée par beat, avec un id auto-loop', () => {
     const loop = makeLoop(8);
     expect(loop.keys.length).toBeGreaterThan(0);
     expect(timelineLengthBeats(loop)).toBe(32);

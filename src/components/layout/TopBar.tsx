@@ -82,7 +82,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
           )}
       </div>
 
-      {/* Mode Switcher — SoundSwitch-style clean tabs */}
+      {/* Mode Switcher — clean tabs */}
       <nav className="flex items-center bg-[#12121a] rounded-lg p-0.5 no-drag">
         {MODE_BUTTONS.map((btn) => (
           <button

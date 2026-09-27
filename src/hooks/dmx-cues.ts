@@ -487,7 +487,7 @@ const LASER_SCAN_BEATS = 4; // période du balayage X/Y (1 bar)
 const LASER_COLOR_BARS = 2; // un cran de roue couleur toutes les 2 bars
 const LASER_ROT_BEATS = 16; // période de base des rotations (lente)
 
-// SoundSwitch: map intensity level + energy -> DMX value within level range
+// map intensity level + energy -> DMX value within level range
 function mapIntensity(level: string, energy: number, section?: string): number {
   if (level === 'dynamic') {
     // Floor section-aware: utiliser SECTION_MIN_INTENSITY si une section est fournie
@@ -698,7 +698,7 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
         const pf = fa.fixture;
 
         // ── 1. Intensity (HTP) - tier-scaled, dimmer-pulse aware ──
-        // SoundSwitch principle: EVERY patched fixture ALWAYS gets dimmer >= absolute minimum.
+        // Principe : EVERY patched fixture ALWAYS gets dimmer >= absolute minimum.
         // Sections differ by movement pattern and strobe, NOT by going dark.
         let computedIntensity = 0;
         {
@@ -733,8 +733,8 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
           }
         }
 
-        // -- 2. Colour - section-stable palette rotation (SoundSwitch-style) --
-        // SoundSwitch-style: color rotates slowly WITHIN section, not per-cue
+        // -- 2. Colour - section-stable palette rotation (type boucle auto) --
+            // Type boucle auto: color rotates slowly WITHIN section, not per-cue
         const sectionColorShift = Math.floor(cueIndex / 8) % Math.max(1, cue.colors.length);
         // Tier-aware color offset: each tier gets a different palette position
         const tierColorOffset = pf.tier === 'secondary' ? Math.floor(cue.colors.length / 3)
@@ -889,7 +889,7 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
             const shutterVal = 8 + Math.round((computedIntensity / 255) * 247);
             channelValues[shutterAddr] = Math.max(8, Math.min(255, shutterVal));
           } else {
-            // SoundSwitch principle: shutter ALWAYS open, never dark.
+            // Principe : shutter ALWAYS open, never dark.
             // 32 = safe open on all fixtures (avoids 0-15 ambiguous range).
             channelValues[shutterAddr] = SHUTTER_OPEN_SAFE;
           }

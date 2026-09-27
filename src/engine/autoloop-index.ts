@@ -1,4 +1,4 @@
-// ─── Autoloop SoundSwitch 2.9 — baril d'export (moteur pur) ─────────────────
+// ─── Autoloop — baril d'export (moteur pur) ─────────────────
 //
 // Point d'entrée unique vers les 4 modules du port TypeScript. Ce fichier ne
 // fait QUE ré-exporter : il n'importe AUCUN code React/Electron/`window`, donc

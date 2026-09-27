@@ -1,4 +1,4 @@
-// ─── useAutoloopEngine — pont React vers le moteur Autoloop SoundSwitch ─────
+// ─── useAutoloopEngine — pont React vers le moteur Autoloop ─────
 //
 // Instancie le moteur pur (`AutoloopPlaybackEngine`) branché sur la sortie DMX
 // réelle via `createAutoLoopOutput`, construit la matrice 4×32 à partir du patch

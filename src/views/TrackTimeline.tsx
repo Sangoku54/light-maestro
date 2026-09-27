@@ -1,5 +1,5 @@
 /**
- * TrackTimeline — multi-track DMX timeline inspired by SoundSwitch.
+ * TrackTimeline — multi-track DMX timeline.
  *
  * Layout (top → bottom, scrollable):
  *   1. Header labels (24px) — fixture names

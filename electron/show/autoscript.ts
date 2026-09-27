@@ -1,11 +1,10 @@
 /**
- * AutoScript Engine — SoundSwitch-style automatic light show generation
+ * AutoScript Engine — automatic light show generation
  *
- * This is the core innovation from SoundSwitch: automatically generate
- * lighting cues and effects based on real-time audio analysis.
+ * Automatically generate lighting cues and effects based on real-time audio analysis.
  *
  * The engine combines:
- * - Beat-synced effects (SoundSwitch)
+ * - Beat-synced effects
  * - RGB Matrix patterns (QLC+)
  * - Dynamic intensity from energy levels
  * - Section-aware effect selection

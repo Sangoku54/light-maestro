@@ -1,4 +1,4 @@
-// ─── Autoloop SoundSwitch 2.9 — adaptateur vers la sortie DMX réelle ────────
+// ─── Autoloop — adaptateur vers la sortie DMX réelle ────────
 //
 // Contrairement au moteur pur (`autoloop-*.ts`), ce module importe `dmxBridge`
 // (la sortie arbitrée de Light Maestro) : il est donc **hors** de la surface

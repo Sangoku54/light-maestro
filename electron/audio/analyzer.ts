@@ -1,7 +1,7 @@
 /**
  * Audio Analyzer — Real-time beat detection & frequency analysis
  *
- * SoundSwitch's killer feature: audio-reactive lighting automation.
+ * Audio-reactive lighting automation.
  * This engine provides:
  * - Real-time beat/BPM detection (onset detection algorithm)
  * - Frequency band analysis (low/mid/high — stems-style breakdown)
@@ -258,7 +258,7 @@ export class AudioAnalyzer {
   }
 
   // ─── Track Section Detection ─────────────────────────────
-  // SoundSwitch-style: detect intro, verse, chorus, drop, outro
+  // Detect intro, verse, chorus, drop, outro
 
   private detectSection(energy: number, low: number, mid: number, high: number): { section: AudioAnalysis['section']; changed: boolean } {
     if (this.sectionEnergyProfile.length < 50) {

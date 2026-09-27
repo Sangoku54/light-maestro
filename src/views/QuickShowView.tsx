@@ -690,7 +690,7 @@ export function genCues(
 
     // --- Differenciation par section (palette, cycle, intensite, strobe) ---
     // Identite visuelle propre a chaque type de section : les autres logiciels
-    // (SoundSwitch, ShowKontrol...) varient couleurs + energie + densite par
+    // (les logiciels DJ...) varient couleurs + energie + densite par
     // section ; ici on fixe des palettes/cycles/boost dedies.
     const DEFAULT_SECTION_PALETTES: Record<string, string[]> = {
       intro:  ['#334155', '#475569', '#64748b', '#1e293b'],

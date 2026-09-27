@@ -1,4 +1,4 @@
-// ─── Pont runtime : patch Light Maestro → Autoloop SoundSwitch ──────────────
+// ─── Pont runtime : patch Light Maestro → boucles auto ──────────────
 //
 // Trait d'union entre le modèle de fixtures réel de Light Maestro
 // (`PatchedFixture` + `analyzeFixture`) et le moteur Autoloop pur
@@ -20,9 +20,9 @@ import type {
 } from './autoloop-index';
 
 /**
- * Mapping heuristique tier + présence pan/tilt → catégorie SoundSwitch.
+  * Mapping heuristique tier + présence pan/tilt → catégorie de boucle auto.
  *
- * SoundSwitch distingue les « Washes » (faisceaux larges, fixes) des « Spots »
+  * Les boucles auto distinguent les « Washes » (faisceaux larges, fixes) des « Spots »
  * (moving heads). Light Maestro n'a pas cette notion exacte ; on la déduit :
  *   - fixture avec pan OU tilt → `Spot` (moving head) ;
  *   - sinon (wash/par/strobe fixe) → `Wash_Primary` si tier primaire,
@@ -142,7 +142,7 @@ export function toAutoloopFixtures(
   return out;
 }
 
-/** Les 4 couleurs de la démo SoundSwitch (cues d'attribut « color »). */
+/** Les 4 couleurs de la démo (cues d'attribut « color »). */
 export function defaultColorCues(): AttributeCue[] {
   return [
     { id: 'c-red', attribute: 'color', values: { red: 255, green: 0, blue: 0 } },
@@ -272,14 +272,14 @@ export function generateBankLoops(
 }
 
 /**
- * Construit le `BankManager` 4×32 à l'identique SoundSwitch 2.9 : 128 slots remplis.
+  * Construit le `BankManager` 4×32 : 128 slots remplis.
  *
  * Chaque banque contient 32 loops (8/16/32/64 bars selon la banque), chaque slot
  * est une variation déterministe (positionCues + palette + targetBars) par catégorie.
  * Les 3 catégories (Wash_Primary, Wash_Secondary, Spot) tournent sur les slots
  * (slot % 3) pour garantir que chaque catégorie apparaît ~10× par banque.
  */
-export function buildSoundswitchBanks(fixtures: AutoloopFixture[]): BankManager {
+export function buildAutoloopBanks(fixtures: AutoloopFixture[]): BankManager {
   const banks = new BankManager();
   const categories = [...new Set(fixtures.map((f) => f.category))] as FixtureCategory[];
   if (categories.length === 0) return banks;
@@ -315,7 +315,7 @@ export function buildSoundswitchBanks(fixtures: AutoloopFixture[]): BankManager 
         positionCues: pos,
         attributeCues: [...cols, ...laserColorCues, ...beam, ...laserBeamCues],
       });
-      // ID lisible identique SoundSwitch: autoscript-Wash_Primary-16b-# (déjà généré)
+      // ID lisible : autoscript-Wash_Primary-16b-# (déjà généré)
       loops.push(loop);
     }
     // Remplit les 32 slots de la banque (populate ne remplit que les vides, ici banque vide → 32)

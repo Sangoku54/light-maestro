@@ -1,4 +1,4 @@
-// ─── Autoloop SoundSwitch 2.9 — Module 3 : moteur de lecture temps réel ─────
+// ─── Autoloop — Module 3 : moteur de lecture temps réel ─────
 //
 // Port TypeScript pur (zéro dépendance React/Electron/`window`) de la classe
 // `PlaybackEngine` du prototype Python (`delivery/autoloop/playback.py`).
