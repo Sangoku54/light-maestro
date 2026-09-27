@@ -212,13 +212,17 @@ function finishRun(run: Run): void {
   run.running = false;
   clearRun(run);
   runs.delete(run.widgetId);
+  console.debug(`[VC] run terminé (${run.kind}) : ${run.widgetId}`);
   notify(run.widgetId, false, run.kind);
 }
 
 /** Arrête un éventuel run précédent de la tuile (sans extinction). */
 function replaceRun(widgetId: string): void {
   const prev = runs.get(widgetId);
-  if (prev) { prev.running = false; clearRun(prev); runs.delete(widgetId); notify(widgetId, false, prev.kind); }
+  if (prev) {
+    console.debug(`[VC] run remplacé (${prev.kind}) : ${widgetId}`);
+    prev.running = false; clearRun(prev); runs.delete(widgetId); notify(widgetId, false, prev.kind);
+  }
   cancelExtinguish(widgetId);
 }
 
@@ -254,6 +258,7 @@ export function vcActivateScene(widgetId: string, sceneId: string): boolean {
   const hold = infinite ? 0 : Math.max(0, scene.duration - fadeIn - fadeOut);
 
   const run = createRun(widgetId, 'scene', channels, fadeOut, sceneId);
+  console.debug(`[VC] activate scene : ${widgetId} → ${sceneId} (dur=${scene.duration} in=${fadeIn} out=${fadeOut} hold=${hold})`);
 
   const applyLevel = (level: number) => {
     if (!run.running) return;
@@ -453,7 +458,8 @@ export function vcActivateDmxChannel(
  */
 export function vcDeactivate(widgetId: string): void {
   const run = runs.get(widgetId);
-  if (!run) return;
+  if (!run) { console.debug(`[VC] deactivate sans run : ${widgetId}`); return; }
+  console.debug(`[VC] deactivate (${run.kind}) : ${widgetId}`);
   cancelExtinguish(widgetId);
   if (run.kind === 'blackout') {
     finishRun(run);
