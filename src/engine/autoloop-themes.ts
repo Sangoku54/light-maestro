@@ -933,8 +933,16 @@ function buildEffectBank(fixtures: AutoloopFixture[], category: FixtureCategory)
       const mv = MOVE_PATTERNS[v % MOVE_PATTERNS.length];
       const radius = 60 + ((v * 17) % 61); // 60..120
       const cycles = [4, 6, 8, 2, 10][v % 5];
-      label = `${mv.label} ${radius}`;
-      for (const fx of fixtures) putMovement(kb, fx, mv.pattern, length, radius, cycles);
+      const color = THEME_COLORS[v % THEME_COLORS.length];
+      label = `${mv.label} ${radius} · ${color.label}`;
+      swatch = color.hex;
+      // Base lumière OBLIGATOIRE : un mouvement seul (pan/tilt sans dimmer
+      // ni couleur) joue dans le noir — tuile « qui ne déclenche rien ».
+      for (const fx of fixtures) {
+        putBase(kb, fx);
+        putMovement(kb, fx, mv.pattern, length, radius, cycles);
+        putColor(kb, fx, color.hex, hexToRgb(color.hex));
+      }
     } else {
       // Aucun axe : on varie la respiration + une couleur (slot toujours utile).
       const period = 2 + (v % 6);
