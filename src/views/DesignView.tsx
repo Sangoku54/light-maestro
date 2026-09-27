@@ -1226,6 +1226,7 @@ const SceneEditor: React.FC = () => {
     if (!isScenePreviewVisible) {
       // Preview masqué : coupe la boucle sans blackout (pas de transient qui
       // re-pinnerait les canaux) et relâche la source pour la lecture live.
+      console.debug('[ScenePreview] preview masquée (mode/onglet) — pas de push');
       stopSceneEfxLoop({ blackout: false });
       try { dmxBridge.release('scene-efx'); } catch {}
       // Le menu scène écrit aussi via la source 'default' (LTP 50) au clic sur
@@ -1276,7 +1277,10 @@ const SceneEditor: React.FC = () => {
       latestChannelsRef.current = { ...scene.channels };
       // Push scene channels to DMX engine immédiatement (avec clear des anciens)
       if (Object.keys(toSend).length > 0) {
+        console.debug(`[ScenePreview] push "${scene.name}" (${Object.keys(toSend).length} ch, source design-test)`);
         sendChannelsToHardwareAndStore(toSend, patchedFixtures, universes, 'design-test').catch(() => {});
+      } else {
+        console.debug(`[ScenePreview] RIEN à pousser pour "${scene.name}" (0 canal)`);
       }
       // PREVIEW ÉDITION = tenue infinie : pas de blackout à la fin de la durée
       // programmée (sinon la scène s'éteint pendant qu'on la modifie). Le live
