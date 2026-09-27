@@ -136,7 +136,6 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     save: (payload: { content: string; blobs?: { key: string; audioFileBase64: string }[] }) =>
       ipcRenderer.invoke('project:save', payload),
     open: () => ipcRenderer.invoke('project:open'),
-    openDemo: () => ipcRenderer.invoke('project:openDemo'),
   },
 
   // Presets (file-based, avoids localStorage quota)

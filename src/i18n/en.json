@@ -140,8 +140,6 @@
     "newTitle": "New Project",
     "open": "Open",
     "openTitle": "Open project (.lmproj)",
-    "demo": "Demo",
-    "demoTitle": "Open the demo project (lightened Yolo + Yolo preset)",
     "save": "Save",
     "saveTitle": "Save project (.lmproj)",
     "switchToEn": "Switch to English",

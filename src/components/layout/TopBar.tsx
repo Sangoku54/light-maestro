@@ -17,7 +17,6 @@ import {
   FolderOpen,
   Save,
   Music,
-  Sparkles,
 } from 'lucide-react';
 
 interface TopBarProps {
@@ -124,14 +123,6 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
       >
         <FolderOpen size={12} />
         <span className="hidden lg:inline">{t('topbar.open')}</span>
-      </button>
-      <button
-        onClick={() => (window as any).__lm_open?.(true)}
-        className="no-drag flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-purple-800/30 text-purple-300 hover:bg-purple-700/40 hover:text-purple-200 transition-all"
-        title={t('topbar.demoTitle')}
-      >
-        <Sparkles size={12} />
-        <span className="hidden lg:inline">{t('topbar.demo')}</span>
       </button>
       <div className="w-px h-4 bg-gray-700" />
       <button

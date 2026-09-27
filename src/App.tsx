@@ -361,15 +361,10 @@ const App: React.FC = () => {
       window.location.reload();
     };
 
-    (window as any).__lm_open = async (demo?: boolean) => {
+    (window as any).__lm_open = async () => {
       try {
-        const api = (window as any).lightMaestro?.project;
-        const result = demo ? await api?.openDemo() : await api?.open();
+        const result = await (window as any).lightMaestro?.project?.open();
         if (!result) return;
-        if (result.error) {
-          try { toast(`Projet démo introuvable (${result.error})`, 'err'); } catch {}
-          return;
-        }
         const data = JSON.parse(result.content);
         // Ré-importer les fixtures custom embarquées AVANT que les fixtures
         // patchées ne tentent de résoudre leurs définitions (getDefinition).
