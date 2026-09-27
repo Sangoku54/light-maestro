@@ -1,6 +1,6 @@
 # Light Maestro
 
-> The best of QLC+ and SoundSwitch, fused into one lighting control software.
+> Professional DMX control with audio-reactive automation, in one lighting software.
 
 **3 modes. 1 tool. Infinite possibilities.**
 
@@ -10,7 +10,9 @@
 
 ## What it does
 
-Light Maestro combines **QLC+'s** professional DMX engine (multi-universe, ArtNet, sACN, fixtures, Virtual Console, RGB Matrix, EFX) with **SoundSwitch's** audio intelligence (AutoScript, beat detection, stem analysis, track section detection).
+Light Maestro combines a professional DMX engine (multi-universe, ArtNet, sACN, fixtures,
+Virtual Console, RGB Matrix, EFX) with audio intelligence (AutoScript, beat detection, stem
+analysis, track section detection).
 
 **Result:** A lighting software that can handle everything from a simple DJ set to a full theater production.
 
