@@ -24,7 +24,10 @@ import {
   __setVCSender,
   __setVCBlackoutFns,
   __setVCButtonFns,
+  __setVCDefResolver,
+  __setVCEfxSender,
 } from '../engine/virtual-console-runtime';
+import { dmxBridge } from '../utils/dmx-bridge';
 import { useShowStore } from '../stores/showStore';
 import { usePerformStore } from '../stores/performStore';
 
@@ -304,6 +307,88 @@ describe('runtime Console Virtuelle — bouton canal DMX', () => {
     expect(vcActivateDmxChannel('w-dmx-bad', 0, 513, 255)).toBe(false);
     expect(vcIsRunning('w-dmx-bad')).toBe(false);
     expect(channelCalls).toEqual([]);
+  });
+});
+
+describe('runtime Console Virtuelle — vague EFX des scènes (efxId)', () => {
+  let efxFrames: Array<{ universe: number; channels: Record<number, number> }> = [];
+  let releaseSpy: ReturnType<typeof vi.spyOn> | null = null;
+
+  beforeEach(() => {
+    efxFrames = [];
+    __setVCEfxSender((universe, channels) => { efxFrames.push({ universe, channels }); });
+    __setVCDefResolver(async () => ({
+      channels: [{ type: 'Pan' }, { type: 'Tilt' }, { type: 'Intensity' }],
+    }));
+    releaseSpy = vi.spyOn(dmxBridge, 'release');
+    useShowStore.setState({
+      patchedFixtures: [
+        { id: 'fx1', fixtureDefId: 'd1', manufacturer: 'T', model: 'M', fixtureType: 'x',
+          modeIndex: 0, modeName: 'm', universeId: 'u1', startAddress: 1, channelCount: 3, name: 'FX1' },
+      ],
+      universes: [{ id: 'u1' }],
+      effects: [
+        { id: 'e1', name: 'Cercle', pattern: 'Circle', speed: 0.5, width: 1, height: 1,
+          rotation: 0, xOffset: 0, yOffset: 0, fixtureIds: ['fx1'], spread: 0 },
+      ],
+    } as any);
+    usePerformStore.setState({
+      vcWidgets: [
+        widget('w-efx', { actionType: 'scene', sceneId: 's-efx' }),
+        widget('w-efx-nodef', { actionType: 'scene', sceneId: 's-efx-nodef' }),
+      ],
+    } as any);
+    useShowStore.setState({
+      scenes: [
+        ...(useShowStore.getState().scenes as any[]),
+        { id: 's-efx', name: 'EFX', channels: { 1: 100, 2: 100, 3: 200 }, fadeIn: 0, fadeOut: 0, duration: 0, efxId: 'e1' },
+        { id: 's-efx-nodef', name: 'EFX nodef', channels: { 1: 50 }, fadeIn: 0, fadeOut: 0, duration: 0 },
+      ] as any,
+    } as any);
+  });
+
+  afterEach(() => {
+    __setVCEfxSender(null);
+    __setVCDefResolver(null);
+    releaseSpy?.mockRestore();
+    releaseSpy = null;
+  });
+
+  it('tuile EFX : le statique part ET la vague bouge (pan/tilt + dimmer 255)', async () => {
+    expect(vcButtonPress('w-efx', true)).toBe(true);
+    expect(vcIsRunning('w-efx')).toBe(true);
+    expect(last()).toEqual({ 1: 100, 2: 100, 3: 200 }); // statique immédiat
+    await vi.advanceTimersByTimeAsync(100); // résolution defs + frames rAF
+    expect(efxFrames.length).toBeGreaterThan(0);
+    const first = efxFrames[0];
+    expect(first.universe).toBe(0);
+    expect(first.channels[3]).toBe(255); // Intensity forcée (miroir preview)
+    // Mouvement réel : pan/tilt évoluent entre deux frames espacées
+    await vi.advanceTimersByTimeAsync(1000);
+    const pans = efxFrames.map((f) => f.channels[1]);
+    expect(new Set(pans).size).toBeGreaterThan(1);
+  });
+
+  it('extinction : la vague s’arrête (release source) et le statique s’éteint', async () => {
+    vcButtonPress('w-efx', true);
+    await vi.advanceTimersByTimeAsync(100);
+    const n = efxFrames.length;
+    expect(n).toBeGreaterThan(0);
+    vcButtonPress('w-efx', true); // toggle off
+    expect(vcIsRunning('w-efx')).toBe(false);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(efxFrames.length).toBe(n); // plus aucune frame EFX
+    expect(releaseSpy).toHaveBeenCalled();
+    expect(last()).toEqual({ 1: 0, 2: 0, 3: 0 }); // statique éteint
+  });
+
+  it('def irrésolvable : statique seul, sans crash ni vague', async () => {
+    __setVCDefResolver(async () => null);
+    expect(vcButtonPress('w-efx-nodef', true)).toBe(true);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(last()).toEqual({ 1: 50 });
+    expect(efxFrames).toEqual([]);
+    expect(vcIsRunning('w-efx-nodef')).toBe(true);
   });
 });
 

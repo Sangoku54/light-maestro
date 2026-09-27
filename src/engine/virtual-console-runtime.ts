@@ -20,9 +20,24 @@ import { useShowStore, type SavedScene, type SavedChaser } from '../stores/showS
 import { usePerformStore, applyWidgetSliderEffect } from '../stores/performStore';
 import { sendChannelsToHardware } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
+import { generateEfxPanTilt } from '../hooks/fixture-tracks';
 
 export type VCRunKind = 'scene' | 'chaser' | 'blackout' | 'grandmaster' | 'dmxchannel';
 export const VC_SOURCE = 'vc';
+
+/**
+ * Source arbitre de la vague EFX des tuiles — séparée du statique 'vc',
+ * comme 'scene-efx' vs 'design-test' côté édition : le mouvement écrase le
+ * pan/tilt statique sans toucher au reste. LTP 84 : sous programmer (85,
+ * la main reste à l'opérateur), au-dessus de vc (80).
+ */
+export const VC_EFX_SOURCE_ID = 'vc-efx';
+let efxSourceRegistered = false;
+function ensureEfxSource(): void {
+  if (efxSourceRegistered) return;
+  efxSourceRegistered = true;
+  try { dmxBridge.registerSource(VC_EFX_SOURCE_ID, 'ltp', 84); } catch { /* */ }
+}
 
 // ─── Environnement (node-safe : tests sans DOM) ────────────
 
@@ -109,6 +124,146 @@ export function __setVCButtonFns(fns: Partial<typeof buttonFns> | null): void {
       };
 }
 
+// ─── Vague EFX des scènes (efxId) ──────────────────────────
+// Sans ça, une tuile « Bleu EFX » ne joue que le statique : le mouvement ne
+// part jamais hors Configuration. Même math que la preview édition
+// (fixture-tracks.ts) et même séparation de sources (vc-efx vs vc).
+
+/** Résolution des canaux d'une fixture (une fois, à l'activation). */
+export type VCDefResolver = (
+  fixtureDefId: string,
+  modeIndex: number,
+) => Promise<{ channels: Array<{ type?: string }> } | null>;
+
+const defaultDefResolver: VCDefResolver = async (fixtureDefId, modeIndex) => {
+  try {
+    if (typeof window === 'undefined') return null;
+    const def = await (window as any)?.lightMaestro?.fixtures?.getDefinition?.(fixtureDefId);
+    const mode = def?.modes?.[modeIndex];
+    return mode ? { channels: mode.channels ?? [] } : null;
+  } catch {
+    return null;
+  }
+};
+
+let defResolver: VCDefResolver = defaultDefResolver;
+
+/** Test hook : remplacer la résolution des defs (pas de window sous vitest). */
+export function __setVCDefResolver(fn: VCDefResolver | null): void {
+  defResolver = fn ?? defaultDefResolver;
+}
+
+/** Envoi EFX par univers (source vc-efx). */
+export type VCEfxSender = (universe: number, channels: Record<number, number>) => void;
+
+const defaultEfxSender: VCEfxSender = (universe, channels) => {
+  ensureEfxSource();
+  try { dmxBridge.write(VC_EFX_SOURCE_ID, universe, channels); } catch { /* */ }
+};
+
+let efxSender: VCEfxSender = defaultEfxSender;
+
+/** Test hook : capturer les frames EFX (pas de DMX sous vitest). */
+export function __setVCEfxSender(fn: VCEfxSender | null): void {
+  efxSender = fn ?? defaultEfxSender;
+}
+
+/** Tuiles avec vague EFX en cours (release de source scopée). */
+const efxRuns = new Set<string>();
+
+function releaseEfxSource(): void {
+  if (efxRuns.size > 0) return; // une autre tuile vague encore
+  try { dmxBridge.release(VC_EFX_SOURCE_ID); } catch { /* */ }
+}
+
+/** Arrête la vague EFX d'un run (annule rAF, retire du compteur, release). */
+function stopRunEfx(run: Run): void {
+  try { run.efxCancel?.(); } catch { /* */ }
+  run.efxCancel = undefined;
+  efxRuns.delete(run.widgetId);
+  releaseEfxSource();
+}
+
+interface EfxTarget {
+  universe: number;
+  panAddr: number | null;
+  tiltAddr: number | null;
+  intensityAddr: number | null;
+}
+
+/** Démarre la vague EFX d'une scène (asynchrone : résolution des defs). */
+function startSceneEfx(run: Run, efxId: string): void {
+  void (async () => {
+    try {
+      const s = useShowStore.getState();
+      const efx = (s.effects ?? []).find((e: any) => e.id === efxId);
+      if (!efx || !Array.isArray(efx.fixtureIds) || efx.fixtureIds.length === 0) return;
+      if (runs.get(run.widgetId) !== run || !run.running) return; // tuile déjà éteinte
+      ensureEfxSource();
+      const universes = s.universes ?? [];
+      const targets: EfxTarget[] = [];
+      for (const fid of efx.fixtureIds) {
+        const pf = (s.patchedFixtures ?? []).find((f: any) => f.id === fid);
+        if (!pf) continue;
+        const resolved = await defResolver(pf.fixtureDefId, pf.modeIndex ?? 0);
+        const channels = resolved?.channels ?? [];
+        let panAddr: number | null = null;
+        let tiltAddr: number | null = null;
+        let intensityAddr: number | null = null;
+        channels.forEach((ch: any, ci: number) => {
+          if (ch?.type === 'Pan' && panAddr === null) panAddr = pf.startAddress + ci;
+          else if (ch?.type === 'Tilt' && tiltAddr === null) tiltAddr = pf.startAddress + ci;
+          else if (ch?.type === 'Intensity' && intensityAddr === null) intensityAddr = pf.startAddress + ci;
+        });
+        if (panAddr === null && tiltAddr === null) continue;
+        const uniIdx = Math.max(0, universes.findIndex((u: any) => String(u?.id) === String(pf.universeId)));
+        targets.push({ universe: uniIdx, panAddr, tiltAddr, intensityAddr });
+      }
+      if (targets.length === 0) return;
+      if (runs.get(run.widgetId) !== run || !run.running) return;
+      efxRuns.add(run.widgetId);
+      const start = now();
+      let raf = 0;
+      let cancelled = false;
+      const cancel = () => {
+        cancelled = true;
+        unframe(raf);
+      };
+      run.efxCancel = cancel;
+      const spread = Number((efx as any).spread ?? 0);
+      const speed = Number(efx.speed ?? 0.5);
+      const tick = () => {
+        if (cancelled || runs.get(run.widgetId) !== run || !run.running) return;
+        const elapsed = (now() - start) / 1000;
+        const tBase = (elapsed * speed * 2) / (Math.PI * 2);
+        const byUniverse = new Map<number, Record<number, number>>();
+        targets.forEach((t, sfi) => {
+          const tCycles = targets.length > 1 && spread > 0 ? tBase + (sfi * spread) / targets.length : tBase;
+          let pan = 128;
+          let tilt = 128;
+          try {
+            const pt = generateEfxPanTilt(efx.pattern, tCycles, efx.width, efx.height, efx.rotation, efx.xOffset, efx.yOffset);
+            if (Number.isFinite(pt.pan)) pan = pt.pan;
+            if (Number.isFinite(pt.tilt)) tilt = pt.tilt;
+          } catch { /* frame dégénérée : on garde le centre */ }
+          let vals = byUniverse.get(t.universe);
+          if (!vals) { vals = {}; byUniverse.set(t.universe, vals); }
+          if (t.panAddr !== null) vals[t.panAddr] = pan;
+          if (t.tiltAddr !== null) vals[t.tiltAddr] = tilt;
+          if (t.intensityAddr !== null) vals[t.intensityAddr] = 255;
+        });
+        for (const [uni, vals] of byUniverse) {
+          try { efxSender(uni, vals); } catch { /* sortie best effort */ }
+        }
+        raf = frame(tick);
+      };
+      raf = frame(tick);
+    } catch {
+      /* vague indisponible : le statique joue quand même */
+    }
+  })();
+}
+
 // ─── Registre des runs ─────────────────────────────────────
 
 interface Run {
@@ -126,6 +281,8 @@ interface Run {
   frames: number[];
   /** Restauration exacte (grandMaster → 1, canal DMX → 0), capturée à l'activation. */
   restore?: () => void;
+  /** Annulation de la vague EFX (scène à efxId), posée à l'activation. */
+  efxCancel?: () => void;
 }
 
 const runs = new Map<string, Run>();
@@ -210,6 +367,7 @@ function extinguish(run: Run): void {
 function finishRun(run: Run): void {
   if (!run.running) return;
   run.running = false;
+  stopRunEfx(run);
   clearRun(run);
   runs.delete(run.widgetId);
   console.debug(`[VC] run terminé (${run.kind}) : ${run.widgetId}`);
@@ -221,7 +379,7 @@ function replaceRun(widgetId: string): void {
   const prev = runs.get(widgetId);
   if (prev) {
     console.debug(`[VC] run remplacé (${prev.kind}) : ${widgetId}`);
-    prev.running = false; clearRun(prev); runs.delete(widgetId); notify(widgetId, false, prev.kind);
+    prev.running = false; stopRunEfx(prev); clearRun(prev); runs.delete(widgetId); notify(widgetId, false, prev.kind);
   }
   cancelExtinguish(widgetId);
 }
@@ -299,6 +457,12 @@ export function vcActivateScene(widgetId: string, sceneId: string): boolean {
   } else {
     applyLevel(1);
     if (!infinite) scheduleFadeOut(hold);
+  }
+  // Vague EFX liée (efxId) : le mouvement part avec le statique, sur sa
+  // propre source — sans ça, la tuile ne joue jamais la vague hors Configuration.
+  const linkedEfxId = (scene as any)?.efxId as string | undefined;
+  if (typeof linkedEfxId === 'string' && linkedEfxId.length > 0) {
+    startSceneEfx(run, linkedEfxId);
   }
   return true;
 }
@@ -460,6 +624,7 @@ export function vcDeactivate(widgetId: string): void {
   const run = runs.get(widgetId);
   if (!run) { console.debug(`[VC] deactivate sans run : ${widgetId}`); return; }
   console.debug(`[VC] deactivate (${run.kind}) : ${widgetId}`);
+  stopRunEfx(run);
   cancelExtinguish(widgetId);
   if (run.kind === 'blackout') {
     finishRun(run);
