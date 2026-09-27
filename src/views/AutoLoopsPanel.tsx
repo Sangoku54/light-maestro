@@ -231,7 +231,7 @@ export const AutoLoopsPanel: React.FC = () => {
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-purple-400" />
-          <h2 className="text-sm font-semibold text-gray-200">Boucles auto</h2>
+          <h2 className="text-sm font-semibold text-gray-200">Scènes pré-programmées</h2>
           <span className="text-[10px] text-gray-500 bg-gray-800 rounded-full px-2 py-0.5">
             {library.length}
           </span>
@@ -336,7 +336,7 @@ export const AutoLoopsPanel: React.FC = () => {
             <p className="text-[10px] text-gray-600 text-center">Aucune boucle ne correspond.</p>
           )}
           <p className="text-[10px] text-gray-600 text-center pb-2">
-            Cliquer une carte joue le loop sur les fixtures patchées · « Régénérer » produit un nouveau set
+            Cliquer une carte joue la scène sur les fixtures patchées · « Régénérer » produit un nouveau set
           </p>
         </div>
         {show3D && !showFloating3D && (
@@ -352,7 +352,7 @@ export const AutoLoopsPanel: React.FC = () => {
       {show3D && showFloating3D && (
         <div className="fixed z-40 bg-black/90 rounded-xl border border-cyan-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}>
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
-            <span className="text-[11px] text-cyan-400 font-medium">🎥 Vue 3D — Boucles auto</span>
+            <span className="text-[11px] text-cyan-400 font-medium">🎥 Vue 3D — Scènes pré-programmées</span>
             <div className="flex items-center gap-1">
               <button onClick={() => { setFloat3DSize({ w: 640, h: 360 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
               <button onClick={() => setShowFloating3D(false)} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>

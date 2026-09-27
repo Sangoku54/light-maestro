@@ -988,7 +988,7 @@ const AutoLoopPicker: React.FC<{ selected?: LoopRecipe; onSelect: (r: LoopRecipe
 
   return (
     <div>
-      <label className="text-[10px] text-gray-500 uppercase tracking-wider">Boucle auto</label>
+      <label className="text-[10px] text-gray-500 uppercase tracking-wider">Scène pré-programmée</label>
       <select
         value={selectedId}
         onChange={(e) => {
@@ -1101,7 +1101,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                   <option value="dmxChannel">{t('perform.vc.dmxChannel')}</option>
                   <option value="loadShow">♪ Play Show</option>
                   <option value="playSong">♪ Play Preset</option>
-                  <option value="autoLoop">🎛 Boucle auto</option>
+                  <option value="autoLoop">🎛 Scène pré-programmée</option>
                 </select>
               </div>
 
@@ -2236,7 +2236,7 @@ const VCButtonWidget: React.FC<{
            config.actionType === 'grandMaster' ? `GM ${config.grandMasterValue ?? 0}` :
            config.actionType === 'dmxChannel' ? `CH ${config.dmxAddress || '–'} → ${config.dmxValue ?? 255}` :
            config.actionType === 'chaser' ? getChaserLabel() :
-           config.actionType === 'autoLoop' ? (config.autoLoopRecipe?.name || '🎛 Boucle auto') :
+           config.actionType === 'autoLoop' ? (config.autoLoopRecipe?.name || '🎛 Scène pré-programmée') :
            scenes.find((s) => s.id === config.sceneId)?.name || 'Button'}
         </span>
       </button>

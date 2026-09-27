@@ -44,7 +44,7 @@ export const AutoLoopBanks: React.FC = () => {
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <Layers className="w-4 h-4 text-cyan-400" />
-          <h3 className="text-xs font-semibold text-gray-200">Boucles auto — 4 banques × 32</h3>
+          <h3 className="text-xs font-semibold text-gray-200">Scènes pré-programmées — 4 banques × 32</h3>
         </div>
         <button
           onClick={() =>
@@ -134,7 +134,7 @@ export const AutoLoopBanks: React.FC = () => {
         <button
           onClick={api.previous}
           className="w-7 h-7 rounded-md bg-gray-800 text-gray-300 hover:bg-gray-700 flex items-center justify-center"
-          title="Loop précédent (wrap)"
+          title="Scène précédente (wrap)"
         >
           <ChevronLeft className="w-3.5 h-3.5" />
         </button>
@@ -152,7 +152,7 @@ export const AutoLoopBanks: React.FC = () => {
         <button
           onClick={api.next}
           className="w-7 h-7 rounded-md bg-gray-800 text-gray-300 hover:bg-gray-700 flex items-center justify-center"
-          title="Loop suivant (wrap)"
+          title="Scène suivante (wrap)"
         >
           <ChevronRight className="w-3.5 h-3.5" />
         </button>
@@ -160,7 +160,7 @@ export const AutoLoopBanks: React.FC = () => {
           onClick={api.override}
           disabled={!playing}
           className="flex items-center gap-1 px-2 h-7 rounded-md bg-purple-600/20 text-purple-300 text-[11px] font-medium hover:bg-purple-600/30 disabled:opacity-40 disabled:cursor-not-allowed"
-          title="Override 2 bars puis reprise (SCRIPT → OVERRIDE → SCRIPT)"
+          title="Override 2 bars puis reprise"
         >
           <SkipForward className="w-3 h-3" />
           Override
