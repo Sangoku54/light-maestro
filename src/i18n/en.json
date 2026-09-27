@@ -95,10 +95,10 @@
     "shift_click_range": "Shift+click for range · drag to adjust"
   },
   "sidebar": {
-    "modeHint_quick": "AutoScript Ready",
+    "modeHint_quick": "Show auto ready",
     "modeHint_design": "Configuration Mode",
     "modeHint_perform": "Live Performance",
-    "autoScript": "AutoScript",
+    "autoScript": "Show auto",
     "audioSource": "Audio Source",
     "colorPresets": "Color Presets",
     "autoLoops": "Pre-programmed scenes",
@@ -167,7 +167,7 @@
     "listening": "Listening…"
   },
   "autoscript": {
-    "title": "AUTOSCRIPT",
+    "title": "SHOW AUTO",
     "intensity": "Intensity",
     "color": "Color",
     "beat": "Beat",
@@ -698,7 +698,7 @@
         "cueList": "Cue List",
         "dmxChannel": "DMX Channel",
         "widget": "Widget",
-        "autoScript": "AutoScript",
+    "autoScript": "Show auto",
         "universe": "Universe",
         "channel": "Channel"
       }
