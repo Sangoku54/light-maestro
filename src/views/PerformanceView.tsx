@@ -1642,20 +1642,24 @@ const VCWidgetRenderer: React.FC<{
 
   const snap = (v: number) => gridSnap ? Math.round(v / GRID_SIZE) * GRID_SIZE : v;
 
-  // Drag
+  // Drag — les origines sont des LOCALES capturées (pas le state) : le
+  // setState est asynchrone, lire dragStart/origPos dans onMove utilisait les
+  // valeurs du rendu précédent → la tuile « se sauvait » au premier mouvement.
   const handleDragStart = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     e.stopPropagation();
     setDragging(true);
-    setDragStart({ x: e.clientX, y: e.clientY });
-    setOrigPos({ x: widget.x, y: widget.y });
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const origX = widget.x;
+    const origY = widget.y;
+    setDragStart({ x: startX, y: startY });
+    setOrigPos({ x: origX, y: origY });
 
     const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - dragStart.x;
-      const dy = ev.clientY - dragStart.y;
       vcUpdateWidget(widget.id, {
-        x: snap(origPos.x + dx),
-        y: snap(origPos.y + dy),
+        x: snap(origX + ev.clientX - startX),
+        y: snap(origY + ev.clientY - startY),
       });
     };
 
@@ -1669,20 +1673,22 @@ const VCWidgetRenderer: React.FC<{
     document.addEventListener('mouseup', onUp);
   };
 
-  // Resize
+  // Resize — même motif que le drag (locales capturées, pas le state).
   const handleResizeStart = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
     setResizing(true);
-    setDragStart({ x: e.clientX, y: e.clientY });
-    setOrigSize({ w: widget.width, h: widget.height });
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const origW = widget.width;
+    const origH = widget.height;
+    setDragStart({ x: startX, y: startY });
+    setOrigSize({ w: origW, h: origH });
 
     const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - dragStart.x;
-      const dy = ev.clientY - dragStart.y;
       vcUpdateWidget(widget.id, {
-        width: Math.max(40, snap(origSize.w + dx)),
-        height: Math.max(30, snap(origSize.h + dy)),
+        width: Math.max(40, snap(origW + ev.clientX - startX)),
+        height: Math.max(30, snap(origH + ev.clientY - startY)),
       });
     };
 
