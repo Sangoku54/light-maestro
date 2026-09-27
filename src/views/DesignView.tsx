@@ -1298,13 +1298,18 @@ const SceneEditor: React.FC = () => {
           // Prépare les fixtures cibles avec leurs offsets pan/tilt
           const startTime = performance.now();
           let raf = 0;
+          // Boucle blindée : une frame en échec (def illisible, NaN…)
+          // ne doit JAMAIS tuer la chaîne rAF — sinon l'EFX fige en cours
+          // de lecture, faisceaux allumés, sans aucune erreur visible.
           const tick = async () => {
-            // Vérifie que la scène est toujours sélectionnée, sinon stoppe (évite de tourner en arrière-plan)
-            const stillSelected = (window as any).__lm_selectedSceneId === scene.id;
-            if (!stillSelected) {
-              stopSceneEfxLoop();
-              return;
-            }
+            let alive = false;
+            try {
+              // Vérifie que la scène est toujours sélectionnée, sinon stoppe (évite de tourner en arrière-plan)
+              const stillSelected = (window as any).__lm_selectedSceneId === scene.id;
+              if (!stillSelected) {
+                stopSceneEfxLoop();
+                return;
+              }
             // PREVIEW ÉDITION : pas de fin sur durée — la boucle EFX tourne
             // tant que la scène est sélectionnée (tenue pour modification).
             // L'arrêt + blackout ont lieu à la désélection (garde
@@ -1321,6 +1326,8 @@ const SceneEditor: React.FC = () => {
               const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
                 efx.pattern, tCycles, efx.width, efx.height, efx.rotation, efx.xOffset, efx.yOffset,
               );
+              // Frame dégénérée (NaN) : on la saute mais la boucle survit.
+              if (!Number.isFinite(dmxPan) || !Number.isFinite(dmxTilt)) continue;
               const pf = useShowStore.getState().patchedFixtures.find((f) => f.id === fid);
               if (!pf) continue;
               try {
@@ -1340,8 +1347,15 @@ const SceneEditor: React.FC = () => {
               const uniNum = Math.max(0, (parseInt(uniId.replace(/\D/g, ''), 10) || 1) - 1);
               try { dmxBridge.write('scene-efx', uniNum, vals); } catch {}
             }
-            raf = requestAnimationFrame(tick);
-            sceneEfxLoopRef.current = raf;
+            alive = true;
+            } catch {
+              // Frame ratée : on ré-arme quand même (voir commentaire en tête).
+              alive = true;
+            }
+            if (alive) {
+              raf = requestAnimationFrame(tick);
+              sceneEfxLoopRef.current = raf;
+            }
           };
           raf = requestAnimationFrame(tick);
           sceneEfxLoopRef.current = raf;
