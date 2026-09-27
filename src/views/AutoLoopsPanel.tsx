@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next';
 import { RefreshCw, Sparkles, Play, Square, Palette, Move, Sun, Zap, Disc, Aperture, Gem, ZoomIn, Snowflake, Crosshair } from 'lucide-react';
 import { useShowStore } from '../stores/showStore';
+import { useAppStore } from '../stores/appStore';
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from '../hooks/dmx-cues';
 import { generateLoopLibrary, materializeAutoLoops, purgeAutoLoops, LOOP_KIND_LABEL, LOOP_KIND_ORDER, type AutoLoop, type AutoLoopKind } from '../engine/auto-loops';
 import { midiPlayChaser, midiStopChaser } from '../engine/midi-actions';
@@ -117,6 +118,16 @@ export const AutoLoopsPanel: React.FC = () => {
   const purgeStore = useCallback(() => {
     purgeAutoLoops(useShowStore.getState());
   }, []);
+
+  // Le panneau ne démonte jamais (display:none dans QuickShowView) : quand on
+  // quitte l'onglet Loops, la carte en cours doit s'arrêter ET s'éteindre
+  // (midiStopChaser flush les zéros), sinon la scène persiste sans contrôle.
+  const loopsTab = useAppStore((s) => s.quickSidebarTab);
+  const stopAllRef = useRef(stopAll);
+  stopAllRef.current = stopAll;
+  useEffect(() => {
+    if (loopsTab !== 'loops') stopAllRef.current();
+  }, [loopsTab]);
 
   // On patch change: stop playback and purge stale materialized loops.
   useEffect(() => {

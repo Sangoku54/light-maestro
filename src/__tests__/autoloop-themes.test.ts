@@ -302,6 +302,42 @@ describe('buildThemedBanks — moteur de lecture', () => {
     expect(empty).toBeInstanceOf(BankManager);
     expect(empty.banks.every((row) => row.every((l) => l === null))).toBe(true);
   });
+
+  it('stop() éteint : zéros sur les canaux de la dernière frame, puis plus rien', () => {
+    const fx = fixtures();
+    const banks = buildThemedBanks(fx);
+    const blue = banks.get(0, THEME_COLORS.findIndex((c) => c.label === 'Bleu'))!;
+
+    const frames: Record<number, number>[] = [];
+    const engine = new AutoloopPlaybackEngine({ send: (c) => { frames.push(c); } }, 120);
+    engine.load(blue);
+    engine.trigger();
+    engine.onBarBeat(0, 0);
+    expect(frames.length).toBe(1);
+    expect(frames[0][12]).toBe(255); // allumé avant l'arrêt
+
+    engine.stop();
+    expect(frames.length).toBe(2);
+    // Extinction exacte : zéro sur chaque canal allumé, rien d'autre
+    for (const addr of Object.keys(frames[0])) {
+      expect(frames[1][Number(addr)]).toBe(0);
+    }
+    expect(Object.keys(frames[1]).sort()).toEqual(Object.keys(frames[0]).sort());
+    expect(engine.state).toBe('idle');
+  });
+
+  it('stop() sans frame jouée : aucun envoi (pas de zéros parasites)', () => {
+    const fx = fixtures();
+    const banks = buildThemedBanks(fx);
+    const blue = banks.get(0, THEME_COLORS.findIndex((c) => c.label === 'Bleu'))!;
+
+    const frames: Record<number, number>[] = [];
+    const engine = new AutoloopPlaybackEngine({ send: (c) => { frames.push(c); } }, 120);
+    engine.load(blue);
+    engine.stop(); // jamais déclenché → rien à éteindre
+    expect(frames).toEqual([]);
+    expect(engine.state).toBe('idle');
+  });
 });
 
 describe('buildThemedBanks — aucun bouton mouvement inactif (régression)', () => {

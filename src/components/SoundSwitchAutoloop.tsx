@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Play, Square, ChevronLeft, ChevronRight, Layers, SkipForward } from 'lucide-react';
 import { useAutoloopEngine } from '../hooks/use-autoloop-engine';
+import { useAppStore } from '../stores/appStore';
 import { PER_BANK } from '../engine/autoloop-banks';
 import { BANK_THEMES } from '../engine/autoloop-themes';
 
@@ -19,6 +20,16 @@ export const SoundSwitchAutoloop: React.FC = () => {
   const api = useAutoloopEngine(120);
   const { ready, playing, repeatMode, activeBank, activeSlot, activeLoop, banks } = api;
   const theme = BANK_THEMES[activeBank];
+
+  // Le panneau parent ne démonte jamais (display:none) : quand on quitte
+  // l'onglet Loops, la banque doit s'arrêter ET s'éteindre, sinon la scène
+  // reste figée allumée sans aucun contrôle visible.
+  const loopsTab = useAppStore((s) => s.quickSidebarTab);
+  const stopRef = useRef(api.stop);
+  stopRef.current = api.stop;
+  useEffect(() => {
+    if (loopsTab !== 'loops') stopRef.current();
+  }, [loopsTab]);
 
   if (!ready) {
     return (

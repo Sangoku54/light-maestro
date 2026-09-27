@@ -157,8 +157,20 @@ export class AutoloopPlaybackEngine {
     this.pendingTrigger = true;
   }
 
-  /** Arrête toute lecture : retour à l'état IDLE. */
+  /** Arrête toute lecture : retour à l'état IDLE.
+   *
+   *  Éteint d'abord ce que le loop allumait (zéros sur les canaux de la
+   *  dernière frame) : sans ça, la source LTP garde ses valeurs et les
+   *  fixtures restent figées allumées après l'arrêt — y compris après
+   *  changement de page, le panneau n'étant jamais démonté (display:none).
+   */
   stop(): void {
+    if (Object.keys(this.lastDmx).length > 0) {
+      const zeros: Record<number, number> = {};
+      for (const addr of Object.keys(this.lastDmx)) zeros[Number(addr)] = 0;
+      try { this.output.send(zeros); } catch { /* sortie best effort */ }
+    }
+    this.lastDmx = {};
     this.state = 'idle';
     this.pendingTrigger = false;
   }

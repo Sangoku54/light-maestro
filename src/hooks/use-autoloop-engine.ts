@@ -19,7 +19,8 @@ import {
 import { buildThemedBanks } from '../engine/autoloop-themes';
 import { AutoloopPlaybackEngine } from '../engine/autoloop-engine';
 import { BankManager } from '../engine/autoloop-banks';
-import { createAutoLoopOutput } from '../engine/autoloop-adapter';
+import { createAutoLoopOutput, AUTO_LOOP_SOURCE_ID } from '../engine/autoloop-adapter';
+import { dmxBridge } from '../utils/dmx-bridge';
 import { generateAutoscript } from '../engine/autoscript-generator';
 import type { AutoloopFixture, AutoloopTimeline, RepeatMode } from '../engine/autoloop-types';
 
@@ -115,7 +116,12 @@ export function useAutoloopEngine(bpm = 120): AutoloopEngineApi {
 
   const stop = useCallback(() => {
     stopClock();
+    // engine.stop() flush les zéros (matériel + miroir 3D éteints), puis on
+    // retire la source LTP : sans release, des zéros persistants bloqueraient
+    // l'engine dessous (quickshow…) ; sans zéros, un release seul laisserait
+    // le dernier état figé (le flush d'un buffer vide n'éteint rien).
     engineRef.current?.stop();
+    try { dmxBridge.release(AUTO_LOOP_SOURCE_ID); } catch { /* sortie best effort */ }
     setPlaying(false);
   }, [stopClock]);
 
@@ -209,13 +215,12 @@ export function useAutoloopEngine(bpm = 120): AutoloopEngineApi {
     if (b) b.repeatMode = mode;
   }, [banks]);
 
-  // Nettoyage à l'unmount : arrêt de l'horloge + du moteur.
+  // Nettoyage à l'unmount : arrêt complet (zéros + release, comme stop()).
   useEffect(() => {
     return () => {
-      stopClock();
-      engineRef.current?.stop();
+      stop();
     };
-  }, [stopClock]);
+  }, [stop]);
 
   return {
     ready: banks !== null,
