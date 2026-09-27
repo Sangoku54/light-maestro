@@ -49,8 +49,8 @@ $session = $stripe->checkout->sessions->create([
         'user_id' => (string)$userId,
         'edition' => $edition,
     ],
-    'success_url' => 'https://light-maestro.app/merci.html',
-    'cancel_url'  => 'https://light-maestro.app/tarifs.html',
+    'success_url' => 'https://light-maestro.com/merci.html',
+    'cancel_url'  => 'https://light-maestro.com/tarifs.html',
 ]);
 
 respond(['url' => $session->url]);
