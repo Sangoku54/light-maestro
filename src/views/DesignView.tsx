@@ -1278,22 +1278,10 @@ const SceneEditor: React.FC = () => {
       if (Object.keys(toSend).length > 0) {
         sendChannelsToHardwareAndStore(toSend, patchedFixtures, universes, 'design-test').catch(() => {});
       }
-      // Si la scène a une durée finie, programme un blackout à la fin (comme un chaser) — 0 = infini (reste allumée)
-      if (scene.duration > 0) {
-        const curId = scene.id;
-        dmxPushRef.current = setTimeout(() => {
-          // Vérifie que la scène est toujours sélectionnée
-          if ((window as any).__lm_selectedSceneId === curId) {
-            const zeros: Record<number, number> = {};
-            for (const k of Object.keys(scene.channels)) zeros[Number(k)] = 0;
-            // Si EFX lié, les canaux de l'EFX sont dans scene.channels (snapshot) — le blackout les éteint aussi
-            if (Object.keys(zeros).length > 0) {
-              sendChannelsToHardwareAndStore(zeros, patchedFixtures, universes, 'design-test', 2000).catch(() => {});
-            }
-            stopSceneEfxLoop();
-          }
-        }, scene.duration) as any;
-      }
+      // PREVIEW ÉDITION = tenue infinie : pas de blackout à la fin de la durée
+      // programmée (sinon la scène s'éteint pendant qu'on la modifie). Le live
+      // (chaser/tuiles) garde sa propre fin de durée ; ici on édite.
+      // La désélection éteint toujours (chemin scene=null ci-dessous).
       // Si la scène a un EFX lié, démarre son loop continu (comme l'aperçu EFX) — il dure `duration` (0 = infini)
       const efxId = (scene as any).efxId as string | undefined;
       if (!efxId) {
@@ -1317,31 +1305,11 @@ const SceneEditor: React.FC = () => {
               stopSceneEfxLoop();
               return;
             }
+            // PREVIEW ÉDITION : pas de fin sur durée — la boucle EFX tourne
+            // tant que la scène est sélectionnée (tenue pour modification).
+            // L'arrêt + blackout ont lieu à la désélection (garde
+            // stillSelected ci-dessus, chemin scene=null).
             const elapsed = (performance.now() - startTime) / 1000;
-            // Lit la durée à jour depuis le store (l'utilisateur peut la changer en live)
-            const curDur = (useShowStore.getState().scenes.find((s) => s.id === scene.id)?.duration) ?? scene.duration;
-            // Respecte la durée de la scène : 0 = infini, sinon stop après duration + fadeOut
-            if (curDur > 0 && elapsed * 1000 >= curDur) {
-              stopSceneEfxLoop();
-              // Blackout propre à la fin de la durée (comme un chaser)
-              try {
-                const byUniverse = new Map<string, Record<number, number>>();
-                for (const fid of efx.fixtureIds) {
-                  const pf = useShowStore.getState().patchedFixtures.find((f) => f.id === fid);
-                  if (!pf) continue;
-                  const uniId = pf.universeId;
-                  let vals = byUniverse.get(uniId);
-                  if (!vals) { vals = {}; byUniverse.set(uniId, vals); }
-                  // Envoie 0 pour les canaux de l'EFX (pan/tilt au centre, dimmer 0)
-                  vals[pf.startAddress] = 0; // dimmer off (adresse 0 = premier canal, à affiner via channelMap si besoin)
-                }
-                for (const [uniId, vals] of byUniverse) {
-                  const uniNum = Math.max(0, (parseInt(uniId.replace(/\D/g, ''), 10) || 1) - 1);
-                  dmxBridge.writeTransient('scene-efx', uniNum, vals);
-                }
-              } catch {}
-              return;
-            }
             // Math EXACTE du moteur (fixture-tracks.ts) : tous les patterns,
             // même amplitude/offsets/rotation que le preview et le show.
             const tBase = (elapsed * efx.speed * 2) / (Math.PI * 2);
