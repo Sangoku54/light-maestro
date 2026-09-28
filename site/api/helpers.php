@@ -67,3 +67,37 @@ function edition_limits(string $edition): array {
         default:         return ['maxFixtures' => 1, 'maxUniverses' => 1];
     }
 }
+
+/**
+ * Email HTML de confirmation d'inscription, aux couleurs Light Maestro.
+ * Ne contient JAMAIS le mot de passe (envoyé en clair = compromis dès la
+ * première fuite de boîte mail) : l'utilisateur le connaît déjà, il vient
+ * de le choisir. Échec silencieux (log serveur) pour ne jamais faire
+ * échouer l'inscription à cause du mail.
+ */
+function send_confirmation_email(string $email, ?string $displayName): void {
+    $name = $displayName ?: explode('@', $email)[0];
+    $nameSafe = htmlspecialchars($name, ENT_QUOTES, 'UTF-8');
+    $subject = 'Bienvenue sur Light Maestro — compte créé';
+    $body = '<!doctype html><html lang="fr"><body style="margin:0;background:#0a0a0f;color:#ede8dc;font-family:Arial,sans-serif;">'
+        . '<div style="max-width:560px;margin:0 auto;padding:32px 24px;">'
+        . '<div style="font-weight:900;letter-spacing:.18em;font-size:13px;"><span style="display:inline-block;background:#8b5cf6;color:#fff;border-radius:8px;padding:4px 8px;margin-right:8px;">LM</span>LIGHT MAESTRO</div>'
+        . '<h1 style="margin:24px 0 8px;font-size:24px;">Bienvenue, ' . $nameSafe . '.</h1>'
+        . '<p style="color:#9ca3af;line-height:1.7;">Votre compte est créé (édition <b style="color:#fff;">Gratuite</b> : 1 fixture, 1 univers, sans limite de temps).</p>'
+        . '<p style="color:#9ca3af;line-height:1.7;">Connectez-vous dans l’application via <b style="color:#fff;">Compte &amp; Licence</b> avec votre email :</p>'
+        . '<div style="background:#12121a;border:1px solid #2a2a3e;border-radius:12px;padding:14px 16px;margin:16px 0;">'
+        . '<div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.08em;">Email du compte</div>'
+        . '<div style="font-size:16px;font-weight:800;margin-top:4px;">' . htmlspecialchars($email, ENT_QUOTES, 'UTF-8') . '</div></div>'
+        . '<p style="color:#9ca3af;line-height:1.7;">Bon premier show — pensez à prévenir le public avant les strobes.</p>'
+        . '<p style="margin-top:24px;font-size:12px;color:#6b7280;">Light Maestro — <a href="https://light-maestro.com" style="color:#8b5cf6;">light-maestro.com</a></p>'
+        . '</div></body></html>';
+    $headers = "MIME-Version: 1.0\r\n"
+        . "Content-Type: text/html; charset=UTF-8\r\n"
+        . "From: Light Maestro <contact@light-maestro.com>\r\n"
+        . "Reply-To: contact@light-maestro.com\r\n";
+    try {
+        @mail($email, $subject, $body, $headers);
+    } catch (Throwable $e) {
+        error_log('[license] envoi email confirmation impossible : ' . $e->getMessage());
+    }
+}

@@ -32,6 +32,7 @@ try {
     $stmt->execute([strtolower($email), $hash, $displayName ?: null]);
 
     $userId = (int)db()->lastInsertId();
+    send_confirmation_email(strtolower($email), $displayName ?: null);
     respond([
         'token' => sign_token($userId),
         'edition' => 'free',
