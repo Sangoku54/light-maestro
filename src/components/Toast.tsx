@@ -20,14 +20,14 @@ export const ToastHost: React.FC = () => {
   useEffect(() => {
     pushFn = (t) => {
       setItems((prev) => [...prev, t]);
-      setTimeout(() => setItems((prev) => prev.filter((x) => x.id !== t.id)), 2600);
+      setTimeout(() => setItems((prev) => prev.filter((x) => x.id !== t.id)), 6000);
     };
     return () => { pushFn = null; };
   }, []);
   return (
-    <div className="fixed bottom-3 right-3 z-[9999] flex flex-col gap-2 pointer-events-none">
+    <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2 pointer-events-none max-w-md">
       {items.map((t) => (
-        <div key={t.id} className={`px-3 py-2 rounded-lg text-xs font-medium shadow-xl border pointer-events-auto ${t.kind === 'ok' ? 'bg-[#12121a] border-emerald-500/30 text-emerald-200' : 'bg-[#1a0a0a] border-red-500/30 text-red-200'}`}>
+        <div key={t.id} className={`px-4 py-3 rounded-xl text-sm font-semibold shadow-2xl border pointer-events-auto ${t.kind === 'ok' ? 'bg-[#12121a] border-emerald-500/40 text-emerald-100' : 'bg-[#1a0a0a] border-red-500/40 text-red-100'}`}>
           {t.msg}
         </div>
       ))}
