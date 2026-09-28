@@ -1,0 +1,14 @@
+# Light Maestro — routage API sans extension.
+# L'app appelle /api/auth/register (sans .php) ; ce rewrite fait le lien.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /api/
+  # /auth/xxx -> /auth/xxx.php (si le fichier existe)
+  RewriteCond %{REQUEST_FILENAME}.php -f
+  RewriteRule ^(.*)$ $1.php [L]
+</IfModule>
+# Sécurité : ne jamais exposer config.php en clair (ne renvoie rien,
+# mais ceinture + bretelles si le PHP tombait en panne).
+<Files "config.php">
+  Require all denied
+</Files>
