@@ -34,6 +34,7 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
 
   const doSubmit = async () => {
     if (!email || !password) return;
@@ -99,10 +100,15 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                 </button>
               )}
               <button
-                onClick={state.logout}
-                className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-700 text-gray-300 text-xs font-semibold hover:bg-gray-700"
+                onClick={() => {
+                  if (!confirmLogout) { setConfirmLogout(true); return; }
+                  setConfirmLogout(false);
+                  state.logout();
+                }}
+                onBlur={() => setConfirmLogout(false)}
+                className={`w-full px-3 py-2 rounded-md text-xs font-semibold border transition-colors ${confirmLogout ? 'bg-red-600/30 border-red-500/50 text-red-200 hover:bg-red-600/40' : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'}`}
               >
-                Se déconnecter
+                {confirmLogout ? 'Confirmer la déconnexion ? (hors-ligne = version gratuite)' : 'Se déconnecter'}
               </button>
             </div>
           ) : (

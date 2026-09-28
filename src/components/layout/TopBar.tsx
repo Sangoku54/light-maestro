@@ -51,6 +51,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
         <div className="flex items-center gap-2">
           <img src={logoIcon} alt="Light Maestro" className="w-7 h-7" />
           <span className="font-semibold text-white text-sm tracking-wide">{t('app.title')}</span>
+          <EditionBadge />
         </div>
         {projectName && (
           <>
@@ -151,7 +152,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
         className="no-drag flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-gray-800/30 text-gray-400 hover:bg-gray-700/40 hover:text-gray-200 transition-all"
         title="Compte & Licence"
       >
-        <LicenseLabel />
+        <AccountLabel />
       </button>
 
       {/* Auto-update notification */}
@@ -171,15 +172,31 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
   );
 };
 
-const LicenseLabel: React.FC = () => {
+const EditionBadge: React.FC = () => {
   const edition = useLicenseStore((s) => s.edition);
-  const labels: Record<string, string> = { free: 'Gratuite', standard: 'Standard', full: 'Complète' };
-  const colors: Record<string, string> = {
-    free: 'text-gray-400',
-    standard: 'text-blue-400',
-    full: 'text-purple-300',
+  const labels: Record<string, string> = {
+    free: 'Version gratuite',
+    standard: 'Version Standard',
+    full: 'Version Complète',
   };
-  return <span className={colors[edition] ?? 'text-gray-400'}>{labels[edition] ?? edition}</span>;
+  const colors: Record<string, string> = {
+    free: 'text-gray-400 border-gray-700',
+    standard: 'text-blue-300 border-blue-500/40',
+    full: 'text-purple-200 border-purple-500/40',
+  };
+  return (
+    <span className={`text-[10px] font-semibold border rounded px-1.5 py-0.5 whitespace-nowrap ${colors[edition] ?? colors.free}`}>
+      {labels[edition] ?? edition}
+    </span>
+  );
+};
+
+const AccountLabel: React.FC = () => {
+  const licensed = useLicenseStore((s) => s.licensed);
+  const email = useLicenseStore((s) => s.email);
+  if (!licensed) return <span>Connexion</span>;
+  const short = (email || '').split('@')[0] || 'Mon compte';
+  return <span className="max-w-[140px] truncate">{short}</span>;
 };
 
 const BlackoutButton: React.FC = () => {
