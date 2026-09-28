@@ -25,7 +25,7 @@ export const ToastHost: React.FC = () => {
     return () => { pushFn = null; };
   }, []);
   return (
-    <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2 pointer-events-none max-w-md">
+    <div className="fixed left-1/2 top-1/3 -translate-x-1/2 z-[9999] flex flex-col items-center gap-2 pointer-events-none max-w-lg w-max">
       {items.map((t) => (
         <div key={t.id} className={`px-4 py-3 rounded-xl text-sm font-semibold shadow-2xl border pointer-events-auto ${t.kind === 'ok' ? 'bg-[#12121a] border-emerald-500/40 text-emerald-100' : 'bg-[#1a0a0a] border-red-500/40 text-red-100'}`}>
           {t.msg}
