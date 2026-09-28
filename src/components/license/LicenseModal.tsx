@@ -111,6 +111,37 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                 {confirmLogout ? 'Confirmer la déconnexion ? (hors-ligne = version gratuite)' : 'Se déconnecter'}
               </button>
             </div>
+          ) : state.email ? (
+            <div className="space-y-2">
+              <p className="text-[11px] text-gray-400 leading-relaxed">
+                Connecté en tant que <span className="text-gray-200 font-semibold">{state.email}</span> — édition gratuite.
+              </p>
+              <button
+                onClick={() => doCheckout('standard')}
+                disabled={busy}
+                className="w-full px-3 py-2 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 disabled:opacity-40"
+              >
+                Passer en Standard — 69€ (fixtures illimitées, 1 univers)
+              </button>
+              <button
+                onClick={() => doCheckout('full')}
+                disabled={busy}
+                className="w-full px-3 py-2 rounded-md bg-purple-600 text-white text-xs font-semibold hover:bg-purple-500 disabled:opacity-40"
+              >
+                Passer en Complète — 99€ (tout illimité)
+              </button>
+              <button
+                onClick={() => {
+                  if (!confirmLogout) { setConfirmLogout(true); return; }
+                  setConfirmLogout(false);
+                  state.logout();
+                }}
+                onBlur={() => setConfirmLogout(false)}
+                className={`w-full px-3 py-2 rounded-md text-xs font-semibold border transition-colors ${confirmLogout ? 'bg-red-600/30 border-red-500/50 text-red-200 hover:bg-red-600/40' : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'}`}
+              >
+                {confirmLogout ? 'Confirmer la déconnexion ?' : 'Se déconnecter'}
+              </button>
+            </div>
           ) : (
             <div className="space-y-3">
               {/* Onglets connexion / inscription */}
