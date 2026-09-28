@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLicenseStore, type LicenseEdition } from '../../stores/licenseStore';
 import { version as appVersion } from '../../../package.json';
+import { toast } from '../Toast';
 
 const EDITION_LABEL: Record<LicenseEdition, { label: string; desc: string; color: string }> = {
   free: {
@@ -33,18 +34,25 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  const [justRegistered, setJustRegistered] = useState<string | null>(null);
 
   const doSubmit = async () => {
     if (!email || !password) return;
     setBusy(true);
     if (mode === 'register') {
       const ok = await state.register(email, password);
-      if (ok) setJustRegistered(email);
+      setBusy(false);
+      if (ok) {
+        onClose();
+        try { toast(`Compte créé, bienvenue ! Email de confirmation envoyé à ${email}`, 'ok'); } catch {}
+      }
     } else {
-      await state.login(email, password);
+      const ok = await state.login(email, password);
+      setBusy(false);
+      if (ok) {
+        onClose();
+        try { toast(`Connecté — bon retour parmi nous !`, 'ok'); } catch {}
+      }
     }
-    setBusy(false);
   };
 
   const doCheckout = async (edition: 'standard' | 'full') => {
@@ -79,24 +87,6 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
           </div>
 
           {state.licensed ? (
-            justRegistered ? (
-              <div className="space-y-3 text-center">
-                <div className="mx-auto w-12 h-12 rounded-full bg-emerald-600/20 border border-emerald-500/40 flex items-center justify-center">
-                  <span className="text-emerald-300 text-xl">✓</span>
-                </div>
-                <p className="text-sm font-semibold text-white">Compte créé, bienvenue !</p>
-                <p className="text-[11px] text-gray-400 leading-relaxed">
-                  Un email de confirmation vient d'être envoyé à<br />
-                  <span className="text-gray-200 font-semibold">{justRegistered}</span>
-                </p>
-                <button
-                  onClick={onClose}
-                  className="w-full px-3 py-2 rounded-md bg-purple-600 text-white text-xs font-semibold hover:bg-purple-500"
-                >
-                  C'est parti
-                </button>
-              </div>
-            ) : (
             <div className="space-y-2">
               {/* Upgrade possible depuis standard vers full */}
               {state.edition === 'standard' && (
@@ -115,7 +105,7 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                 Se déconnecter
               </button>
             </div>
-          )) : (
+          ) : (
             <div className="space-y-3">
               {/* Onglets connexion / inscription */}
               <div className="flex rounded-lg overflow-hidden border border-gray-700">
