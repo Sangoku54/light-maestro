@@ -44,10 +44,18 @@ STRIPE_PRICE_FULL                          ← id du price 99 €
 JWT_SECRET                                 ← chaîne aléatoire longue
 ```
 
-### 5. Créer les produits/prix dans Stripe
-Deux produits en mode **paiement unique (one-time)** :
-- « Standard » → prix 6900 (69 €) → note l'id → `STRIPE_PRICE_STANDARD`
-- « Full » → prix 9900 (99 €) → note l'id → `STRIPE_PRICE_FULL`
+### 5. Créer les produits/prix dans Stripe — D'ABORD EN MODE TEST
+> ⚠️ Test et live sont deux mondes séparés : clés, prix et webhooks ne sont
+> pas partagés. Toujours valider le flux complet en test avant de toucher au live.
+1. Bascule le dashboard en **mode Test** (interrupteur en haut).
+2. Deux produits en **paiement unique (one-time)** :
+   - « Standard » → prix 6900 (69 €) → note l'id (`price_...` test) → `STRIPE_PRICE_STANDARD`
+   - « Full » → prix 9900 (99 €) → note l'id (`price_...` test) → `STRIPE_PRICE_FULL`
+3. Paiement test avec la carte `4242 4242 4242 4242`.
+4. Quand tout marche, **refais les étapes 5-6 en mode Live** (nouveaux prix,
+   nouveau webhook, nouvelles clés) et remplace les 4 valeurs dans `config.php`.
+   Ne jamais mélanger : `sk_test` + secret test, `sk_live` + secret live —
+   sinon les paiements passent mais les licences ne s'activent jamais.
 
 ### 6. Configurer le webhook Stripe
 - Dashboard Stripe → **Webhooks** → ajouter un endpoint : `https://ton-domaine.fr/api/stripe/webhook.php`
