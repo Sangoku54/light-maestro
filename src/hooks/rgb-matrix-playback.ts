@@ -198,10 +198,32 @@ export function restoreMatrixEnabled(stash: Map<string, boolean>): void {
   } catch {}
 }
 
+/**
+ * Extinction de fin : quand plus aucune matrice n'est active, les dernières
+ * valeurs écrites resteraient sinon figées dans l'arbitre (contribution
+ * persistante) — fixtures allumées alors que le motif est fini. On flush des
+ * zéros transitoires (le motif s'éteint, puis la source est relâchée et
+ * l'engine dessous reprend la main), puis on vide le registre.
+ */
+export function flushMatrixIdle(
+  lastAddrs: Map<number, Set<number>>,
+  writeTransient: (universe: number, zeros: Record<number, number>) => void,
+): void {
+  for (const [uni, addrs] of lastAddrs) {
+    if (addrs.size === 0) continue;
+    const zeros: Record<number, number> = {};
+    for (const a of addrs) zeros[a] = 0;
+    try { writeTransient(uni, zeros); } catch { /* sortie best effort */ }
+  }
+  lastAddrs.clear();
+}
+
 export function useRgbMatrixPlayback() {
   const rafRef = useRef<number>(0);
   const startTimeRef = useRef<number>(0);
   const lastFrameRef = useRef<number>(0);
+  // Adresses écrites par univers : registre d'extinction (flushMatrixIdle).
+  const lastAddrsRef = useRef(new Map<number, Set<number>>());
   // Cache des définitions (le tick RAF est synchrone : chargement en
   // tâche de fond, les fixtures s'allument dès que leur def est résolue).
   const defCacheRef = useRef(new Map<string, any>());
@@ -222,6 +244,10 @@ export function useRgbMatrixPlayback() {
 
       const matrices = useRgbMatrixStore.getState().matrices.filter(m => m.enabled);
       if (matrices.length === 0) {
+        // Plus rien à piloter : éteindre ce qu'on allumait (sinon figé).
+        flushMatrixIdle(lastAddrsRef.current, (uni, zeros) =>
+          dmxBridge.writeTransient('rgb-matrix', uni, zeros),
+        );
         rafRef.current = requestAnimationFrame(tick);
         return;
       }
@@ -277,6 +303,10 @@ export function useRgbMatrixPlayback() {
       // Send one arbitrated frame per universe through the output arbiter
       for (const [uniIdx, vals] of perUniverse) {
         dmxBridge.write('rgb-matrix', uniIdx, vals);
+        // Registre d'extinction : mémorise les adresses écrites.
+        let set = lastAddrsRef.current.get(uniIdx);
+        if (!set) { set = new Set<number>(); lastAddrsRef.current.set(uniIdx, set); }
+        for (const addrStr of Object.keys(vals)) set.add(Number(addrStr));
       }
 
       rafRef.current = requestAnimationFrame(tick);
