@@ -73,16 +73,17 @@
           <div class="card" style="padding:14px; display:flex; gap:12px; align-items:center"><span class="ico cyan">💬</span><div><div style="font-weight:800">Signaler un bug</div><div class="meta">Écrivez-nous avec un .lmproj + log + capture si possible</div></div></div>
         </div>
       </div>
-      <form class="card" onsubmit="event.preventDefault(); alert('Démo statique — branchez ici votre Formspree / Getform / backend.');">
+      <form class="card" id="contact-form">
         <h3 class="h3">Envoyer un message</h3>
-        <p style="margin-top:6px">Formulaire statique — branchez un endpoint (Formspree, Getform, ou votre API) en remplaçant l'action.</p>
+        <p style="margin-top:6px">Réponse sous 24–48h ouvrées, directement par email.</p>
         <div style="display:grid; gap:10px; margin-top:12px">
-          <label style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#9ca3af">Nom</label><input required placeholder="Votre nom" style="padding:10px 12px; border-radius:12px; border:1px solid #2a2a3e; background: #0a0a12; color:white"/>
-          <label style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#9ca3af">Email</label><input required type="email" placeholder="vous@exemple.fr" style="padding:10px 12px; border-radius:12px; border:1px solid #2a2a3e; background: #0a0a12; color:white"/>
-          <label style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#9ca3af">Sujet</label><select style="padding:10px 12px; border-radius:12px; border:1px solid #2a2a3e; background: #0a0a12; color:white">          <option>Question générale</option><option>Bug / Support</option><option>Fixture manquante</option></select>
-          <label style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#9ca3af">Message</label><textarea required rows="4" placeholder="Décrivez votre besoin, votre setup (fixtures, univers, OS)..." style="padding:10px 12px; border-radius:12px; border:1px solid #2a2a3e; background: #0a0a12; color:white"></textarea>
-          <button class="btn btn-primary" type="submit">Envoyer →</button>
-          <div class="meta">En envoyant, vous acceptez notre <a href="#confidentialite" style="color:#c084fc">politique de confidentialité</a>.</div>
+          <label style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#9ca3af">Nom</label><input id="cf-name" required placeholder="Votre nom" style="padding:10px 12px; border-radius:12px; border:1px solid #2a2a3e; background: #0a0a12; color:white"/>
+          <label style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#9ca3af">Email</label><input id="cf-email" required type="email" placeholder="vous@exemple.fr" style="padding:10px 12px; border-radius:12px; border:1px solid #2a2a3e; background: #0a0a12; color:white"/>
+          <label style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#9ca3af">Sujet</label><select id="cf-subject" style="padding:10px 12px; border-radius:12px; border:1px solid #2a2a3e; background: #0a0a12; color:white"><option>Question générale</option><option>Bug / Support</option><option>Fixture manquante</option></select>
+          <label style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#9ca3af">Message</label><textarea id="cf-message" required rows="4" placeholder="Décrivez votre besoin, votre setup (fixtures, univers, OS)..." style="padding:10px 12px; border-radius:12px; border:1px solid #2a2a3e; background: #0a0a12; color:white"></textarea>
+          <input id="cf-company" type="text" tabindex="-1" autocomplete="off" style="position:absolute; left:-9999px; opacity:0; height:0" aria-hidden="true"/>
+          <button class="btn btn-primary" type="submit" id="cf-send">Envoyer →</button>
+          <div class="meta" id="cf-status">En envoyant, vous acceptez notre <a href="#confidentialite" style="color:#c084fc">politique de confidentialité</a>.</div>
         </div>
       </form>
     </div>
@@ -117,5 +118,48 @@
   </div>
 </footer>
 <script src="./assets/site.js"></script>
+<script>
+(function(){
+  var form = document.getElementById('contact-form');
+  if (!form) return;
+  var status = document.getElementById('cf-status');
+  var send = document.getElementById('cf-send');
+  function say(msg, ok){
+    status.textContent = msg;
+    status.style.color = ok ? '#6ee7b7' : '#fca5a5';
+  }
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    var payload = {
+      name: document.getElementById('cf-name').value.trim(),
+      email: document.getElementById('cf-email').value.trim(),
+      subject: document.getElementById('cf-subject').value,
+      message: document.getElementById('cf-message').value.trim(),
+      company: document.getElementById('cf-company').value
+    };
+    if (!payload.name || !payload.email || !payload.message) { say('Nom, email et message sont requis.', false); return; }
+    send.disabled = true;
+    send.textContent = 'Envoi…';
+    fetch('/api/contact.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return { ok: r.ok, d: d }; }); })
+    .then(function(res){
+      if (res.ok && res.d && res.d.ok) {
+        say('Message envoyé — on vous répond sous 24–48h ouvrées.', true);
+        form.reset();
+      } else {
+        say((res.d && res.d.message) || 'Envoi impossible. Écrivez-nous à contact@light-maestro.com', false);
+      }
+    }).catch(function(){
+      say('Envoi impossible. Écrivez-nous à contact@light-maestro.com', false);
+    }).finally(function(){
+      send.disabled = false;
+      send.textContent = 'Envoyer →';
+    });
+  });
+})();
+</script>
 </body>
 </html>
