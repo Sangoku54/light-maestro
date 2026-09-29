@@ -48,7 +48,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
   const [showHelp, setShowHelp] = useState(false);
 
   return (
-    <header className="h-10 bg-[var(--bg-2)] border-b border-[var(--border)] grid grid-cols-[1fr_auto_1fr] items-center pl-3 pr-[150px] gap-2 select-none drag-region min-w-0">
+    <header className="h-10 bg-[var(--bg-2)] border-b border-[var(--border)] grid grid-cols-[1fr_auto_1fr] items-center pl-3 pr-[150px] gap-2 select-none drag-region min-w-0 overflow-hidden">
       {/* Left zone: logo + project/preset/audio context */}
       <div className="flex items-center gap-2 no-drag min-w-0 overflow-hidden">
         <div className="flex items-center gap-2">
@@ -109,7 +109,9 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
       </nav>
 
       {/* Right zone: actions */}
-      <div className="flex items-center justify-end gap-2 no-drag min-w-0">
+      {/* Right zone: actions — scroll horizontal sur écrans étroits (tablette),
+          jamais de chevauchement : chaque contrôle reste cliquable. */}
+      <div className="flex items-center justify-end gap-2 no-drag min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>button]:shrink-0 [&>button]:min-h-[28px] [&>div]:shrink-0">
       {/* Open/Save */}
       <button
         onClick={() => (window as any).__lm_new?.()}
@@ -119,7 +121,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
         <FilePlus size={12} />
         <span className="hidden lg:inline">{t('topbar.new')}</span>
       </button>
-      <div className="w-px h-4 bg-gray-700" />
+      <div className="w-px h-4 bg-gray-700 hidden md:block shrink-0" />
       <button
         onClick={() => (window as any).__lm_open?.()}
         className="no-drag flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-gray-800/30 text-gray-400 hover:bg-gray-700/40 hover:text-gray-200 transition-all"
@@ -128,7 +130,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
         <FolderOpen size={12} />
         <span className="hidden lg:inline">{t('topbar.open')}</span>
       </button>
-      <div className="w-px h-4 bg-gray-700" />
+      <div className="w-px h-4 bg-gray-700 hidden md:block shrink-0" />
       <button
         onClick={() => (window as any).__lm_save?.()}
         className="no-drag flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-gray-800/30 text-gray-400 hover:bg-gray-700/40 hover:text-gray-200 transition-all"
@@ -137,7 +139,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
         <Save size={12} />
         <span className="hidden lg:inline">{t('topbar.save')}</span>
       </button>
-      <div className="w-px h-4 bg-gray-700" />
+      <div className="w-px h-4 bg-gray-700 hidden md:block shrink-0" />
 
       {/* Language Switcher */}
       <button
