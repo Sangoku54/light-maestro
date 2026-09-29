@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { clampRect } from '../components/clampedpopup';
+import { showItemDuration } from '../utils/show-items';
 import {
   Play, Pause, Square, Repeat, Plus, Trash2, Music, Film,
   Zap, Volume2, VolumeX, GripHorizontal, ChevronDown, X,
@@ -76,6 +77,9 @@ export const ShowManager: React.FC = () => {
   // Playback state
   const [playState, setPlayState] = useState<'stopped' | 'playing' | 'paused'>('stopped');
   const [playheadTime, setPlayheadTime] = useState(0);
+  // Zoom timeline (0.5× → 8×) : déclaré tôt car le listener molette l'utilise.
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const clampZoom = (z: number) => Math.max(0.5, Math.min(8, z));
   const [loop, setLoop] = useState(false);
   const playTimerRef = useRef<number | null>(null);
   const playStartRef = useRef<number>(0);
@@ -581,7 +585,8 @@ export const ShowManager: React.FC = () => {
     setDraggingItem(latestDrag);
     const onMove = (ev: MouseEvent) => {
       const dx = ev.clientX - startX;
-      const containerW = timelineRef.current?.clientWidth ?? 1;
+      // scrollWidth = largeur réelle des pistes (× zoom), pas le viewport.
+      const containerW = timelineRef.current?.scrollWidth ?? timelineRef.current?.clientWidth ?? 1;
       const dt = (dx / containerW) * effectiveDuration;
       latestDrag = { ...latestDrag, origStartTime: Math.max(0, item.startTime + dt) };
       setDraggingItem(latestDrag);
@@ -620,7 +625,8 @@ export const ShowManager: React.FC = () => {
     setResizingItem(latestResize);
     const onMove = (ev: MouseEvent) => {
       const dx = ev.clientX - startX;
-      const containerW = timelineRef.current?.clientWidth ?? 1;
+      // scrollWidth = largeur réelle des pistes (× zoom), pas le viewport.
+      const containerW = timelineRef.current?.scrollWidth ?? timelineRef.current?.clientWidth ?? 1;
       const dt = (dx / containerW) * effectiveDuration;
       if (edge === 'left') {
         const newStart = Math.max(0, item.startTime + dt);
@@ -681,8 +687,9 @@ export const ShowManager: React.FC = () => {
     document.addEventListener('mouseup', onUp);
   };
 
-  const handleTimelineWheel = (e: React.WheelEvent) => {
-    // Zoom removed — percentage layout adapts automatically
+  const handleTimelineWheel = (_e: React.WheelEvent) => {
+    // Zoom réel géré par le listener natif non-passif ci-dessous (React
+    // onWheel ne peut pas preventDefault : la page zoomerait à la place).
   };
 
   const handleDurationChange = (newDuration: number) => {
@@ -723,6 +730,32 @@ export const ShowManager: React.FC = () => {
     const sync = () => { ruler.scrollLeft = timeline.scrollLeft; };
     timeline.addEventListener('scroll', sync);
     return () => timeline.removeEventListener('scroll', sync);
+  }, []);
+
+  // ── Ctrl+molette = zoom (listener natif non-passif : React onWheel ne peut
+  // pas preventDefault, sinon la page zoome au lieu de la timeline) ──
+  const zoomRef = useRef(zoomLevel);
+  zoomRef.current = zoomLevel;
+  useEffect(() => {
+    const el = timelineRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const prev = zoomRef.current;
+      const next = Math.max(0.5, Math.min(8, prev * (e.deltaY < 0 ? 1.25 : 0.8)));
+      if (next === prev) return;
+      const rect = el.getBoundingClientRect();
+      const ratio = (e.clientX - rect.left + el.scrollLeft) / (el.scrollWidth || 1);
+      zoomRef.current = next;
+      setZoomLevel(next);
+      requestAnimationFrame(() => {
+        const ed = el.scrollWidth || 1;
+        el.scrollLeft = Math.max(0, ratio * ed - (e.clientX - el.getBoundingClientRect().left));
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
   // ── Load waveforms for all audio track items ──
@@ -794,17 +827,23 @@ export const ShowManager: React.FC = () => {
       }
     });
     return () => cancelAnimationFrame(raf);
-  }, [waveformVersion, effectiveDuration, totalDuration, trackItems]);
+    // zoomLevel : la largeur des canvas suit les pistes (scrollWidth × zoom).
+  }, [waveformVersion, effectiveDuration, totalDuration, trackItems, zoomLevel]);
 
   // Percentage-based timeline (always fills container, no zoom needed)
   const pctLeft = useCallback((ms: number) => msToPct(ms, effectiveDuration), [effectiveDuration]);
   const pctWidth = useCallback((ms: number) => msToPct(ms, effectiveDuration), [effectiveDuration]);
-  const timelineWidth = '100%';
+  // Zoom : les pistes s'élargissent (scroll horizontal) pour placer au
+  // dixième de seconde ; à 1 la timeline remplit le conteneur comme avant.
+  const timelineWidth = `${100 * zoomLevel}%`;
   const rulerTicks = useMemo(() => {
     const ticks: { time: number; pct: string; label: string; major: boolean }[] = [];
-    // Auto tick interval based on duration
+    // Auto tick interval based on duration, resserré au zoom (précision).
     const durSec = effectiveDuration / 1000;
-    const interval = durSec > 600 ? 30000 : durSec > 120 ? 10000 : durSec > 30 ? 5000 : 1000;
+    const base = durSec > 600 ? 30000 : durSec > 120 ? 10000 : durSec > 30 ? 5000 : 1000;
+    const steps = [100, 250, 500, 1000, 2000, 5000, 10000, 30000, 60000];
+    const wanted = base / zoomLevel;
+    const interval = steps.reduce((best, s) => (Math.abs(s - wanted) < Math.abs(best - wanted) ? s : best), steps[3]);
     for (let t = 0; t <= effectiveDuration; t += interval) {
       const sec = Math.floor(t / 1000);
       const min = Math.floor(sec / 60);
@@ -817,7 +856,7 @@ export const ShowManager: React.FC = () => {
       });
     }
     return ticks;
-  }, [effectiveDuration]);
+  }, [effectiveDuration, zoomLevel]);
 
   const TRACK_COLORS: Record<string, string> = {
     scene: '#a855f7',
@@ -975,7 +1014,30 @@ export const ShowManager: React.FC = () => {
           <span className="text-[10px] text-gray-600">s</span>
         </div>
 
-        {/* Zoom: removed — timeline uses 100% width percentage layout */}
+        {/* Zoom timeline (précision de placement) */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setZoomLevel((z) => clampZoom(z / 1.25))}
+            className="px-2 py-0.5 rounded text-[10px] bg-gray-800/50 text-gray-300 hover:bg-gray-700/50"
+            title="Dézoomer (ou Ctrl+molette)"
+          >
+            −
+          </button>
+          <button
+            onClick={() => setZoomLevel(1)}
+            className="px-2 py-0.5 rounded text-[10px] bg-gray-800/50 text-gray-300 hover:bg-gray-700/50 font-mono min-w-[44px]"
+            title="Zoom 100 %"
+          >
+            {Math.round(zoomLevel * 100)}%
+          </button>
+          <button
+            onClick={() => setZoomLevel((z) => clampZoom(z * 1.25))}
+            className="px-2 py-0.5 rounded text-[10px] bg-gray-800/50 text-gray-300 hover:bg-gray-700/50"
+            title="Zoomer (ou Ctrl+molette)"
+          >
+            +
+          </button>
+        </div>
         <div className="w-px h-5 bg-gray-800" />
 
         {/* Save / Load */}
@@ -1550,7 +1612,8 @@ export const ShowManager: React.FC = () => {
             {selTrack?.type === 'scene' && scenes.map((scene) => (
               <button
                 key={scene.id}
-                onClick={() => handleAddItemToTrack(selectedTrackId, scene.id, scene.name, scene.duration, undefined, scene.fadeIn, scene.fadeOut)}
+                // Durée programmée respectée (infinie → repli 10 s, voir showItemDuration).
+                onClick={() => handleAddItemToTrack(selectedTrackId, scene.id, scene.name, showItemDuration('scene', scene.duration), undefined, scene.fadeIn, scene.fadeOut)}
                 className="px-3 py-1.5 rounded-lg text-xs bg-purple-600/10 border border-purple-500/20 text-purple-300 hover:bg-purple-600/20 transition-colors"
               >
                 🎬 {scene.name}
