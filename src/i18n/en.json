@@ -92,7 +92,10 @@
     "search_placeholder": "Search…",
     "right_click_details": "Click to select · Right-click for full details",
     "drag_to_position": "Drag to position",
-    "shift_click_range": "Shift+click for range · drag to adjust"
+    "shift_click_range": "Shift+click for range · drag to adjust",
+    "play": "Play",
+    "stop": "Stop",
+    "regenerate": "Regenerate"
   },
   "sidebar": {
     "modeHint_quick": "Show auto ready",
@@ -162,7 +165,8 @@
     "dmxOn": "DMX ON",
     "dmxOff": "DMX OFF",
     "blackout": "BLACKOUT",
-    "listening": "Listening…"
+    "listening": "Listening…",
+    "latencyHint": "Renderer pipeline latency: audio state read → DMX frame sent (IPC). Excludes hardware latency (USB/ArtNet/sACN)."
   },
   "autoscript": {
     "title": "SHOW AUTO",
@@ -526,7 +530,50 @@
       "deleteSceneBody": "This will permanently delete this scene. This cannot be undone.",
       "dropSceneHint": "Drop a scene here",
       "dropUncategorized": "Uncategorized"
-    }
+    },
+    "durationHint": "Duration = total window (fades included). 0 = hold forever.",
+    "realtimeHint": "(120 = realtime)",
+    "fixturesInSceneTitle": "Fixtures included in this scene",
+    "matrixEngines": "{{resolved}}/{{total}} fixtures written to DMX",
+    "matrixWaiting": "waiting…",
+    "groupEmpty": " — empty or missing group, nothing to drive",
+    "groupUnresolved": " — unresolved definitions or fixtures without RGB",
+    "matrixOutAuto": "Output: auto-drive active ✓ (RGB/wheel + dimmer + shutter handled by the matrix)",
+    "matrixOutMuted": "Output: matrix writes but NOTHING comes out",
+    "matrixOverridden": "overridden by {{by}}",
+    "matrixRelease": "Release",
+    "matrixNoLtp": " — no LTP source detected",
+    "sacnNetwork": "sACN network",
+    "sacnRxOn": "receiver on",
+    "sacnRxOff": "receiver off",
+    "sacnHint": "outgoing (transmit) · incoming (receive, HTP merge)",
+    "sacnErrors": "{{count}} error(s)",
+    "sacnEmpty": "No sACN universe configured — network monitoring shows here for sACN universes.",
+    "sacnColTx": "Transmit (out)",
+    "sacnColRx": "Receive (in)",
+    "sacnColSources": "Sources received",
+    "sacnColRxState": "Reception",
+    "deleteChaserTitle": "Delete chaser?",
+    "deleteChaserText": "This will permanently delete this chaser. This cannot be undone.",
+    "deleteCueTitle": "Delete cue list?",
+    "deleteCueText": "This cannot be undone.",
+    "deleteEfxTitle": "Delete EFX?",
+    "deleteEfxText": "This will permanently delete this EFX. This cannot be undone.",
+    "noCueListsYet": "No cue lists yet. Create one from the left panel.",
+    "createToEdit": "Create from the left panel to edit",
+    "live3dShow": "🎥 Live 3D View — Show",
+    "searchFixtures": "Search by manufacturer, model or type…",
+    "loadingLibrary": "Loading fixture library…",
+    "clickToSelect": "Click to select · Right-click for details",
+    "choose3d": "Choose how the fixture appears in 3D",
+    "loadingShort": "Loading…",
+    "dmxRunning": "Running",
+    "dmxStopped": "Stopped",
+    "dmxStart": "Start",
+    "selectSerialPort": "-- Select serial port --",
+    "selectComPort": "⚠ Select a COM port for DMX output",
+    "loadingFixtures": "Loading fixtures…",
+    "selectOrCreateMatrix": "Select or create a matrix"
   },
   "perform": {
     "virtualConsole": "Virtual Console",
@@ -617,7 +664,12 @@
       "frame": "Frame",
       "group": "Group",
       "dragWidgetsHere": "Drag widgets here",
-      "blackoutLabel": "⚫ BLACKOUT"
+      "blackoutLabel": "⚫ BLACKOUT",
+      "autoLoopWidget": "Pre-programmed scene",
+      "chooseLoop": "— Pick a scene —",
+      "patchHint": "Patch fixtures in Setup to generate scenes.",
+      "gmHint": "0 = blackout (kill), 255 = full power. Press again to restore 255.",
+      "notPatched": "Not patched"
     },
     "midi": {
       "title": "MIDI Mapping",
@@ -696,7 +748,7 @@
         "cueList": "Cue List",
         "dmxChannel": "DMX Channel",
         "widget": "Widget",
-    "autoScript": "Show auto",
+        "autoScript": "Show auto",
         "universe": "Universe",
         "channel": "Channel"
       }
@@ -959,5 +1011,128 @@
     "creditsTitle": "Credits",
     "ofl": "Fixture definitions: Open Fixture Library (MIT license) — open-fixture-library.org",
     "appLine": "Light Maestro — DMX lighting control software"
+  },
+  "toasts": {
+    "saving": "Save already in progress…",
+    "saveApi": "Save API unavailable (preload?)",
+    "saveRefused": "Project save refused by the system",
+    "saveFailed": "Project save failed — {{msg}}",
+    "saved": "Project saved",
+    "error": "Error: {{msg}}",
+    "errorAsync": "Async error: {{msg}}",
+    "registered": "Account created, welcome! Confirmation email sent to {{email}}",
+    "welcomeBack": "Signed in — welcome back!"
+  },
+  "loops": {
+    "title": "Pre-programmed scenes",
+    "banksTitle": "Pre-programmed scenes — 4 banks × 32",
+    "emptyPatch": "No patched fixtures.",
+    "emptyPatchHint": "Patch fixtures in Setup to generate scenes.",
+    "all": "All",
+    "search": "Search…",
+    "noMatch": "No matching scenes.",
+    "hint": "Click a card to play the scene on patched fixtures · “Regenerate” builds a new set",
+    "view3d": "3D View",
+    "view3dPanel": "🎥 3D View — Pre-programmed scenes",
+    "repeatTitle": "Repeat mode (Infinite loops, Track Duration regenerates on load)",
+    "repeatInfinite": "∞ Infinite",
+    "repeatTrack": "◷ Track Duration",
+    "prevScene": "Previous scene (wrap)",
+    "nextScene": "Next scene (wrap)",
+    "kinds": {
+      "color-chase": "Color",
+      "movement": "Movement",
+      "dimmer-pulse": "Ambiance",
+      "strobe": "Strobe",
+      "color-wheel": "Color wheel",
+      "gobo": "Gobo",
+      "effect": "Effect",
+      "prism": "Prism",
+      "beam-zoom": "Zoom",
+      "beam-frost": "Frost",
+      "beam-iris": "Iris",
+      "beam-focus": "Focus",
+      "laser-pattern": "Laser pattern",
+      "laser-scan": "Laser sweep",
+      "laser-color": "Laser color"
+    },
+    "themes": {
+      "couleurs": {
+        "label": "Colors",
+        "hint": "Full look: all fixtures in one color"
+      },
+      "effets": {
+        "label": "Effects",
+        "hint": "Movement, strobe, intensity, gobo, prism, beam, laser"
+      },
+      "matrice": {
+        "label": "RGB Matrix",
+        "hint": "Spatial patterns computed over the fixture grid"
+      },
+      "mix": {
+        "label": "Mix",
+        "hint": "Compilation: color + movement (+ strobe / breathing)"
+      }
+    },
+    "slotTitle": "{{label}} · {{bars}} bars · {{category}} · slot {{slot}}",
+    "slotEmpty": "Empty slot {{slot}}",
+    "override": "Override",
+    "overrideTitle": "2-bar override, then resume",
+    "activeLine": "{{label}} · {{bars}} bars · {{category}} · {{theme}} {{slot}}/32"
+  },
+  "help": {
+    "title": "Help center",
+    "progress": "{{done}}/{{total}} guides completed",
+    "graduate": "🎓 Certified operator!",
+    "steps": "Step by step",
+    "tips": "Booth tips",
+    "challenge": "🎯 Challenge",
+    "understood": "Got it",
+    "understoodDone": "✓ Got it!",
+    "prev": "← Previous",
+    "next": "Next →"
+  },
+  "license": {
+    "title": "Account & License",
+    "edition": "Edition: {{label}}",
+    "edFreeLabel": "Free",
+    "edFreeDesc": "1 fixture · 1 universe",
+    "edStandardLabel": "Standard",
+    "edStandardDesc": "Unlimited fixtures · 1 universe",
+    "edFullLabel": "Full",
+    "edFullDesc": "Unlimited fixtures and universes",
+    "checkoutFull": "Upgrade to Full — €99",
+    "logout": "Log out",
+    "confirmLogout": "Confirm logout? (offline = free edition)",
+    "confirmLogoutShort": "Confirm logout?",
+    "freeConnected": "free edition.",
+    "connectedAs": "Signed in as",
+    "checkoutStandard": "Go Standard — €69 (unlimited fixtures, 1 universe)",
+    "checkoutFullFree": "Go Full — €99 (everything unlimited)",
+    "loginTab": "Sign in",
+    "registerTab": "Create account",
+    "email": "Email",
+    "emailPlaceholder": "you@example.com",
+    "password": "Password",
+    "busy": "Please wait…",
+    "doRegister": "Create account",
+    "doLogin": "Sign in",
+    "priceStandard": "Standard — €69 · unlimited fixtures, 1 universe",
+    "priceFull": "Full — €99 · unlimited fixtures and universes",
+    "err": {
+      "unavailable": "License unavailable",
+      "network": "Network error",
+      "loginFailed": "Sign-in failed",
+      "registerFailed": "Sign-up failed",
+      "checkoutFailed": "Checkout unavailable"
+    }
+  },
+  "audio": {
+    "toStart": "Start (↖)",
+    "minimapDrag": "🖱 Drag = navigate",
+    "minimapSelect": "⇧/Ctrl + 🖱 drag = select",
+    "minimapType": "⇧/Ctrl + 1-6 = type",
+    "minimapZoom": "Double-click = zoom region",
+    "minimapFull": "Esc = full view"
   }
 }

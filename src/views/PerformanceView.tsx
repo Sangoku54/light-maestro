@@ -17,7 +17,7 @@ import { analyzeAudioBuffer, type TrackAnalysis } from '../hooks/audio-analysis'
 import { sendChannelsToHardware, sendToUniverse } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { startAutoLoop, stopAutoLoop, isAutoLoopActive, stopAllAutoLoops } from '../engine/auto-loop-player';
-import { generateLoopLibrary, loopToRecipe, LOOP_KIND_LABEL, LOOP_KIND_ORDER, type AutoLoop, type LoopRecipe } from '../engine/auto-loops';
+import { generateLoopLibrary, loopToRecipe, LOOP_KIND_ORDER, type AutoLoop, type LoopRecipe } from '../engine/auto-loops';
 import { preloadAudioUrl, decodeAudioUrl } from '../utils/audio-cache';
 import { generateEfxPanTilt } from '../hooks/fixture-tracks';
 import { resolveAudioUrl } from '../utils/project-audio';
@@ -962,6 +962,7 @@ const PageContextMenu: React.FC<{
  * groupé par catégorie, pour retrouver la boucle choisie en amont.
  */
 const AutoLoopPicker: React.FC<{ selected?: LoopRecipe; onSelect: (r: LoopRecipe) => void }> = ({ selected, onSelect }) => {
+  const { t } = useTranslation();
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
   const fixturePositions = useShowStore((s) => s.fixturePositions);
   const [loops, setLoops] = useState<AutoLoop[]>([]);
@@ -988,7 +989,7 @@ const AutoLoopPicker: React.FC<{ selected?: LoopRecipe; onSelect: (r: LoopRecipe
 
   return (
     <div>
-      <label className="text-[10px] text-gray-500 uppercase tracking-wider">Scène pré-programmée</label>
+      <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('perform.vc.autoLoopWidget')}</label>
       <select
         value={selectedId}
         onChange={(e) => {
@@ -997,9 +998,9 @@ const AutoLoopPicker: React.FC<{ selected?: LoopRecipe; onSelect: (r: LoopRecipe
         }}
         className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300"
       >
-        <option value="">— Choisir une boucle —</option>
+        <option value="">{t('perform.vc.chooseLoop')}</option>
         {grouped.map(([kind, arr]) => (
-          <optgroup key={kind} label={LOOP_KIND_LABEL[kind]}>
+          <optgroup key={kind} label={t(`loops.kinds.${kind}`)}>
             {arr.map((l) => (
               <option key={l.id} value={l.id}>
                 {l.name} · {l.speedBpm} BPM {l.direction === 'forward' ? '→' : l.direction === 'backward' ? '←' : '↔'}
@@ -1009,7 +1010,7 @@ const AutoLoopPicker: React.FC<{ selected?: LoopRecipe; onSelect: (r: LoopRecipe
         ))}
       </select>
       {loops.length === 0 && (
-        <p className="text-[9px] text-amber-400 mt-1">Patch des fixtures dans Setup pour générer des boucles.</p>
+        <p className="text-[9px] text-amber-400 mt-1">{t('perform.vc.patchHint')}</p>
       )}
     </div>
   );
@@ -1275,7 +1276,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                   <input type="number" min={0} max={255} value={config.grandMasterValue ?? 0}
                     onChange={(e) => setConfig({ ...config, grandMasterValue: Number(e.target.value) })}
                     className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300" />
-                  <p className="text-[9px] text-gray-500 mt-1">0 = noir (kill), 255 = pleine puissance. Réappuyer restaure 255.</p>
+                  <p className="text-[9px] text-gray-500 mt-1">{t('perform.vc.gmHint')}</p>
                 </div>
               )}
 
@@ -2967,7 +2968,7 @@ const SimpleDeskPanel: React.FC = () => {
                       </div>
                     );
                   }
-                  return <div className="text-[10px] text-gray-600 mt-1">Non patché</div>;
+                  return <div className="text-[10px] text-gray-600 mt-1">{t('perform.vc.notPatched')}</div>;
                 })()}
               </div>
 

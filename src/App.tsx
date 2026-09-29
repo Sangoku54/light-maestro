@@ -1,5 +1,9 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import i18next from 'i18next';
+
+// Traduction hors composant (saveProject) : instance i18next directe.
+const t0 = (k: string, o?: Record<string, unknown>) => i18next.t(k, o);
 import { useAppStore, AppMode } from './stores/appStore';
 import { useShowStore } from './stores/showStore';
 import { useLicenseStore } from './stores/licenseStore';
@@ -72,7 +76,7 @@ let projectSaveInFlight = false;
 async function saveProject(options: { silent?: boolean } = {}): Promise<boolean> {
   if (projectSaveInFlight) {
     if (!options.silent) {
-      try { toast('Sauvegarde déjà en cours…', 'err'); } catch {}
+      try { toast(t0('toasts.saving'), 'err'); } catch {}
     }
     return false; // a save is already running — skip
   }
@@ -188,7 +192,7 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     const projectApi = (window as any).lightMaestro?.project;
     if (!projectApi?.save) {
       if (!options.silent) {
-        try { toast('API de sauvegarde indisponible (preload ?)', 'err'); } catch {}
+        try { toast(t0('toasts.saveApi'), 'err'); } catch {}
       }
       return false;
     }
@@ -209,12 +213,12 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     // falsy = dialog cancelled (null) or IPC failure — silent for cancel,
     // visible when the API itself blew up (no path, no toast otherwise).
     if (!options.silent && saved === false) {
-      try { toast('Sauvegarde du projet refusée par le système', 'err'); } catch {}
+      try { toast(t0('toasts.saveRefused'), 'err'); } catch {}
     }
     return false;
   } catch (e) {
     console.error('Failed to save project:', e);
-    try { toast(`Échec de sauvegarde du projet — ${e instanceof Error ? e.message : String(e)}`, 'err'); } catch {}
+    try { toast(t0('toasts.saveFailed', { msg: e instanceof Error ? e.message : String(e) }), 'err'); } catch {}
     return false;
   } finally {
     projectSaveInFlight = false;
@@ -487,7 +491,7 @@ const App: React.FC = () => {
     (window as any).__lm_save = async () => {
       const ok = await saveProject();
       if (ok) {
-        try { toast('Projet sauvegardé', 'ok'); } catch {}
+        try { toast(t0('toasts.saved'), 'ok'); } catch {}
       }
       return ok;
     };
@@ -504,11 +508,11 @@ const App: React.FC = () => {
   // un échec de sauvegarde est totalement invisible pour l'utilisateur.
   useEffect(() => {
     const onError = (e: ErrorEvent) => {
-      try { toast(`Erreur: ${e.message}`, 'err'); } catch {}
+      try { toast(t0('toasts.error', { msg: e.message }), 'err'); } catch {}
     };
     const onRejection = (e: PromiseRejectionEvent) => {
       const msg = e.reason instanceof Error ? e.reason.message : String(e.reason);
-      try { toast(`Erreur async: ${msg}`, 'err'); } catch {}
+      try { toast(t0('toasts.errorAsync', { msg }), 'err'); } catch {}
     };
     window.addEventListener('error', onError);
     window.addEventListener('unhandledrejection', onRejection as EventListener);
@@ -767,7 +771,7 @@ const StatusBar: React.FC = () => {
               ? 'text-amber-400'
               : 'text-red-400')
           }
-          title="Latence pipeline renderer : lecture de l'état audio → trame DMX émise (IPC). N'inclut pas la latence matérielle (USB/ArtNet/sACN)."
+          title={t('statusBar.latencyHint')}
         >
           {latencyMs === null ? 'Latence audio→DMX : —' : `Latence audio→DMX : ${Math.round(latencyMs)} ms`}
         </span>

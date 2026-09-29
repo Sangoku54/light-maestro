@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Play, Square, ChevronLeft, ChevronRight, Layers, SkipForward } from 'lucide-react';
 import { useAutoloopEngine } from '../hooks/use-autoloop-engine';
 import { useAppStore } from '../stores/appStore';
@@ -17,6 +18,7 @@ import { BANK_THEMES } from '../engine/autoloop-themes';
  * aucun bouton anonyme, aucun slot vide (le générateur remplit les 32 emplacements).
  */
 export const AutoLoopBanks: React.FC = () => {
+  const { t } = useTranslation();
   const api = useAutoloopEngine(120);
   const { ready, playing, repeatMode, activeBank, activeSlot, activeLoop, banks } = api;
   const theme = BANK_THEMES[activeBank];
@@ -44,7 +46,7 @@ export const AutoLoopBanks: React.FC = () => {
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <Layers className="w-4 h-4 text-cyan-400" />
-          <h3 className="text-xs font-semibold text-gray-200">Scènes pré-programmées — 4 banques × 32</h3>
+          <h3 className="text-xs font-semibold text-gray-200">{t('loops.banksTitle')}</h3>
         </div>
         <button
           onClick={() =>
@@ -55,9 +57,9 @@ export const AutoLoopBanks: React.FC = () => {
               ? 'bg-cyan-600/20 text-cyan-300'
               : 'bg-amber-600/20 text-amber-300'
           }`}
-          title="Mode de répétition (Infinite rejoue en boucle, Track Duration régénère au chargement)"
+          title={t('loops.repeatTitle')}
         >
-          {repeatMode === 'infinite' ? '∞ Infinite' : '◷ Track Duration'}
+          {repeatMode === 'infinite' ? t('loops.repeatInfinite') : t('loops.repeatTrack')}
         </button>
       </div>
 
@@ -67,14 +69,14 @@ export const AutoLoopBanks: React.FC = () => {
           <button
             key={meta.id}
             onClick={() => api.select(bank, 0)}
-            title={meta.hint}
+            title={t(`loops.themes.${meta.id}.hint`, { defaultValue: meta.hint })}
             className={`flex-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
               activeBank === bank
                 ? 'bg-cyan-600/30 text-cyan-300 border border-cyan-500/30'
                 : `bg-gray-800/50 hover:text-gray-300 border border-transparent ${meta.accent} opacity-60 hover:opacity-100`
             }`}
           >
-            {meta.label}
+            {t(`loops.themes.${meta.id}.label`, { defaultValue: meta.label })}
           </button>
         ))}
       </div>
@@ -101,8 +103,8 @@ export const AutoLoopBanks: React.FC = () => {
                   disabled={isEmpty}
                   title={
                     loop
-                      ? `${loop.label ?? loop.id} · ${loop.bars} bars · ${loop.category} · slot ${slot + 1}`
-                      : `Slot ${slot + 1} vide`
+                      ? t('loops.slotTitle', { label: loop.label ?? loop.id, bars: loop.bars, category: loop.category, slot: slot + 1 })
+                      : t('loops.slotEmpty', { slot: slot + 1 })
                   }
                   className={`h-7 px-1 rounded text-[8px] font-medium transition-all border flex items-center justify-center gap-1 leading-none ${
                     isActive
@@ -124,7 +126,7 @@ export const AutoLoopBanks: React.FC = () => {
             })}
           </div>
           <div className="mt-1 text-[9px] text-gray-600 text-center truncate">
-            {theme.label} — 32 slots · {banks.get(activeBank, activeSlot)?.category ?? '—'}
+            {t(`loops.themes.${theme.id}.label`, { defaultValue: theme.label })} — 32 slots · {banks.get(activeBank, activeSlot)?.category ?? '—'}
           </div>
         </div>
       )}
@@ -134,7 +136,7 @@ export const AutoLoopBanks: React.FC = () => {
         <button
           onClick={api.previous}
           className="w-7 h-7 rounded-md bg-gray-800 text-gray-300 hover:bg-gray-700 flex items-center justify-center"
-          title="Scène précédente (wrap)"
+          title={t('loops.prevScene')}
         >
           <ChevronLeft className="w-3.5 h-3.5" />
         </button>
@@ -147,12 +149,12 @@ export const AutoLoopBanks: React.FC = () => {
           }`}
         >
           {playing ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-          {playing ? 'Stop' : 'Jouer'}
+          {playing ? t('common.stop') : t('common.play')}
         </button>
         <button
           onClick={api.next}
           className="w-7 h-7 rounded-md bg-gray-800 text-gray-300 hover:bg-gray-700 flex items-center justify-center"
-          title="Scène suivante (wrap)"
+          title={t('loops.nextScene')}
         >
           <ChevronRight className="w-3.5 h-3.5" />
         </button>
@@ -160,18 +162,23 @@ export const AutoLoopBanks: React.FC = () => {
           onClick={api.override}
           disabled={!playing}
           className="flex items-center gap-1 px-2 h-7 rounded-md bg-purple-600/20 text-purple-300 text-[11px] font-medium hover:bg-purple-600/30 disabled:opacity-40 disabled:cursor-not-allowed"
-          title="Override 2 bars puis reprise"
+          title={t('loops.overrideTitle')}
         >
           <SkipForward className="w-3 h-3" />
-          Override
+          {t('loops.override')}
         </button>
       </div>
 
       {/* Loop actif */}
       {activeLoop && (
         <div className="mt-1.5 text-[10px] text-gray-500 truncate">
-          {activeLoop.label ?? activeLoop.id} · {activeLoop.bars} bars · {activeLoop.category} ·{' '}
-          {theme.label} {activeSlot + 1}/32
+          {t('loops.activeLine', {
+            label: activeLoop.label ?? activeLoop.id,
+            bars: activeLoop.bars,
+            category: activeLoop.category,
+            theme: t(`loops.themes.${theme.id}.label`, { defaultValue: theme.label }),
+            slot: activeSlot + 1,
+          })}
         </div>
       )}
     </div>

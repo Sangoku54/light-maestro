@@ -6,9 +6,11 @@
  * précédent/suivant. Modal plein écran fermable (Échap/✕).
  */
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { HELP_GROUPS, HELP_PAGES, getHelpDone, setHelpDone } from './helpContent';
 
 export const HelpModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const { t } = useTranslation();
   const [pageId, setPageId] = useState<string>(HELP_PAGES[0].id);
   const [done, setDone] = useState<Record<string, boolean>>(getHelpDone);
 
@@ -50,7 +52,7 @@ export const HelpModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         {/* Sommaire */}
         <div className="w-[240px] shrink-0 border-r border-gray-800/60 overflow-y-auto p-3 space-y-3">
           <div>
-            <div className="text-[11px] font-bold text-white px-1">Centre d'aide</div>
+            <div className="text-[11px] font-bold text-white px-1">{t('help.title')}</div>
             <div className="mt-1.5 h-1.5 rounded-full bg-gray-800 overflow-hidden">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-purple-500 to-cyan-400 transition-all"
@@ -58,8 +60,8 @@ export const HelpModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               />
             </div>
             <div className="text-[10px] text-gray-500 mt-1 px-1">
-              {doneCount}/{HELP_PAGES.length} fiches comprises
-              {doneCount === HELP_PAGES.length ? ' 🎓 Régisseur confirmé !' : ''}
+              {t('help.progress', { done: doneCount, total: HELP_PAGES.length })}
+              {doneCount === HELP_PAGES.length ? ` ${t('help.graduate')}` : ''}
             </div>
           </div>
           {HELP_GROUPS.map((g) => (
@@ -93,7 +95,7 @@ export const HelpModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Pas à pas</div>
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">{t('help.steps')}</div>
               <ol className="space-y-2">
                 {page.steps.map((s, i) => (
                   <li key={i} className="flex gap-2.5 text-[13px] text-gray-200 leading-relaxed">
@@ -105,7 +107,7 @@ export const HelpModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             </div>
 
             <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 px-4 py-3">
-              <div className="text-[10px] uppercase tracking-wider text-amber-400/90 mb-2">Astuces régie</div>
+              <div className="text-[10px] uppercase tracking-wider text-amber-400/90 mb-2">{t('help.tips')}</div>
               <ul className="space-y-1.5">
                 {page.tips.map((tip, i) => (
                   <li key={i} className="text-[13px] text-gray-300 leading-relaxed">💡 {tip}</li>
@@ -114,21 +116,21 @@ export const HelpModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             </div>
 
             <div className="rounded-lg border border-cyan-500/25 bg-cyan-500/5 px-4 py-3">
-              <div className="text-[10px] uppercase tracking-wider text-cyan-300/90 mb-1">🎯 Défi</div>
+              <div className="text-[10px] uppercase tracking-wider text-cyan-300/90 mb-1">{t('help.challenge')}</div>
               <p className="text-[13px] text-gray-200 leading-relaxed">{page.challenge}</p>
               <button
                 onClick={toggleDone}
                 className={`mt-2 px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${done[page.id] ? 'bg-emerald-600/25 border-emerald-500/40 text-emerald-200' : 'bg-gray-800/60 border-gray-700 text-gray-300 hover:border-emerald-500/40 hover:text-emerald-200'}`}
               >
-                {done[page.id] ? '✓ Compris !' : 'J’ai compris'}
+                {done[page.id] ? t('help.understoodDone') : t('help.understood')}
               </button>
             </div>
           </div>
 
           <div className="px-6 py-3 border-t border-gray-800/50 flex items-center justify-between">
-            <button onClick={() => go(-1)} className="px-3 py-1.5 rounded-md text-xs text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">← Précédent</button>
+            <button onClick={() => go(-1)} className="px-3 py-1.5 rounded-md text-xs text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">{t('help.prev')}</button>
             <span className="text-[11px] text-gray-600">{idx + 1} / {HELP_PAGES.length}</span>
-            <button onClick={() => go(1)} className="px-3 py-1.5 rounded-md text-xs text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">Suivant →</button>
+            <button onClick={() => go(1)} className="px-3 py-1.5 rounded-md text-xs text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">{t('help.next')}</button>
           </div>
         </div>
       </div>

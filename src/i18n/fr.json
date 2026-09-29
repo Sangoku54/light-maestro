@@ -92,7 +92,10 @@
     "search_placeholder": "Rechercher…",
     "right_click_details": "Cliquer pour sélectionner · Clic droit pour les détails",
     "drag_to_position": "Glisser pour positionner",
-    "shift_click_range": "Shift+clic pour plage · glisser pour ajuster"
+    "shift_click_range": "Shift+clic pour plage · glisser pour ajuster",
+    "play": "Jouer",
+    "stop": "Arrêter",
+    "regenerate": "Régénérer"
   },
   "sidebar": {
     "modeHint_quick": "Show auto prêt",
@@ -162,7 +165,8 @@
     "dmxOn": "DMX ON",
     "dmxOff": "DMX OFF",
     "blackout": "BLACKOUT",
-    "listening": "Écoute…"
+    "listening": "Écoute…",
+    "latencyHint": "Latence pipeline renderer : lecture de l’état audio → trame DMX émise (IPC). N’inclut pas la latence matérielle (USB/ArtNet/sACN)."
   },
   "autoscript": {
     "title": "SHOW AUTO",
@@ -526,7 +530,50 @@
       "deleteSceneBody": "Cette action supprime définitivement la scène. Impossible de l’annuler.",
       "dropSceneHint": "Déposer une scène ici",
       "dropUncategorized": "Non classé"
-    }
+    },
+    "durationHint": "Duration = fenêtre totale (fades inclus). 0 = maintien infini.",
+    "realtimeHint": "(120 = temps réel)",
+    "fixturesInSceneTitle": "Fixtures incluses dans cette scène",
+    "matrixEngines": "{{resolved}}/{{total}} fixtures écrites en DMX",
+    "matrixWaiting": "en attente…",
+    "groupEmpty": " — groupe vide ou introuvable, rien à piloter",
+    "groupUnresolved": " — définitions non résolues ou fixtures sans RGB",
+    "matrixOutAuto": "Sortie : pilotage auto actif ✓ (RGB/roue + dimmer + shutter gérés par la matrice)",
+    "matrixOutMuted": "Sortie : la matrice écrit mais RIEN ne sort",
+    "matrixOverridden": "écrasée par {{by}}",
+    "matrixRelease": "Libérer",
+    "matrixNoLtp": " — aucune source LTP détectée",
+    "sacnNetwork": "Réseau sACN",
+    "sacnRxOn": "récepteur actif",
+    "sacnRxOff": "récepteur inactif",
+    "sacnHint": "ce qui part (émission) · ce qui arrive (réception, merge HTP)",
+    "sacnErrors": "{{count}} erreur(s)",
+    "sacnEmpty": "Aucun univers sACN configuré — le monitoring réseau s'affiche ici pour les univers de type sACN.",
+    "sacnColTx": "Émission (part)",
+    "sacnColRx": "Réception (arrive)",
+    "sacnColSources": "Sources reçues",
+    "sacnColRxState": "Réception",
+    "deleteChaserTitle": "Supprimer le chaser ?",
+    "deleteChaserText": "Cela supprimera définitivement ce chaser. Irréversible.",
+    "deleteCueTitle": "Supprimer la cue list ?",
+    "deleteCueText": "Irréversible.",
+    "deleteEfxTitle": "Supprimer l’EFX ?",
+    "deleteEfxText": "Cela supprimera définitivement cet EFX. Irréversible.",
+    "noCueListsYet": "Aucune cue list. Créez-en une depuis le panneau de gauche.",
+    "createToEdit": "Créez depuis le panneau de gauche pour éditer",
+    "live3dShow": "🎥 Live 3D View — Show",
+    "searchFixtures": "Rechercher par fabricant, modèle ou type…",
+    "loadingLibrary": "Chargement de la bibliothèque fixtures…",
+    "clickToSelect": "Cliquer pour sélectionner · Clic droit pour détails",
+    "choose3d": "Choisir comment la fixture apparaît en 3D",
+    "loadingShort": "Chargement…",
+    "dmxRunning": "En marche",
+    "dmxStopped": "Arrêté",
+    "dmxStart": "Démarrer",
+    "selectSerialPort": "-- Choisir le port série --",
+    "selectComPort": "⚠ Choisissez un port COM pour la sortie DMX",
+    "loadingFixtures": "Chargement fixtures…",
+    "selectOrCreateMatrix": "Sélectionnez ou créez une matrice"
   },
   "perform": {
     "virtualConsole": "Console Virtuelle",
@@ -617,7 +664,12 @@
       "frame": "Cadre",
       "group": "Groupe",
       "dragWidgetsHere": "Glissez les widgets ici",
-      "blackoutLabel": "⚫ BLACKOUT"
+      "blackoutLabel": "⚫ BLACKOUT",
+      "autoLoopWidget": "Scène pré-programmée",
+      "chooseLoop": "— Choisir une scène —",
+      "patchHint": "Patche des projecteurs dans Configuration pour générer des scènes.",
+      "gmHint": "0 = noir (kill), 255 = pleine puissance. Réappuyer restaure 255.",
+      "notPatched": "Non patché"
     },
     "midi": {
       "title": "Mappage MIDI",
@@ -696,7 +748,7 @@
         "cueList": "Cue List",
         "dmxChannel": "Canal DMX",
         "widget": "Widget",
-    "autoScript": "Show auto",
+        "autoScript": "Show auto",
         "universe": "Univers",
         "channel": "Canal"
       }
@@ -959,5 +1011,128 @@
     "creditsTitle": "Crédits",
     "ofl": "Définitions de projecteurs : Open Fixture Library (licence MIT) — open-fixture-library.org",
     "appLine": "Light Maestro — logiciel de pilotage lumière DMX"
+  },
+  "toasts": {
+    "saving": "Sauvegarde déjà en cours…",
+    "saveApi": "API de sauvegarde indisponible (preload ?)",
+    "saveRefused": "Sauvegarde du projet refusée par le système",
+    "saveFailed": "Échec de sauvegarde du projet — {{msg}}",
+    "saved": "Projet sauvegardé",
+    "error": "Erreur : {{msg}}",
+    "errorAsync": "Erreur async : {{msg}}",
+    "registered": "Compte créé, bienvenue ! Email de confirmation envoyé à {{email}}",
+    "welcomeBack": "Connecté — bon retour parmi nous !"
+  },
+  "loops": {
+    "title": "Scènes pré-programmées",
+    "banksTitle": "Scènes pré-programmées — 4 banques × 32",
+    "emptyPatch": "Aucune fixture patchée.",
+    "emptyPatchHint": "Patche des projecteurs dans Configuration pour générer des scènes.",
+    "all": "Toutes",
+    "search": "Rechercher…",
+    "noMatch": "Aucune scène ne correspond.",
+    "hint": "Cliquer une carte joue la scène sur les fixtures patchées · « Régénérer » produit un nouveau set",
+    "view3d": "Vue 3D",
+    "view3dPanel": "🎥 Vue 3D — Scènes pré-programmées",
+    "repeatTitle": "Mode de répétition (Infinite rejoue en boucle, Track Duration régénère au chargement)",
+    "repeatInfinite": "∞ Infinite",
+    "repeatTrack": "◷ Track Duration",
+    "prevScene": "Scène précédente (wrap)",
+    "nextScene": "Scène suivante (wrap)",
+    "kinds": {
+      "color-chase": "Couleur",
+      "movement": "Mouvement",
+      "dimmer-pulse": "Ambiance",
+      "strobe": "Strobe",
+      "color-wheel": "Roue couleur",
+      "gobo": "Gobo",
+      "effect": "Effet",
+      "prism": "Prisme",
+      "beam-zoom": "Zoom",
+      "beam-frost": "Frost",
+      "beam-iris": "Iris",
+      "beam-focus": "Focus",
+      "laser-pattern": "Motif laser",
+      "laser-scan": "Balayage laser",
+      "laser-color": "Couleur laser"
+    },
+    "themes": {
+      "couleurs": {
+        "label": "Couleurs",
+        "hint": "Look plein : toutes les fixtures dans une même couleur"
+      },
+      "effets": {
+        "label": "Effets",
+        "hint": "Mouvements, strobe, intensité, gobo, prisme, beam, laser"
+      },
+      "matrice": {
+        "label": "Matrice RGB",
+        "hint": "Motifs spatiaux calculés sur la grille des fixtures"
+      },
+      "mix": {
+        "label": "Mix",
+        "hint": "Compilation : couleur + mouvement (+ strobe / respiration)"
+      }
+    },
+    "slotTitle": "{{label}} · {{bars}} bars · {{category}} · slot {{slot}}",
+    "slotEmpty": "Slot {{slot}} vide",
+    "override": "Override",
+    "overrideTitle": "Override 2 bars puis reprise",
+    "activeLine": "{{label}} · {{bars}} bars · {{category}} · {{theme}} {{slot}}/32"
+  },
+  "help": {
+    "title": "Centre d'aide",
+    "progress": "{{done}}/{{total}} fiches comprises",
+    "graduate": "🎓 Régisseur confirmé !",
+    "steps": "Pas à pas",
+    "tips": "Astuces régie",
+    "challenge": "🎯 Défi",
+    "understood": "J’ai compris",
+    "understoodDone": "✓ Compris !",
+    "prev": "← Précédent",
+    "next": "Suivant →"
+  },
+  "license": {
+    "title": "Compte & Licence",
+    "edition": "Édition : {{label}}",
+    "edFreeLabel": "Gratuite",
+    "edFreeDesc": "1 fixture · 1 univers",
+    "edStandardLabel": "Standard",
+    "edStandardDesc": "Fixtures illimitées · 1 univers",
+    "edFullLabel": "Complète",
+    "edFullDesc": "Fixtures et univers illimités",
+    "checkoutFull": "Passer à la version Complète — 99€",
+    "logout": "Se déconnecter",
+    "confirmLogout": "Confirmer la déconnexion ? (hors-ligne = version gratuite)",
+    "confirmLogoutShort": "Confirmer la déconnexion ?",
+    "freeConnected": "édition gratuite.",
+    "connectedAs": "Connecté en tant que",
+    "checkoutStandard": "Passer en Standard — 69€ (fixtures illimitées, 1 univers)",
+    "checkoutFullFree": "Passer en Complète — 99€ (tout illimité)",
+    "loginTab": "Connexion",
+    "registerTab": "Créer un compte",
+    "email": "Email",
+    "emailPlaceholder": "vous@exemple.com",
+    "password": "Mot de passe",
+    "busy": "Patientez…",
+    "doRegister": "Créer le compte",
+    "doLogin": "Se connecter",
+    "priceStandard": "Standard — 69 € · fixtures illimitées, 1 univers",
+    "priceFull": "Complète — 99 € · fixtures et univers illimités",
+    "err": {
+      "unavailable": "Licence indisponible",
+      "network": "Erreur réseau",
+      "loginFailed": "Connexion échouée",
+      "registerFailed": "Inscription échouée",
+      "checkoutFailed": "Checkout indisponible"
+    }
+  },
+  "audio": {
+    "toStart": "Début (↖)",
+    "minimapDrag": "🖱 Glisser = naviguer",
+    "minimapSelect": "⇧/Ctrl + 🖱 glisser = sélection",
+    "minimapType": "⇧/Ctrl + 1-6 = type",
+    "minimapZoom": "Double-clic = zoom zone",
+    "minimapFull": "Échap = vue complète"
   }
 }

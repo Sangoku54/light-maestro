@@ -91,51 +91,51 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
 
   login: async (email, password) => {
     const a = api();
-    if (!a) { set({ loginError: 'Licence indisponible' }); return false; }
+    if (!a) { set({ loginError: 'unavailable' }); return false; }
     try {
       const r = await a.login(email, password);
       if (r.ok && r.state) {
         set({ ...r.state, loginError: null });
         return true;
       }
-      set({ loginError: r.message || 'Connexion échouée' });
+      set({ loginError: r.message || 'loginFailed' });
       return false;
     } catch {
-      set({ loginError: 'Erreur réseau' });
+      set({ loginError: 'network' });
       return false;
     }
   },
 
   register: async (email, password) => {
     const a = api();
-    if (!a) { set({ loginError: 'Licence indisponible' }); return false; }
+    if (!a) { set({ loginError: 'unavailable' }); return false; }
     try {
       const r = await a.register(email, password);
       if (r.ok && r.state) {
         set({ ...r.state, loginError: null });
         return true;
       }
-      set({ loginError: r.message || 'Inscription échouée' });
+      set({ loginError: r.message || 'registerFailed' });
       return false;
     } catch {
-      set({ loginError: 'Erreur réseau' });
+      set({ loginError: 'network' });
       return false;
     }
   },
 
   checkout: async (edition) => {
     const a = api();
-    if (!a) { set({ loginError: 'Licence indisponible' }); return null; }
+    if (!a) { set({ loginError: 'unavailable' }); return null; }
     try {
       const r = await a.checkout(edition);
       if (r.ok && r.url) {
         await a.openUrl(r.url).catch(() => {});
         return r.url;
       }
-      set({ loginError: r.message || 'Checkout indisponible' });
+      set({ loginError: r.message || 'checkoutFailed' });
       return null;
     } catch {
-      set({ loginError: 'Erreur réseau' });
+      set({ loginError: 'network' });
       return null;
     }
   },

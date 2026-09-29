@@ -1,4 +1,5 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Upload, Play, Pause, SkipBack, SkipForward } from 'lucide-react';
 import { analyzeAudioBuffer, TrackAnalysis, TrackSection, SECTION_COLORS } from './audio-analysis';
 import type { GenreProfile } from './audio-analysis';
@@ -214,7 +215,10 @@ interface AudioFileUploadProps {
   effects?: { id: string; name: string }[];
 }
 
-export const AudioFileUpload: React.FC<AudioFileUploadProps> = ({ onFileLoaded, onInsertColor, onInsertDimmer, onInsertStrobe, compact, externalState, onSelectionChange, onSectionClick, onInsertEntity, sections, showTransport, onSectionsChange, snapToBeats, scenes, chasers, cueLists, effects }) => {
+export const AudioFileUpload: React.FC<AudioFileUploadProps> = ({ onFileLoaded,
+onInsertColor, onInsertDimmer, onInsertStrobe, compact, externalState, onSelectionChange, onSectionClick,
+onInsertEntity, sections, showTransport, onSectionsChange, snapToBeats, scenes, chasers, cueLists, effects }) => {
+  const { t } = useTranslation();
   const internalState = useAudioFileLoader();
   const { file, analysis, isAnalyzing, isPlaying, currentTime, error, loadFile, play, pause, stop, seek, clear } = externalState || internalState;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -286,7 +290,7 @@ export const AudioFileUpload: React.FC<AudioFileUploadProps> = ({ onFileLoaded, 
       {/* Playback bar (masquable : transport déporté en bas de page QuickShow) */}
       {showTransport !== false && (
       <div className="flex items-center gap-2">
-        <button onClick={() => seek(0)} className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Début (↖)">
+        <button onClick={() => seek(0)} className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title={t('audio.toStart')}>
           <SkipBack size={14} />
         </button>
         <button onClick={isPlaying ? pause : play} className="p-2 rounded-full bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 transition-colors">
@@ -341,6 +345,7 @@ interface WaveformDisplayProps {
 const TYPE_KEYS: Record<string, string> = { Digit1: 'intro', Digit2: 'verse', Digit3: 'chorus', Digit4: 'bridge', Digit5: 'drop', Digit6: 'outro' };
 
 const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sections, duration, currentTime, onSeek, onSelectionChange, onSectionClick, onSectionsChange, snapToBeats, onInsertEntity, onInsertColor, onInsertDimmer, onInsertStrobe, scenes, chasers, cueLists, effects, energyCurve, lowCurve }) => {
+  const { t } = useTranslation();
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
   const minimapCanvasRef = useRef<HTMLCanvasElement>(null);
   const mainContainerRef = useRef<HTMLDivElement>(null);
@@ -864,11 +869,11 @@ const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveform, beats, sect
           <canvas ref={minimapCanvasRef} className="w-full h-full" />
         </div>
         <div className="flex items-center gap-3 px-1">
-          <span className="text-[9px] text-gray-600">🖱 Glisser = naviguer</span>
-          <span className="text-[9px] text-gray-600">⇧/Ctrl + 🖱 glisser = sélection</span>
-          <span className="text-[9px] text-gray-600">⇧/Ctrl + 1-6 = type</span>
-          <span className="text-[9px] text-gray-600">Double-clic = zoom zone</span>
-          <span className="text-[9px] text-gray-600">Échap = vue complète</span>
+          <span className="text-[9px] text-gray-600">{t('audio.minimapDrag')}</span>
+          <span className="text-[9px] text-gray-600">{t('audio.minimapSelect')}</span>
+          <span className="text-[9px] text-gray-600">{t('audio.minimapType')}</span>
+          <span className="text-[9px] text-gray-600">{t('audio.minimapZoom')}</span>
+          <span className="text-[9px] text-gray-600">{t('audio.minimapFull')}</span>
         </div>
         </>
       )}

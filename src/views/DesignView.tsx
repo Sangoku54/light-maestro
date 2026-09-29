@@ -240,7 +240,7 @@ const ShowWith3D: React.FC = () => {
       {show3D && showFloating3D && (
         <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}>
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
-            <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D View — Show</span>
+            <span className="text-[11px] text-purple-400 font-medium">{t('design.live3dShow')}</span>
             <div className="flex items-center gap-1">
               <button onClick={() => { setFloat3DSize({ w: 640, h: 360 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
               <button onClick={() => { setShowFloating3D(false); setShow3D(false); }} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
@@ -578,7 +578,7 @@ const SceneList: React.FC = () => {
     }
     return (
       <div className="text-xs text-gray-600 text-center py-8 space-y-2">
-        <div>No scenes yet. Click "New Scene" to create one.</div>
+        <div>{t('design.noScenesYet')}</div>
         <button
           onClick={() => setCreatingFolder(true)}
           className="mx-auto flex items-center gap-1 px-2 py-1 rounded-md bg-gray-800/50 border border-gray-700 text-gray-400 hover:text-purple-300 hover:border-purple-500/50 transition-colors"
@@ -1582,7 +1582,7 @@ const SceneEditor: React.FC = () => {
       <div className="flex flex-col items-center justify-center h-full text-gray-600">
         <div className="text-4xl mb-3 opacity-30">🎬</div>
         <div className="text-sm mb-1">No scene selected</div>
-        <div className="text-xs mb-4">Create a new scene from the left panel to start editing</div>
+        <div className="text-xs mb-4">{t('design.createToEdit')}</div>
       </div>
     );
   }
@@ -1646,7 +1646,7 @@ const SceneEditor: React.FC = () => {
         <ParamField label="Fade Out" value={editFadeOut} unit="ms" onChange={(v) => { setEditFadeOut(v); if (scene) updateScene(scene.id, { fadeOut: v }); }} />
         <ParamField label="Duration" value={editDuration} unit="ms" onChange={(v) => { setEditDuration(v); if (scene) updateScene(scene.id, { duration: v }); }} />
       </div>
-      <p className="text-[9px] text-gray-500 -mt-3">Duration = fenêtre totale (fades inclus). 0 = maintien infini.</p>
+      <p className="text-[9px] text-gray-500 -mt-3">{t('design.durationHint')}</p>
 
       {/* Action buttons */}
       <div className="flex gap-2">
@@ -2250,6 +2250,7 @@ const SaveIcon: React.FC<{ size?: number }> = ({ size = 14 }) => (
 // ─── Chaser List (Left Panel) ──────────────────────────────
 
 const ChaserList: React.FC = () => {
+  const { t } = useTranslation();
   const chasers = useShowStore((s) => s.chasers);
   const createChaser = useShowStore((s) => s.createChaser);
   const deleteChaser = useShowStore((s) => s.deleteChaser);
@@ -2322,7 +2323,7 @@ const ChaserList: React.FC = () => {
                 <button
                   onClick={(e) => { e.stopPropagation(); setConfirmDelete(chaser.id); }}
                   className="p-1 text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                  title="Delete chaser"
+                  title={t('design.deleteChaserTitle')}
                 >
                   <Trash2 size={12} />
                 </button>
@@ -2347,7 +2348,7 @@ const ChaserList: React.FC = () => {
             }}
             className="w-full text-left px-3 py-1.5 text-xs text-red-300 hover:bg-red-600/20 hover:text-red-200 transition-colors flex items-center gap-2"
           >
-            <Trash2 size={12} /> Delete Chaser
+            <Trash2 size={12} /> {t('common.delete')} Chaser
           </button>
         </div>
       )}
@@ -2356,10 +2357,10 @@ const ChaserList: React.FC = () => {
       {confirmDelete && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setConfirmDelete(null)}>
           <div className="bg-[#12121a] border border-gray-700 rounded-xl p-5 shadow-2xl w-80" onClick={(e) => e.stopPropagation()}>
-            <h4 className="text-sm font-bold text-white mb-2">Delete Chaser?</h4>
-            <p className="text-xs text-gray-400 mb-4">This will permanently delete this chaser. This cannot be undone.</p>
+            <h4 className="text-sm font-bold text-white mb-2">{t('design.deleteChaserTitle')}</h4>
+            <p className="text-xs text-gray-400 mb-4">{t('design.deleteChaserText')}</p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmDelete(null)} className="px-3 py-1.5 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300 hover:bg-gray-700/50">Cancel</button>
+              <button onClick={() => setConfirmDelete(null)} className="px-3 py-1.5 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300 hover:bg-gray-700/50">{t('common.cancel')}</button>
               <button
                 onClick={() => {
                   deleteChaser(confirmDelete);
@@ -2367,8 +2368,7 @@ const ChaserList: React.FC = () => {
                   if (selectedId === confirmDelete) setSelectedId(null);
                 }}
                 className="px-3 py-1.5 bg-red-600/20 border border-red-500/30 rounded-lg text-xs text-red-300 hover:bg-red-600/30"
-              >
-                Delete
+              >{t('common.delete')}
               </button>
             </div>
           </div>
@@ -2809,7 +2809,7 @@ const ChaserEditor: React.FC = () => {
       <div className="flex flex-col items-center justify-center h-full text-gray-600">
         <div className="text-4xl mb-3 opacity-30">🎞️</div>
         <div className="text-sm mb-1">No chaser selected</div>
-        <div className="text-xs mb-4">Create a new chaser from the left panel to start editing</div>
+        <div className="text-xs mb-4">{t('design.noChasersYet')}</div>
       </div>
     );
   }
@@ -2835,7 +2835,7 @@ const ChaserEditor: React.FC = () => {
         <div className="flex gap-1.5">
           {playState === 'stopped' && (
             <button onClick={startPlayback} disabled={editSteps.length === 0}
-              className="p-2 rounded-lg bg-green-600/20 text-green-400 hover:bg-green-600/30 disabled:opacity-30 transition-colors" title="Play">
+              className="p-2 rounded-lg bg-green-600/20 text-green-400 hover:bg-green-600/30 disabled:opacity-30 transition-colors" title={t('common.play')}>
               <Play size={16} />
             </button>
           )}
@@ -2852,7 +2852,7 @@ const ChaserEditor: React.FC = () => {
             </button>
           )}
           <button onClick={handleStop}
-            className="p-2 rounded-lg bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-colors" title="Stop">
+            className="p-2 rounded-lg bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-colors" title={t('common.stop')}>
             <Square size={16} />
           </button>
         </div>
@@ -2902,7 +2902,7 @@ const ChaserEditor: React.FC = () => {
           <button onClick={() => { const v = Math.max(20, Math.min(300, editSpeed + 1)); setEditSpeed(v); persistChanges(editSteps, undefined, v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
           <span className="text-xs text-gray-300 font-mono w-10 text-right">{editSpeed}</span>
           <span className="text-[10px] text-gray-600">BPM</span>
-          <span className="text-[9px] text-gray-700">(120 = temps réel)</span>
+          <span className="text-[9px] text-gray-700">{t('design.realtimeHint')}</span>
         </div>
       </div>
 
@@ -2957,7 +2957,7 @@ const ChaserEditor: React.FC = () => {
                       type="text"
                       value={stepSearch}
                       onChange={(e) => setStepSearch(e.target.value)}
-                      placeholder="Search scenes…"
+                      placeholder={t('design.searchScenes')}
                       className="w-full bg-gray-800/50 border border-gray-700 rounded pl-7 pr-2 py-1.5 text-xs text-gray-300 placeholder-gray-600 outline-none focus:border-purple-500/50"
                       autoFocus
                     />
@@ -3039,7 +3039,7 @@ const ChaserEditor: React.FC = () => {
                       <span className="text-xs text-gray-200 truncate flex-1 min-w-0" title={scn?.name || 'N/A'}>
                         {scn?.name || '(no scene)'}
                       </span>
-                      <span className="text-[9px] text-gray-500 shrink-0" title="Fixtures incluses dans cette scène">
+                      <span className="text-[9px] text-gray-500 shrink-0" title={t('design.fixturesInSceneTitle')}>
                         {scn ? patchedFixtures.filter((pf) => sceneTouchesFixture(scn, pf)).length : 0} fx
                       </span>
                       <div className="flex gap-0.5 shrink-0">
@@ -3221,6 +3221,7 @@ const DIRECTIONS = [
 ];
 
 const RgbMatrixList: React.FC = () => {
+  const { t } = useTranslation();
   const { matrices, activeMatrixId, setActiveMatrix, createMatrix, deleteMatrix, toggleMatrix } = useRgbMatrixStore();
   const fixtureGroups = useShowStore(s => s.fixtureGroups);
   const [showNew, setShowNew] = useState(false);
@@ -3250,8 +3251,8 @@ const RgbMatrixList: React.FC = () => {
           </select>
           <div className="flex gap-1">
             <button onClick={() => { if (newName.trim()) { createMatrix(newName.trim(), newGroupId); setNewName(''); setShowNew(false); } }}
-              className="flex-1 px-2 py-1 rounded text-xs bg-purple-600 text-white">Create</button>
-            <button onClick={() => setShowNew(false)} className="px-2 py-1 rounded text-xs bg-gray-700 text-gray-400">Cancel</button>
+              className="flex-1 px-2 py-1 rounded text-xs bg-purple-600 text-white">{t('common.create')}</button>
+            <button onClick={() => setShowNew(false)} className="px-2 py-1 rounded text-xs bg-gray-700 text-gray-400">{t('common.cancel')}</button>
           </div>
         </div>
       )}
@@ -3282,6 +3283,7 @@ const RgbMatrixList: React.FC = () => {
 };
 
 const RGBMatrixEditor: React.FC = () => {
+  const { t } = useTranslation();
   const { matrices, activeMatrixId, updateMatrix } = useRgbMatrixStore();
   const matrixStats = useRgbMatrixStore(s => s.stats);
   const fixtureGroups = useShowStore(s => s.fixtureGroups);
@@ -3334,7 +3336,7 @@ const RGBMatrixEditor: React.FC = () => {
   }, [active?.id, active?.enabled, active?.speed]);
 
   if (!active) {
-    return <div className="text-xs text-gray-600 text-center py-8">Select or create a matrix</div>;
+    return <div className="text-xs text-gray-600 text-center py-8">{t('design.selectOrCreateMatrix')}</div>;
   }
 
   const startRgb = parseInt(active.startColor.slice(1, 3), 16) || 255;
@@ -3547,14 +3549,14 @@ const RGBMatrixEditor: React.FC = () => {
         return (
           <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-3 text-[11px] space-y-1">
             <div className="text-gray-400">
-              Moteur : {stats ? <span className={stats.resolved > 0 ? 'text-green-400' : 'text-red-400'}>{stats.resolved}/{stats.total} fixtures écrites en DMX</span> : 'en attente…'}
-              {stats && stats.total === 0 && <span className="text-amber-400"> — groupe vide ou introuvable, rien à piloter</span>}
-              {stats && stats.total > 0 && stats.resolved === 0 && <span className="text-amber-400"> — définitions non résolues ou fixtures sans RGB</span>}
+              Moteur : {stats ? <span className={stats.resolved > 0 ? 'text-green-400' : 'text-red-400'}>{t('design.matrixEngines', { resolved: stats.resolved, total: stats.total })}</span> : t('design.matrixWaiting')}
+              {stats && stats.total === 0 && <span className="text-amber-400">{t('design.groupEmpty')}</span>}
+              {stats && stats.total > 0 && stats.resolved === 0 && <span className="text-amber-400">{t('design.groupUnresolved')}</span>}
             </div>
             {active.enabled && stats && stats.resolved > 0 && (
               outNonZero
-                ? <div className="text-green-400">Sortie : pilotage auto actif ✓ (RGB/roue + dimmer + shutter gérés par la matrice)</div>
-                : <div className="text-red-400">Sortie : la matrice écrit mais RIEN ne sort{overriddenBy && overriddenBy !== '?' ? <> — écrasée par <span className="text-yellow-300">{overriddenBy}</span> <button onClick={() => dmxBridge.release(overriddenBy!)} className="ml-1 px-2 py-0.5 rounded bg-red-600/30 border border-red-500/40 text-red-200 hover:bg-red-600/50">Libérer</button></> : ' — aucune source LTP détectée'}.</div>
+                ? <div className="text-green-400">{t('design.matrixOutAuto')}</div>
+                : <div className="text-red-400">{t('design.matrixOutMuted')}{overriddenBy && overriddenBy !== '?' ? <> — {t('design.matrixOverridden', { by: overriddenBy })} <button onClick={() => dmxBridge.release(overriddenBy!)} className="ml-1 px-2 py-0.5 rounded bg-red-600/30 border border-red-500/40 text-red-200 hover:bg-red-600/50">{t('design.matrixRelease')}</button></> : t('design.matrixNoLtp')}.</div>
             )}
           </div>
         );
@@ -3583,6 +3585,7 @@ const RGBMatrixEditor: React.FC = () => {
 // ─── Cue List Editor (Design mode — theater-style sequential playback) ──
 
 const CueListList: React.FC = () => {
+  const { t } = useTranslation();
   const cueLists = useShowStore((s) => s.cueLists);
   const deleteCueList = useShowStore((s) => s.deleteCueList);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -3663,7 +3666,7 @@ const CueListList: React.FC = () => {
           <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider">{ctxMenu.name}</div>
           <button onClick={() => { setConfirmDelete(ctxMenu.id); setCtxMenu((c) => ({ ...c, visible: false })); }}
             className="w-full text-left px-3 py-1.5 text-xs text-red-300 hover:bg-red-600/20 flex items-center gap-2">
-            <Trash2 size={12} /> Delete Cue List
+            <Trash2 size={12} /> {t('common.delete')} Cue List
           </button>
         </div>
       )}
@@ -3671,12 +3674,12 @@ const CueListList: React.FC = () => {
       {confirmDelete && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setConfirmDelete(null)}>
           <div className="bg-[#12121a] border border-gray-700 rounded-xl p-5 shadow-2xl w-80" onClick={(e) => e.stopPropagation()}>
-            <h4 className="text-sm font-bold text-white mb-2">Delete Cue List?</h4>
-            <p className="text-xs text-gray-400 mb-4">This cannot be undone.</p>
+            <h4 className="text-sm font-bold text-white mb-2">{t('design.deleteCueTitle')}</h4>
+            <p className="text-xs text-gray-400 mb-4">{t('design.deleteCueText')}</p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmDelete(null)} className="px-3 py-1.5 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300">Cancel</button>
+              <button onClick={() => setConfirmDelete(null)} className="px-3 py-1.5 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300">{t('common.cancel')}</button>
               <button onClick={() => { deleteCueList(confirmDelete); setConfirmDelete(null); if (selectedId === confirmDelete) setSelectedId(null); }}
-                className="px-3 py-1.5 bg-red-600/20 border border-red-500/30 rounded-lg text-xs text-red-300">Delete</button>
+                className="px-3 py-1.5 bg-red-600/20 border border-red-500/30 rounded-lg text-xs text-red-300">{t('common.delete')}</button>
             </div>
           </div>
         </div>
@@ -3686,6 +3689,7 @@ const CueListList: React.FC = () => {
 };
 
 const CueListEditor: React.FC = () => {
+  const { t } = useTranslation();
   const cueLists = useShowStore((s) => s.cueLists);
   const scenes = useShowStore((s) => s.scenes);
   const updateCueList = useShowStore((s) => s.updateCueList);
@@ -3715,7 +3719,7 @@ const CueListEditor: React.FC = () => {
       <div className="flex flex-col items-center justify-center h-full text-gray-600">
         <div className="text-4xl mb-3 opacity-30">📋</div>
         <div className="text-sm mb-1">No cue list selected</div>
-        <div className="text-xs">Create a cue list from the left panel</div>
+        <div className="text-xs">{t('design.noCueListsYet')}</div>
       </div>
     );
   }
@@ -3868,6 +3872,7 @@ const CueListEditor: React.FC = () => {
 // ─── EFX List (Left Panel) ─────────────────────────────────
 
 const EFXList: React.FC = () => {
+  const { t } = useTranslation();
   const effects = useShowStore((s) => s.effects);
   const deleteEffect = useShowStore((s) => s.deleteEffect);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -3932,11 +3937,10 @@ const EFXList: React.FC = () => {
       {confirmDelete && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setConfirmDelete(null)}>
           <div className="bg-[#12121a] border border-gray-700 rounded-xl p-5 shadow-2xl w-80" onClick={(e) => e.stopPropagation()}>
-            <h4 className="text-sm font-bold text-white mb-2">Delete EFX?</h4>
-            <p className="text-xs text-gray-400 mb-4">This will permanently delete this EFX. This cannot be undone.</p>
+            <h4 className="text-sm font-bold text-white mb-2">{t('design.deleteEfxTitle')}</h4>
+            <p className="text-xs text-gray-400 mb-4">{t('design.deleteEfxText')}</p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmDelete(null)} className="px-3 py-1.5 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300 hover:bg-gray-700/50">
-                Cancel
+              <button onClick={() => setConfirmDelete(null)} className="px-3 py-1.5 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300 hover:bg-gray-700/50">{t('common.cancel')}
               </button>
               <button
                 onClick={() => {
@@ -3945,8 +3949,7 @@ const EFXList: React.FC = () => {
                   setConfirmDelete(null);
                 }}
                 className="px-3 py-1.5 bg-red-600/20 border border-red-500/30 rounded-lg text-xs text-red-300 hover:bg-red-600/30"
-              >
-                Delete
+              >{t('common.delete')}
               </button>
             </div>
           </div>
@@ -5953,14 +5956,14 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                       onSwitchToSearch(searchQuery.trim());
                     }
                   }}
-                  placeholder="Or search by manufacturer, model, or type…"
+                  placeholder={t('design.searchFixtures')}
                   className="w-full bg-gray-800/50 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-purple-500/50"
                 />
               </div>
               {libLoading ? (
                 <div className="flex flex-col items-center justify-center py-10 gap-3">
                   <div className="w-6 h-6 rounded-full border-2 border-gray-700 border-t-purple-400 animate-spin" />
-                  <p className="text-xs text-gray-500">Loading fixture library…</p>
+                  <p className="text-xs text-gray-500">{t('design.loadingLibrary')}</p>
                 </div>
               ) : (
               <>
@@ -6032,7 +6035,7 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                   </button>
                 ))}
               </div>
-              <p className="text-[9px] text-gray-700 text-center mt-1">Click to select · Right-click for full details</p>
+              <p className="text-[9px] text-gray-700 text-center mt-1">{t('design.clickToSelect')}</p>
             </div>
           )}
           {step === 'searching' && (
@@ -6043,7 +6046,7 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                   type="text"
                   value={searchQuery}
                   onChange={(e) => onSearch(e.target.value)}
-                  placeholder="Search by manufacturer, model, or type…"
+                  placeholder={t('design.searchFixtures')}
                   className="w-full bg-gray-800/50 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-purple-500/50"
                   autoFocus
                 />
@@ -6084,7 +6087,7 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                 </div>
               )}
               {searchResults.length > 0 && (
-                <p className="text-[9px] text-gray-700 text-center mt-1">Click to select · Right-click for full details</p>
+                <p className="text-[9px] text-gray-700 text-center mt-1">{t('design.clickToSelect')}</p>
               )}
             </div>
           )}
@@ -6249,7 +6252,7 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs text-gray-400">Fixture Preview</label>
-                  <span className="text-[9px] text-gray-600">Choose how the fixture appears in 3D view</span>
+                  <span className="text-[9px] text-gray-600">{t('design.choose3d')}</span>
                 </div>
                 {
   /* Use the imported getVariantsForCategory */
@@ -6269,7 +6272,7 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
               <span className="text-[8px] text-gray-400 leading-tight text-center">{v.label}</span>
             </button>
           );
-        }) : <span className="text-[9px] text-gray-600">Loading…</span>}
+        }) : <span className="text-[9px] text-gray-600">{t('design.loadingShort')}</span>}
       </div>
     );
   })()
@@ -6645,6 +6648,7 @@ const GroupsList: React.FC = () => {
 // ─── Groups Editor (Right Panel) ─────────────────────────
 
 const GroupsEditor: React.FC = () => {
+  const { t } = useTranslation();
   const fixtureGroups = useShowStore((s) => s.fixtureGroups);
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
   const universes = useShowStore((s) => s.universes);
@@ -6816,8 +6820,7 @@ const GroupsEditor: React.FC = () => {
               <button
                 onClick={resetCreate}
                 className="flex-1 px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300 hover:bg-gray-700/50 transition-colors"
-              >
-                Cancel
+              >{t('common.cancel')}
               </button>
               <button
                 onClick={handleCreate}
@@ -6903,14 +6906,14 @@ const GroupsEditor: React.FC = () => {
                       onClick={() => { removeGroup(g.id); setEditGroupId(null); }}
                       className="px-3 py-2 bg-red-600/15 text-red-300 rounded-lg text-xs hover:bg-red-600/25 transition-colors flex items-center gap-1.5"
                     >
-                      <Trash2 size={12} /> Delete
+                      <Trash2 size={12} /> {t('common.delete')}
                     </button>
                     <div className="flex-1" />
                     <button
                       onClick={handleCancelEdit}
                       className="px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300 hover:bg-gray-700/50 transition-colors"
                     >
-                      Cancel
+                      {t('common.cancel')}
                     </button>
                     <button
                       onClick={handleSaveEdit}
@@ -6970,6 +6973,7 @@ function lightenColor(hex: string, amount: number): string {
 // ─── Design Settings Panel ─────────────────────────────────
 
 const DesignSettingsPanel: React.FC = () => {
+  const { t } = useTranslation();
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const showUniverses = useShowStore((s) => s.universes);
   const addShowUniverse = useShowStore((s) => s.addShowUniverse);
@@ -7134,11 +7138,11 @@ const DesignSettingsPanel: React.FC = () => {
           <div><h3 className="text-sm font-semibold text-gray-200">DMX Engine</h3><p className="text-[10px] text-gray-500">Must be running before DMX output works</p></div>
           <div className="flex items-center gap-2">
             <span className={'w-2 h-2 rounded-full ' + (dmxEngineRunning ? 'bg-green-500' : 'bg-gray-600')} />
-            <span className="text-[10px] text-gray-500">{dmxEngineRunning ? 'Running' : 'Stopped'}</span>
+            <span className="text-[10px] text-gray-500">{dmxEngineRunning ? t('design.dmxRunning') : t('design.dmxStopped')}</span>
             {dmxEngineRunning ? (
-              <button onClick={handleStopDmx} className="px-3 py-1.5 bg-red-600/30 text-red-300 rounded text-[10px] font-semibold hover:bg-red-600/50 border border-red-500/30">Stop</button>
+              <button onClick={handleStopDmx} className="px-3 py-1.5 bg-red-600/30 text-red-300 rounded text-[10px] font-semibold hover:bg-red-600/50 border border-red-500/30">{t('common.stop')}</button>
             ) : (
-              <button onClick={handleStartDmx} className="px-3 py-1.5 bg-green-600/30 text-green-300 rounded text-[10px] font-semibold hover:bg-green-600/50 border border-green-500/30">Start</button>
+              <button onClick={handleStartDmx} className="px-3 py-1.5 bg-green-600/30 text-green-300 rounded text-[10px] font-semibold hover:bg-green-600/50 border border-green-500/30">{t('design.dmxStart')}</button>
             )}
           </div>
         </div>
@@ -7184,12 +7188,12 @@ const DesignSettingsPanel: React.FC = () => {
               <div className={`${uType === 'usb-dmx' ? '' : 'hidden'}`}>
                 <div className="flex gap-1">
                   <select value={uPort} onChange={(e) => handleUpdateUniverse(univ.id, { serialPort: e.target.value })} className="flex-1 bg-[#0a0a0f] border border-gray-700/50 rounded px-2 py-1 text-[10px] text-gray-300">
-                    <option value="">-- Select serial port --</option>
+                    <option value="">{t('design.selectSerialPort')}</option>
                     {showPorts.map((p: any) => <option key={p.path} value={p.path}>{p.path}{p.manufacturer ? ' - ' + p.manufacturer : ''}</option>)}
                   </select>
                   <button onClick={refreshPorts} disabled={portsLoading} className="px-2 py-1 bg-gray-800/50 text-gray-400 rounded text-[9px] hover:bg-gray-700/50" title="Refresh">{portsLoading ? '...' : '↻'}</button>
                 </div>
-                {!uPort && <p className="text-[9px] text-yellow-500 mt-1">⚠ Select a COM port for DMX output</p>}
+                {!uPort && <p className="text-[9px] text-yellow-500 mt-1">⚠ {t('design.selectComPort')}</p>}
               </div>
               <div className={`${uType === 'artnet' ? '' : 'hidden'}`}>
                 <div className="flex gap-1"><input type="text" value={univ.artnetIP || '255.255.255.255'} onChange={(e) => handleUpdateUniverse(univ.id, { artnetIP: e.target.value })} placeholder="IP" className="flex-1 bg-[#0a0a0f] border border-gray-700/50 rounded px-2 py-1 text-[10px] text-gray-300" /><input type="number" value={univ.artnetSubnet || 0} onChange={(e) => handleUpdateUniverse(univ.id, { artnetSubnet: parseInt(e.target.value)||0 })} placeholder="Subnet" className="w-14 bg-[#0a0a0f] border border-gray-700/50 rounded px-2 py-1 text-[10px] text-gray-300" /><input type="number" value={univ.artnetUniverse || 0} onChange={(e) => handleUpdateUniverse(univ.id, { artnetUniverse: parseInt(e.target.value)||0 })} placeholder="Univ" className="w-14 bg-[#0a0a0f] border border-gray-700/50 rounded px-2 py-1 text-[10px] text-gray-300" /></div>
@@ -7266,6 +7270,7 @@ interface EditorMode {
 }
 
 const FixtureEditorModal: React.FC<{ onClose: () => void; preloadedFixture?: any }> = ({ onClose, preloadedFixture }) => {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<'create' | 'edit'>(preloadedFixture ? 'edit' : 'create');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -7657,11 +7662,11 @@ const FixtureEditorModal: React.FC<{ onClose: () => void; preloadedFixture?: any
               <div className="relative">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                 <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by manufacturer, model, or type…"
+                  placeholder={t('design.searchFixtures')}
                   className="w-full bg-gray-800/50 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-purple-500/50" />
               </div>
               <div className="max-h-40 overflow-y-auto space-y-1">
-                {!loaded && <div className="text-xs text-gray-500 text-center py-4">Loading fixtures…</div>}
+                {!loaded && <div className="text-xs text-gray-500 text-center py-4">{t('design.loadingFixtures')}</div>}
                 {loaded && filtered.length === 0 && <div className="text-xs text-gray-600 text-center py-4">No fixtures found</div>}
                 {filtered.slice(0, 50).map((def) => (
                   <button key={def.id} onClick={() => handleLoadForEdit(def.id)}
@@ -7794,6 +7799,7 @@ const NetDot: React.FC<{ ok: boolean; off?: boolean; title: string }> = ({ ok, o
 );
 
 const NetworkMonitor: React.FC = () => {
+  const { t } = useTranslation();
   const [network, setNetwork] = useState<{ enabled: boolean; errors: string[]; universes: any[] } | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
 
@@ -7825,34 +7831,34 @@ const NetworkMonitor: React.FC = () => {
     <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
       <div className="px-4 py-2 border-b border-gray-800/50 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className="text-xs font-medium text-gray-400">Réseau sACN</span>
+          <span className="text-xs font-medium text-gray-400">{t('design.sacnNetwork')}</span>
           <span className="flex items-center gap-1.5 text-[10px] text-gray-500">
             <span className={`inline-block w-2 h-2 rounded-full ${network?.enabled ? 'bg-green-500' : 'bg-gray-700'}`} />
-            {network?.enabled ? 'récepteur actif' : 'récepteur inactif'}
+            {network?.enabled ? t('design.sacnRxOn') : t('design.sacnRxOff')}
           </span>
-          <span className="text-[10px] text-gray-600">ce qui part (émission) · ce qui arrive (réception, merge HTP)</span>
+          <span className="text-[10px] text-gray-600">{t('design.sacnHint')}</span>
         </div>
         {!!network?.errors?.length && (
           <span className="flex items-center gap-1 text-[10px] text-red-400">
-            <AlertTriangle size={11} /> {network.errors.length} erreur(s)
+            <AlertTriangle size={11} /> {t('design.sacnErrors', { count: network.errors.length })}
           </span>
         )}
       </div>
 
       {universes.length === 0 ? (
         <div className="p-4 text-center text-xs text-gray-600">
-          Aucun univers sACN configuré — le monitoring réseau s'affiche ici pour les univers de type sACN.
+          {t('design.sacnEmpty')}
         </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-gray-800/30 text-[10px] text-gray-500 uppercase tracking-wider">
-                <th className="text-left px-4 py-2 font-medium">Univers</th>
-                <th className="text-left px-4 py-2 font-medium">Émission (part)</th>
-                <th className="text-left px-4 py-2 font-medium">Réception (arrive)</th>
-                <th className="text-left px-4 py-2 font-medium">Sources reçues</th>
-                <th className="text-right px-4 py-2 font-medium">Réception</th>
+                <th className="text-left px-4 py-2 font-medium">{t('common.universe')}</th>
+                <th className="text-left px-4 py-2 font-medium">{t('design.sacnColTx')}</th>
+                <th className="text-left px-4 py-2 font-medium">{t('design.sacnColRx')}</th>
+                <th className="text-left px-4 py-2 font-medium">{t('design.sacnColSources')}</th>
+                <th className="text-right px-4 py-2 font-medium">{t('design.sacnColRxState')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800/20">
