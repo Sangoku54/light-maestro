@@ -386,16 +386,55 @@ function createWindow() {
 }
 
 function createTray() {
-  const icon = nativeImage.createEmpty();
-  tray = new Tray(icon);
-  tray.setToolTip('Light Maestro');
+  buildTrayMenu();
+}
+
+type MainLocale = 'fr' | 'en';
+let mainLocale: MainLocale = 'fr';
+
+/** Libellés natifs (tray + dialogues) — le renderer pousse sa langue via app:set-locale. */
+const MAIN_STRINGS: Record<MainLocale, Record<string, string>> = {
+  fr: {
+    trayShow: 'Afficher', trayHide: 'Masquer', trayQuit: 'Quitter',
+    dlgOpenShow: 'Ouvrir un show', dlgOpenFile: 'Ouvrir un fichier',
+    dlgSaveFile: 'Enregistrer le fichier', dlgImportAudio: 'Importer un fichier audio',
+    dlgOpenProject: 'Ouvrir un projet', dlgRepairPresets: 'Dossier de presets à réparer (.lmpreset)',
+    filterShow: 'Show Light Maestro', filterAudio: 'Audio', filterProject: 'Projet Light Maestro',
+  },
+  en: {
+    trayShow: 'Show', trayHide: 'Hide', trayQuit: 'Quit',
+    dlgOpenShow: 'Open Show', dlgOpenFile: 'Open File',
+    dlgSaveFile: 'Save File', dlgImportAudio: 'Import Audio File',
+    dlgOpenProject: 'Open Project', dlgRepairPresets: 'Presets folder to repair (.lmpreset)',
+    filterShow: 'Light Maestro Show', filterAudio: 'Audio', filterProject: 'Light Maestro Project',
+  },
+};
+
+function L(key: string): string {
+  return MAIN_STRINGS[mainLocale]?.[key] ?? MAIN_STRINGS.en[key] ?? key;
+}
+
+function buildTrayMenu(): void {
+  if (!tray) {
+    const icon = nativeImage.createEmpty();
+    tray = new Tray(icon);
+    tray.setToolTip('Light Maestro');
+  }
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Show', click: () => mainWindow?.show() },
-    { label: 'Hide', click: () => mainWindow?.hide() },
+    { label: L('trayShow'), click: () => mainWindow?.show() },
+    { label: L('trayHide'), click: () => mainWindow?.hide() },
     { type: 'separator' },
-    { label: 'Quit', click: () => { mainWindow?.webContents.send('app:before-close'); } }
+    { label: L('trayQuit'), click: () => { mainWindow?.webContents.send('app:before-close'); } }
   ]));
 }
+
+ipcMain.handle('app:set-locale', (_event, locale: unknown) => {
+  if (locale === 'en' || locale === 'fr') {
+    mainLocale = locale;
+    try { buildTrayMenu(); } catch { /* tray pas encore créé */ }
+  }
+  return mainLocale;
+});
 
 // ─── IPC Handlers: Remote web LAN ────────────────────────────
 // Serveur HTTP embarqué (0.0.0.0:8080, token d'auth). Les commandes
@@ -622,8 +661,8 @@ ipcMain.handle('show:load', async (_, filePath: string) => {
 ipcMain.handle('show:listRecent', async () => showStorage.listRecent());
 ipcMain.handle('show:openDialog', async () => {
   const { filePaths } = await dialog.showOpenDialog({
-    title: 'Open Show',
-    filters: [{ name: 'Light Maestro Show', extensions: ['lmshow'] }],
+    title: L('dlgOpenShow'),
+    filters: [{ name: L('filterShow'), extensions: ['lmshow'] }],
     properties: ['openFile'],
   });
   if (!filePaths || filePaths.length === 0) return null;
@@ -633,7 +672,7 @@ ipcMain.handle('show:openDialog', async () => {
 // ─── IPC Handlers: Generic File Dialog ──────────────────────
 ipcMain.handle('dialog:openFile', async (_, filters: Electron.FileFilter[]) => {
   const { filePaths } = await dialog.showOpenDialog({
-    title: 'Open File',
+    title: L('dlgOpenFile'),
     filters: filters || [],
     properties: ['openFile'],
   });
@@ -645,7 +684,7 @@ ipcMain.handle('dialog:openFile', async (_, filters: Electron.FileFilter[]) => {
 
 ipcMain.handle('dialog:saveFile', async (_, filters: Electron.FileFilter[], defaultName: string, content: string) => {
   const { filePath } = await dialog.showSaveDialog({
-    title: 'Save File',
+    title: L('dlgSaveFile'),
     defaultPath: defaultName,
     filters: filters || [],
   });
@@ -657,8 +696,8 @@ ipcMain.handle('dialog:saveFile', async (_, filters: Electron.FileFilter[], defa
 // ─── IPC Handlers: Audio ──────────────────────────────────────
 ipcMain.handle('audio:import', async () => {
   const { filePaths } = await dialog.showOpenDialog({
-    title: 'Import Audio File',
-    filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma', 'aiff'] }],
+    title: L('dlgImportAudio'),
+    filters: [{ name: L('filterAudio'), extensions: ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma', 'aiff'] }],
     properties: ['openFile'],
   });
   if (!filePaths || filePaths.length === 0) return null;
@@ -875,7 +914,7 @@ ipcMain.on('audio:pushBuffer', (_, buffer: Float32Array) => {
 ipcMain.handle('project:save', async (_, payload: { content: string; blobs: any[] }) => {
   const result = await dialog.showSaveDialog(mainWindow!, {
     defaultPath: `lightmaestro-project-${Date.now()}.lmproj`,
-    filters: [{ name: 'Light Maestro Project', extensions: ['lmproj'] }],
+    filters: [{ name: L('filterProject'), extensions: ['lmproj'] }],
   });
   if (result.canceled || !result.filePath) return null;
   const { content, blobs = [] } = payload ?? {};
@@ -885,8 +924,8 @@ ipcMain.handle('project:save', async (_, payload: { content: string; blobs: any[
 
 ipcMain.handle('project:open', async () => {
   const result = await dialog.showOpenDialog(mainWindow!, {
-    title: 'Open Project',
-    filters: [{ name: 'Light Maestro Project', extensions: ['lmproj'] }],
+    title: L('dlgOpenProject'),
+    filters: [{ name: L('filterProject'), extensions: ['lmproj'] }],
     properties: ['openFile'],
   });
   if (result.canceled || result.filePaths.length === 0) return null;
@@ -914,7 +953,7 @@ ipcMain.handle('presets:load', async () => {
 // jamais aux fichiers déjà OK ni à leur contenu hors audio.
 ipcMain.handle('presets:repairAudio', async () => {
   const pick = await dialog.showOpenDialog(mainWindow!, {
-    title: 'Dossier de presets à réparer (.lmpreset)',
+    title: L('dlgRepairPresets'),
     properties: ['openDirectory'],
   });
   if (pick.canceled || pick.filePaths.length === 0) return null;

@@ -166,7 +166,7 @@ contextBridge.exposeInMainWorld('lightMaestro', {
 
   // App-level controls
   app: {
-    onBeforeClose: (callback: () => void) => {
+    setLocale: (locale: string) => ipcRenderer.invoke('app:set-locale', locale),    onBeforeClose: (callback: () => void) => {
       ipcRenderer.on('app:before-close', () => callback());
       return () => { ipcRenderer.removeAllListeners('app:before-close'); };
     },
