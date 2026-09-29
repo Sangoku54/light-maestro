@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Aide — Light Maestro | 19 fiches par fonction</title>
+<meta name="description" content="Centre d'aide Light Maestro : 19 fiches par fonction — pas-à-pas, astuces régie et défis pour chaque outil du logiciel."/>
+<link rel="icon" type="image/png" href="./assets/favicon-32.png"/>
+<link rel="stylesheet" href="./assets/site.css"/>
+<style>.chapter{scroll-margin-top:84px} [data-help-nav].active{background:rgba(139,92,246,.18) !important; border-color:rgba(139,92,246,.35) !important; color:#ede9fe !important}</style>
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="./index.html"><img src="./assets/logo.svg" alt="Light Maestro" style="width:34px;height:34px;border-radius:10px;box-shadow:0 8px 24px rgba(168,85,247,.35)"/><span class="brand-word">LIGHT <span>MAESTRO</span></span></a>
+    <nav class="nav-links"><a href="./index.html">Accueil</a><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tutoriels.html">Tutoriels</a><a class="active" href="./aide.html">Aide</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a><a href="./support.html">Support</a></nav>
+    <div style="display:flex; gap:10px; align-items:center"><a class="nav-cta" href="./telecharger.html">⬇ Télécharger</a><button class="hamburger" data-menu>≡</button></div>
+  </div>
+  <div data-menu-panel style="display:none; border-top:1px solid #1f1f2e; background: rgba(6,6,10,.88)"><div class="wrap" style="padding:12px 20px; display:flex; flex-wrap:wrap; gap:10px"><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a><a href="./support.html">Support</a></div></div>
+</header>
+
+<section class="hero" style="padding:28px 0 18px">
+  <div class="wrap">
+    <span class="kicker">Centre d'aide • 19 fiches</span>
+    <h1 class="h1">Chaque fonction, expliquée comme en régie.</h1>
+    <p class="lead">Pas-à-pas concrets, astuces terrain et un défi par fiche. Même contenu que l'aide intégrée au logiciel (bouton Aide en haut à droite).</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap" style="display:grid; grid-template-columns:250px 1fr; gap:18px; align-items:start">
+    <div class="card" style="position:sticky; top:84px; max-height:70vh; overflow-y:auto">
+      <div style="margin-bottom:14px">
+        <div style="font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin-bottom:6px">Démarrer</div>
+<button data-help-nav="projets" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">📁</span>Projets : créer, ouvrir, sauver
+        </button>
+<button data-help-nav="audio" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">🎧</span>Audio : importer et analyser
+        </button>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin-bottom:6px">Show Auto</div>
+<button data-help-nav="show-auto" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">⚡</span>Show auto : ton morceau pilote la lumière
+        </button>
+<button data-help-nav="palettes" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">🎨</span>Palettes Couleur
+        </button>
+<button data-help-nav="scenes-preprog" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">✨</span>Scènes pré-programmées
+        </button>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin-bottom:6px">Configuration</div>
+<button data-help-nav="patch" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">🔌</span>Patch : déclarer tes projecteurs
+        </button>
+<button data-help-nav="groupes" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">👥</span>Groupes
+        </button>
+<button data-help-nav="scenes" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">🎬</span>Scènes : tes looks figés
+        </button>
+<button data-help-nav="chasers" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">🏃</span>Chasers : enchaîner des scènes
+        </button>
+<button data-help-nav="cuelists" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">📋</span>Cue Lists : la conduite au bouton GO
+        </button>
+<button data-help-nav="rgb-matrix" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">🟧</span>Matrice RGB
+        </button>
+<button data-help-nav="efx" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">🌀</span>EFX : mouvements paramétriques
+        </button>
+<button data-help-nav="vue-2d" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">🗺️</span>Vue 2D : le plan de scène
+        </button>
+<button data-help-nav="programmeur" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">🟣</span>Programateur : le live avant de sauver
+        </button>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin-bottom:6px">Performance</div>
+<button data-help-nav="console" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">🎛️</span>Console Virtuelle : tes tuiles de live
+        </button>
+<button data-help-nav="curseurs" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">🎚️</span>Curseurs : Grand Master et canal DMX
+        </button>
+<button data-help-nav="midi" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">🎹</span>MIDI : Learn + LEDs qui suivent
+        </button>
+<button data-help-nav="distance" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">📡</span>À distance : OSC, Timecode, Remote web
+        </button>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin-bottom:6px">Compte</div>
+<button data-help-nav="licence" style="display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; border:1px solid transparent; background:none; color:#d1d5db; font-size:13px; cursor:pointer">
+          <span style="margin-right:6px">🔑</span>Compte &amp; Licence : gratuit, Standard, Complète
+        </button>
+      </div>
+    </div>
+    <div>
+    <article class="card chapter" id="aide-projets" data-help-page="projets" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">📁</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Projets : créer, ouvrir, sauver</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Tout ton show tient dans un fichier .lmproj : patch, scènes, presets, console.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>En haut : Nouveau (page blanche), Ouvrir (un .lmproj), Enregistrer (Ctrl+S).</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Travaillez sans peur : à la fermeture, un garde-fou propose Sauver / Jeter.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Un point sale = pastille : tant qu’elle est là, ce n’est pas sauvé.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Un .lmproj par soirée + date dans le nom : « 2026-10-31-club.lmproj ».</li>
+            <li style="margin-bottom:6px">💡 Copie le fichier sur clé USB avant de partir — c’est ton backup.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Crée un projet, patch une fixture, sauvegarde avec Ctrl+S.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-audio" data-help-page="audio" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">🎧</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Audio : importer et analyser</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Pas d’analyse = pas de show auto. Un morceau bien analysé, c’est 80 % du travail fait.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Mode Show Auto → Source Audio : glisse un MP3/WAV/FLAC.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Lance l’analyse : BPM, sections (intro/couplet/refrain/drop) et énergie sont détectés.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Vérifie les sections affichées : si le drop est mal placé, force le BPM au tap tempo.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Coupe les silences et intros parlées avant analyse : tempo plus juste.</li>
+            <li style="margin-bottom:6px">💡 Un morceau à tempo variable reste un challenge — cale le BPM à la main.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Analyse un morceau et retrouve son drop sur la timeline.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-show-auto" data-help-page="show-auto" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">⚡</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Show auto : ton morceau pilote la lumière</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Le Show auto génère chasers, couleurs, strobes et mouvements depuis l’analyse. Toi, tu règles le goût.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Choisis un preset (.lmpreset) ou génère depuis ton morceau analysé.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Règle intensité, palette, mouvement et division du temps.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Appuie sur lecture : la lumière suit les sections (le drop tape plus fort).</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">4</span><span>Sauvegarde en preset pour rejouer à l’identique en live.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Strobe trop violent ? Baisse la limite strobe avant de toucher au reste.</li>
+            <li style="margin-bottom:6px">💡 En live : Grand Master ou Blackout, toujours à portée de main.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Joue un morceau entier sans toucher un slider après le lancement.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-palettes" data-help-page="palettes" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">🎨</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Palettes Couleur</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Des couleurs cohérentes sur tout le show, au lieu d’un arc-en-ciel fatigué.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Onglet Palettes Couleur : choisis Warm, Cool ou Party selon l’ambiance.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Applique par section : un couplet froid + un refrain chaud, ça raconte quelque chose.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Crée tes presets : 3 couleurs qui vont ensemble valent mieux que 12 au hasard.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Moins de couleurs = show plus pro. 3 max par morceau.</li>
+            <li style="margin-bottom:6px">💡 Le blanc casse tout : réserve-le aux pics (drop, final).</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Refais un de tes morceaux avec une seule palette de 3 couleurs.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-scenes-preprog" data-help-page="scenes-preprog" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">✨</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Scènes pré-programmées</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">128 scènes générées depuis TON patch, en 4 banques de 32. La panne d’inspiration n’existe plus.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Onglet Scènes pré-programmées : choisis une banque (Couleurs, Effets, Matrice, Mix).</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Clique une tuile : elle joue en boucle. Re-clique : elle s’arrête ET s’éteint.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>« Régénérer » produit 128 nouvelles variantes du même patch.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Une tuile allumée le reste même en changeant d’onglet — re-clique pour l’éteindre.</li>
+            <li style="margin-bottom:6px">💡 Les tuiles Effets bougent les têtes : vérifie où elles pointent avant le public.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Trouve une tuile Effets qui bouge + une tuile Couleurs qui claque, enchaîne-les.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-patch" data-help-page="patch" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">🔌</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Patch : déclarer tes projecteurs</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Le logiciel ne devine pas ton parc : chaque projecteur se déclare une fois, avec sa bonne adresse.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Mode Configuration → onglet Projecteurs : cherche ton modèle (1500+ références, import .qxf possible).</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Pose-le à son adresse DMX réelle (lis la notice du projecteur).</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Conflit d’adresses = rouge : corrige avant de continuer.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">4</span><span>Répète pour chaque projecteur, dans l’ordre de la chaîne DMX.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Photo de l’afficheur DMX de chaque projecteur avant de démonter. Toujours.</li>
+            <li style="margin-bottom:6px">💡 Adresse qui se chevauchent = deux projecteurs qui font n’importe quoi ensemble.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Patch ton premier projecteur et allume-le depuis la fiche (test).</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-groupes" data-help-page="groupes" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">👥</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Groupes</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">« Les 4 washes de face » en un clic au lieu de 4 : regroupe par rôle, pas par hasard.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Onglet Groupes : crée un groupe par rôle (face, contre, lyres, strobes).</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Glisse les projecteurs dedans.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Pilote le groupe d’un coup dans scènes, chasers et EFX.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Un projecteur peut vivre dans plusieurs groupes (face + tous).</li>
+            <li style="margin-bottom:6px">💡 Nomme comme tu parles en régie : « face », « fond », « strobes ».</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Crée un groupe “face” et fais-le clignoter depuis une scène.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-scenes" data-help-page="scenes" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">🎬</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Scènes : tes looks figés</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Une scène = un état complet des projecteurs. C’est la brique de tout le reste.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Onglet Scènes : Nouvelle scène, règle dimmer/couleurs/positions.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Dose fade in/out et durée (0 = infini, reste allumée).</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Clic droit sur une scène : Renommer, Modifier, Dupliquer.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">4</span><span>Modifier allume les faisceaux pour régler en voyant — la preview tient tant que tu édites.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Duplique plutôt que de repartir de zéro : 80 % des looks se ressemblent.</li>
+            <li style="margin-bottom:6px">💡 Durée 0 = tenue infinie : parfait pour bosser, à éviter en chaser sans fin voulue.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Crée “Rouge face” : washes en rouge à 100 %, le reste éteint.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-chasers" data-help-page="chasers" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">🏃</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Chasers : enchaîner des scènes</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Un chaser joue des scènes en boucle : chenillards, vagues, strobes rythmés.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Onglet Chasers : Nouveau, ajoute des scènes comme pas.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Règle l’ordre, la vitesse et la direction (avant, arrière, ping-pong).</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Teste : ça tourne en boucle jusqu’à l’arrêt.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Un chaser à 2 pas bien calés bat un chaser à 12 pas brouillons.</li>
+            <li style="margin-bottom:6px">💡 Vitesse en BPM du morceau = chaser qui respire avec la musique.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Un chaser 2 pas (rouge/bleu) qui tourne propre à 120 BPM.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-cuelists" data-help-page="cuelists" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">📋</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Cue Lists : la conduite au bouton GO</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Théâtre, one-man-show, cérémonie : chaque appui sur GO envoie la cue suivante.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Onglet Cue Lists : Nouvelle liste, empile scènes et chasers.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Règle GO manuel ou follow (enchaînement auto après la durée).</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>En live : un seul bouton, pas d’impro à 3h du matin.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Numérote et nomme chaque cue comme ton conducteur (« Q12 - final »).</li>
+            <li style="margin-bottom:6px">💡 Follow pour les transitions timed, GO manuel dès qu’un humain parle.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Une cue list de 3 cues jouée au GO sans faute.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-rgb-matrix" data-help-page="rgb-matrix" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">🟧</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Matrice RGB</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Transforme tes PARs en écran géant : lignes, cercles, diamants qui courent.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Onglet Matrice RGB : dessine ta matrice (lignes/colonnes).</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Choisis un motif : ligne, cercle, diamant, carré, triangle.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Lance : le motif court, en rythme si audio-réactif.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Ordonne la matrice comme la scène vue du public, sinon le motif part à l’envers.</li>
+            <li style="margin-bottom:6px">💡 Moins vite = plus lisible. Un chase lent se voit, un chase rapide bave.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Un cercle qui tourne sur 4 PARs, sens horaire.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-efx" data-help-page="efx" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">🌀</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">EFX : mouvements paramétriques</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Cercles, 8, carrés, vagues : des mouvements propres sans programmer pas à pas.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Onglet EFX : Nouvel effet, choisis un motif (cercle, 8, carré, triangle…).</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Règle largeur, hauteur, vitesse, rotation.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Lie-le à une scène : la scène joue le statique + la vague en continu.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Petite amplitude + vitesse lente = classe. Grand + vite = fête foraine.</li>
+            <li style="margin-bottom:6px">💡 Teste au sol d’abord : un cercle trop large finit dans le public.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Un 8 lent sur 2 lyres, 30 secondes sans toucher.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-vue-2d" data-help-page="vue-2d" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">🗺️</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Vue 2D : le plan de scène</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Place tes projecteurs comme en vrai : la 3D et les mouvements suivent.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Onglet Vue 2D : glisse chaque projecteur à sa place (pont, sol, côtés).</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Règle l’orientation : face public, contre, latéral.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>La Vue 3D et les faisceaux suivent ce plan.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Un plan faux = des faisceaux qui ne vont nulle part en 3D.</li>
+            <li style="margin-bottom:6px">💡 Mets à jour le plan à chaque changement de salle.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Reproduis ta dernière implantation réelle en 2D.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-programmeur" data-help-page="programmeur" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">🟣</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Programateur : le live avant de sauver</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Le violet, c’est du live non sauvé. Le programateur essaie, la scène garde.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Touche des canaux : ils partent en live (violet), sans toucher aux scènes.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Ça plaît ? Store vers une scène (nouvelle ou existante).</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Ça plaît pas ? Clear : retour à l’état programmé.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Jamais de Store sans regarder ce qui est violet : tu sauverais des scories.</li>
+            <li style="margin-bottom:6px">💡 Le programateur a priorité sur presque tout : s’il est plein, rien d’autre ne passe.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Monte un look au programateur, Store-le en nouvelle scène, Clear.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-console" data-help-page="console" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">🎛️</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Console Virtuelle : tes tuiles de live</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Boutons et scènes à toi, en grand, cliquables en stress : ta console perso.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Mode Performance : ajoute boutons (scènes, chasers, blackout) sur le canevas.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Déplace/Redimensionne au drag. Clic droit : configurer, supprimer.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Organise en pages (ex. une par morceau) et navigue aux onglets.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">4</span><span>En live : un appui = toggle, sauf flash (maintenu = momentané).</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Grosses tuiles pour les actions panique (blackout en énorme, en bas à droite).</li>
+            <li style="margin-bottom:6px">💡 Une page par morceau + une page “secours” : blackout, full, strobe.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Une page 4 tuiles : 2 scènes + 1 chaser + 1 blackout géant.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-curseurs" data-help-page="curseurs" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">🎚️</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Curseurs : Grand Master et canal DMX</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Deux faders vitaux : le volume général de la lumière, et un canal direct.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Ajoute un slider, fonction Grand Master : 0 = noir total, 255 = tout.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Ajoute un slider fonction Canal : choisis univers + adresse + valeur.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>En live, le Grand Master baisse tout sans toucher aux scènes.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Grand Master à 80 % en balance : marge de progression pour le show.</li>
+            <li style="margin-bottom:6px">💡 Un slider canal sur le dimmer de secours sauve quand une scène déraille.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Baisse un show en cours à mi-course uniquement au Grand Master.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-midi" data-help-page="midi" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">🎹</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">MIDI : Learn + LEDs qui suivent</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Mappe ton contrôleur une fois : pads, faders, et les LEDs qui reflètent l’état réel.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>Ouvre Mappage MIDI : bouge un contrôle → clique une action → mappé.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Les boutons mappés allument/éteignent comme les tuiles.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Le feedback LED renvoie l’état : pad allumé = tuile active, pour de vrai.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Mappe d’abord blackout + 4 scènes : le reste, c’est du bonus.</li>
+            <li style="margin-bottom:6px">💡 Si une LED ment, c’est le mapping qui est faux, pas la tuile.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Mappe 2 pads (scène on/off) + 1 fader (Grand Master).</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-distance" data-help-page="distance" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">📡</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">À distance : OSC, Timecode, Remote web</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Pilote depuis une tablette, un séquenceur ou une régie son : la lumière suit.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>OSC : reçois TouchOSC/Lemur sur le réseau (mêmes actions que MIDI).</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Timecode (MTC) : déclenche des cues sur le temps d’un séquenceur.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Remote web : active le serveur, scanne l’URL sur ton téléphone — même réseau exigé.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Teste le Wi-Fi de la salle AVANT : un réseau saturé = ordres perdus.</li>
+            <li style="margin-bottom:6px">💡 Le Remote reste en local : jamais exposé sur internet, par design.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Déclenche une scène depuis ton téléphone via le Remote.</p>
+      </div>
+    </article>
+    <article class="card chapter" id="aide-licence" data-help-page="licence" style="margin-bottom:16px; display:none">
+      <div style="font-size:26px">🔑</div>
+      <h2 class="h3" style="margin-top:8px; font-size:22px">Compte &amp; Licence : gratuit, Standard, Complète</h2>
+      <p style="color:#c4b5fd; font-size:13px; margin-top:6px">Gratuit : 1 fixture, 1 univers. Standard (69 €) : fixtures illimitées. Complète (99 €) : tout illimité. Perpétuel, jamais d’abonnement.</p>
+      <h3 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; margin:14px 0 8px">Pas à pas</h3>
+      <ol style="list-style:none; margin:0; padding:0; color:#e5e7eb; font-size:13px; line-height:1.7">
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">1</span><span>En haut à droite : badge de version + bouton Connexion.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">2</span><span>Crée ton compte (email de confirmation), connecte-toi.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">3</span><span>Achète depuis le modal : Standard 69 € ou Complète 99 €, paiement Stripe.</span></li>
+            <li style="display:flex; gap:10px; margin-bottom:8px"><span style="flex-shrink:0; width:22px; height:22px; border-radius:999px; background:rgba(139,92,246,.2); border:1px solid rgba(139,92,246,.4); color:#c4b5fd; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center">4</span><span>Après achat : reconnecte-toi pour activer. Hors-ligne ensuite : aucun souci.</span></li>
+      </ol>
+      <div style="margin-top:12px; border:1px solid rgba(245,158,11,.3); background:rgba(245,158,11,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#fbbf24; margin-bottom:6px">Astuces régie</div>
+        <ul style="list-style:none; margin:0; padding:0; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li style="margin-bottom:6px">💡 Connecte-toi une fois AVANT de partir en campagne sans réseau.</li>
+            <li style="margin-bottom:6px">💡 Ne te déconnecte jamais en live : hors-ligne = retour gratuit.</li>
+        </ul>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(34,211,238,.3); background:rgba(34,211,238,.05); border-radius:12px; padding:12px 14px">
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#67e8f9; margin-bottom:4px">🎯 Défi</div>
+        <p style="color:#e5e7eb; font-size:13px; margin:0">Crée ton compte et retrouve ton badge de version.</p>
+      </div>
+    </article>
+      <div class="card" style="text-align:center">
+        <h3 class="h3">Une question qui n'est pas dans les fiches ?</h3>
+        <p style="margin-top:8px">Écrivez-nous avec ce que vous vouliez faire — on répond et on enrichit l'aide.</p>
+        <div style="margin-top:12px"><a class="btn btn-ghost" href="./support.html#contact">Contacter le support →</a></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div><div style="display:flex; align-items:center; gap:10px; font-weight:900; letter-spacing:.18em; font-size:12px"><img src="./assets/logo.svg" alt="Light Maestro" style="width:28px;height:28px;border-radius:8px"/> LIGHT MAESTRO</div><p style="margin:10px 0 0; max-width:360px">L'aide du logiciel, en ligne.</p><p class="mono" style="margin-top:10px; font-size:11px; color:#6b7280">© <span data-year></span> Light Maestro</p></div>
+      <div><div style="font-weight:800; color:white; margin-bottom:8px">Apprendre</div><div style="display:grid; gap:8px"><a href="./tutoriels.html">Tutoriels</a><a href="./support.html">Support & FAQ</a></div></div>
+      <div><div style="font-weight:800; color:white; margin-bottom:8px">Site</div><div style="display:grid; gap:8px"><a href="./index.html">Accueil</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a></div></div>
+      <div><div style="font-weight:800; color:white; margin-bottom:8px">Légal</div><div style="display:grid; gap:8px"><a href="./mentions-legales.html">Mentions légales</a><a href="./licence.html">Licence</a></div></div>
+    </div>
+  </div>
+</footer>
+<script src="./assets/site.js"></script>
+<script>
+(function(){
+  var pages = Array.prototype.slice.call(document.querySelectorAll('[data-help-page]'));
+  var btns = Array.prototype.slice.call(document.querySelectorAll('[data-help-nav]'));
+  function show(id){
+    pages.forEach(function(a){ a.style.display = a.getAttribute('data-help-page') === id ? 'block' : 'none'; });
+    btns.forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-help-nav') === id); });
+    var el = document.querySelector('[data-help-page="' + id + '"]');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    try { history.replaceState(null, '', '#' + id); } catch(e) {}
+  }
+  btns.forEach(function(b){ b.addEventListener('click', function(){ show(b.getAttribute('data-help-nav')); }); });
+  var start = (location.hash || '').replace('#', '');
+  show(document.querySelector('[data-help-page="' + start + '"]') ? start : pages[0].getAttribute('data-help-page'));
+})();
+</script>
+</body>
+</html>
