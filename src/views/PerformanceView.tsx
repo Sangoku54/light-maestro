@@ -962,7 +962,7 @@ const PageContextMenu: React.FC<{
  * groupé par catégorie, pour retrouver la boucle choisie en amont.
  */
 const AutoLoopPicker: React.FC<{ selected?: LoopRecipe; onSelect: (r: LoopRecipe) => void }> = ({ selected, onSelect }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
   const fixturePositions = useShowStore((s) => s.fixturePositions);
   const [loops, setLoops] = useState<AutoLoop[]>([]);
@@ -977,7 +977,8 @@ const AutoLoopPicker: React.FC<{ selected?: LoopRecipe; onSelect: (r: LoopRecipe
       })
       .catch(() => { if (!cancelled) setLoops([]); });
     return () => { cancelled = true; };
-  }, [patchedFixtures, fixturePositions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patchedFixtures, fixturePositions, i18n.language]);
 
   const grouped: [AutoLoop['kind'], AutoLoop[]][] = LOOP_KIND_ORDER
     .map((k) => [k, loops.filter((l) => l.kind === k)] as [AutoLoop['kind'], AutoLoop[]])

@@ -9,6 +9,7 @@
 // Pas de boucle bloquante : la lecture s'arrête en `cancelAnimationFrame`.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useShowStore } from '../stores/showStore';
 import { useClockStore } from '../stores/clockStore';
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from './dmx-cues';
@@ -66,6 +67,7 @@ export function useAutoloopEngine(bpm = 120): AutoloopEngineApi {
   const rafRef = useRef(0);
   const startRef = useRef(0);
   const masterBpm = useClockStore((s) => s.bpm);
+  const { i18n } = useTranslation();
   const masterPhase = useClockStore((s) => s.phase);
   // Master Clock overrides local bpm when Link/MIDI/Tap actif — sinon bpm passé en param (QuickShow)
   const effectiveBpm = masterBpm > 0 ? masterBpm : bpm;
@@ -107,7 +109,8 @@ export function useAutoloopEngine(bpm = 120): AutoloopEngineApi {
     setBanks(b);
     const output = createAutoLoopOutput(patchedFixtures, universes);
     engineRef.current = new AutoloopPlaybackEngine(output, bpmRef.current);
-  }, [patchedFixtures, defs, universes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patchedFixtures, defs, universes, i18n.language]);
 
   const stopClock = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);

@@ -15,6 +15,7 @@
 import type { PatchedFixture, FixtureTier, SavedScene, SavedChaser, FixturePos } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureCapability } from '../hooks/dmx-cues';
 import { analyzeChannels, type ChannelAnalysis, pickLaserModeCap } from './fixture-analyzer';
+import { loopWord } from './autoloop-types';
 import { classifyGoboCap } from './gobo-engine';
 import { movementAt, type EffectPattern } from './effect-engine';
 import { zeroDmxOffset } from './dmx-movement';
@@ -250,7 +251,7 @@ function buildColorChase(
 
   return {
     id: variant ? `auto-cc-${tier}-${variant}` : `auto-cc-${tier}`,
-    name: variant ? `Chase · ${variant} · ${tier}` : `Color chase · ${tier}`,
+    name: variant ? `${loopWord('chase', 'Chase')} · ${variant} · ${tier}` : `${loopWord('colorChase', 'Color chase')} · ${tier}`,
     tier,
     kind: 'color-chase',
     fixtureIds: fixtures.map((f) => f.pf.id),
@@ -298,7 +299,7 @@ function buildMovementLoop(
 
   return {
     id: `auto-mv-${tier}-${pattern.name}`,
-    name: `Movement · ${pattern.name} · ${tier}`,
+    name: `${loopWord('movement', 'Movement')} · ${pattern.name} · ${tier}`,
     tier,
     kind: 'movement',
     fixtureIds: fixtures.map((f) => f.pf.id),
@@ -330,7 +331,7 @@ function buildDimmerPulse(
 
   return {
     id: `auto-dp-${tier}`,
-    name: `Dimmer pulse · ${tier}`,
+    name: `${loopWord('dimmerPulse', 'Dimmer pulse')} · ${tier}`,
     tier,
     kind: 'dimmer-pulse',
     fixtureIds: fixtures.map((f) => f.pf.id),
@@ -358,7 +359,7 @@ function buildStrobeLoop(
 
   return {
     id: `auto-st-${tier}`,
-    name: `Strobe · ${tier}`,
+    name: `${loopWord('strobe', 'Strobe')} · ${tier}`,
     tier,
     kind: 'strobe',
     fixtureIds: fixtures.map((f) => f.pf.id),
@@ -389,7 +390,7 @@ function buildColorWheelLoop(
   }
   return {
     id: `auto-cw-${tier}`,
-    name: `Color wheel · ${tier}`,
+    name: `${loopWord('colorWheel', 'Color wheel')} · ${tier}`,
     tier,
     kind: 'color-wheel',
     fixtureIds: fixtures.map((f) => f.pf.id),
@@ -436,7 +437,7 @@ function buildGoboLoop(
   }
   return {
     id: `auto-gb-${tier}`,
-    name: `Gobo · ${tier}`,
+    name: `${loopWord('gobo', 'Gobo')} · ${tier}`,
     tier,
     kind: 'gobo',
     fixtureIds: fixtures.map((f) => f.pf.id),
@@ -474,7 +475,7 @@ function buildEffectLoop(
   }
   return {
     id: `auto-fx-${tier}`,
-    name: `Effect · ${tier}`,
+    name: `${loopWord('effect', 'Effect')} · ${tier}`,
     tier,
     kind: 'effect',
     fixtureIds: fixtures.map((f) => f.pf.id),
@@ -510,7 +511,7 @@ function buildPrismLoop(
   }
   return {
     id: `auto-pr-${tier}`,
-    name: `Prism · ${tier}`,
+    name: `${loopWord('prism', 'Prism')} · ${tier}`,
     tier,
     kind: 'prism',
     fixtureIds: fixtures.map((f) => f.pf.id),
@@ -599,7 +600,7 @@ function buildLaserPatternLoop(
   }
   return {
     id: `auto-lp-${tier}`,
-    name: `Motifs laser · ${tier}`,
+    name: `${loopWord('laserPatterns', 'Motifs laser')} · ${tier}`,
     tier,
     kind: 'laser-pattern',
     fixtureIds: fixtures.map((f) => f.pf.id),
@@ -645,7 +646,7 @@ function buildLaserScanLoop(
   }
   return {
     id: `auto-ls-${tier}`,
-    name: shape === 'lissajous' ? `Balayage laser ∞ · ${tier}` : `Balayage laser · ${tier}`,
+    name: shape === 'lissajous' ? `${loopWord('laserScan8', 'Balayage laser ∞')} · ${tier}` : `${loopWord('laserScan', 'Balayage laser')} · ${tier}`,
     tier,
     kind: 'laser-scan',
     fixtureIds: fixtures.map((f) => f.pf.id),
@@ -685,7 +686,7 @@ function buildLaserColorLoop(
   }
   return {
     id: `auto-lc-${tier}`,
-    name: `Couleur laser · ${tier}`,
+    name: `${loopWord('laserColor', 'Couleur laser')} · ${tier}`,
     tier,
     kind: 'laser-color',
     fixtureIds: fixtures.map((f) => f.pf.id),
@@ -1003,9 +1004,9 @@ export function materializeAutoLoops(loops: AutoLoop[], store: AutoLoopStoreFaca
       });
       return sceneId;
     });
-    const chaserId = store.createChaser(`Auto · ${loop.name}`);
+    const chaserId = store.createChaser(`${loopWord('autoPrefix', 'Auto')} · ${loop.name}`);
     store.updateChaser(chaserId, {
-      name: `Auto · ${loop.name}`,
+      name: `${loopWord('autoPrefix', 'Auto')} · ${loop.name}`,
       steps: sceneIds.map((sceneId) => ({ sceneId, fadeIn: 0, hold: holdMs, fadeOut: 0 })),
       speed: loop.speedBpm,
       direction: loop.direction,

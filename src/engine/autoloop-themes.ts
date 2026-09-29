@@ -31,6 +31,7 @@ import {
   clampDmx,
 } from './autoloop-types';
 import { BankManager, BANKS, PER_BANK } from './autoloop-banks';
+import { loopColorLabel, loopMovementLabel, loopMatrixLabel, loopWord } from './autoloop-types';
 import { evalEffect, type EffectPattern } from './effect-engine';
 import { getPatternColor, hexToRgb } from './rgb-matrix-patterns';
 import { findBestWheelCap } from './dmx-color';
@@ -686,6 +687,15 @@ interface MatrixRecipe {
   beatsPerCycle: number;
 }
 
+/** Libellés FR sources des recettes matrice (clés stables du dict de locale). */
+export function matrixRecipeLabels(): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const r of MATRIX_RECIPES) {
+    if (!seen.has(r.label)) { seen.add(r.label); out.push(r.label); }
+  }
+  return out;
+}
 /** Les 32 recettes de la banque « Matrice RGB ». */
 const MATRIX_RECIPES: readonly MatrixRecipe[] = [
   { pattern: 'chase', label: 'Chase bleu', start: '#0066ff', end: '#ffffff', width: 30, beatsPerCycle: 2 },
@@ -815,7 +825,7 @@ function buildColorBank(fixtures: AutoloopFixture[], category: FixtureCategory):
     }
     out.push(
       makeLoop(
-        { id: `theme-couleurs-${i + 1}`, label: color.label, theme: 'couleurs', swatch: color.hex, bars: DEFAULT_BARS, category },
+        { id: `theme-couleurs-${i + 1}`, label: loopColorLabel(color.hex, color.label), theme: 'couleurs', swatch: color.hex, bars: DEFAULT_BARS, category },
         kb,
       ),
     );
@@ -846,7 +856,7 @@ function buildEffectBank(fixtures: AutoloopFixture[], category: FixtureCategory)
     const radii = [96, 74, 112];
     const cycles = [4, 8, 2];
     MOVE_PATTERNS.forEach((mv, i) => {
-      push(mv.label, undefined, (kb) => {
+      push(loopMovementLabel(mv.pattern, mv.label), undefined, (kb) => {
         for (const fx of fixtures) {
           putMovement(kb, fx, mv.pattern, length, radii[i % radii.length], cycles[i % cycles.length]);
         }
@@ -855,46 +865,46 @@ function buildEffectBank(fixtures: AutoloopFixture[], category: FixtureCategory)
   }
 
   // 2. Lumière : strobe + respiration.
-  push('Strobe lent', undefined, (kb) => {
+  push(loopWord('tmplStrobeSlow', 'Strobe lent'), undefined, (kb) => {
     for (const fx of fixtures) putStrobe(kb, fx, length, 1);
   });
-  push('Strobe rapide', undefined, (kb) => {
+  push(loopWord('tmplStrobeFast', 'Strobe rapide'), undefined, (kb) => {
     for (const fx of fixtures) putStrobe(kb, fx, length, 0.5);
   });
-  push('Respiration lente', undefined, (kb) => {
+  push(loopWord('tmplBreathSlow', 'Respiration lente'), undefined, (kb) => {
     for (const fx of fixtures) putDimmerPulse(kb, fx, length, 8);
   });
-  push('Respiration rapide', undefined, (kb) => {
+  push(loopWord('tmplBreathFast', 'Respiration rapide'), undefined, (kb) => {
     for (const fx of fixtures) putDimmerPulse(kb, fx, length, 2);
   });
 
   // 3. Roue couleur / gobo / prisme / beam — seulement si détectés.
   if (has('wheel')) {
-    push('Roue couleur', undefined, (kb) => {
+    push(loopWord('tmplWheel', 'Roue couleur'), undefined, (kb) => {
       for (const fx of fixtures) putWheelSweep(kb, fx, length);
     });
-    push('Roue → dégradé', undefined, (kb) => {
+    push(loopWord('tmplWheelGrad', 'Roue → dégradé'), undefined, (kb) => {
       for (const fx of fixtures) putWheelSweep(kb, fx, Math.round(length / 2));
     });
   }
   if (has('gobo')) {
-    push('Gobo', undefined, (kb) => {
+    push(loopWord('tmplGobo', 'Gobo'), undefined, (kb) => {
       for (const fx of fixtures) putGobo(kb, fx, length);
     });
-    push('Gobo rapide', undefined, (kb) => {
+    push(loopWord('tmplGoboFast', 'Gobo rapide'), undefined, (kb) => {
       for (const fx of fixtures) putGobo(kb, fx, Math.round(length / 2));
     });
   }
   if (has('prism')) {
-    push('Prisme', undefined, (kb) => {
+    push(loopWord('tmplPrism', 'Prisme'), undefined, (kb) => {
       for (const fx of fixtures) putPrism(kb, fx, length);
     });
   }
   const beamSwings: Array<['zoom' | 'frost' | 'iris' | 'focus', string, number, number]> = [
-    ['zoom', 'Zoom large/étroit', 24, 200],
-    ['iris', 'Iris ouvre/ferme', 48, 220],
-    ['frost', 'Frost doux/plein', 0, 180],
-    ['focus', 'Focus proche/lointain', 48, 208],
+    ['zoom', loopWord('tmplBeamZoom', 'Zoom large/étroit'), 24, 200],
+    ['iris', loopWord('tmplBeamIris', 'Iris ouvre/ferme'), 48, 220],
+    ['frost', loopWord('tmplBeamFrost', 'Frost doux/plein'), 0, 180],
+    ['focus', loopWord('tmplBeamFocus', 'Focus proche/lointain'), 48, 208],
   ];
   for (const [channel, label, lo, hi] of beamSwings) {
     if (!has(channel)) continue;
@@ -903,10 +913,10 @@ function buildEffectBank(fixtures: AutoloopFixture[], category: FixtureCategory)
     });
   }
   if (fixtures.some((fx) => fx.isLaser)) {
-    push('Laser — balayage', undefined, (kb) => {
+    push(loopWord('tmplLaserScan', 'Laser — balayage'), undefined, (kb) => {
       for (const fx of fixtures) putLaserScanSpeed(kb, fx, length);
     });
-    push('Laser — motif', undefined, (kb) => {
+    push(loopWord('tmplLaserPattern', 'Laser — motif'), undefined, (kb) => {
       const pattern = (fx: AutoloopFixture) => off(fx, 'pattern');
       for (const fx of fixtures) {
         const addr = pattern(fx);
@@ -934,7 +944,10 @@ function buildEffectBank(fixtures: AutoloopFixture[], category: FixtureCategory)
       const radius = 60 + ((v * 17) % 61); // 60..120
       const cycles = [4, 6, 8, 2, 10][v % 5];
       const color = THEME_COLORS[v % THEME_COLORS.length];
-      label = `${mv.label} ${radius} · ${color.label}`;
+      label = loopWord('tmplMoveRadiusColor', `${mv.label} ${radius} · ${color.label}`)
+        .replace('{move}', loopMovementLabel(mv.pattern, mv.label))
+        .replace('{radius}', String(radius))
+        .replace('{color}', loopColorLabel(color.hex, color.label));
       swatch = color.hex;
       // Base lumière OBLIGATOIRE : un mouvement seul (pan/tilt sans dimmer
       // ni couleur) joue dans le noir — tuile « qui ne déclenche rien ».
@@ -947,7 +960,9 @@ function buildEffectBank(fixtures: AutoloopFixture[], category: FixtureCategory)
       // Aucun axe : on varie la respiration + une couleur (slot toujours utile).
       const period = 2 + (v % 6);
       const color = THEME_COLORS[v % THEME_COLORS.length];
-      label = `Respiration ${period}b · ${color.label}`;
+      label = loopWord('tmplBreathPeriod', `Respiration ${period}b · ${color.label}`)
+        .replace('{period}', String(period))
+        .replace('{color}', loopColorLabel(color.hex, color.label));
       swatch = color.hex;
       for (const fx of fixtures) {
         putBase(kb, fx);
@@ -959,7 +974,7 @@ function buildEffectBank(fixtures: AutoloopFixture[], category: FixtureCategory)
     if (kb.keys.length === 0) {
       // Rien d'exploitable : couleur pleine (garantie d'un slot non vide).
       const color = THEME_COLORS[v % THEME_COLORS.length];
-      label = color.label;
+      label = loopColorLabel(color.hex, color.label);
       swatch = color.hex;
       for (const fx of fixtures) {
         putBase(kb, fx);
@@ -1023,7 +1038,7 @@ function buildMatrixBank(fixtures: AutoloopFixture[], category: FixtureCategory)
 
     out.push(
       makeLoop(
-        { id: `theme-matrice-${i + 1}`, label: recipe.label, theme: 'matrice', swatch: recipe.start, bars: DEFAULT_BARS, category },
+        { id: `theme-matrice-${i + 1}`, label: loopMatrixLabel(recipe.label), theme: 'matrice', swatch: recipe.start, bars: DEFAULT_BARS, category },
         kb,
       ),
     );
@@ -1055,16 +1070,16 @@ function buildMixBank(fixtures: AutoloopFixture[], category: FixtureCategory): A
     }
 
     const suffix =
-      variant === 4 ? ' · Strobe' :
-      variant === 5 ? ' · Respiration' :
-      variant === 6 ? ' · Strobe rapide' :
-      variant === 7 ? ' · Roue' : '';
+      variant === 4 ? loopWord('tmplMixSuffixStrobe', ' · Strobe') :
+      variant === 5 ? loopWord('tmplMixSuffixBreath', ' · Respiration') :
+      variant === 6 ? loopWord('tmplMixSuffixStrobeFast', ' · Strobe rapide') :
+      variant === 7 ? loopWord('tmplMixSuffixWheel', ' · Roue') : '';
 
     out.push(
       makeLoop(
         {
           id: `theme-mix-${i + 1}`,
-          label: `${color.label} · ${mv.label}${suffix}`,
+          label: `${loopColorLabel(color.hex, color.label)} · ${loopMovementLabel(mv.pattern, mv.label)}${suffix}`,
           theme: 'mix',
           swatch: color.hex,
           bars: DEFAULT_BARS,
@@ -1096,7 +1111,7 @@ export function buildThemedBanks(fixtures: AutoloopFixture[]): BankManager {
     const loops = builders[bank](fixtures, category);
     padToBank(loops, () =>
       makeLoop(
-        { id: `theme-${BANK_THEMES[bank].id}-fallback`, label: 'Aucun canal', theme: BANK_THEMES[bank].id, bars: DEFAULT_BARS, category },
+        { id: `theme-${BANK_THEMES[bank].id}-fallback`, label: loopWord('tmplNoChannel', 'Aucun canal'), theme: BANK_THEMES[bank].id, bars: DEFAULT_BARS, category },
         new KeyBuilder(),
       ),
     );

@@ -44,7 +44,7 @@ const DEFAULT_COUNT = 36;
  * materializes the loop into a playable chaser and starts it on click.
  */
 export const AutoLoopsPanel: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
   const [fixtureDefs, setFixtureDefs] = useState<Map<string, DmxFixtureDefinition>>(new Map());
   const [seed, setSeed] = useState(0);
@@ -152,7 +152,8 @@ export const AutoLoopsPanel: React.FC = () => {
       seed,
       positions: useShowStore.getState().fixturePositions,
     });
-  }, [patchedFixtures, fixtureDefs, seed, patchKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patchedFixtures, fixtureDefs, seed, patchKey, i18n.language]);
 
   const counts = useMemo(() => {
     const map = new Map<AutoLoopKind, number>();

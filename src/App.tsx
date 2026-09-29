@@ -20,6 +20,7 @@ import { AudioCaptureProvider } from './hooks/useAudioCapture';
 import { useAudioFileLoader } from './hooks/useAudioFileLoader';
 import { useRgbMatrixPlayback } from './hooks/rgb-matrix-playback';
 import { useMidiTriggers } from './hooks/midi-trigger';
+import { useLoopLocale } from './hooks/use-loop-locale';
 import { useMidiFeedback } from './hooks/use-midi-feedback';
 import { useRemoteTriggers } from './hooks/remote-trigger';
 import { useMtcTriggers } from './hooks/mtc-trigger';
@@ -245,6 +246,8 @@ const App: React.FC = () => {
 
   // MIDI triggers — global (scènes/chasers/cuelists/autoscript/widgets)
   useMidiTriggers();
+  // Libellés moteur des boucles : suivent la langue UI.
+  useLoopLocale();
 
   // Feedback MIDI (LED des pads du contrôleur) — état des tuiles poussé au main
   useMidiFeedback();

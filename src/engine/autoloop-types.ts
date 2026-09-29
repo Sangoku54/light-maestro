@@ -10,7 +10,73 @@
 // PAS une liste de scenes : chaque clé décrit un état DMX (position, attribut)
 // à un instant `beat` précis du loop.
 //
-// Ce module ne contient que des types et leurs mathématiques associées.
+// Ce module ne contient que des types et leurs mathématiques associées,
+// plus le registre de libellés localisés ci-dessous (français par défaut,
+// écrasé par le hook useLoopLocale — les tests gardent le français).
+
+/** Libellés localisables des boucles générées (clés stables → texte). */
+export interface LoopTextDict {
+  kinds: Record<string, string>;
+  words: Record<string, string>;
+  /** hex couleur (minuscules) → nom. */
+  colors: Record<string, string>;
+  /** pattern de mouvement → nom. */
+  movements: Record<string, string>;
+  /** id de banque → { label, hint }. */
+  themes: Record<string, { label: string; hint: string }>;
+  /** libellé FR de recette matrice → libellé traduit. */
+  matrix: Record<string, string>;
+}
+
+const _text: LoopTextDict = { kinds: {}, words: {}, colors: {}, movements: {}, themes: {}, matrix: {} };
+
+/** Remplace (fusion) les libellés — appelé par useLoopLocale au changement de langue. */
+export function setLoopLocaleText(partial: Partial<LoopTextDict>): void {
+  for (const k of ['kinds', 'words', 'colors', 'movements', 'themes', 'matrix'] as const) {
+    const part = (partial as Record<string, Record<string, unknown>>)[k];
+    if (part) Object.assign(_text[k], part);
+  }
+}
+
+/** Réinitialise les surcharges (français codé en dur). Test uniquement. */
+export function resetLoopLocaleText(): void {
+  _text.kinds = {};
+  _text.words = {};
+  _text.colors = {};
+  _text.movements = {};
+  _text.themes = {};
+  _text.matrix = {};
+}
+
+/** Libellé de kind (boucle), repli = libellé français codé en dur. */
+export function loopKindLabel(kind: string, fallback: string): string {
+  return _text.kinds[kind] ?? fallback;
+}
+
+/** Mot de nommage (Chase, Strobe…), repli français. */
+export function loopWord(key: string, fallback: string): string {
+  return _text.words[key] ?? fallback;
+}
+
+/** Nom de couleur par hex, repli français. */
+export function loopColorLabel(hex: string, fallback: string): string {
+  return _text.colors[hex.toLowerCase()] ?? fallback;
+}
+
+/** Nom de mouvement par pattern, repli français. */
+export function loopMovementLabel(pattern: string, fallback: string): string {
+  return _text.movements[pattern] ?? fallback;
+}
+
+/** Libellé de recette matrice (repli = français codé en dur). */
+export function loopMatrixLabel(french: string): string {
+  return _text.matrix[french] ?? french;
+}
+
+/** Label/hint de banque thématique, null = garder les statiques. */
+export function loopThemeText(id: string): { label: string; hint: string } | null {
+  return (_text.themes[id] as { label: string; hint: string } | undefined) ?? null;
+}
 
 /** Nombre de beats par mesure (signature 4/4, hypothèse des boucles auto). */
 export const BEATS_PER_BAR = 4;
