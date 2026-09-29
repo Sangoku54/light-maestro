@@ -35,8 +35,8 @@ import {
 } from '../hooks/dmx-cues';
 import { useTranslation } from 'react-i18next';
 import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X, LayoutGrid, Music, Zap, List, Search, Crosshair, Sparkles, LampDesk, Undo2, RotateCcw } from 'lucide-react';
-import { DEFAULT_POSITIONS, MUSICIAN_KINDS, MUSICIAN_LABELS, isRosterEmpty, normalizeRoster, rosterTotal, type MusicianKind, type MusicianRoster } from '../utils/musicians';
-import { SUPPORT_KINDS, SUPPORT_LABELS, needsSupportGeometry, resolveSupportKind, supportColumnHeight, type FixtureSupport } from '../utils/supports';
+import { DEFAULT_POSITIONS, MUSICIAN_KINDS, isRosterEmpty, normalizeRoster, rosterTotal, type MusicianKind, type MusicianRoster } from '../utils/musicians';
+import { SUPPORT_KINDS, needsSupportGeometry, resolveSupportKind, supportColumnHeight, type FixtureSupport } from '../utils/supports';
 import clavierImg from '../assets/musicians/clavier.png';
 import chanteuseImg from '../assets/musicians/chanteuse.png';
 import chanteurImg from '../assets/musicians/chanteur.png';
@@ -418,6 +418,7 @@ function livePoseChannels(prog: Record<number, number>, f3dMap: Map<string, any>
  * Souscrit réactivement au programmer → valeurs à jour en direct.
  */
 function DirectPTFaders({ panAddrs, tiltAddrs }: { panAddrs: number[]; tiltAddrs: number[] }) {
+  const { t } = useTranslation();
   const chans = useProgrammerStore((s) => s.channels);
   const setCh = useProgrammerStore((s) => s.setChannel);
   const hasPan = panAddrs.length > 0;
@@ -441,8 +442,8 @@ function DirectPTFaders({ panAddrs, tiltAddrs }: { panAddrs: number[]; tiltAddrs
   );
   return (
     <>
-      {hasPan && row('Pan', pan, panAddrs)}
-      {hasTilt && row('Tilt', tilt, tiltAddrs)}
+      {hasPan && row(t('stage3D.faderPan'), pan, panAddrs)}
+      {hasTilt && row(t('stage3D.faderTilt'), tilt, tiltAddrs)}
     </>
   );
 }
@@ -455,6 +456,7 @@ function DirectPTFaders({ panAddrs, tiltAddrs }: { panAddrs: number[]; tiltAddrs
  * écriture multi-cibles via `onSet` quand fourni.
  */
 function DirectDimmerFader({ intensityAddrs, rgbAddrs, onSet }: { intensityAddrs: number[]; rgbAddrs: number[]; onSet?: (v: number) => void }) {
+  const { t } = useTranslation();
   const chans = useProgrammerStore((s) => s.channels);
   const setCh = useProgrammerStore((s) => s.setChannel);
   const hasDimmer = intensityAddrs.length > 0;
@@ -469,7 +471,7 @@ function DirectDimmerFader({ intensityAddrs, rgbAddrs, onSet }: { intensityAddrs
   };
   return (
     <div className="space-y-1">
-      <div className="flex justify-between text-[10px]"><span className="text-gray-500">Dimmer</span><span className="text-violet-300 font-mono">{val}</span></div>
+      <div className="flex justify-between text-[10px]"><span className="text-gray-500">{t('stage3D.faderDimmer')}</span><span className="text-violet-300 font-mono">{val}</span></div>
       <div className="flex items-center gap-1">
         <button onClick={() => setVal(val - 1)} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
         <input type="range" min={0} max={255} value={val} onChange={(e) => setVal(Number(e.target.value))} className="flex-1 h-1 accent-violet-500 cursor-pointer" />
@@ -2889,8 +2891,8 @@ export const Stage3D: React.FC<{
     if (!entry) return;
     setUndoDepth(undoStackRef.current.length);
     await applyUndoEntry(entry);
-    try { (window as any).__lm_toast?.('Dernière action annulée', 'info'); } catch {}
-  }, [applyUndoEntry]);
+    try { (window as any).__lm_toast?.(t('stage3D.toastUndo'), 'info'); } catch {}
+  }, [applyUndoEntry, t]);
 
   const handleResetAll = useCallback(async () => {
     while (undoStackRef.current.length > 0) {
@@ -2909,8 +2911,8 @@ export const Stage3D: React.FC<{
     try { fixtureTestState.clearAll(); setLightOn(false); } catch {}
     undoStackRef.current = [];
     setUndoDepth(0);
-    try { (window as any).__lm_toast?.('Programmation réinitialisée', 'success'); } catch {}
-  }, [applyUndoEntry, restoreSceneState, clearEfxSnapshotFlag]);
+    try { (window as any).__lm_toast?.(t('stage3D.toastReset'), 'success'); } catch {}
+  }, [applyUndoEntry, restoreSceneState, clearEfxSnapshotFlag, t]);
 
   const handleCancelEfxSnapshot = useCallback(async () => {
     const snap = (window as any).__lm_efxSnapshotApplied as { sceneId: string } | undefined;
@@ -2940,8 +2942,8 @@ export const Stage3D: React.FC<{
     }
     clearEfxSnapshotFlag();
     try { dmxBridge.release('design-efx'); } catch {}
-    try { (window as any).__lm_toast?.('EFX snapshot annulé', 'info'); } catch {}
-  }, [applyUndoEntry, restoreSceneState, clearEfxSnapshotFlag]);
+    try { (window as any).__lm_toast?.(t('stage3D.toastEfxCancelled'), 'info'); } catch {}
+  }, [applyUndoEntry, restoreSceneState, clearEfxSnapshotFlag, t]);
 
   // ── EFX snapshot — uniquement si enableEfxApply (onglet Scènes) ──
   const effects = useShowStore((s) => s.effects);
@@ -3034,8 +3036,8 @@ export const Stage3D: React.FC<{
       setEfxSnapshotActive(true);
       try { await sendChannelsToHardwareAndStore(snapshot, store.patchedFixtures, store.universes); } catch {}
     }
-    try { (window as any).__lm_toast?.(`EFX "${efx.name}" appliqué à la scène — prévisualisation 3D à jour`, 'success'); } catch {}
-  }, [effects, selectedEfxId, selectedFixtureId, captureSceneBaseline, pushUndo, musicians, stageScene]);
+    try { (window as any).__lm_toast?.(t('stage3D.toastEfxApplied', { name: efx.name }), 'success'); } catch {}
+  }, [effects, selectedEfxId, selectedFixtureId, captureSceneBaseline, pushUndo, musicians, stageScene, t]);
 
   // ── Rec Scène / Rec EFX / Rec Show — extraits du panneau modal pour être
   //    réutilisables par la barre compacte affichée en mode édition
@@ -3050,7 +3052,7 @@ export const Stage3D: React.FC<{
       }
     }
     if (Object.keys(prog).length === 0) {
-      try { (window as any).__lm_toast?.('Programmeur vide — rien à capturer', 'err'); } catch {}
+      try { (window as any).__lm_toast?.(t('stage3D.programmerEmpty'), 'err'); } catch {}
       return;
     }
     const s = useShowStore.getState();
@@ -3074,17 +3076,17 @@ export const Stage3D: React.FC<{
       if (app.mode !== 'design') app.setMode('design');
       app.setDesignSidebarTab('scenes');
     } catch {}
-    try { (window as any).__lm_toast?.(`Rec Scène OK (${Object.keys(channels).length} ch)`, 'ok'); } catch {}
-  }, [pushUndo]);
+    try { (window as any).__lm_toast?.(t('stage3D.recSceneOk', { count: Object.keys(channels).length }), 'ok'); } catch {}
+  }, [pushUndo, t]);
 
   const handleRecEfxCb = useCallback(() => {
     const prog = useProgrammerStore.getState().channels;
     if (Object.keys(prog).length === 0) {
-      try { (window as any).__lm_toast?.('Programmeur vide — rien à capturer', 'err'); } catch {}
+      try { (window as any).__lm_toast?.(t('stage3D.programmerEmpty'), 'err'); } catch {}
       return;
     }
     if (!selectedFixture) {
-      try { (window as any).__lm_toast?.('Sélectionne une fixture pour Rec EFX', 'err'); } catch {}
+      try { (window as any).__lm_toast?.(t('stage3D.selectFixtureForEfx'), 'err'); } catch {}
       return;
     }
     const f3d = fixturesRef.current.get(selectedFixture.id);
@@ -3098,12 +3100,12 @@ export const Stage3D: React.FC<{
     const id = s.createEffect(`EFX 3D ${s.effects.length + 1}`);
     s.updateEffect(id, { name: `EFX 3D ${s.effects.length}`, pattern: 'Circle', width: 1, height: 1, rotation: 0, speed: 0.5, xOffset: xOff, yOffset: yOff, fixtureIds: selectedFixture ? [selectedFixture.id] : [] });
     pushUndo({ type: 'efx-create', efxId: id });
-  }, [selectedFixture, patchedFixtures, pushUndo]);
+  }, [selectedFixture, patchedFixtures, pushUndo, t]);
 
   const handleRecShowCb = useCallback(() => {
     const prog = useProgrammerStore.getState().channels;
     if (Object.keys(prog).length === 0) {
-      try { (window as any).__lm_toast?.('Programmeur vide — rien à capturer', 'err'); } catch {}
+      try { (window as any).__lm_toast?.(t('stage3D.programmerEmpty'), 'err'); } catch {}
       return;
     }
     const s = useShowStore.getState();
@@ -3131,7 +3133,7 @@ export const Stage3D: React.FC<{
     const show = fresh.shows.find((sh) => sh.id === shId);
     if (show) fresh.updateShow(shId, { tracks: [{ id: `trk-${Date.now()}`, name: 'Scene Track', type: 'scene', items: [{ id: `tmi-${Date.now()}`, startTime: 0, duration: 5000, resourceId: scId, fadeIn: 0, fadeOut: 0, name: fresh.scenes.find((sc) => sc.id === scId)?.name || 'Scene 3D' }], muted: false, solo: false }] as any });
     pushUndo({ type: 'show-create', showId: shId, sceneId: scId });
-  }, [pushUndo]);
+  }, [pushUndo, t]);
 
   // ── Render ──────────────────────────────────────────
   const filteredFixtures = fixtureSearch.trim()
@@ -3150,23 +3152,23 @@ export const Stage3D: React.FC<{
             <Eye size={14} className="text-purple-400" /> {t('stage3D.title')}
           </span>
           <span className="w-px h-5 bg-gray-800" />
-          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Caméra</span>
+          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">{t('stage3D.camera')}</span>
           <div className="flex items-center gap-1 p-0.5 rounded-lg bg-black/30 border border-gray-800/50">
-            <RichTooltip content={{ title: 'Vue face (public)', text: 'Caméra derrière le public, face à la scène. Point de vue standard.', tone: 'info' }}>
+            <RichTooltip content={{ title: t('stage3D.camFrontTipTitle'), text: t('stage3D.camFrontTipText'), tone: 'info' }}>
               <button onClick={() => setCameraPreset('front')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.frontView')}><PanelTop size={11} /> {t('stage3D.front')}</button>
             </RichTooltip>
-            <RichTooltip content={{ title: 'Vue de dessus', text: 'Plan 2D depuis le plafond. Idéal pour ajuster positions X/Z des fixtures.', tone: 'info' }}>
+            <RichTooltip content={{ title: t('stage3D.camTopTipTitle'), text: t('stage3D.camTopTipText'), tone: 'info' }}>
               <button onClick={() => setCameraPreset('top')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.topView')}><ChevronUp size={11} /> {t('stage3D.top')}</button>
             </RichTooltip>
-            <RichTooltip content={{ title: 'Vue de côté', text: 'Profil latéral. Utile pour voir les hauteurs et inclinaisons.', tone: 'info' }}>
+            <RichTooltip content={{ title: t('stage3D.camSideTipTitle'), text: t('stage3D.camSideTipText'), tone: 'info' }}>
               <button onClick={() => setCameraPreset('side')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.sideView')}><PanelRight size={11} /> {t('stage3D.side')}</button>
             </RichTooltip>
-            <RichTooltip content={{ title: 'Vue public', text: 'Caméra depuis la piste, à hauteur du public. Permet de vérifier l\'impact réel.', tone: 'info' }}>
+            <RichTooltip content={{ title: t('stage3D.camAudienceTipTitle'), text: t('stage3D.camAudienceTipText'), tone: 'info' }}>
               <button onClick={() => setCameraPreset('audience')} className="px-2 py-1 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1" title={t('stage3D.audienceView')}><Users size={11} /> {t('stage3D.audience')}</button>
             </RichTooltip>
           </div>
           <span className="w-px h-5 bg-gray-800" />
-          <RichTooltip content={{ title: 'Mode Direct', text: 'Active le mode édition directe : glisse sur une fixture pour ajuster Pan/Tilt. Le curseur devient violet quand il est actif.', example: 'Activez Direct → cliquez + glissez sur une fixture pour la faire tourner en temps réel.', tone: 'warn' }}>
+          <RichTooltip content={{ title: t('stage3D.directTipTitle'), text: t('stage3D.directTipText'), example: t('stage3D.directTipExample'), tone: 'warn' }}>
             <button onClick={() => setDirectMode((v) => !v)} className={`px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 transition-all ${directMode ? 'bg-violet-600 text-white border-violet-500 shadow' : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-gray-200 hover:border-gray-600'}`} title={directMode ? t('stage3D.directOnTitle') : t('stage3D.directOffTitle')}>
               <Crosshair size={12} /> {directMode ? t('stage3D.directOn') : t('stage3D.direct')}
             </button>
@@ -3174,38 +3176,38 @@ export const Stage3D: React.FC<{
         </div>
         <div className="flex-1 min-w-[12px]" />
         <div className="flex items-center gap-2 min-w-max">
-          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider hidden lg:inline">Scène</span>
+          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider hidden lg:inline">{t('stage3D.scene')}</span>
           <div className="relative flex items-center">
             <LayoutGrid size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
-            <RichTooltip content={{ title: 'Dispositions de scène', text: 'Positions de travail prédéfinies pour les musiciens. Change les positions des fixtures selon la config de ton scène.', tone: 'info' }} placement="bottom">
-              <select value={stageScene} onChange={(e) => handleStageSceneChange(e.target.value as StageScene)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50" title="Configuration de scène">
-                <option value="empty" className="bg-[#0d0d14]">Scène vide</option>
-                <option value="rear" className="bg-[#0d0d14]">Pont arrière</option>
-                <option value="rear-front" className="bg-[#0d0d14]">Pont arrière + avant</option>
-                <option value="full" className="bg-[#0d0d14]">Arrière + avant + 2 côtés</option>
+            <RichTooltip content={{ title: t('stage3D.sceneLayoutTipTitle'), text: t('stage3D.sceneLayoutTipText'), tone: 'info' }} placement="bottom">
+              <select value={stageScene} onChange={(e) => handleStageSceneChange(e.target.value as StageScene)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50" title={t('stage3D.sceneConfigTitle')}>
+                <option value="empty" className="bg-[#0d0d14]">{t('stage3D.sceneEmpty')}</option>
+                <option value="rear" className="bg-[#0d0d14]">{t('stage3D.sceneRear')}</option>
+                <option value="rear-front" className="bg-[#0d0d14]">{t('stage3D.sceneRearFront')}</option>
+                <option value="full" className="bg-[#0d0d14]">{t('stage3D.sceneFull')}</option>
               </select>
             </RichTooltip>
           </div>
 <div className="hidden md:flex items-center gap-1 bg-black/20 border border-gray-800/50 rounded-lg px-2 py-1">
               <Maximize2 size={11} className="text-gray-500" />
-              <input type="number" min={1} step={0.5} value={draftDims.width} onChange={(e) => setDraftDims((prev) => ({ ...prev, width: e.target.value }))} onBlur={commitStageDims} onKeyDown={(e) => { if (e.key === 'Enter') commitStageDims(); }} className="w-11 bg-transparent text-gray-200 text-[10px] text-center focus:outline-none" aria-label="Largeur" />
+              <input type="number" min={1} step={0.5} value={draftDims.width} onChange={(e) => setDraftDims((prev) => ({ ...prev, width: e.target.value }))} onBlur={commitStageDims} onKeyDown={(e) => { if (e.key === 'Enter') commitStageDims(); }} className="w-11 bg-transparent text-gray-200 text-[10px] text-center focus:outline-none" aria-label={t('stage3D.stageWidthAria')} />
               <span className="text-gray-600 text-[10px]">×</span>
-              <input type="number" min={1} step={0.5} value={draftDims.depth} onChange={(e) => setDraftDims((prev) => ({ ...prev, depth: e.target.value }))} onBlur={commitStageDims} onKeyDown={(e) => { if (e.key === 'Enter') commitStageDims(); }} className="w-11 bg-transparent text-gray-200 text-[10px] text-center focus:outline-none" aria-label="Profondeur" />
+              <input type="number" min={1} step={0.5} value={draftDims.depth} onChange={(e) => setDraftDims((prev) => ({ ...prev, depth: e.target.value }))} onBlur={commitStageDims} onKeyDown={(e) => { if (e.key === 'Enter') commitStageDims(); }} className="w-11 bg-transparent text-gray-200 text-[10px] text-center focus:outline-none" aria-label={t('stage3D.stageDepthAria')} />
               <span className="text-gray-600 text-[10px]">m</span>
             </div>
             <div className="relative flex items-center">
               <Music size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
-              <RichTooltip content={{ title: 'Musiciens sur scène', text: 'Gère la liste des musiciens/chanteurs présents. Chaque nom est lié à un patch de fixtures pour les assigner visuellement.', tone: 'info' }} placement="bottom">
-                <button ref={musiciansBtnRef} onClick={() => setMusiciansMenuOpen(v => !v)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50 whitespace-nowrap" title="Présence musiciens/chanteurs sur scène">
-                  {rosterTotal(musicians) > 0 ? `Musiciens · ${rosterTotal(musicians)}` : 'Musiciens'}
+              <RichTooltip content={{ title: t('stage3D.musiciansTipTitle'), text: t('stage3D.musiciansTipText'), tone: 'info' }} placement="bottom">
+                <button ref={musiciansBtnRef} onClick={() => setMusiciansMenuOpen(v => !v)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50 whitespace-nowrap" title={t('stage3D.musiciansBtnTitle')}>
+                  {rosterTotal(musicians) > 0 ? t('stage3D.musiciansCount', { count: rosterTotal(musicians) }) : t('stage3D.musiciansBtn')}
                 </button>
               </RichTooltip>
             </div>
             <div className="relative flex items-center">
               <LampDesk size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
-              <RichTooltip content={{ title: 'Supports des projecteurs', text: 'Applique un support physique à TOUTES les fixtures patchées (le détail par fixture reste réglable en cliquant un projecteur). Pont = rendu historique, rien de dessiné.', tone: 'info' }} placement="bottom">
-                <button onClick={() => setSupportsMenuOpen(v => !v)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50 whitespace-nowrap" title="Appliquer un support à toutes les fixtures">
-                  Supports
+              <RichTooltip content={{ title: t('stage3D.supportsTipTitle'), text: t('stage3D.supportsTipText'), tone: 'info' }} placement="bottom">
+                <button onClick={() => setSupportsMenuOpen(v => !v)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50 whitespace-nowrap" title={t('stage3D.supportsBtnTitle')}>
+                  {t('stage3D.supportsBtn')}
                 </button>
               </RichTooltip>
             </div>
@@ -3216,8 +3218,8 @@ export const Stage3D: React.FC<{
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setMusiciansMenuOpen(false)}>
           <div className="w-64 rounded-lg border border-gray-700/60 bg-[#0d0d14] shadow-xl shadow-black/60 p-2" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
-              <span className="text-[10px] font-medium text-gray-300">Musiciens sur scène</span>
-              <button onClick={() => handleMusiciansChange({})} className="text-[9px] text-gray-500 hover:text-purple-300" title="Retirer tous les musiciens">Tout retirer</button>
+              <span className="text-[10px] font-medium text-gray-300">{t('stage3D.musiciansTipTitle')}</span>
+              <button onClick={() => handleMusiciansChange({})} className="text-[9px] text-gray-500 hover:text-purple-300" title={t('stage3D.removeAllTitle')}>{t('stage3D.removeAll')}</button>
             </div>
             {MUSICIAN_KINDS.map(kind => {
               const count = musicians[kind] ?? 0;
@@ -3225,10 +3227,10 @@ export const Stage3D: React.FC<{
               return (
                 <div key={kind} className="flex items-center gap-2 px-1 py-1 rounded hover:bg-gray-800/30">
                   <input type="checkbox" checked={checked} onChange={() => handleMusiciansChange({ ...musicians, [kind]: checked ? 0 : 1 })} className="accent-purple-500 w-3 h-3 cursor-pointer shrink-0" />
-                  <span className={`flex-1 text-[10px] ${checked ? 'text-gray-200' : 'text-gray-500'}`}>{MUSICIAN_LABELS[kind]}</span>
-                  <button onClick={() => handleMusiciansChange({ ...musicians, [kind]: Math.max(0, count - 1) })} disabled={count <= 0} className="w-5 h-5 rounded bg-gray-800/60 text-gray-300 text-[11px] leading-none hover:bg-gray-700/60 disabled:opacity-30" aria-label={`Réduire ${MUSICIAN_LABELS[kind]}`}>−</button>
+                  <span className={`flex-1 text-[10px] ${checked ? 'text-gray-200' : 'text-gray-500'}`}>{t(`stage3D.musician_${kind}`)}</span>
+                  <button onClick={() => handleMusiciansChange({ ...musicians, [kind]: Math.max(0, count - 1) })} disabled={count <= 0} className="w-5 h-5 rounded bg-gray-800/60 text-gray-300 text-[11px] leading-none hover:bg-gray-700/60 disabled:opacity-30" aria-label={t('stage3D.decreaseAria', { label: t(`stage3D.musician_${kind}`) })}>−</button>
                   <span className="w-5 text-center text-[10px] text-gray-200 tabular-nums">{count}</span>
-                  <button onClick={() => handleMusiciansChange({ ...musicians, [kind]: Math.min(8, count + 1) })} className="w-5 h-5 rounded bg-gray-800/60 text-gray-300 text-[11px] leading-none hover:bg-gray-700/60" aria-label={`Augmenter ${MUSICIAN_LABELS[kind]}`}>+</button>
+                  <button onClick={() => handleMusiciansChange({ ...musicians, [kind]: Math.min(8, count + 1) })} className="w-5 h-5 rounded bg-gray-800/60 text-gray-300 text-[11px] leading-none hover:bg-gray-700/60" aria-label={t('stage3D.increaseAria', { label: t(`stage3D.musician_${kind}`) })}>+</button>
                 </div>
               );
             })}
@@ -3240,7 +3242,7 @@ export const Stage3D: React.FC<{
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setSupportsMenuOpen(false)}>
           <div className="w-64 rounded-lg border border-gray-700/60 bg-[#0d0d14] shadow-xl shadow-black/60 p-2" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
-              <span className="text-[10px] font-medium text-gray-300">Supports · toutes les fixtures</span>
+              <span className="text-[10px] font-medium text-gray-300">{t('stage3D.supportsTitle')}</span>
               <button onClick={() => setSupportsMenuOpen(false)} className="text-gray-500 hover:text-gray-300 text-sm px-1">✕</button>
             </div>
             {SUPPORT_KINDS.map(kind => {
@@ -3254,14 +3256,14 @@ export const Stage3D: React.FC<{
                     setSupportsMenuOpen(false);
                   }}
                   className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-800/30 text-left"
-                  title={kind === 'truss' ? 'Rendu historique : rien de dessiné' : `Pose ${patchedFixtures.length} fixture(s) sur ${SUPPORT_LABELS[kind].toLowerCase()}`}
+                  title={kind === 'truss' ? t('stage3D.trussHistoricTip') : t('stage3D.supportApplyAll', { count: patchedFixtures.length, label: t(`stage3D.support_${kind}`).toLowerCase() })}
                 >
-                  <span className="text-[10px] text-gray-200 flex-1">{SUPPORT_LABELS[kind]}</span>
+                  <span className="text-[10px] text-gray-200 flex-1">{t(`stage3D.support_${kind}`)}</span>
                   <span className="text-[10px] text-gray-500 tabular-nums">{count}</span>
                 </button>
               );
             })}
-            <p className="px-2 pt-1 text-[9px] text-gray-600">Le détail par fixture se règle en cliquant un projecteur.</p>
+            <p className="px-2 pt-1 text-[9px] text-gray-600">{t('stage3D.supportHint')}</p>
           </div>
         </div>
       )}
@@ -3322,19 +3324,19 @@ export const Stage3D: React.FC<{
             value={stageScene}
             onChange={e => handleStageSceneChange(e.target.value as StageScene)}
             className="bg-gray-800/40 text-gray-300 text-[10px] pl-7 pr-2 py-1 rounded border border-gray-700/40 appearance-none cursor-pointer hover:border-gray-600/60 focus:outline-none focus:border-purple-500/50"
-            title="Configuration de scène"
+            title={t('stage3D.sceneConfigTitle')}
           >
-            <option value="empty" className="bg-[#0d0d14]">Scène vide</option>
-            <option value="rear" className="bg-[#0d0d14]">Pont arrière</option>
-            <option value="rear-front" className="bg-[#0d0d14]">Pont arrière + avant</option>
-            <option value="full" className="bg-[#0d0d14]">Arrière + avant + 2 côtés</option>
+            <option value="empty" className="bg-[#0d0d14]">{t('stage3D.sceneEmpty')}</option>
+            <option value="rear" className="bg-[#0d0d14]">{t('stage3D.sceneRear')}</option>
+            <option value="rear-front" className="bg-[#0d0d14]">{t('stage3D.sceneRearFront')}</option>
+            <option value="full" className="bg-[#0d0d14]">{t('stage3D.sceneFull')}</option>
           </select>
         </div>
 
         <div className="w-px h-4 bg-gray-800" />
 
         {/* Stage size — resizable without upper limit; fixtures scale proportionally */}
-        <div className="flex items-center gap-1" title="Dimensions de la scène (largeur × profondeur, en mètres)">
+        <div className="flex items-center gap-1" title={t('stage3D.stageDimsTitle')}>
           <Maximize2 size={12} className="text-gray-500" />
           <input
             type="number"
@@ -3345,7 +3347,7 @@ export const Stage3D: React.FC<{
             onBlur={commitStageDims}
             onKeyDown={e => { if (e.key === 'Enter') commitStageDims(); }}
             className="w-12 bg-gray-800/40 text-gray-200 text-[10px] px-1 py-0.5 rounded border border-gray-700/40 focus:outline-none focus:border-purple-500/50"
-            aria-label="Largeur de la scène (m)"
+            aria-label={t('stage3D.stageWidthAria')}
           />
           <span className="text-gray-600 text-[10px]">×</span>
           <input
@@ -3357,14 +3359,14 @@ export const Stage3D: React.FC<{
             onBlur={commitStageDims}
             onKeyDown={e => { if (e.key === 'Enter') commitStageDims(); }}
             className="w-12 bg-gray-800/40 text-gray-200 text-[10px] px-1 py-0.5 rounded border border-gray-700/40 focus:outline-none focus:border-purple-500/50"
-            aria-label="Profondeur de la scène (m)"
+            aria-label={t('stage3D.stageDepthAria')}
           />
           <span className="text-gray-600 text-[10px]">m</span>
         </div>
 
         <div className="w-px h-4 bg-gray-800" />
 
-        <div className="relative flex items-center" title="Configuration des musiciens sur scène (glissez-les pour les déplacer)">
+        <div className="relative flex items-center" title={t('stage3D.musiciansConfigTitle')}>
           <Music size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
           <button
             ref={musiciansBtnRef}
@@ -3380,7 +3382,7 @@ export const Stage3D: React.FC<{
             }}
             className="bg-gray-800/40 text-gray-300 text-[10px] pl-7 pr-2 py-1 rounded border border-gray-700/40 cursor-pointer hover:border-gray-600/60 focus:outline-none focus:border-purple-500/50 whitespace-nowrap"
           >
-            {rosterTotal(musicians) > 0 ? `Musiciens · ${rosterTotal(musicians)}` : 'Musiciens'}
+            {rosterTotal(musicians) > 0 ? t('stage3D.musiciansCount', { count: rosterTotal(musicians) }) : t('stage3D.musiciansBtn')}
           </button>
         </div>
 
@@ -3389,15 +3391,15 @@ export const Stage3D: React.FC<{
           className={`px-2 py-1 rounded text-[10px] flex items-center gap-1 transition-colors ${
             showFixtureList ? 'bg-purple-600/20 text-purple-300' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/30'
           }`}
-          title="Liste des fixtures — retrouver rapidement une light"
+          title={t('stage3D.fixtureListTitle')}
         >
-          <List size={12} /> Fixtures
+          <List size={12} /> {t('stage3D.fixtures')}
         </button>
 
         <div className="flex-1" />
 
         <span className="text-[10px] text-gray-600">
-          {patchedFixtures.length} fixtures · glisser pour orbiter · clic pour sélectionner · liste « Fixtures » pour retrouver une light
+          {t('stage3D.statusHintLegacy', { count: patchedFixtures.length })}
         </span>
         </div>
       </div>
@@ -3410,22 +3412,22 @@ export const Stage3D: React.FC<{
           <div className="order-1 w-[220px] xl:w-[260px] shrink-0 border-r border-gray-800/50 bg-[#0d0d14]/80 flex flex-col min-h-0">
             <div className="px-3 py-2 border-b border-gray-800/50">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">Fixtures</span>
+                <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">{t('stage3D.fixtures')}</span>
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] text-purple-300 font-mono">{filteredFixtures.length}</span>
-                  <button onClick={() => setLeftDockCollapsed(true)} className="w-5 h-5 rounded bg-black/30 border border-gray-800 text-gray-500 hover:text-gray-300 hover:border-gray-600 flex items-center justify-center" title="Réduire la liste">
+                  <button onClick={() => setLeftDockCollapsed(true)} className="w-5 h-5 rounded bg-black/30 border border-gray-800 text-gray-500 hover:text-gray-300 hover:border-gray-600 flex items-center justify-center" title={t('stage3D.collapseList')}>
                     <ChevronUp size={10} className="rotate-[-90deg]" />
                   </button>
                 </div>
               </div>
             <div className="mt-2 relative">
               <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
-              <input value={fixtureSearch} onChange={(e) => setFixtureSearch(e.target.value)} placeholder="Rechercher…" className="w-full pl-7 pr-2 py-1.5 bg-black/30 border border-gray-800 rounded-lg text-xs text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-purple-500/50" />
+              <input value={fixtureSearch} onChange={(e) => setFixtureSearch(e.target.value)} placeholder={t('stage3D.searchPlaceholder')} className="w-full pl-7 pr-2 py-1.5 bg-black/30 border border-gray-800 rounded-lg text-xs text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-purple-500/50" />
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             {filteredFixtures.length === 0 ? (
-              <div className="text-xs text-gray-600 text-center py-8">Aucun projecteur</div>
+              <div className="text-xs text-gray-600 text-center py-8">{t('stage3D.noProjector')}</div>
             ) : filteredFixtures.map((f) => {
               const isSel = selectedFixtureId === f.id || multiSelectedIds.has(f.id);
               return (
@@ -3437,14 +3439,14 @@ export const Stage3D: React.FC<{
               );
             })}
           </div>
-          <div className="p-2 border-t border-gray-800/50 text-[10px] text-gray-600">Glisser sur le canvas pour orbiter • Clic = sélectionner • Ctrl+clic = multi • Target = viser</div>
+          <div className="p-2 border-t border-gray-800/50 text-[10px] text-gray-600">{t('stage3D.canvasHint')}</div>
         </div>
         ) : (
           <div className="order-1 w-8 shrink-0 border-r border-gray-800/50 bg-[#0d0d14]/60 flex flex-col items-center py-2 gap-2">
-            <button onClick={() => setLeftDockCollapsed(false)} className="w-6 h-6 rounded bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 border border-purple-500/30 flex items-center justify-center" title="Ouvrir la liste fixtures">
+            <button onClick={() => setLeftDockCollapsed(false)} className="w-6 h-6 rounded bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 border border-purple-500/30 flex items-center justify-center" title={t('stage3D.openFixtureList')}>
               <List size={12} />
             </button>
-            <span className="text-[9px] text-gray-600 [writing-mode:vertical-lr] tracking-widest uppercase">Fixtures</span>
+            <span className="text-[9px] text-gray-600 [writing-mode:vertical-lr] tracking-widest uppercase">{t('stage3D.fixtures')}</span>
             <span className="text-[9px] text-purple-400 font-mono">{filteredFixtures.length}</span>
           </div>
         )}
@@ -3463,7 +3465,7 @@ export const Stage3D: React.FC<{
           <div className="absolute inset-0 flex items-center justify-center bg-[#08080e]/80 z-10">
             <div className="text-center">
               <div className="w-5 h-5 border-2 border-purple-500/30 border-t-purple-400 rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-xs text-gray-500">Loading fixture definitions...</p>
+              <p className="text-xs text-gray-500">{t('stage3D.loadingDefs')}</p>
             </div>
           </div>
         )}
@@ -3480,7 +3482,7 @@ export const Stage3D: React.FC<{
         {targetMode && selectedFixture && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-cyan-500/50 bg-cyan-600/20 text-[11px] font-semibold text-cyan-200 pointer-events-none shadow-xl">
             <Crosshair size={12} />
-            Mode cible — cliquez un point de la scène
+            {t('stage3D.targetBeacon')}
             <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-100 font-mono">
               {multiSelectedIds.size > 0 ? multiSelectedIds.size : 1}
             </span>
@@ -3496,9 +3498,9 @@ export const Stage3D: React.FC<{
           >
             <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800/50 shrink-0">
               <span className="text-xs font-semibold text-gray-200 flex items-center gap-1.5">
-                <List size={12} className="text-purple-400" /> Fixtures ({filteredFixtures.length})
+                <List size={12} className="text-purple-400" /> {t('stage3D.fixtures')} ({filteredFixtures.length})
               </span>
-              <button onClick={() => setShowFixtureList(false)} className="text-gray-600 hover:text-gray-300 transition-colors" title="Fermer">
+              <button onClick={() => setShowFixtureList(false)} className="text-gray-600 hover:text-gray-300 transition-colors" title={t('stage3D.close')}>
                 <X size={14} />
               </button>
             </div>
@@ -3509,14 +3511,14 @@ export const Stage3D: React.FC<{
                   autoFocus
                   value={fixtureSearch}
                   onChange={(e) => setFixtureSearch(e.target.value)}
-                  placeholder="Nom ou n° DMX…"
+                  placeholder={t('stage3D.searchDmxPlaceholder')}
                   className="w-full bg-gray-800/50 border border-gray-700/50 rounded pl-7 pr-2 py-1.5 text-xs text-gray-300 placeholder-gray-600 outline-none focus:border-purple-500/50"
                 />
               </div>
             </div>
             <div className="overflow-y-auto flex-1 py-1">
               {filteredFixtures.length === 0 ? (
-                <div className="text-xs text-gray-600 text-center py-6 px-3">Aucune fixture ne correspond</div>
+                <div className="text-xs text-gray-600 text-center py-6 px-3">{t('stage3D.noFixtureMatch')}</div>
               ) : (
                 filteredFixtures.map((f, idx) => {
                   const uniIdx = universeIndexMap.get(f.universeId);
@@ -3598,10 +3600,10 @@ export const Stage3D: React.FC<{
                   className={`px-2.5 py-1 rounded text-[10px] font-semibold flex items-center gap-1 transition-colors border shrink-0 ${lightOn
                     ? 'bg-green-500/25 text-green-300 border-green-500/50'
                     : 'bg-green-600/15 text-green-400 border-green-700/40 hover:bg-green-600/25'}`}
-                  title={lightOn ? 'Éteindre' : 'Allumer (dimmer max + blanc)'}
+                  title={lightOn ? t('stage3D.turnOff') : t('stage3D.turnOnTitle')}
                 >
                   <Zap size={11} />
-                  {lightOn ? 'Éteindre' : 'Allumer'}
+                  {lightOn ? t('stage3D.turnOff') : t('stage3D.turnOn')}
                 </button>
               </div>
               <button
@@ -3618,7 +3620,7 @@ export const Stage3D: React.FC<{
               {/* X Position */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-gray-500">X Position</span>
+                  <span className="text-gray-500">{t('stage3D.posX')}</span>
                   <span className="text-gray-400 font-mono">{(selectedPos.x * stageDims.width).toFixed(1)}m</span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -3642,7 +3644,7 @@ export const Stage3D: React.FC<{
               {/* Z/Depth Position */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-gray-500">Z Depth</span>
+                  <span className="text-gray-500">{t('stage3D.posZ')}</span>
                   <span className="text-gray-400 font-mono">{(selectedPos.y * stageDims.depth).toFixed(1)}m</span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -3666,7 +3668,7 @@ export const Stage3D: React.FC<{
               {/* Height */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-gray-500">Height</span>
+                  <span className="text-gray-500">{t('stage3D.posH')}</span>
                   <span className="text-gray-400 font-mono">{(selectedPos.h * 5.0).toFixed(1)}m</span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -3689,7 +3691,7 @@ export const Stage3D: React.FC<{
 
               {/* Quick height presets */}
               <div className="flex gap-1">
-                <RichTooltip content={{ title: 'Truss 3 m', text: 'Place la fixture à 3 m de hauteur (typique barre de truss).', tone: 'info' }}>
+                <RichTooltip content={{ title: t('stage3D.heightTrussTipTitle'), text: t('stage3D.heightTrussTipText'), tone: 'info' }}>
                   <button
                     onClick={() => setFixturePosition(selectedFixture.id, { h: 0.6 })}
                     className={`flex-1 px-2 py-1 rounded text-[9px] transition-colors ${
@@ -3698,10 +3700,10 @@ export const Stage3D: React.FC<{
                         : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
                     }`}
                   >
-                    Truss 3m
+                    {t('stage3D.presetTruss')}
                   </button>
                 </RichTooltip>
-                <RichTooltip content={{ title: 'Ground 1.5 m', text: 'Place la fixture à 1.5 m de hauteur (pied de parapède).', tone: 'info' }}>
+                <RichTooltip content={{ title: t('stage3D.heightGroundTipTitle'), text: t('stage3D.heightGroundTipText'), tone: 'info' }}>
                   <button
                     onClick={() => setFixturePosition(selectedFixture.id, { h: 0.3 })}
                     className={`flex-1 px-2 py-1 rounded text-[9px] transition-colors ${
@@ -3710,10 +3712,10 @@ export const Stage3D: React.FC<{
                         : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
                     }`}
                   >
-                    Ground 1.5m
+                    {t('stage3D.presetGround')}
                   </button>
                 </RichTooltip>
-                <RichTooltip content={{ title: 'High 4 m', text: 'Place la fixture à 4 m (grand truss, tête haute).', tone: 'info' }}>
+                <RichTooltip content={{ title: t('stage3D.heightHighTipTitle'), text: t('stage3D.heightHighTipText'), tone: 'info' }}>
                   <button
                     onClick={() => setFixturePosition(selectedFixture.id, { h: 0.8 })}
                     className={`flex-1 px-2 py-1 rounded text-[9px] transition-colors ${
@@ -3722,7 +3724,7 @@ export const Stage3D: React.FC<{
                         : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
                     }`}
                   >
-                    High 4m
+                    {t('stage3D.presetHigh')}
                   </button>
                 </RichTooltip>
               </div>
@@ -3730,14 +3732,14 @@ export const Stage3D: React.FC<{
               {/* Mount mode */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-gray-500">Mount</span>
+                  <span className="text-gray-500">{t('stage3D.mount')}</span>
                 </div>
                 <div className="grid grid-cols-4 gap-1">
                   {([
-                    { v: 'top' as const, label: 'Top', icon: '🔽', tip: { title: 'Top — truss', text: 'Fixé en hauteur, faisceau vers le bas (plafond → sol).', example: 'Classique barres de truss au-dessus de la scène.', tone: 'info' as const } },
-                    { v: 'ground' as const, label: 'Ground', icon: '🔼', tip: { title: 'Ground — sol', text: 'Au sol, faisceau vers le haut (sol → plafond).', example: 'Pieds de parapède, wash plat monté à ras du sol.', tone: 'info' as const } },
-                    { v: 'rear' as const, label: 'Rear', icon: '▶', tip: { title: 'Rear — arrière', text: 'Fixé à l\'arrière, faisceau horizontal vers l\'avant (public).', example: 'Faux-plates arrière, projecteurs derrière les musiciens.', tone: 'info' as const } },
-                    { v: 'hanging' as const, label: 'Hanging', icon: '🎥', tip: { title: 'Hanging — suspendu (renversé)', text: 'Accroché au-dessus du pont, tête en bas. Le faisceau part horizontal vers le public. L\'auto-aim le vise vers le centre de la scène.', example: 'Movers suspendus au truss, tête retournée. Utilisez ensuite l\'outil Target pour orienter précisément.', tone: 'success' as const } },
+                    { v: 'top' as const, label: t('stage3D.mountTop'), icon: '🔽', tip: { title: t('stage3D.mountTopTipTitle'), text: t('stage3D.mountTopTipText'), example: t('stage3D.mountTopTipExample'), tone: 'info' as const } },
+                    { v: 'ground' as const, label: t('stage3D.mountGround'), icon: '🔼', tip: { title: t('stage3D.mountGroundTipTitle'), text: t('stage3D.mountGroundTipText'), example: t('stage3D.mountGroundTipExample'), tone: 'info' as const } },
+                    { v: 'rear' as const, label: t('stage3D.mountRear'), icon: '▶', tip: { title: t('stage3D.mountRearTipTitle'), text: t('stage3D.mountRearTipText'), example: t('stage3D.mountRearTipExample'), tone: 'info' as const } },
+                    { v: 'hanging' as const, label: t('stage3D.mountHanging'), icon: '🎥', tip: { title: t('stage3D.mountHangingTipTitle'), text: t('stage3D.mountHangingTipText'), example: t('stage3D.mountHangingTipExample'), tone: 'success' as const } },
                   ]).map(opt => (
                     <RichTooltip key={opt.v} content={opt.tip}>
                       <button
@@ -3761,14 +3763,14 @@ export const Stage3D: React.FC<{
               {/* Support physique (comme les musiciens : choix visible en 3D) */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-gray-500">Support</span>
+                  <span className="text-gray-500">{t('stage3D.support')}</span>
                 </div>
                 <div className="grid grid-cols-4 gap-1">
                   {([
-                    { v: 'truss' as const, label: SUPPORT_LABELS.truss, icon: '🏗', tip: { title: 'Pont — truss', text: 'Comportement historique : rien de dessiné, la fixture flotte à sa hauteur (pont existant).', example: 'Par défaut : projets existants inchangés.', tone: 'info' as const } },
-                    { v: 'totem' as const, label: SUPPORT_LABELS.totem, icon: '🗼', tip: { title: 'Totem — tour verticale', text: 'Colonne posée au sol qui monte jusqu\'à la fixture. Standard DJ des deux côtés de la scène.', example: 'Deux totems + 2 lyres pour un set DJ.', tone: 'info' as const } },
-                    { v: 'tripod' as const, label: SUPPORT_LABELS.tripod, icon: '📷', tip: { title: 'Trépied — pied en T', text: 'Pied repliable avec barre en T, posé au sol sous la fixture. Standard prestataires.', example: 'Projecteur en façade sans structure.', tone: 'info' as const } },
-                    { v: 'floor' as const, label: SUPPORT_LABELS.floor, icon: '🟫', tip: { title: 'Sol — posé au sol', text: 'Aucun support dessiné : uplight, wash posé au sol (combine avec Mount Ground).', example: 'Uplights au pied du mur.', tone: 'info' as const } },
+                    { v: 'truss' as const, label: t('stage3D.support_truss'), icon: '🏗', tip: { title: t('stage3D.supportTrussTipTitle'), text: t('stage3D.supportTrussTipText'), example: t('stage3D.supportTrussTipExample'), tone: 'info' as const } },
+                    { v: 'totem' as const, label: t('stage3D.support_totem'), icon: '🗼', tip: { title: t('stage3D.supportTotemTipTitle'), text: t('stage3D.supportTotemTipText'), example: t('stage3D.supportTotemTipExample'), tone: 'info' as const } },
+                    { v: 'tripod' as const, label: t('stage3D.support_tripod'), icon: '📷', tip: { title: t('stage3D.supportTripodTipTitle'), text: t('stage3D.supportTripodTipText'), example: t('stage3D.supportTripodTipExample'), tone: 'info' as const } },
+                    { v: 'floor' as const, label: t('stage3D.support_floor'), icon: '🟫', tip: { title: t('stage3D.supportFloorTipTitle'), text: t('stage3D.supportFloorTipText'), example: t('stage3D.supportFloorTipExample'), tone: 'info' as const } },
                   ]).map(opt => (
                     <RichTooltip key={opt.v} content={opt.tip}>
                       <button
@@ -3788,7 +3790,7 @@ export const Stage3D: React.FC<{
 
               {/* Direct DMX — intensity + couleur (programmer) */}
               <div className="space-y-2 p-2 rounded-lg bg-violet-600/10 border border-violet-500/20">
-                <div className="text-[10px] font-semibold text-violet-300">Direct — programmer (violet)</div>
+                <div className="text-[10px] font-semibold text-violet-300">{t('stage3D.directProgrammer')}</div>
                 {selectedFixture && (() => {
                   const ids = getActionFixtureIds();
                   const setCh = useProgrammerStore.getState().setChannel;
@@ -3844,21 +3846,21 @@ export const Stage3D: React.FC<{
                     for (const fid of ids) applyHexColorToFixture(fid, hex);
                   }} className="w-6 h-6 rounded border border-gray-700 cursor-pointer p-0" />
                 </div>
-                <RichTooltip content={{ title: 'Target — viser un point', text: 'Active le mode cible : cliquez sur la scène 3D pour calculer le pan/tilt exact qui vise ce point.\nEcrit les valeurs DMX dans le programmeur (couche LTP, en direct sur la fixture).', example: 'Sélectionnez 1 ou + fixtures → cliquez Target → cliquez un point sur le sol → la fixture bouge physiquement vers ce point.', tone: 'success' }} placement="bottom">
-                  <button onClick={() => setTargetMode((v) => !v)} className={`mt-1 w-full px-2.5 py-1.5 rounded-md text-[10px] font-bold flex items-center justify-center gap-1.5 border transition-all ${targetMode ? 'bg-cyan-600/30 text-cyan-200 border-cyan-500/50 shadow' : 'bg-gray-800/50 text-gray-400 border-gray-700 hover:text-gray-200 hover:border-gray-600'}`} title={targetMode ? 'Quitter le mode cible' : 'Viser un point : sélectionne 1+ projecteurs (Ctrl+clic en 3D), puis cliquez un point de la scène → pan/tilt DMX en direct'}>
-                    <Crosshair size={12} /> {targetMode ? 'Cible active — cliquez la 3D' : 'Target (viser un point)'}
+                <RichTooltip content={{ title: t('stage3D.targetTipTitle'), text: t('stage3D.targetTipText'), example: t('stage3D.targetTipExample'), tone: 'success' }} placement="bottom">
+                  <button onClick={() => setTargetMode((v) => !v)} className={`mt-1 w-full px-2.5 py-1.5 rounded-md text-[10px] font-bold flex items-center justify-center gap-1.5 border transition-all ${targetMode ? 'bg-cyan-600/30 text-cyan-200 border-cyan-500/50 shadow' : 'bg-gray-800/50 text-gray-400 border-gray-700 hover:text-gray-200 hover:border-gray-600'}`} title={targetMode ? t('stage3D.targetQuit') : t('stage3D.targetAimTitle')}>
+                    <Crosshair size={12} /> {targetMode ? t('stage3D.targetActive') : t('stage3D.targetBtn')}
                   </button>
                 </RichTooltip>
-                <div className="text-[9px] text-gray-500">Drag sur la fixture en mode Direct = Pan/Tilt. Store pour créer Scene/EFX/Show.</div>
+                <div className="text-[9px] text-gray-500">{t('stage3D.directHint')}</div>
                 <div className="flex gap-1.5">
-                  <RichTooltip content={{ title: 'Rec Scène', text: 'Enregistre le look actuel du programmeur (pan/tilt/couleur/intensité) dans une nouvelle scène sélectionnable.', example: 'Ajoutez la fixture à la scène, ajustez pan/tilt/couleur ici, puis "Rec Scène" → elle apparaît dans la liste des scènes.', tone: 'success' }}>
-                    <button onClick={handleRecSceneCb} className="flex-1 py-1 rounded bg-yellow-600/20 text-yellow-300 border border-yellow-500/30 text-[10px] font-medium hover:bg-yellow-600/30">Rec Scène</button>
+                  <RichTooltip content={{ title: t('stage3D.recSceneTipTitle'), text: t('stage3D.recSceneTipText'), example: t('stage3D.recSceneTipExample'), tone: 'success' }}>
+                    <button onClick={handleRecSceneCb} className="flex-1 py-1 rounded bg-yellow-600/20 text-yellow-300 border border-yellow-500/30 text-[10px] font-medium hover:bg-yellow-600/30">{t('stage3D.recScene')}</button>
                   </RichTooltip>
-                  <RichTooltip content={{ title: 'Rec EFX', text: 'Enregistre le look actuel dans un nouvel EFX (effet auto : cercle, balayage, vague...).', example: 'Créez un EFX basé sur le pan/tilt actuel → il boucle automatiquement sur les fixtures sélectionnées.', tone: 'info' }}>
-                    <button onClick={handleRecEfxCb} className="flex-1 py-1 rounded bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-medium hover:bg-cyan-600/30">Rec EFX</button>
+                  <RichTooltip content={{ title: t('stage3D.recEfxTipTitle'), text: t('stage3D.recEfxTipText'), example: t('stage3D.recEfxTipExample'), tone: 'info' }}>
+                    <button onClick={handleRecEfxCb} className="flex-1 py-1 rounded bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-medium hover:bg-cyan-600/30">{t('stage3D.recEfx')}</button>
                   </RichTooltip>
-                  <RichTooltip content={{ title: 'Rec Show', text: 'Enregistre le look actuel dans le montage Show (séquence globale, toutes les fixtures).', example: 'Pour figer un look global dans le timeline du Show, appuyez ici.', tone: 'info' }}>
-                    <button onClick={handleRecShowCb} className="flex-1 py-1 rounded bg-amber-600/20 text-amber-300 border border-amber-500/30 text-[10px] font-medium hover:bg-amber-600/30">Rec Show</button>
+                  <RichTooltip content={{ title: t('stage3D.recShowTipTitle'), text: t('stage3D.recShowTipText'), example: t('stage3D.recShowTipExample'), tone: 'info' }}>
+                    <button onClick={handleRecShowCb} className="flex-1 py-1 rounded bg-amber-600/20 text-amber-300 border border-amber-500/30 text-[10px] font-medium hover:bg-amber-600/30">{t('stage3D.recShow')}</button>
                   </RichTooltip>
                 </div>
               </div>
@@ -3874,7 +3876,7 @@ export const Stage3D: React.FC<{
                   <>
               <div className="pt-2 border-t border-gray-800 space-y-1">
                 <div className="flex justify-between text-[10px]">
-                  <RichTooltip content={{ title: 'Pan zéro DMX', text: 'Décale le faisceau de la tête dans la vue 3D (réglage visuel persistant) : à DMX pan 128, le faisceau pointe ici. Le centre de l\'oscillation autoscript est posé par « Capturer ».', example: 'Pointe la tête (modale) puis clic sur « Capturer » : le mouvement autoscript tournera autour de cette pose.', tone: 'info' }}><span className="text-gray-500 cursor-help">Pan zéro DMX</span></RichTooltip>
+                  <RichTooltip content={{ title: t('stage3D.panZeroTipTitle'), text: t('stage3D.panZeroTipText'), example: t('stage3D.panZeroTipExample'), tone: 'info' }}><span className="text-gray-500 cursor-help">{t('stage3D.panZero')}</span></RichTooltip>
                   <span className="text-gray-400 font-mono">{((selectedPos.zeroPan ?? 0)).toFixed(0)}°</span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -3894,7 +3896,7 @@ export const Stage3D: React.FC<{
                   <span>-270°</span><span>+270°</span>
                 </div>
                 <div className="flex justify-between text-[10px] pt-1">
-                  <RichTooltip content={{ title: 'Tilt zéro DMX', text: 'Décale verticalement le faisceau de la tête dans la vue 3D (tare visuelle persistante) : à DMX tilt 128, le faisceau pointe ici.', example: 'Compense un accrochage physique qui vise trop haut/bas.', tone: 'info' }}><span className="text-gray-500 cursor-help">Tilt zéro DMX</span></RichTooltip>
+                  <RichTooltip content={{ title: t('stage3D.tiltZeroTipTitle'), text: t('stage3D.tiltZeroTipText'), example: t('stage3D.tiltZeroTipExample'), tone: 'info' }}><span className="text-gray-500 cursor-help">{t('stage3D.tiltZero')}</span></RichTooltip>
                   <span className="text-gray-400 font-mono">{((selectedPos.zeroTilt ?? 0)).toFixed(0)}°</span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -3941,10 +3943,10 @@ export const Stage3D: React.FC<{
                         centerTilt: Math.max(-90, Math.min(90, Math.round((tiltByte - 128) / 255 * 180))),
                       });
                     }
-                  }} title="Centre l'oscillation autoscript sur la pose actuelle (toutes les fixtures sélectionnées) — conserve la couleur et la position du programmeur" className="flex-1 text-[9px] rounded bg-purple-900/60 border border-purple-700/50 text-purple-200 hover:bg-purple-800/60 py-0.5">Capturer</button>
-                  <button onClick={() => setFixturePosition(selectedFixture.id, { zeroPan: 0, zeroTilt: 0, centerPan: 0, centerTilt: 0 })} title="Remet les faders point zéro et le centre de mouvement à 0°" className="flex-1 text-[9px] rounded bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 py-0.5">Zéro (0°)</button>
+                  }} title={t('stage3D.captureTitle')} className="flex-1 text-[9px] rounded bg-purple-900/60 border border-purple-700/50 text-purple-200 hover:bg-purple-800/60 py-0.5">{t('stage3D.capture')}</button>
+                  <button onClick={() => setFixturePosition(selectedFixture.id, { zeroPan: 0, zeroTilt: 0, centerPan: 0, centerTilt: 0 })} title={t('stage3D.zeroTitle')} className="flex-1 text-[9px] rounded bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 py-0.5">{t('stage3D.zeroBtn')}</button>
                 </div>
-                <p className="text-[9px] text-gray-600">Les faders décalent le faisceau (visuel, persistant). « Capturer » centre l'oscillation autoscript sur la pose actuelle de la tête.</p>
+                <p className="text-[9px] text-gray-600">{t('stage3D.zeroHint')}</p>
               </div>
                   </>
                 ) : null;
@@ -3953,7 +3955,7 @@ export const Stage3D: React.FC<{
               {/* Thumbnail Scale */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-gray-500">Taille icône</span>
+                  <span className="text-gray-500">{t('stage3D.iconSize')}</span>
                   <span className="text-gray-400 font-mono">{((selectedPos.thumbnailScale ?? 0.75)).toFixed(2)}×</span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -3982,7 +3984,7 @@ export const Stage3D: React.FC<{
               {/* Beam Angle (Zoom) */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-gray-500">Beam Angle</span>
+                  <span className="text-gray-500">{t('stage3D.beamAngle')}</span>
                   <span className="text-gray-400 font-mono">{((selectedPos.beamAngle ?? 0.15) * 180 / Math.PI).toFixed(0)}°</span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -4008,20 +4010,20 @@ export const Stage3D: React.FC<{
             {enableEfxApply && (
               <div className="mx-4 mb-3 p-3 rounded-xl bg-gradient-to-br from-violet-600/15 via-purple-600/10 to-cyan-600/10 border border-violet-500/20">
                 <div className="flex items-center gap-1.5 mb-2">
-                  <span className="text-[10px] font-bold tracking-widest text-violet-300 uppercase">✨ EFX Snapshot</span>
-                  <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/20">Nouveau</span>
+                  <span className="text-[10px] font-bold tracking-widest text-violet-300 uppercase">{t('stage3D.efxSnapshot')}</span>
+                  <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/20">{t('stage3D.newBadge')}</span>
                 </div>
-                <p className="text-[10px] text-gray-400 leading-relaxed mb-2">Applique un effet enregistré à la scène en cours — la 3D fige la pose, la scène garde la mémoire.</p>
+                <p className="text-[10px] text-gray-400 leading-relaxed mb-2">{t('stage3D.efxSnapshotText')}</p>
                 <select value={selectedEfxId} onChange={(e) => setSelectedEfxId(e.target.value)} className="w-full bg-black/40 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-violet-500/50">
-                  <option value="">— Choisir un EFX —</option>
+                  <option value="">{t('stage3D.chooseEfx')}</option>
                   {effects.map((efx) => (
                     <option key={efx.id} value={efx.id} className="bg-[#0d0d14]">{efx.name} · {efx.pattern}</option>
                   ))}
                 </select>
                 <button onClick={handleApplyEfxSnapshot} disabled={!selectedEfxId} className="mt-2 w-full py-2 rounded-lg bg-gradient-to-r from-violet-600 to-purple-600 text-white text-xs font-bold hover:from-violet-500 hover:to-purple-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all">
-                  <Sparkles size={12} /> Appliquer à la scène
+                  <Sparkles size={12} /> {t('stage3D.applyToScene')}
                 </button>
-                {effects.length === 0 && <p className="text-[9px] text-gray-600 mt-1 text-center">Aucun EFX enregistré — crée-en dans Design → EFX</p>}
+                {effects.length === 0 && <p className="text-[9px] text-gray-600 mt-1 text-center">{t('stage3D.noEfx')}</p>}
               </div>
             )}
             {/* Reset / Undo — efface la programmation en cours */}
@@ -4030,16 +4032,16 @@ export const Stage3D: React.FC<{
                 onClick={handleUndoLast}
                 disabled={undoDepth === 0}
                 className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg bg-gray-800/60 border border-gray-700 text-[11px] text-gray-300 hover:bg-gray-700 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                title="Effacer la dernière action (undo)"
+                title={t('stage3D.undoTitle')}
               >
-                <Undo2 size={12} /> Dernière action
+                <Undo2 size={12} /> {t('stage3D.undoLast')}
               </button>
               <button
                 onClick={handleResetAll}
                 className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg bg-red-600/15 border border-red-500/30 text-[11px] text-red-300 hover:bg-red-600/30 transition-colors"
-                title="Tout réinitialiser : vide le programmeur, annule les actions et l'EFX snapshot"
+                title={t('stage3D.resetTitle')}
               >
-                <RotateCcw size={12} /> Tout réinit.
+                <RotateCcw size={12} /> {t('stage3D.resetAll')}
               </button>
             </div>
             {/* Close button */}
@@ -4048,16 +4050,16 @@ export const Stage3D: React.FC<{
                 <button
                   onClick={handleCancelEfxSnapshot}
                   className="w-full px-3 py-2 bg-orange-600/15 border border-orange-500/40 rounded-lg text-xs text-orange-300 hover:bg-orange-600/25 transition-colors flex items-center justify-center gap-1.5"
-                  title="Annule l'EFX snapshot appliqué à la scène (restaure l'état d'avant)"
+                  title={t('stage3D.cancelEfxTitle')}
                 >
-                  <Undo2 size={12} /> Annuler l'EFX snapshot
+                  <Undo2 size={12} /> {t('stage3D.cancelEfx')}
                 </button>
               )}
               <button
                 onClick={clearFixtureSelection}
                 className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-700/50 transition-colors"
               >
-                Fermer
+                {t('stage3D.close')}
               </button>
             </div>
             </div>
@@ -4070,69 +4072,69 @@ export const Stage3D: React.FC<{
         {enableEfxApply && !rightDockCollapsed && (
           <div className="order-3 w-[220px] xl:w-[264px] shrink-0 border-l border-gray-800/50 bg-[#0d0d14]/60 flex flex-col min-h-0">
             <div className="px-3 py-2 border-b border-gray-800/50 flex items-center justify-between">
-              <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">Scène & EFX</span>
-              <button onClick={() => setRightDockCollapsed(true)} className="w-5 h-5 rounded bg-black/30 border border-gray-800 text-gray-500 hover:text-gray-300 hover:border-gray-600 flex items-center justify-center" title="Réduire le panneau">
+              <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">{t('stage3D.sceneEfx')}</span>
+              <button onClick={() => setRightDockCollapsed(true)} className="w-5 h-5 rounded bg-black/30 border border-gray-800 text-gray-500 hover:text-gray-300 hover:border-gray-600 flex items-center justify-center" title={t('stage3D.collapsePanel')}>
                 <ChevronUp size={10} className="rotate-90" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
               <div className="p-3 rounded-xl bg-gradient-to-br from-violet-600/15 to-cyan-600/10 border border-violet-500/20">
-                <div className="text-xs font-bold text-violet-300 mb-1">✨ Appliquer un EFX</div>
-                <p className="text-[10px] text-gray-400 mb-2">Choisis un effet, il sera figé dans la scène en cours (ou nouvelle scène).</p>
+                <div className="text-xs font-bold text-violet-300 mb-1">{t('stage3D.applyEfx')}</div>
+                <p className="text-[10px] text-gray-400 mb-2">{t('stage3D.applyEfxText')}</p>
                 <select value={selectedEfxId} onChange={(e) => setSelectedEfxId(e.target.value)} className="w-full bg-black/40 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-violet-500/50">
-                  <option value="">— Choisir un EFX —</option>
+                  <option value="">{t('stage3D.chooseEfx')}</option>
                   {effects.map((efx) => (
                     <option key={efx.id} value={efx.id} className="bg-[#0d0d14]">{efx.name} · {efx.pattern}</option>
                   ))}
                 </select>
                 <button onClick={handleApplyEfxSnapshot} disabled={!selectedEfxId} className="mt-2 w-full py-2 rounded-lg bg-gradient-to-r from-violet-600 to-purple-600 text-white text-xs font-bold hover:from-violet-500 hover:to-purple-500 disabled:opacity-40 flex items-center justify-center gap-1.5">
-                  <Sparkles size={12} /> Appliquer à la scène
+                  <Sparkles size={12} /> {t('stage3D.applyToScene')}
                 </button>
               </div>
               <div className="grid grid-cols-3 gap-1">
-                <button onClick={handleRecSceneCb} className="px-1 py-1.5 rounded-lg bg-yellow-600/20 text-yellow-300 border border-yellow-500/30 text-[10px] font-medium hover:bg-yellow-600/30 transition-colors" title="Capture la pose actuelle en nouvelle scène">Rec Scène</button>
-                <button onClick={handleRecEfxCb} className="px-1 py-1.5 rounded-lg bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-medium hover:bg-cyan-600/30 transition-colors" title="Crée un EFX depuis la pose actuelle">Rec EFX</button>
-                <button onClick={handleRecShowCb} className="px-1 py-1.5 rounded-lg bg-amber-600/20 text-amber-300 border border-amber-500/30 text-[10px] font-medium hover:bg-amber-600/30 transition-colors" title="Capture la pose en scène + show">Rec Show</button>
+                <button onClick={handleRecSceneCb} className="px-1 py-1.5 rounded-lg bg-yellow-600/20 text-yellow-300 border border-yellow-500/30 text-[10px] font-medium hover:bg-yellow-600/30 transition-colors" title={t('stage3D.recSceneTitle')}>{t('stage3D.recScene')}</button>
+                <button onClick={handleRecEfxCb} className="px-1 py-1.5 rounded-lg bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-medium hover:bg-cyan-600/30 transition-colors" title={t('stage3D.recEfxTitle')}>{t('stage3D.recEfx')}</button>
+                <button onClick={handleRecShowCb} className="px-1 py-1.5 rounded-lg bg-amber-600/20 text-amber-300 border border-amber-500/30 text-[10px] font-medium hover:bg-amber-600/30 transition-colors" title={t('stage3D.recShowTitle')}>{t('stage3D.recShow')}</button>
               </div>
               <div className="grid grid-cols-2 gap-1">
                 <button
                   onClick={handleUndoLast}
                   disabled={undoDepth === 0}
                   className="flex items-center justify-center gap-1 px-1 py-1.5 rounded-lg bg-gray-800/60 border border-gray-700 text-[10px] text-gray-300 hover:bg-gray-700 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  title="Effacer la dernière action (undo)"
+                  title={t('stage3D.undoTitle')}
                 >
-                  <Undo2 size={11} /> Dernière action
+                  <Undo2 size={11} /> {t('stage3D.undoLast')}
                 </button>
                 <button
                   onClick={handleResetAll}
                   className="flex items-center justify-center gap-1 px-1 py-1.5 rounded-lg bg-red-600/15 border border-red-500/30 text-[10px] text-red-300 hover:bg-red-600/30 transition-colors"
-                  title="Tout réinitialiser : vide le programmeur, annule les actions et l'EFX snapshot"
+                  title={t('stage3D.resetTitle')}
                 >
-                  <RotateCcw size={11} /> Tout réinit.
+                  <RotateCcw size={11} /> {t('stage3D.resetAll')}
                 </button>
               </div>
               {efxSnapshotActive && (
                 <button
                   onClick={handleCancelEfxSnapshot}
                   className="w-full px-2 py-1.5 rounded-lg bg-orange-600/15 border border-orange-500/40 text-[10px] text-orange-300 hover:bg-orange-600/25 transition-colors flex items-center justify-center gap-1"
-                  title="Annule l'EFX snapshot appliqué à la scène"
+                  title={t('stage3D.cancelEfxTitleShort')}
                 >
-                  <Undo2 size={11} /> Annuler l'EFX snapshot
+                  <Undo2 size={11} /> {t('stage3D.cancelEfx')}
                 </button>
               )}
               <div className="p-2.5 rounded-lg bg-black/20 border border-gray-800/50">
-                <div className="text-[10px] font-semibold text-gray-400 mb-1">Astuce pro</div>
-                <p className="text-[10px] text-gray-500 leading-relaxed">Sélectionne une lyre à gauche, ajuste sa position avec `−/+`, puis fige un EFX — ta scène garde la pose exacte vue en 3D.</p>
+                <div className="text-[10px] font-semibold text-gray-400 mb-1">{t('stage3D.proTip')}</div>
+                <p className="text-[10px] text-gray-500 leading-relaxed">{t('stage3D.proTipText')}</p>
               </div>
             </div>
           </div>
         )}
         {enableEfxApply && rightDockCollapsed && (
           <div className="order-3 w-8 shrink-0 border-l border-gray-800/50 bg-[#0d0d14]/60 flex flex-col items-center py-2 gap-2">
-            <button onClick={() => setRightDockCollapsed(false)} className="w-6 h-6 rounded bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 border border-purple-500/30 flex items-center justify-center" title="Ouvrir le panneau Scène & EFX">
+            <button onClick={() => setRightDockCollapsed(false)} className="w-6 h-6 rounded bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 border border-purple-500/30 flex items-center justify-center" title={t('stage3D.openSceneEfx')}>
               <List size={12} />
             </button>
-            <span className="text-[9px] text-gray-600 [writing-mode:vertical-lr] tracking-widest uppercase">Scène</span>
+            <span className="text-[9px] text-gray-600 [writing-mode:vertical-lr] tracking-widest uppercase">{t('stage3D.scene')}</span>
           </div>
         )}
         {/* Fermeture row principale (le centre est déjà fermé plus haut) */}
@@ -4141,10 +4143,10 @@ export const Stage3D: React.FC<{
       <div className="h-6 border-t border-gray-800/50 bg-[#0d0d14] flex items-center px-3 gap-3 text-[10px] text-gray-500 shrink-0">
         <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> 3D 30 fps</span>
         <span className="w-px h-3 bg-gray-800" />
-        <span>{patchedFixtures.length} fixtures</span>
+        <span>{patchedFixtures.length} {t('stage3D.fixturesShort')}</span>
         {selectedFixture && <><span className="w-px h-3 bg-gray-800" /><span className="text-purple-300">{selectedFixture.name}</span></>}
         <span className="flex-1" />
-        <span className="hidden md:inline">Glisser = orbiter • Clic = sélectionner • Ctrl+clic = multi • Target = viser un point</span>
+        <span className="hidden md:inline">{t('stage3D.statusHint')}</span>
       </div>
     </div>
   );

@@ -2562,8 +2562,8 @@ if (editBlock) { setEditBlock(null); return; }
     ctx.lineTo(LABEL_WIDTH, h);
     ctx.stroke();
 
-    const headerText = `${cues.length} cues  ·  ${numFixtures} fixtures  ·  ${bpmSafe} BPM` +
-      (numEfxTracks > 0 ? `  ·  ${numEfxTracks} EFX track${numEfxTracks !== 1 ? 's' : ''}` : '');
+    const headerText = t('timeline.headerStats', { cues: cues.length, fixtures: numFixtures, bpm: bpmSafe }) +
+      (numEfxTracks > 0 ? t('timeline.headerStatsEfx', { count: numEfxTracks }) : '');
 
     ctx.fillStyle = '#6b7280';
     ctx.font = '10px -apple-system, monospace';
@@ -2971,7 +2971,7 @@ if (editBlock) { setEditBlock(null); return; }
     ctx.fillStyle = '#8b5cf6';
     ctx.font = '9px -apple-system, sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText('AutoScript', 6, autoY + 12);
+    ctx.fillText(t('timeline.autoscriptLabel'), 6, autoY + 12);
 
     // Top separator
     ctx.strokeStyle = 'rgba(139, 92, 246, 0.2)';
@@ -3086,13 +3086,13 @@ if (editBlock) { setEditBlock(null); return; }
     ctx.font = '7px -apple-system, sans-serif';
     ctx.fillStyle = '#a855f7';
     ctx.textAlign = 'left';
-    ctx.fillText('1P dim', w - 160, autoY + 10);
+    ctx.fillText(t('timeline.legendTier1'), w - 160, autoY + 10);
     ctx.fillStyle = '#3b82f6';
-    ctx.fillText('2S dim', w - 114, autoY + 10);
+    ctx.fillText(t('timeline.legendTier2'), w - 114, autoY + 10);
     ctx.fillStyle = '#6b7280';
-    ctx.fillText('3T dim', w - 72, autoY + 10);
+    ctx.fillText(t('timeline.legendTier3'), w - 72, autoY + 10);
     ctx.fillStyle = '#22c55e';
-    ctx.fillText('\u2500 tilt', w - 44, autoY + 10);
+    ctx.fillText(t('timeline.legendTilt'), w - 44, autoY + 10);
 
     // ── EFX tracks ──────────────────────────────────
     if (numEfxTracks > 0) {
@@ -3130,7 +3130,7 @@ if (editBlock) { setEditBlock(null); return; }
         } else if (tf?.type === 'fixture') {
           targetLabel = '💡 ×1';
         } else {
-          targetLabel = '🌐 all';
+          targetLabel = '🌐 ' + t('common.all');
         }
         if (targetLabel) {
           ctx.fillStyle = '#6b7280';
@@ -3246,7 +3246,7 @@ if (editBlock) { setEditBlock(null); return; }
         } else if (tf?.type === 'fixture') {
           targetLabel = '💡 ×1';
         } else {
-          targetLabel = '🌐 all';
+          targetLabel = '🌐 ' + t('common.all');
         }
         if (targetLabel) {
           ctx.fillStyle = '#6b7280';
@@ -3376,7 +3376,7 @@ if (editBlock) { setEditBlock(null); return; }
         } else if (tf?.type === 'fixture') {
           targetLabel = '💡 ×1';
         } else {
-          targetLabel = '🌐 all';
+          targetLabel = '🌐 ' + t('common.all');
         }
         if (targetLabel) {
           ctx.fillStyle = '#6b7280';
@@ -3493,7 +3493,7 @@ if (editBlock) { setEditBlock(null); return; }
         } else if (tf?.type === 'fixture') {
           targetLabel = '💡 ×1';
         } else {
-          targetLabel = '🌐 all';
+          targetLabel = '🌐 ' + t('common.all');
         }
         if (targetLabel) {
           ctx.fillStyle = '#6b7280';
@@ -3607,7 +3607,7 @@ if (editBlock) { setEditBlock(null); return; }
         if (cEntry0) {
           cTargetLabel = '🎬 ' + (cEntry0.label || cEntry0.chaserName || '').slice(0, 10);
         } else {
-          cTargetLabel = 'clic droit pour importer';
+          cTargetLabel = t('timeline.rightClickToImport');
         }
         if (cTargetLabel) {
           ctx.fillStyle = '#6b7280';
@@ -3656,7 +3656,7 @@ if (editBlock) { setEditBlock(null); return; }
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 7px -apple-system, sans-serif';
             ctx.textAlign = 'center';
-            const nameLabel = (entry.label || entry.chaserName || 'chaser').length > 14 ? (entry.label || entry.chaserName || 'chaser').substring(0, 13) + '…' : (entry.label || entry.chaserName || 'chaser');
+            const nameLabel = (entry.label || entry.chaserName || t('timeline.fallbackChaser')).length > 14 ? (entry.label || entry.chaserName || t('timeline.fallbackChaser')).substring(0, 13) + '…' : (entry.label || entry.chaserName || t('timeline.fallbackChaser'));
             ctx.fillText(nameLabel, ex + entryW / 2, trackY + CHASER_TRACK_HEIGHT / 2 + 3);
           }
 
@@ -3708,7 +3708,7 @@ if (editBlock) { setEditBlock(null); return; }
         const sLabel = sTrack.name.length > 11 ? sTrack.name.substring(0, 10) + '\u2026' : sTrack.name;
         ctx.fillText('SHOW: ' + sLabel, 6, trackY + 12);
         const sEntry0 = sTrack.entries[0];
-        let sTargetLabel = sEntry0 ? ('🎬 ' + (sEntry0.label || sEntry0.showName || '').slice(0, 10)) : 'clic droit pour importer';
+        let sTargetLabel = sEntry0 ? ('🎬 ' + (sEntry0.label || sEntry0.showName || '').slice(0, 10)) : t('timeline.rightClickToImport');
         if (sTargetLabel) { ctx.fillStyle = '#6b7280'; ctx.font = '8px -apple-system, sans-serif'; ctx.fillText(sTargetLabel, 72, trackY + 12); }
         ctx.strokeStyle = 'rgba(75, 85, 99, 0.1)'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.moveTo(LABEL_WIDTH, trackY + SHOW_TRACK_HEIGHT); ctx.lineTo(w, trackY + SHOW_TRACK_HEIGHT); ctx.stroke();
         for (const entry of sTrack.entries) {
@@ -3719,7 +3719,7 @@ if (editBlock) { setEditBlock(null); return; }
           const pad = 3; const barY = trackY + pad; const barH = SHOW_TRACK_HEIGHT - pad * 2;
           ctx.fillStyle = '#f59e0b'; ctx.globalAlpha = 0.88; ctx.beginPath(); ctx.roundRect(ex, barY, entryW, barH, 3); ctx.fill(); ctx.globalAlpha = 1;
           ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.roundRect(ex, barY, 3, barH, [3, 0, 0, 3]); ctx.fill(); ctx.beginPath(); ctx.roundRect(endX - 3, barY, 3, barH, [0, 3, 3, 0]); ctx.fill();
-          if (entryW > 44) { ctx.fillStyle = '#ffffff'; ctx.font = 'bold 7px -apple-system, sans-serif'; ctx.textAlign = 'center'; const nameLabel = (entry.label || entry.showName || 'show').length > 14 ? (entry.label || entry.showName || 'show').substring(0, 13) + '…' : (entry.label || entry.showName || 'show'); ctx.fillText(nameLabel, ex + entryW / 2, trackY + SHOW_TRACK_HEIGHT / 2 + 3); }
+          if (entryW > 44) { ctx.fillStyle = '#ffffff'; ctx.font = 'bold 7px -apple-system, sans-serif'; ctx.textAlign = 'center'; const nameLabel = (entry.label || entry.showName || t('timeline.fallbackShow')).length > 14 ? (entry.label || entry.showName || t('timeline.fallbackShow')).substring(0, 13) + '…' : (entry.label || entry.showName || t('timeline.fallbackShow')); ctx.fillText(nameLabel, ex + entryW / 2, trackY + SHOW_TRACK_HEIGHT / 2 + 3); }
           ctx.fillStyle = '#fbbf24'; const diamondSize = 3; ctx.beginPath(); ctx.moveTo(ex, barY + barH / 2 - diamondSize); ctx.lineTo(ex + diamondSize, barY + barH / 2); ctx.lineTo(ex, barY + barH / 2 + diamondSize); ctx.lineTo(ex - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(endX, barY + barH / 2 - diamondSize); ctx.lineTo(endX + diamondSize, barY + barH / 2); ctx.lineTo(endX, barY + barH / 2 + diamondSize); ctx.lineTo(endX - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill();
         }
       }
@@ -3761,7 +3761,7 @@ if (editBlock) { setEditBlock(null); return; }
         if (cEntry0) {
           cTargetLabel = '🎭 ' + (cEntry0.label || cEntry0.sceneName || '').slice(0, 10);
         } else {
-          cTargetLabel = 'clic droit pour importer';
+          cTargetLabel = t('timeline.rightClickToImport');
         }
         if (cTargetLabel) {
           ctx.fillStyle = '#6b7280';
@@ -3799,7 +3799,7 @@ if (editBlock) { setEditBlock(null); return; }
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 7px -apple-system, sans-serif';
             ctx.textAlign = 'center';
-            const nameLabel = (entry.label || entry.sceneName || 'scene').length > 14 ? (entry.label || entry.sceneName || 'scene').substring(0, 13) + '…' : (entry.label || entry.sceneName || 'scene');
+            const nameLabel = (entry.label || entry.sceneName || t('timeline.fallbackScene')).length > 14 ? (entry.label || entry.sceneName || t('timeline.fallbackScene')).substring(0, 13) + '…' : (entry.label || entry.sceneName || t('timeline.fallbackScene'));
             ctx.fillText(nameLabel, ex + entryW / 2, trackY + SCENE_TRACK_HEIGHT / 2 + 3);
           }
           ctx.fillStyle = '#c4b5fd'; const diamondSize = 3; ctx.beginPath(); ctx.moveTo(ex, barY + barH / 2 - diamondSize); ctx.lineTo(ex + diamondSize, barY + barH / 2); ctx.lineTo(ex, barY + barH / 2 + diamondSize); ctx.lineTo(ex - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(endX, barY + barH / 2 - diamondSize); ctx.lineTo(endX + diamondSize, barY + barH / 2); ctx.lineTo(endX, barY + barH / 2 + diamondSize); ctx.lineTo(endX - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill();
@@ -3845,7 +3845,7 @@ if (editBlock) { setEditBlock(null); return; }
         if (cEntry0) {
           cTargetLabel = '🔳 ' + (cEntry0.label || cEntry0.matrixName || '').slice(0, 10);
         } else {
-          cTargetLabel = 'clic droit pour importer';
+          cTargetLabel = t('timeline.rightClickToImport');
         }
         if (cTargetLabel) {
           ctx.fillStyle = '#6b7280';
@@ -3883,7 +3883,7 @@ if (editBlock) { setEditBlock(null); return; }
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 7px -apple-system, sans-serif';
             ctx.textAlign = 'center';
-            const nameLabel = (entry.label || entry.matrixName || 'matrix').length > 14 ? (entry.label || entry.matrixName || 'matrix').substring(0, 13) + '…' : (entry.label || entry.matrixName || 'matrix');
+            const nameLabel = (entry.label || entry.matrixName || t('timeline.fallbackMatrix')).length > 14 ? (entry.label || entry.matrixName || t('timeline.fallbackMatrix')).substring(0, 13) + '…' : (entry.label || entry.matrixName || t('timeline.fallbackMatrix'));
             ctx.fillText(nameLabel, ex + entryW / 2, trackY + MATRIX_TRACK_HEIGHT / 2 + 3);
           }
           ctx.fillStyle = '#f9a8d4'; const diamondSize = 3; ctx.beginPath(); ctx.moveTo(ex, barY + barH / 2 - diamondSize); ctx.lineTo(ex + diamondSize, barY + barH / 2); ctx.lineTo(ex, barY + barH / 2 + diamondSize); ctx.lineTo(ex - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(endX, barY + barH / 2 - diamondSize); ctx.lineTo(endX + diamondSize, barY + barH / 2); ctx.lineTo(endX, barY + barH / 2 + diamondSize); ctx.lineTo(endX - diamondSize, barY + barH / 2); ctx.closePath(); ctx.fill();
@@ -3942,6 +3942,7 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
   }, [
+    t,
     cues,
     sections,
     duration,
@@ -4009,13 +4010,13 @@ if (editBlock) { setEditBlock(null); return; }
               setFtMenu(null);
               setGradientPicker({ sectionType: 'fixture', colorIdx: 0, startColor: '#ff0064', endColor: '#ff0064', constantColor: false, trackIdx: ftMenu.trackIdx });
             }}
-          ><span className="text-[14px]">🎨</span> Color</button>
+          ><span className="text-[14px]">🎨</span> {t('timeline.blockColor')}</button>
           {/* Dimmer */}
           <button className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2"
             onClick={() => {
               const popup = document.createElement('div');
               popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:1px solid #374151;border-radius:12px;padding:20px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);min-width:280px';
-              popup.innerHTML = '<div style="color:#06b6d4;font-size:13px;font-weight:600;margin-bottom:8px">Dimmer</div><div style="padding:8px 10px;background:rgba(6,182,212,.1);border:1px solid rgba(6,182,212,.2);border-radius:8px;margin-bottom:12px"><p style="margin:0 0 4px 0;font-size:11px;color:#cbd5e1"><b style="color:#06b6d4">Départ</b> : intensité au début du bloc (0 = éteint, 255 = plein).</p><p style="margin:0;font-size:11px;color:#cbd5e1"><b style="color:#06b6d4">Arrivée</b> : intensité cible en fin de bloc. Différente = fondu progressif.</p></div><div style="display:flex;gap:16px;justify-content:center"><div style="text-align:center"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">Départ</div><div id="__dv1" style="color:#06b6d4;font-size:20px;font-weight:700;margin:4px 0">200</div><input id="__dr1" type="range" min="0" max="255" value="200" style="width:100%;accent-color:#06b6d4" /></div><div style="text-align:center"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">Arrivée</div><div id="__dv2" style="color:#06b6d4;font-size:20px;font-weight:700;margin:4px 0">200</div><input id="__dr2" type="range" min="0" max="255" value="200" style="width:100%;accent-color:#06b6d4" /></div></div><div style="display:flex;gap:8px;margin-top:16px;justify-content:center"><button id="__dc" style="background:#06b6d4;color:#000;border:none;border-radius:6px;padding:6px 16px;font-size:12px;font-weight:600;cursor:pointer">OK</button><button id="__dx" style="background:#374151;color:#9ca3af;border:none;border-radius:6px;padding:6px 16px;font-size:12px;cursor:pointer">Cancel</button></div>';
+              popup.innerHTML = '<div style="color:#06b6d4;font-size:13px;font-weight:600;margin-bottom:8px">' + t('timeline.popupDimmerTitle') + '</div><div style="padding:8px 10px;background:rgba(6,182,212,.1);border:1px solid rgba(6,182,212,.2);border-radius:8px;margin-bottom:12px"><p style="margin:0 0 4px 0;font-size:11px;color:#cbd5e1"><b style="color:#06b6d4">' + t('timeline.popupStart') + '</b> : ' + t('timeline.popupDimmerStartHint') + '</p><p style="margin:0;font-size:11px;color:#cbd5e1"><b style="color:#06b6d4">' + t('timeline.popupEnd') + '</b> : ' + t('timeline.popupDimmerEndHint') + '</p></div><div style="display:flex;gap:16px;justify-content:center"><div style="text-align:center"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">' + t('timeline.popupStart') + '</div><div id="__dv1" style="color:#06b6d4;font-size:20px;font-weight:700;margin:4px 0">200</div><input id="__dr1" type="range" min="0" max="255" value="200" style="width:100%;accent-color:#06b6d4" /></div><div style="text-align:center"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">' + t('timeline.popupEnd') + '</div><div id="__dv2" style="color:#06b6d4;font-size:20px;font-weight:700;margin:4px 0">200</div><input id="__dr2" type="range" min="0" max="255" value="200" style="width:100%;accent-color:#06b6d4" /></div></div><div style="display:flex;gap:8px;margin-top:16px;justify-content:center"><button id="__dc" style="background:#06b6d4;color:#000;border:none;border-radius:6px;padding:6px 16px;font-size:12px;font-weight:600;cursor:pointer">' + t('timeline.ok') + '</button><button id="__dx" style="background:#374151;color:#9ca3af;border:none;border-radius:6px;padding:6px 16px;font-size:12px;cursor:pointer">' + t('common.cancel') + '</button></div>';
               document.body.appendChild(popup);
               const rng1 = popup.querySelector('#__dr1') as HTMLInputElement;
               const rng2 = popup.querySelector('#__dr2') as HTMLInputElement;
@@ -4040,13 +4041,13 @@ if (editBlock) { setEditBlock(null); return; }
               });
               popup.querySelector('#__dx')!.addEventListener('click', () => document.body.removeChild(popup));
             }}
-          ><span className="text-[14px]">💡</span> Dimmer</button>
+          ><span className="text-[14px]">💡</span> {t('timeline.blockDimmer')}</button>
           {/* Strobe */}
           <button className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2"
             onClick={() => {
               const popup = document.createElement('div');
               popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:1px solid #374151;border-radius:12px;padding:20px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);min-width:280px';
-              popup.innerHTML = '<div style="color:#fbbf24;font-size:13px;font-weight:600;margin-bottom:8px">Strobe Speed</div><div style="padding:8px 10px;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.2);border-radius:8px;margin-bottom:12px"><p style="margin:0 0 4px 0;font-size:11px;color:#cbd5e1"><b style="color:#fbbf24">Départ</b> : fréquence au début du bloc (Hz).</p><p style="margin:0;font-size:11px;color:#cbd5e1"><b style="color:#fbbf24">Arrivée</b> : fréquence cible en fin de bloc. Accélération ou ralentissement progressif.</p></div><div style="display:flex;gap:16px;justify-content:center"><div style="text-align:center"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">Départ</div><div id="__sv1" style="color:#fbbf24;font-size:20px;font-weight:700;margin:4px 0">8 Hz</div><input id="__sr1" type="range" min="1" max="25" value="8" style="width:100%;accent-color:#f59e0b" /></div><div style="text-align:center"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">Arrivée</div><div id="__sv2" style="color:#fbbf24;font-size:20px;font-weight:700;margin:4px 0">8 Hz</div><input id="__sr2" type="range" min="1" max="25" value="8" style="width:100%;accent-color:#f59e0b" /></div></div><div style="display:flex;gap:8px;margin-top:16px;justify-content:center"><button id="__sc" style="background:#f59e0b;color:#000;border:none;border-radius:6px;padding:6px 16px;font-size:12px;font-weight:600;cursor:pointer">OK</button><button id="__sx" style="background:#374151;color:#9ca3af;border:none;border-radius:6px;padding:6px 16px;font-size:12px;cursor:pointer">Cancel</button></div>';
+              popup.innerHTML = '<div style="color:#fbbf24;font-size:13px;font-weight:600;margin-bottom:8px">' + t('timeline.popupStrobeTitle') + '</div><div style="padding:8px 10px;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.2);border-radius:8px;margin-bottom:12px"><p style="margin:0 0 4px 0;font-size:11px;color:#cbd5e1"><b style="color:#fbbf24">' + t('timeline.popupStart') + '</b> : ' + t('timeline.popupStrobeStartHint') + '</p><p style="margin:0;font-size:11px;color:#cbd5e1"><b style="color:#fbbf24">' + t('timeline.popupEnd') + '</b> : ' + t('timeline.popupStrobeEndHint') + '</p></div><div style="display:flex;gap:16px;justify-content:center"><div style="text-align:center"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">' + t('timeline.popupStart') + '</div><div id="__sv1" style="color:#fbbf24;font-size:20px;font-weight:700;margin:4px 0">8 Hz</div><input id="__sr1" type="range" min="1" max="25" value="8" style="width:100%;accent-color:#f59e0b" /></div><div style="text-align:center"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">' + t('timeline.popupEnd') + '</div><div id="__sv2" style="color:#fbbf24;font-size:20px;font-weight:700;margin:4px 0">8 Hz</div><input id="__sr2" type="range" min="1" max="25" value="8" style="width:100%;accent-color:#f59e0b" /></div></div><div style="display:flex;gap:8px;margin-top:16px;justify-content:center"><button id="__sc" style="background:#f59e0b;color:#000;border:none;border-radius:6px;padding:6px 16px;font-size:12px;font-weight:600;cursor:pointer">' + t('timeline.ok') + '</button><button id="__sx" style="background:#374151;color:#9ca3af;border:none;border-radius:6px;padding:6px 16px;font-size:12px;cursor:pointer">' + t('common.cancel') + '</button></div>';
               document.body.appendChild(popup);
               const rng1 = popup.querySelector('#__sr1') as HTMLInputElement;
               const rng2 = popup.querySelector('#__sr2') as HTMLInputElement;
@@ -4071,13 +4072,13 @@ if (editBlock) { setEditBlock(null); return; }
               });
               popup.querySelector('#__sx')!.addEventListener('click', () => document.body.removeChild(popup));
             }}
-          ><span className="text-[14px]">⚡</span> Strobe</button>
+          ><span className="text-[14px]">⚡</span> {t('timeline.blockStrobe')}</button>
           {/* Movement */}
           <button className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2"
             onClick={() => {
               const popup = document.createElement('div');
               popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:1px solid #374151;border-radius:12px;padding:20px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);min-width:360px';
-              popup.innerHTML = '<div style="color:#22c55e;font-size:13px;font-weight:600;margin-bottom:8px">Movement</div><div style="padding:8px 10px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.2);border-radius:8px;margin-bottom:12px"><p style="margin:0 0 4px 0;font-size:11px;color:#cbd5e1"><b style="color:#22c55e">Départ</b> : pattern et amplitude au début du bloc.</p><p style="margin:0;font-size:11px;color:#cbd5e1"><b style="color:#22c55e">Arrivée</b> : cible en fin de bloc. Pattern différent = changement à mi-temps.</p></div><div style="display:flex;gap:16px;justify-content:center"><div style="text-align:center;flex:1"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">Départ</div><select id="__mp1" style="width:100%;background:#1f1f2e;border:1px solid #374151;border-radius:6px;padding:6px;color:#d1d5db;font-size:12px;margin-bottom:8px"><option value="sweep">Sweep</option><option value="circle">Circle</option><option value="bounce">Bounce</option><option value="wave">Wave</option><option value="figure8">Figure-8</option><option value="zigzag">Zigzag</option><option value="diamond">Diamond</option><option value="spiral">Spiral</option><option value="heartbeat">Heartbeat</option><option value="randomWalk">Random Walk</option><option value="panOnly">Pan Only</option><option value="tiltOnly">Tilt Only</option><option value="static">Static</option></select><div id="__mv1" style="color:#22c55e;font-size:16px;font-weight:700;margin:4px 0">80</div><input id="__ma1" type="range" min="20" max="200" value="80" style="width:100%;accent-color:#22c55e" /></div><div style="text-align:center;flex:1"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">Arrivée</div><select id="__mp2" style="width:100%;background:#1f1f2e;border:1px solid #374151;border-radius:6px;padding:6px;color:#d1d5db;font-size:12px;margin-bottom:8px"><option value="sweep">Sweep</option><option value="circle">Circle</option><option value="bounce">Bounce</option><option value="wave">Wave</option><option value="figure8">Figure-8</option><option value="zigzag">Zigzag</option><option value="diamond">Diamond</option><option value="spiral">Spiral</option><option value="heartbeat">Heartbeat</option><option value="randomWalk">Random Walk</option><option value="panOnly">Pan Only</option><option value="tiltOnly">Tilt Only</option><option value="static">Static</option></select><div id="__mv2" style="color:#22c55e;font-size:16px;font-weight:700;margin:4px 0">80</div><input id="__ma2" type="range" min="20" max="200" value="80" style="width:100%;accent-color:#22c55e" /></div></div><div style="display:flex;gap:8px;margin-top:12px;justify-content:center"><button id="__mc" style="background:#22c55e;color:#000;border:none;border-radius:6px;padding:6px 16px;font-size:12px;font-weight:600;cursor:pointer">OK</button><button id="__mx" style="background:#374151;color:#9ca3af;border:none;border-radius:6px;padding:6px 16px;font-size:12px;cursor:pointer">Cancel</button></div>';
+              popup.innerHTML = '<div style="color:#22c55e;font-size:13px;font-weight:600;margin-bottom:8px">' + t('timeline.popupMovementTitle') + '</div><div style="padding:8px 10px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.2);border-radius:8px;margin-bottom:12px"><p style="margin:0 0 4px 0;font-size:11px;color:#cbd5e1"><b style="color:#22c55e">' + t('timeline.popupStart') + '</b> : ' + t('timeline.popupMovementStartHint') + '</p><p style="margin:0;font-size:11px;color:#cbd5e1"><b style="color:#22c55e">' + t('timeline.popupEnd') + '</b> : ' + t('timeline.popupMovementEndHint') + '</p></div><div style="display:flex;gap:16px;justify-content:center"><div style="text-align:center;flex:1"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">' + t('timeline.popupStart') + '</div><select id="__mp1" style="width:100%;background:#1f1f2e;border:1px solid #374151;border-radius:6px;padding:6px;color:#d1d5db;font-size:12px;margin-bottom:8px"><option value="sweep">Sweep</option><option value="circle">Circle</option><option value="bounce">Bounce</option><option value="wave">Wave</option><option value="figure8">Figure-8</option><option value="zigzag">Zigzag</option><option value="diamond">Diamond</option><option value="spiral">Spiral</option><option value="heartbeat">Heartbeat</option><option value="randomWalk">Random Walk</option><option value="panOnly">Pan Only</option><option value="tiltOnly">Tilt Only</option><option value="static">Static</option></select><div id="__mv1" style="color:#22c55e;font-size:16px;font-weight:700;margin:4px 0">80</div><input id="__ma1" type="range" min="20" max="200" value="80" style="width:100%;accent-color:#22c55e" /></div><div style="text-align:center;flex:1"><div style="color:#9ca3af;font-size:10px;margin-bottom:4px">' + t('timeline.popupEnd') + '</div><select id="__mp2" style="width:100%;background:#1f1f2e;border:1px solid #374151;border-radius:6px;padding:6px;color:#d1d5db;font-size:12px;margin-bottom:8px"><option value="sweep">Sweep</option><option value="circle">Circle</option><option value="bounce">Bounce</option><option value="wave">Wave</option><option value="figure8">Figure-8</option><option value="zigzag">Zigzag</option><option value="diamond">Diamond</option><option value="spiral">Spiral</option><option value="heartbeat">Heartbeat</option><option value="randomWalk">Random Walk</option><option value="panOnly">Pan Only</option><option value="tiltOnly">Tilt Only</option><option value="static">Static</option></select><div id="__mv2" style="color:#22c55e;font-size:16px;font-weight:700;margin:4px 0">80</div><input id="__ma2" type="range" min="20" max="200" value="80" style="width:100%;accent-color:#22c55e" /></div></div><div style="display:flex;gap:8px;margin-top:12px;justify-content:center"><button id="__mc" style="background:#22c55e;color:#000;border:none;border-radius:6px;padding:6px 16px;font-size:12px;font-weight:600;cursor:pointer">' + t('timeline.ok') + '</button><button id="__mx" style="background:#374151;color:#9ca3af;border:none;border-radius:6px;padding:6px 16px;font-size:12px;cursor:pointer">' + t('common.cancel') + '</button></div>';
               document.body.appendChild(popup);
               const sel1 = popup.querySelector('#__mp1') as HTMLSelectElement;
               const sel2 = popup.querySelector('#__mp2') as HTMLSelectElement;
@@ -4103,7 +4104,7 @@ if (editBlock) { setEditBlock(null); return; }
               });
               popup.querySelector('#__mx')!.addEventListener('click', () => document.body.removeChild(popup));
             }}
-          ><span className="text-[14px]">↕</span> Movement</button>
+          ><span className="text-[14px]">↕</span> {t('timeline.blockMovement')}</button>
           {/* Remove block */}
           <div className="border-t border-gray-800 my-0.5" />
           <button className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800 flex items-center gap-2"
@@ -4123,10 +4124,10 @@ if (editBlock) { setEditBlock(null); return; }
               }
               setFtMenu(null); setFtSelStart(null); setFtSelEnd(null); setFtSelFixture(null);
             }}
-          ><span className="text-[14px]">🗑</span> Clear blocks in selection</button>
+          ><span className="text-[14px]">🗑</span> {t('timeline.clearBlocksInSelection')}</button>
           <button className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:bg-gray-800"
             onClick={() => { setFtMenu(null); setFtSelStart(null); setFtSelEnd(null); setFtSelFixture(null); }}
-          >Cancel</button>
+          >{t('common.cancel')}</button>
         </div>
       )}
 
@@ -4181,10 +4182,10 @@ if (editBlock) { setEditBlock(null); return; }
                   style={{ backgroundColor: tooltip.cue.color }}
                 />
                 <span className="text-gray-300 font-medium">
-                  {tooltip.cue.effect || 'Cue'}
+                  {tooltip.cue.effect || t('timeline.tooltipCueDefault')}
                 </span>
                 {tooltip.cue.strobe && (
-                  <span className="text-yellow-400 text-[9px]">⚡ STROBE</span>
+                  <span className="text-yellow-400 text-[9px]">{t('timeline.strobeBadge')}</span>
                 )}
               </div>
               <div className="flex items-center gap-3 text-[10px] text-gray-500">
@@ -4218,16 +4219,16 @@ if (editBlock) { setEditBlock(null); return; }
           <div className="absolute inset-0 bg-black/70" />
           <div className="relative z-10 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-6 w-[420px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full bg-gradient-to-r from-purple-500 to-cyan-400" /><span className="text-sm font-semibold text-gray-200">Choix de couleur</span></div>
+              <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full bg-gradient-to-r from-purple-500 to-cyan-400" /><span className="text-sm font-semibold text-gray-200">{t('timeline.colorChoiceTitle')}</span></div>
               <button className="text-gray-500 hover:text-white text-lg px-1" onClick={() => setGradientPicker(null)}>✕</button>
             </div>
             <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-3 mb-4">
-              <div className="flex items-start gap-2 mb-2"><span className="w-5 h-5 rounded-full bg-purple-500/30 text-purple-300 text-[10px] flex items-center justify-center font-bold shrink-0 mt-0.5">1</span><p className="text-[11px] text-gray-400 leading-relaxed">Choisissez la <b className="text-purple-300">couleur de départ</b>. Elle servira de teinte dominante pour ce bloc.</p></div>
-              <div className="flex items-start gap-2"><span className="w-5 h-5 rounded-full bg-cyan-500/30 text-cyan-300 text-[10px] flex items-center justify-center font-bold shrink-0 mt-0.5">2</span><p className="text-[11px] text-gray-400 leading-relaxed">Choisissez une <b className="text-cyan-300">couleur d'arrivée</b> pour un dégradé progressif, ou la même pour une teinte constante.</p></div>
+              <div className="flex items-start gap-2 mb-2"><span className="w-5 h-5 rounded-full bg-purple-500/30 text-purple-300 text-[10px] flex items-center justify-center font-bold shrink-0 mt-0.5">1</span><p className="text-[11px] text-gray-400 leading-relaxed">{t('timeline.colorStep1Before')}<b className="text-purple-300">{t('timeline.colorStep1Bold')}</b>{t('timeline.colorStep1After')}</p></div>
+              <div className="flex items-start gap-2"><span className="w-5 h-5 rounded-full bg-cyan-500/30 text-cyan-300 text-[10px] flex items-center justify-center font-bold shrink-0 mt-0.5">2</span><p className="text-[11px] text-gray-400 leading-relaxed">{t('timeline.colorStep2Before')}<b className="text-cyan-300">{t('timeline.colorStep2Bold')}</b>{t('timeline.colorStep2After')}</p></div>
             </div>
             <div className="grid grid-cols-2 gap-4 mb-4">
-              <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Départ</label><div className="flex items-center gap-2"><input type="color" value={gradientPicker.startColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, startColor: e.target.value, endColor: prev.constantColor ? e.target.value : prev.endColor } : null)} className="w-10 h-10 rounded-lg border-2 border-gray-700 cursor-pointer" /><span className="text-xs text-gray-300 font-mono">{gradientPicker.startColor}</span></div></div>
-              <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Arrivée</label><div className="flex items-center gap-2"><input type="color" value={gradientPicker.endColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, endColor: e.target.value } : null)} disabled={gradientPicker.constantColor} className={'w-10 h-10 rounded-lg border-2 border-purple-700 cursor-pointer ' + (gradientPicker.constantColor ? 'opacity-30 cursor-not-allowed' : '')} /><span className="text-xs text-gray-300 font-mono">{gradientPicker.endColor}</span></div></div>
+              <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">{t('timeline.start')}</label><div className="flex items-center gap-2"><input type="color" value={gradientPicker.startColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, startColor: e.target.value, endColor: prev.constantColor ? e.target.value : prev.endColor } : null)} className="w-10 h-10 rounded-lg border-2 border-gray-700 cursor-pointer" /><span className="text-xs text-gray-300 font-mono">{gradientPicker.startColor}</span></div></div>
+              <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">{t('timeline.end')}</label><div className="flex items-center gap-2"><input type="color" value={gradientPicker.endColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, endColor: e.target.value } : null)} disabled={gradientPicker.constantColor} className={'w-10 h-10 rounded-lg border-2 border-purple-700 cursor-pointer ' + (gradientPicker.constantColor ? 'opacity-30 cursor-not-allowed' : '')} /><span className="text-xs text-gray-300 font-mono">{gradientPicker.endColor}</span></div></div>
             </div>
             <div className="h-3 rounded-full mb-4" style={{ background: 'linear-gradient(90deg, ' + gradientPicker.startColor + ', ' + gradientPicker.endColor + ')' }} />
             <div className="flex flex-wrap gap-1.5 mb-4">
@@ -4237,12 +4238,12 @@ if (editBlock) { setEditBlock(null); return; }
             </div>
             <label className="flex items-center gap-2 text-[10px] text-gray-500 mb-4 cursor-pointer">
               <input type="checkbox" checked={gradientPicker.endColor === gradientPicker.startColor} onChange={e => { if (e.target.checked) setGradientPicker(prev => prev ? { ...prev, endColor: prev.startColor, constantColor: true } : null); else setGradientPicker(prev => prev ? { ...prev, constantColor: false } : null); }} className="accent-purple-500" />
-              Couleur constante (départ = arrivée)
+              {t('timeline.constantColor')}
             </label>
 {/* ── Presets ── */}
 {qs?.gradientPresets && qs.gradientPresets.length > 0 && (
   <div className="mb-3">
-    <div className="text-[9px] text-gray-500 uppercase tracking-wider mb-1.5">Presets sauvegardés</div>
+    <div className="text-[9px] text-gray-500 uppercase tracking-wider mb-1.5">{t('timeline.savedPresets')}</div>
     <div className="flex flex-wrap gap-1">
       {qs.gradientPresets.map((p: any) => (
         <button key={p.id} className="px-2 py-1 rounded text-[9px] border border-gray-700 hover:border-purple-500 transition-colors"
@@ -4260,13 +4261,13 @@ if (editBlock) { setEditBlock(null); return; }
   <button className="w-full text-[10px] text-gray-500 border border-dashed border-gray-700 rounded-md py-1 hover:border-purple-500 hover:text-purple-300 transition-colors"
     onClick={() => {
       if (!gradientPicker) return;
-      const name = prompt('Nom du preset :');
+      const name = prompt(t('timeline.presetNamePrompt'));
       if (!name || !(name.trim())) return;
       const presets = qs?.gradientPresets ? [...qs.gradientPresets] : [];
       presets.push({ id: 'gp-' + Date.now(), name, start: gradientPicker.startColor, end: gradientPicker.endColor });
       setQs({ ...qs, gradientPresets: presets });
     }}
-  >+ Sauvegarder ce dégradé</button>
+  >{t('timeline.saveGradient')}</button>
 </div>
 
             <div className="flex justify-end gap-2">
@@ -4284,7 +4285,7 @@ if (editBlock) { setEditBlock(null); return; }
                 }
                 setGradientPicker(null);
                 setFtSelStart(null); setFtSelEnd(null); setFtSelFixture(null);
-              }} className="px-4 py-2 rounded-lg text-xs font-medium bg-purple-600 text-white hover:bg-purple-500">Appliquer</button>
+              }} className="px-4 py-2 rounded-lg text-xs font-medium bg-purple-600 text-white hover:bg-purple-500">{t('timeline.apply')}</button>
             </div>
           </div>
         </div>
@@ -4300,13 +4301,13 @@ if (editBlock) { setEditBlock(null); return; }
             <div className="absolute inset-0 bg-black/70" onClick={() => setEditBlock(null)} />
             <div className="relative z-10 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-6 w-[420px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full bg-gradient-to-r from-purple-500 to-cyan-400" /><span className="text-sm font-semibold text-gray-200">Modifier couleur</span></div>
+                <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full bg-gradient-to-r from-purple-500 to-cyan-400" /><span className="text-sm font-semibold text-gray-200">{t('timeline.editColorTitle')}</span></div>
                 <button className="text-gray-500 hover:text-white text-lg px-1" onClick={() => setEditBlock(null)}>✕</button>
               </div>
               <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-3 mb-4">
                 <div className="flex gap-4">
-                  <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Départ</label><div className="flex items-center gap-2"><input type="color" value={cb.color} onChange={e => {}} id="__edit_cs" className="w-10 h-10 rounded-lg border-2 border-purple-700 cursor-pointer" /><span className="text-xs text-gray-300 font-mono">{cb.color}</span></div></div>
-                  <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Arrivée</label><div className="flex items-center gap-2"><input type="color" value={cb.endColor || cb.color} onChange={e => {}} id="__edit_ce" className="w-10 h-10 rounded-lg border-2 border-purple-700 cursor-pointer" /><span className="text-xs text-gray-300 font-mono">{cb.endColor || cb.color}</span></div></div>
+                  <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">{t('timeline.start')}</label><div className="flex items-center gap-2"><input type="color" value={cb.color} onChange={e => {}} id="__edit_cs" className="w-10 h-10 rounded-lg border-2 border-purple-700 cursor-pointer" /><span className="text-xs text-gray-300 font-mono">{cb.color}</span></div></div>
+                  <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">{t('timeline.end')}</label><div className="flex items-center gap-2"><input type="color" value={cb.endColor || cb.color} onChange={e => {}} id="__edit_ce" className="w-10 h-10 rounded-lg border-2 border-purple-700 cursor-pointer" /><span className="text-xs text-gray-300 font-mono">{cb.endColor || cb.color}</span></div></div>
                 </div>
                 <div className="h-3 rounded-full mt-3" style={{ background: 'linear-gradient(90deg, ' + cb.color + ', ' + (cb.endColor || cb.color) + ')' }} />
               </div>
@@ -4317,7 +4318,7 @@ if (editBlock) { setEditBlock(null); return; }
               </div>
               <label className="flex items-center gap-2 text-[10px] text-gray-500 mb-4 cursor-pointer">
                 <input type="checkbox" id="__edit_const" checked={!cb.endColor || cb.endColor === cb.color} onChange={e => { const val = e.target.checked ? (document.getElementById('__edit_cs') as HTMLInputElement).value : ''; const ce = document.getElementById('__edit_ce') as HTMLInputElement; if(ce){ce.value=val;ce.dispatchEvent(new Event('input',{bubbles:true}));} }} className="accent-purple-500" />
-                Couleur constante (départ = arrivée)
+                {t('timeline.constantColor')}
               </label>
               <div className="flex justify-end gap-2">
                 <button onClick={() => setEditBlock(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">{t('common.cancel')}</button>
@@ -4327,7 +4328,7 @@ if (editBlock) { setEditBlock(null); return; }
                   const same = cs === ce;
                   onFixtureTracksChange(fixtureTracks.map((t, i) => i === editBlock.trackIdx ? { ...t, colorBlocks: t.colorBlocks.map(b => b.id === editBlock.blockId ? { ...b, color: cs, endColor: same ? undefined : ce } : b) } : t));
                   setEditBlock(null);
-                }} className="px-4 py-2 rounded-lg text-xs font-medium bg-purple-600 text-white hover:bg-purple-500">Appliquer</button>
+                }} className="px-4 py-2 rounded-lg text-xs font-medium bg-purple-600 text-white hover:bg-purple-500">{t('timeline.apply')}</button>
               </div>
             </div>
           </div>
@@ -4344,13 +4345,13 @@ if (editBlock) { setEditBlock(null); return; }
             <div className="absolute inset-0 bg-black/70" onClick={() => setEditBlock(null)} />
             <div className="relative z-10 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-6 w-[340px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-semibold text-cyan-300">💡 Modifier dimmer</span>
-              <div className="mt-3 mb-3 bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-2"><p className="text-[10px] text-gray-300 m-0"><b className="text-cyan-400">Départ</b> : intensité au début • <b className="text-cyan-400">Arrivée</b> : fondu progressif si différente.</p></div>
+                <span className="text-sm font-semibold text-cyan-300">{t('timeline.editDimmerTitle')}</span>
+              <div className="mt-3 mb-3 bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-2"><p className="text-[10px] text-gray-300 m-0"><b className="text-cyan-400">{t('timeline.start')}</b>{t('timeline.editDimmerHintA')}<b className="text-cyan-400">{t('timeline.end')}</b>{t('timeline.editDimmerHintB')}</p></div>
                 <button className="text-gray-500 hover:text-white text-lg px-1" onClick={() => setEditBlock(null)}>✕</button>
               </div>
               <div className="flex gap-4">
                 <div className="flex-1 text-center">
-                  <div className="text-[10px] text-gray-500 mb-1">Départ</div>
+                  <div className="text-[10px] text-gray-500 mb-1">{t('timeline.start')}</div>
                   <div id="__ed_dim_v1" className="text-cyan-300 text-lg font-bold mb-2">{db.value}</div>
                   <div className="flex items-center gap-1">
                     <button onClick={() => { const el = document.getElementById('__ed_dim_s1') as HTMLInputElement; if (!el) return; const v = Math.max(0, Math.min(255, Number(el.value) - 1)); el.value = String(v); document.getElementById('__ed_dim_v1')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
@@ -4359,7 +4360,7 @@ if (editBlock) { setEditBlock(null); return; }
                   </div>
                 </div>
                 <div className="flex-1 text-center">
-                  <div className="text-[10px] text-gray-500 mb-1">Arrivée</div>
+                  <div className="text-[10px] text-gray-500 mb-1">{t('timeline.end')}</div>
                   <div id="__ed_dim_v2" className="text-cyan-300 text-lg font-bold mb-2">{db.endValue ?? db.value}</div>
                   <div className="flex items-center gap-1">
                     <button onClick={() => { const el = document.getElementById('__ed_dim_s2') as HTMLInputElement; if (!el) return; const v = Math.max(0, Math.min(255, Number(el.value) - 1)); el.value = String(v); document.getElementById('__ed_dim_v2')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
@@ -4375,7 +4376,7 @@ if (editBlock) { setEditBlock(null); return; }
                   const v2 = Number((document.getElementById('__ed_dim_s2') as HTMLInputElement).value);
                   onFixtureTracksChange(fixtureTracks.map((t, i) => i === editBlock.trackIdx ? { ...t, dimmerBlocks: t.dimmerBlocks.map(b => b.id === editBlock.blockId ? { ...b, value: v1, endValue: v1 !== v2 ? v2 : undefined } : b) } : t));
                   setEditBlock(null);
-                }} className="px-4 py-2 rounded-lg text-xs font-medium bg-cyan-600 text-white hover:bg-cyan-500">Appliquer</button>
+                }} className="px-4 py-2 rounded-lg text-xs font-medium bg-cyan-600 text-white hover:bg-cyan-500">{t('timeline.apply')}</button>
               </div>
             </div>
           </div>
@@ -4392,13 +4393,13 @@ if (editBlock) { setEditBlock(null); return; }
             <div className="absolute inset-0 bg-black/70" onClick={() => setEditBlock(null)} />
             <div className="relative z-10 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-6 w-[340px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-semibold text-yellow-400">⚡ Modifier strobe</span>
-              <div className="mt-3 mb-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-2"><p className="text-[10px] text-gray-300 m-0"><b className="text-yellow-400">Départ</b> : fréquence Hz au début • <b className="text-yellow-400">Arrivée</b> : accélération/réduction.</p></div>
+                <span className="text-sm font-semibold text-yellow-400">{t('timeline.editStrobeTitle')}</span>
+              <div className="mt-3 mb-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-2"><p className="text-[10px] text-gray-300 m-0"><b className="text-yellow-400">{t('timeline.start')}</b>{t('timeline.editStrobeHintA')}<b className="text-yellow-400">{t('timeline.end')}</b>{t('timeline.editStrobeHintB')}</p></div>
                 <button className="text-gray-500 hover:text-white text-lg px-1" onClick={() => setEditBlock(null)}>✕</button>
               </div>
               <div className="flex gap-4">
                 <div className="flex-1 text-center">
-                  <div className="text-[10px] text-gray-500 mb-1">Départ (Hz)</div>
+                  <div className="text-[10px] text-gray-500 mb-1">{t('timeline.start')} (Hz)</div>
                   <div id="__ed_sb_v1" className="text-yellow-400 text-lg font-bold mb-2">{sb.speed}</div>
                   <div className="flex items-center gap-1">
                     <button onClick={() => { const el = document.getElementById('__ed_sb_s1') as HTMLInputElement; if (!el) return; const v = Math.max(1, Math.min(30, Number(el.value) - 1)); el.value = String(v); document.getElementById('__ed_sb_v1')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
@@ -4407,7 +4408,7 @@ if (editBlock) { setEditBlock(null); return; }
                   </div>
                 </div>
                 <div className="flex-1 text-center">
-                  <div className="text-[10px] text-gray-500 mb-1">Arrivée (Hz)</div>
+                  <div className="text-[10px] text-gray-500 mb-1">{t('timeline.end')} (Hz)</div>
                   <div id="__ed_sb_v2" className="text-yellow-400 text-lg font-bold mb-2">{sb.endSpeed ?? sb.speed}</div>
                   <div className="flex items-center gap-1">
                     <button onClick={() => { const el = document.getElementById('__ed_sb_s2') as HTMLInputElement; if (!el) return; const v = Math.max(1, Math.min(30, Number(el.value) - 1)); el.value = String(v); document.getElementById('__ed_sb_v2')!.textContent = String(v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
@@ -4423,7 +4424,7 @@ if (editBlock) { setEditBlock(null); return; }
                   const s2 = Number((document.getElementById('__ed_sb_s2') as HTMLInputElement).value);
                   onFixtureTracksChange(fixtureTracks.map((t, i) => i === editBlock.trackIdx ? { ...t, strobeBlocks: t.strobeBlocks.map(b => b.id === editBlock.blockId ? { ...b, speed: s1, endSpeed: s1 !== s2 ? s2 : undefined } : b) } : t));
                   setEditBlock(null);
-                }} className="px-4 py-2 rounded-lg text-xs font-medium bg-yellow-600 text-black hover:bg-yellow-500">Appliquer</button>
+                }} className="px-4 py-2 rounded-lg text-xs font-medium bg-yellow-600 text-black hover:bg-yellow-500">{t('timeline.apply')}</button>
               </div>
             </div>
           </div>
@@ -4441,13 +4442,13 @@ if (editBlock) { setEditBlock(null); return; }
             <div className="absolute inset-0 bg-black/70" onClick={() => setEditBlock(null)} />
             <div className="relative z-10 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-6 w-[380px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-semibold text-green-400">↕ Modifier mouvement</span>
-              <div className="mt-3 mb-3 bg-green-500/10 border border-green-500/20 rounded-lg p-2"><p className="text-[10px] text-gray-300 m-0"><b className="text-green-400">Départ</b> : pattern + amplitude au début • <b className="text-green-400">Arrivée</b> : transition.</p></div>
+                <span className="text-sm font-semibold text-green-400">{t('timeline.editMovementTitle')}</span>
+              <div className="mt-3 mb-3 bg-green-500/10 border border-green-500/20 rounded-lg p-2"><p className="text-[10px] text-gray-300 m-0"><b className="text-green-400">{t('timeline.start')}</b>{t('timeline.editMovementHintA')}<b className="text-green-400">{t('timeline.end')}</b>{t('timeline.editMovementHintB')}</p></div>
                 <button className="text-gray-500 hover:text-white text-lg px-1" onClick={() => setEditBlock(null)}>✕</button>
               </div>
               <div className="flex gap-4">
                 <div className="flex-1 text-center">
-                  <div className="text-[10px] text-gray-500 mb-1">Départ</div>
+                  <div className="text-[10px] text-gray-500 mb-1">{t('timeline.start')}</div>
                   <select id="__ed_mv_p1" defaultValue={mb.pattern} className="w-full bg-[#1f1f2e] border border-gray-700 rounded-md p-1.5 text-gray-300 text-xs mb-2">
                     {patterns.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
@@ -4459,7 +4460,7 @@ if (editBlock) { setEditBlock(null); return; }
                   </div>
                 </div>
                 <div className="flex-1 text-center">
-                  <div className="text-[10px] text-gray-500 mb-1">Arrivée</div>
+                  <div className="text-[10px] text-gray-500 mb-1">{t('timeline.end')}</div>
                   <select id="__ed_mv_p2" defaultValue={mb.endPattern || mb.pattern} className="w-full bg-[#1f1f2e] border border-gray-700 rounded-md p-1.5 text-gray-300 text-xs mb-2">
                     {patterns.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
@@ -4480,7 +4481,7 @@ if (editBlock) { setEditBlock(null); return; }
                   const a2 = Number((document.getElementById('__ed_mv_a2') as HTMLInputElement).value);
                   onFixtureTracksChange(fixtureTracks.map((t, i) => i === editBlock.trackIdx ? { ...t, movementBlocks: t.movementBlocks.map(b => b.id === editBlock.blockId ? { ...b, pattern: p1, amplitude: a1, endPattern: p1 !== p2 ? p2 : undefined, endAmplitude: a1 !== a2 ? a2 : undefined } : b) } : t));
                   setEditBlock(null);
-                }} className="px-4 py-2 rounded-lg text-xs font-medium bg-green-600 text-black hover:bg-green-500">Appliquer</button>
+                }} className="px-4 py-2 rounded-lg text-xs font-medium bg-green-600 text-black hover:bg-green-500">{t('timeline.apply')}</button>
               </div>
             </div>
           </div>
@@ -4495,7 +4496,7 @@ if (editBlock) { setEditBlock(null); return; }
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider border-b border-gray-800">
-            {blockMenu.blockType}
+            {t('timeline.blockType_' + blockMenu.blockType)}
           </div>
           <button className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-gray-800 flex items-center gap-2"
             onClick={() => {
@@ -4515,7 +4516,7 @@ if (editBlock) { setEditBlock(null); return; }
               onFixtureTracksChange(updated);
               setBlockMenu(null);
             }}
-          ><span className="text-[14px]">🗑</span> Supprimer</button>
+          ><span className="text-[14px]">🗑</span> {t('common.delete')}</button>
         </div>
       )}
 

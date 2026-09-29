@@ -2,6 +2,7 @@
 import React, { useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import { clampRect } from '../components/clampedpopup';
 import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { Save, FolderOpen, Download, RefreshCw, Undo2, Redo2, Trash2, Zap, ZapOff, Pencil, Plus, Palette, Sun, Layers, Upload, Music, Crosshair, Snowflake, Sparkles, Play, Pause, Square, SkipBack, SkipForward, Wrench } from 'lucide-react';
 import { useAppStore, type CustomPalette, type ColorPreset } from '../stores/appStore';
 import { useShowStore, type PatchedFixture, type SongPreset, type View3DState } from '../stores/showStore';
@@ -45,6 +46,7 @@ const PromptModal: React.FC<{
   onCancel: () => void;
   onOk: (value: string) => void;
 }> = ({ title, initial = '', placeholder = '', onCancel, onOk }) => {
+  const { t } = useTranslation();
   const [value, setValue] = useState(initial);
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
@@ -73,13 +75,13 @@ const PromptModal: React.FC<{
             onClick={onCancel}
             className="px-3 py-1 rounded text-xs text-gray-400 hover:bg-gray-800/60 transition-colors"
           >
-            Annuler
+            {t('common.cancel')}
           </button>
           <button
             onClick={submit}
             className="px-3 py-1 rounded text-xs font-medium bg-purple-600/40 text-purple-200 hover:bg-purple-600/60 border border-purple-500/40 transition-colors"
           >
-            OK
+            {t('quickshow.ok')}
           </button>
         </div>
       </div>
@@ -109,14 +111,7 @@ function presetAudioOf(p: { data?: any } | undefined): string {
 
 function audioConfirmNoAudio(name: string): boolean {
   // eslint-disable-next-line no-restricted-globals
-  return window.confirm(
-    `⚠️ Aucun audio disponible pour « ${name} ».` +
-    '\n\nLe .lmpreset sera écrit SANS son — s\'il existe déjà un fichier du même nom' +
-    '\ncontenant l\'audio, il sera ÉCRASÉ sans son (perte définitive).' +
-    '\n\n⚡ Rechargez d\'abord l\'audio dans la sidebar (Nouveau fichier audio),' +
-    '\npuis ré-exportez.' +
-    '\n\nContinuer quand même sans audio ?'
-  );
+  return window.confirm(i18n.t('quickshow.noAudioConfirm', { name }));
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -1379,11 +1374,7 @@ const ColorPresetsPanel: React.FC = () => {
 
         {/* Tab switcher */}
         <div className="flex gap-0.5 bg-gray-800/30 rounded-lg p-0.5 mb-4">
-          {([
-            ['live', 'Palette Active'],
-            ['sections', 'Par Section'],
-            ['presets', 'Presets'],
-          ] as const).map(([key, label]) => (
+          {(['live', 'sections', 'presets'] as const).map((key) => (
             <button
               key={key}
               onClick={() => setActiveTab(key)}
@@ -1393,7 +1384,7 @@ const ColorPresetsPanel: React.FC = () => {
                   : 'text-gray-500 hover:text-gray-300'
               }`}
             >
-              {label}
+              {key === 'live' ? t('quickshow.paletteActiveTab') : key === 'sections' ? t('quickshow.paletteSectionsTab') : t('quickshow.palettePresetsTab')}
             </button>
           ))}
         </div>
@@ -1404,7 +1395,7 @@ const ColorPresetsPanel: React.FC = () => {
         <div className="px-4 pb-4 space-y-4">
           {/* Color scheme selector */}
           <div className="bg-[#0d0d14] border border-gray-800/50 rounded-lg p-3">
-            <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-2">Style de Palette</label>
+            <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-2">{t('quickshow.paletteStyle')}</label>
             <div className="flex flex-wrap gap-1">
               {Object.entries(BUILTIN_PALETTES).map(([key, label]) => (
                 <button
@@ -1416,7 +1407,7 @@ const ColorPresetsPanel: React.FC = () => {
                       : 'bg-gray-800/40 text-gray-400 border border-gray-700/30 hover:bg-gray-700/40'
                   }`}
                 >
-                  {label}
+                  {key === 'auto' ? t('quickshow.autoDetected') : label}
                 </button>
               ))}
             </div>
@@ -1426,16 +1417,16 @@ const ColorPresetsPanel: React.FC = () => {
           <div className="bg-[#0d0d14] border border-gray-800/50 rounded-lg p-3">
             <div className="flex items-center justify-between mb-3">
               <label className="text-[10px] text-gray-500 uppercase tracking-wider">
-                Couleurs Actives
+                {t('quickshow.activeColors')}
                 <span className="text-gray-600 ml-1">
-                  ({qs.colorScheme === 'user' ? 'Personnalisé' : qs.colorScheme})
+                  ({qs.colorScheme === 'user' ? t('quickshow.customized') : qs.colorScheme})
                 </span>
               </label>
               <button
                 onClick={handleAddActiveColor}
                 className="px-2 py-0.5 rounded text-[10px] text-purple-400 border border-purple-500/30 hover:bg-purple-600/20 transition-colors"
               >
-                + Ajouter
+                {t('quickshow.addColorBtn')}
               </button>
             </div>
             <div className="flex flex-wrap gap-2 items-center">
@@ -1445,12 +1436,12 @@ const ColorPresetsPanel: React.FC = () => {
                     onClick={() => setColorModal({ mode: 'edit-active', idx: i })}
                     className="w-10 h-10 rounded-full border-2 border-gray-600 hover:border-purple-400 hover:scale-110 transition-all cursor-pointer shadow-lg"
                     style={{ backgroundColor: color }}
-                    title="Clic pour modifier"
+                    title={t('quickshow.clickToEdit')}
                   />
                   <button
                     onClick={(e) => { e.stopPropagation(); handleRemoveActiveColor(i); }}
                     className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-600/80 text-white text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500"
-                    title="Supprimer"
+                    title={t('common.delete')}
                   >
                     ×
                   </button>
@@ -1466,13 +1457,13 @@ const ColorPresetsPanel: React.FC = () => {
         <div className="px-4 pb-4 space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-[10px] text-gray-500 uppercase tracking-wider">
-              Palette personnalisée par type de section
+              {t('quickshow.customPaletteHint')}
             </p>
             <button
               onClick={() => clearCustomPalette()}
               className="px-2 py-0.5 rounded text-[10px] text-red-400 border border-red-500/20 hover:bg-red-600/10 transition-colors"
             >
-              Tout réinitialiser
+              {t('common.resetAll')}
             </button>
           </div>
           {SECTION_TYPES.map(st => {
@@ -1486,9 +1477,9 @@ const ColorPresetsPanel: React.FC = () => {
                       className="w-3 h-3 rounded-full"
                       style={{ backgroundColor: SECTION_COLORS[st] || '#4b5563' }}
                     />
-                    <span className="text-xs font-medium text-gray-300 capitalize">{st}</span>
+                    <span className="text-xs font-medium text-gray-300 capitalize">{t(`autoscript.sectionTypes.${st}`, { defaultValue: st })}</span>
                     {!hasCustom && (
-                      <span className="text-[9px] text-gray-600">(palette globale)</span>
+                      <span className="text-[9px] text-gray-600">{t('quickshow.globalPalette')}</span>
                     )}
                   </div>
                   <div className="flex gap-1">
@@ -1496,14 +1487,14 @@ const ColorPresetsPanel: React.FC = () => {
                       onClick={() => handleSectionAddColor(st)}
                       className="px-2 py-0.5 rounded text-[10px] text-purple-400 border border-purple-500/30 hover:bg-purple-600/20 transition-colors"
                     >
-                      + Couleur
+                      {t('quickshow.addColorShort')}
                     </button>
                     {hasCustom && (
                       <button
                         onClick={() => handleSectionReset(st)}
                         className="px-2 py-0.5 rounded text-[10px] text-red-400 border border-red-500/20 hover:bg-red-600/10 transition-colors"
                       >
-                        Reset
+                        {t('common.reset')}
                       </button>
                     )}
                   </div>
@@ -1516,12 +1507,12 @@ const ColorPresetsPanel: React.FC = () => {
                           onClick={() => handleSectionColorEdit(st, ci)}
                           className="w-9 h-9 rounded-full border-2 border-gray-600 hover:border-purple-400 hover:scale-110 transition-all cursor-pointer"
                           style={{ backgroundColor: color }}
-                          title={`${color} - clic pour modifier`}
+                          title={t('quickshow.colorClickToEdit', { color })}
                         />
                         <button
                           onClick={(e) => { e.stopPropagation(); handleSectionColorRemove(st, ci); }}
                           className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-600/80 text-white text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500"
-                          title="Supprimer"
+                          title={t('common.delete')}
                         >
                           ×
                         </button>
@@ -1533,7 +1524,7 @@ const ColorPresetsPanel: React.FC = () => {
                     {activeColors.slice(0, 4).map((color, i) => (
                       <span key={i} className="w-6 h-6 rounded-full border border-gray-700" style={{ backgroundColor: color }} />
                     ))}
-                    <span className="text-[10px] text-gray-600 self-center ml-1">héritée</span>
+                    <span className="text-[10px] text-gray-600 self-center ml-1">{t('quickshow.inherited')}</span>
                   </div>
                 )}
               </div>
@@ -1547,21 +1538,21 @@ const ColorPresetsPanel: React.FC = () => {
         <div className="px-4 pb-4 space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-[10px] text-gray-500 uppercase tracking-wider">
-              Vos palettes sauvegardées
+              {t('quickshow.savedPalettes')}
             </p>
             <button
               onClick={() => setPromptOpen(true)}
               className="px-2 py-0.5 rounded text-[10px] text-purple-400 border border-purple-500/30 hover:bg-purple-600/20 transition-colors"
             >
-              + Sauvegarder la palette active
+              {t('quickshow.saveActivePalette')}
             </button>
           </div>
           {presets.length === 0 ? (
             <div className="bg-[#0d0d14] border border-gray-800/50 rounded-lg p-6 text-center">
               <Palette className="w-8 h-8 text-gray-700 mx-auto mb-2" />
-              <p className="text-xs text-gray-500">Aucun preset sauvegardé.</p>
+              <p className="text-xs text-gray-500">{t('quickshow.noSavedPreset')}</p>
               <p className="text-[10px] text-gray-600 mt-1">
-                Créez une palette dans l'onglet « Palette Active », puis sauvegardez-la ici.
+                {t('quickshow.createPaletteHint')}
               </p>
             </div>
           ) : (
@@ -1582,13 +1573,13 @@ const ColorPresetsPanel: React.FC = () => {
                       }}
                       className="text-[10px] px-2 py-1 bg-purple-600/20 rounded text-purple-300 hover:bg-purple-600/30 transition-colors"
                     >
-                      Appliquer
+                      {t('quickshow.apply')}
                     </button>
                     <button
                       onClick={() => deleteColorPreset(p.id)}
                       className="text-[10px] px-2 py-1 text-red-400 hover:bg-red-600/10 rounded transition-colors"
                     >
-                      Supprimer
+                      {t('common.delete')}
                     </button>
                   </div>
                   {/* Color hex codes */}
@@ -1607,13 +1598,12 @@ const ColorPresetsPanel: React.FC = () => {
       {/* Footer hint */}
       <div className="px-4 py-2 border-t border-gray-800/30 mt-auto">
         <p className="text-[9px] text-gray-700">
-          La palette par section remplace la palette active pour les sections concernées.
-          Le panneau AutoScript permet aussi l'édition contextuelle.
+          {t('quickshow.paletteSectionHint')}
         </p>
       </div>
       {promptOpen && (
         <PromptModal
-          title="Nom du preset :"
+          title={t('quickshow.presetNameTitle')}
           onCancel={() => setPromptOpen(false)}
           onOk={(name) => { addColorPreset(name, activeColors); setPromptOpen(false); }}
         />
@@ -1625,10 +1615,10 @@ const ColorPresetsPanel: React.FC = () => {
           : colorModal.mode === 'add-section' ? (SECTION_COLORS[colorModal.section] || '#ff0064')
           : '#ffffff';
         const title =
-          colorModal.mode === 'add-active' ? 'Ajouter une couleur'
-          : colorModal.mode === 'edit-active' ? 'Modifier la couleur'
-          : colorModal.mode === 'add-section' ? `Ajouter — ${colorModal.section}`
-          : `Modifier — ${colorModal.section}`;
+          colorModal.mode === 'add-active' ? t('quickshow.addColorTitle')
+          : colorModal.mode === 'edit-active' ? t('quickshow.editColorTitle')
+          : colorModal.mode === 'add-section' ? t('quickshow.addColorSection', { section: colorModal.section })
+          : t('quickshow.editColorSection', { section: colorModal.section });
         return (
           <ColorPickerModal
             title={title}
@@ -2091,25 +2081,25 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     const api = (window as any).lightMaestro?.allinone;
     if (!api) {
       setAiAvailable(false);
-      if (!silent) setAiStatus({ phase: 'error', msg: 'Structure IA : app desktop requise (indisponible dans le navigateur).' });
+      if (!silent) setAiStatus({ phase: 'error', msg: t('quickshow.aiDesktopRequired') });
       return;
     }
     if (!resolvedAnalysis || !audioFile.audioBuffer) {
-      if (!silent) setAiStatus({ phase: 'error', msg: 'Structure IA : charge d\u2019abord un audio.' });
+      if (!silent) setAiStatus({ phase: 'error', msg: t('quickshow.aiLoadAudioFirst') });
       return;
     }
     if (aiRunningRef.current) return;
     aiRunningRef.current = true;
     try {
-      if (!silent) setAiStatus({ phase: 'checking', msg: 'Structure IA : vérification de l\u2019outil…' });
+      if (!silent) setAiStatus({ phase: 'checking', msg: t('quickshow.aiCheckingTool') });
       const check = await api.check();
       if (!check?.ok) {
         setAiAvailable(false);
-        if (!silent) setAiStatus({ phase: 'error', msg: `Structure IA indisponible — ${check?.detail || 'outil introuvable'}` });
+        if (!silent) setAiStatus({ phase: 'error', msg: t('quickshow.aiUnavailable', { detail: check?.detail || t('quickshow.aiToolMissing') }) });
         return;
       }
       setAiAvailable(true);
-      setAiStatus({ phase: 'running', msg: 'Structure IA : analyse en cours (séparation + modèle, plusieurs minutes)…' });
+      setAiStatus({ phase: 'running', msg: t('quickshow.aiRunningMsg') });
       const wavDataUrl = audioBufferToWavDataUrl(audioFile.audioBuffer);
       const commaIdx = wavDataUrl.indexOf(',');
       const r = await api.analyze({
@@ -2118,15 +2108,15 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         model: aiModel,
       });
       if (!r?.ok || !r.json) {
-        setAiStatus({ phase: 'error', msg: `Structure IA échouée — ${r?.error || 'erreur inconnue'}.` });
+        setAiStatus({ phase: 'error', msg: t('quickshow.aiFailed', { error: r?.error || t('quickshow.aiUnknownError') }) });
         fillLocalSections();
         return;
       }
       const mapped = applyAllInOneJson(r.json);
       aiAppliedKeyRef.current = `${resolvedAnalysis.fileName || ''}#${Math.round(resolvedAnalysis.duration || 0)}#${aiModel}`;
-      setAiStatus({ phase: 'idle', msg: `Structure IA appliquée : ${mapped.sections.length} sections${r.cached ? ' (cache)' : ''}.` });
+      setAiStatus({ phase: 'idle', msg: t('quickshow.aiApplied', { count: mapped.sections.length, cached: r.cached ? t('quickshow.aiCachedSuffix') : '' }) });
     } catch (e: any) {
-      setAiStatus({ phase: 'error', msg: `Structure IA échouée — ${e?.message || e}.` });
+      setAiStatus({ phase: 'error', msg: t('quickshow.aiFailed', { error: e?.message || e }) });
       fillLocalSections();
     } finally {
       aiRunningRef.current = false;
@@ -2136,7 +2126,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const cancelAiStructure = useCallback(() => {
     try { (window as any).lightMaestro?.allinone?.cancel?.(); } catch {}
     aiRunningRef.current = false;
-    setAiStatus({ phase: 'idle', msg: 'Structure IA annulée.' });
+    setAiStatus({ phase: 'idle', msg: t('quickshow.aiCancelled') });
     fillLocalSections();
   }, [fillLocalSections]);
 
@@ -2171,7 +2161,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     const api = (window as any).lightMaestro?.allinone;
     if (!api?.onProgress) return;
     const off = api.onProgress((msg: string) => {
-      if (aiRunningRef.current) setAiStatus({ phase: 'running', msg: `Structure IA : ${msg}` });
+      if (aiRunningRef.current) setAiStatus({ phase: 'running', msg: t('quickshow.aiProgress', { msg }) });
     });
     return () => { try { off?.(); } catch {} };
   }, []);
@@ -2246,10 +2236,10 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         }
         applyAllInOneJson(text);
         aiAppliedKeyRef.current = `${resolvedAnalysis?.fileName || ''}#${Math.round(resolvedAnalysis?.duration || 0)}#${aiModel}`;
-        setAiStatus({ phase: 'idle', msg: `Structure IA importée : ${probeMapped.sections.length} sections.` });
+        setAiStatus({ phase: 'idle', msg: t('quickshow.aiImported', { count: probeMapped.sections.length }) });
       } catch (e) {
         console.error('All-In-One import failed:', e);
-        setAiStatus({ phase: 'error', msg: 'Import All-In-One échoué (JSON invalide ?).' });
+        setAiStatus({ phase: 'error', msg: t('quickshow.aiImportFailed') });
       }
     };
     inp.click();
@@ -2490,7 +2480,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
         };
         if (audioBase64Raw) data.audioDataBase64 = audioBase64Raw;
         const api = (window as any).lightMaestro?.presets;
-        if (!api) { console.error('IPC presets API not available - window.lightMaestro.presets is undefined'); alert('Preset save failed: IPC bridge not loaded.'); return; }
+        if (!api) { console.error('IPC presets API not available - window.lightMaestro.presets is undefined'); alert(t('quickshow.presetSaveFailed')); return; }
         const list = await api.load();
         const newPreset = { name, timestamp: new Date().toISOString(), data };
         const updated = [...(Array.isArray(list) ? list : []), newPreset];
@@ -3883,7 +3873,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               className="px-3 py-1.5 rounded bg-yellow-600/20 border border-yellow-500/30 text-yellow-300 text-xs hover:bg-yellow-600/30"
             >
               <Layers className="w-3.5 h-3.5 inline mr-1" />
-              Charger un preset
+              {t('quickshow.loadPreset')}
             </button>
           </div>
         </div>
@@ -3915,7 +3905,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               className="px-3 py-1.5 rounded bg-yellow-600/20 border border-yellow-500/30 text-yellow-300 text-xs hover:bg-yellow-600/30"
             >
               <Layers className="w-3.5 h-3.5 inline mr-1" />
-              Charger un preset
+              {t('quickshow.loadPreset')}
             </button>
           </div>
         </div>
@@ -3928,7 +3918,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800/50 bg-[#0d0d14] flex-wrap">
         {/* DMX Toggle */}
-        <RichTooltip content={{ title: 'DMX Output', text: 'Active ou coupe la sortie DMX vers le matériel.\nQuand c\'est coupé, la 3D reste affichée mais rien ne part en hardware.', tone: 'warn' }} placement="bottom">
+        <RichTooltip content={{ title: t('quickshow.ttDmxTitle'), text: t('quickshow.ttDmxText'), tone: 'warn' }} placement="bottom">
           <button
             title={t('dmxOutput') || 'DMX Output'}
             onClick={() => setDmxOutputEnabled(v => !v)}
@@ -3939,9 +3929,9 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         </RichTooltip>
 
         {/* Dry-run toggle */}
-        <RichTooltip content={{ title: 'Dry-run (sans matériel)', text: 'Branche l\'apparition : la sortie DMX est simulée sans envoyer de vraies données au matériel. Réglage de test en sécurité.', example: 'Utilisez-le pour préparer votre show avant la scène réelle.', tone: 'info' }} placement="bottom">
+        <RichTooltip content={{ title: t('quickshow.ttDryTitle'), text: t('quickshow.ttDryText'), example: t('quickshow.ttDryEx'), tone: 'info' }} placement="bottom">
           <button
-            title={'Dry-run preview (no hardware DMX)'}
+            title={t('quickshow.dryRunTitle')}
             onClick={() => setDryRunMode(v => !v)}
             className={`p-1.5 rounded text-[10px] font-mono font-bold ${dryRunMode ? 'text-amber-400 bg-amber-400/10' : 'text-gray-600 bg-gray-800/50'}`}
           >
@@ -3950,9 +3940,9 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         </RichTooltip>
 
         {/* Freeze hold */}
-        <RichTooltip content={{ title: frozen ? 'Unfreeze — reprendre' : 'Freeze — figer la trame', text: 'En mode Freeze, la trame DMX actuelle est maintenue (pause de la lecture).', example: 'Suspendre la course du show pour vérifier un état précis.', tone: 'info' }} placement="bottom">
+        <RichTooltip content={{ title: frozen ? t('quickshow.ttFreezeTitleOn') : t('quickshow.ttFreezeTitleOff'), text: t('quickshow.ttFreezeText'), example: t('quickshow.ttFreezeEx'), tone: 'info' }} placement="bottom">
           <button
-            title={frozen ? 'Unfreeze (resume playback)' : 'Freeze (hold current DMX frame)'}
+            title={frozen ? t('quickshow.unfreezeTitle') : t('quickshow.freezeTitle')}
             onClick={() => { setFrozen(v => { frozenRef.current = !v; return !v; }); }}
             className={`p-1.5 rounded text-[10px] font-mono font-bold ${frozen ? 'text-cyan-400 bg-cyan-400/10' : 'text-gray-600 bg-gray-800/50'}`}
           >
@@ -3961,9 +3951,9 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         </RichTooltip>
 
         {/* Drop Now */}
-        <RichTooltip content={{ title: 'Drop — impact énergique', text: 'Déclenche un "drop" sonore/visuel : énergie max + strobe pendant ~300 ms.', example: 'À l\'appogiathe d\'un refrain ou d\'une drop musicale.', tone: 'danger' }} placement="bottom">
+        <RichTooltip content={{ title: t('quickshow.ttDropTitle'), text: t('quickshow.ttDropText'), example: t('quickshow.ttDropEx'), tone: 'danger' }} placement="bottom">
           <button
-            title="Force a drop (max energy + strobe for 300ms)"
+            title={t('quickshow.forceDropTitle')}
             onClick={() => { forceDropRef.current = true; }}
             className="p-1.5 rounded text-gray-600 bg-gray-800/50 hover:text-red-400 hover:bg-red-400/5"
           >
@@ -3976,9 +3966,9 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
         {/* A/B Compare */}
         {cuesB.length > 0 ? (
-          <RichTooltip content={{ title: 'Comparaison A/B', text: 'Bascule entre deux styles de cue générés (A et B) pour comparer l\'ambiance lumineuse.', example: 'Générez le style B (maison) puis alternô avec A (techno) pour choisir la vibe.', tone: 'info' }} placement="bottom">
+          <RichTooltip content={{ title: t('quickshow.ttABTitle'), text: t('quickshow.ttABText'), example: t('quickshow.ttABEx'), tone: 'info' }} placement="bottom">
             <button
-              title={showB ? 'Switch to style A' : 'Switch to style B (' + compareStyle + ')'}
+              title={showB ? t('quickshow.switchStyleA') : t('quickshow.switchStyleB', { style: compareStyle })}
               onClick={() => setShowB(v => !v)}
               className={`p-1.5 rounded text-[10px] font-mono font-bold ${showB ? 'text-amber-400 bg-amber-400/10' : 'text-gray-500 bg-gray-800/50'}`}
             >
@@ -3986,9 +3976,9 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
             </button>
           </RichTooltip>
         ) : (
-          <RichTooltip content={{ title: 'Générer un style B', text: 'Crée une version alternative des cues avec un style musical différent, pour comparaison en un clic.', example: 'Testé à pleine énergie techno vs house sans tout refaire.', tone: 'info' }} placement="bottom">
+          <RichTooltip content={{ title: t('quickshow.ttGenBTitle'), text: t('quickshow.ttGenBText'), example: t('quickshow.ttGenBEx'), tone: 'info' }} placement="bottom">
             <button
-              title="Generate B cues with different style for comparison"
+              title={t('quickshow.generateStyleB')}
               onClick={() => {
                 const styleB = qs.musicStyle === 'techno' ? 'house' : 'techno';
                 const qsB = { ...qs, musicStyle: styleB };
@@ -4052,39 +4042,39 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         <div className="h-5 border-l border-gray-700 mx-1" />
 
         {/* Undo / Redo */}
-        <RichTooltip content={{ title: 'Annuler (Undo)', text: 'Annule la dernière modification de la timeline ou du montage.', tone: 'info' }} placement="bottom">
-          <button title="Undo" onClick={undo} disabled={!canUndo} className={`p-1 rounded ${canUndo ? 'text-gray-400 hover:text-white' : 'text-gray-700'}`}>
+        <RichTooltip content={{ title: t('quickshow.ttUndoTitle'), text: t('quickshow.ttUndoText'), tone: 'info' }} placement="bottom">
+          <button title={t('quickshow.undoTitle')} onClick={undo} disabled={!canUndo} className={`p-1 rounded ${canUndo ? 'text-gray-400 hover:text-white' : 'text-gray-700'}`}>
             <Undo2 className="w-3.5 h-3.5" />
           </button>
         </RichTooltip>
-        <RichTooltip content={{ title: 'Rétablir (Redo)', text: 'Réapplique la modification que vous venez d\'annuler.', tone: 'info' }} placement="bottom">
-          <button title="Redo" onClick={redo} disabled={!canRedo} className={`p-1 rounded ${canRedo ? 'text-gray-400 hover:text-white' : 'text-gray-700'}`}>
+        <RichTooltip content={{ title: t('quickshow.ttRedoTitle'), text: t('quickshow.ttRedoText'), tone: 'info' }} placement="bottom">
+          <button title={t('quickshow.redoTitle')} onClick={redo} disabled={!canRedo} className={`p-1 rounded ${canRedo ? 'text-gray-400 hover:text-white' : 'text-gray-700'}`}>
             <Redo2 className="w-3.5 h-3.5" />
           </button>
         </RichTooltip>
 
         {/* Save / Load */}
-        <RichTooltip content={{ title: 'Sauvegarder', text: 'Enregistre tout l\'état actuel (scènes, EFX, Show, audio, positions) dans le fichier projet.', example: 'Faites-le régulièrement pour ne pas perdre votre travail.', tone: 'success' }} placement="bottom">
+        <RichTooltip content={{ title: t('quickshow.ttSaveTitle'), text: t('quickshow.ttSaveText'), example: t('quickshow.ttSaveEx'), tone: 'success' }} placement="bottom">
           <button title={t('save') || 'Save'} onClick={() => saveProject(resolvedAnalysis, sections, qs, audioFile, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, disabledFixtures)} className="p-1 rounded text-gray-400 hover:text-white">
             <Save className="w-3.5 h-3.5" />
           </button>
         </RichTooltip>
-        <RichTooltip content={{ title: 'Ouvrir', text: 'Charges un projet .lmpreset sauvegardé (fill + audio + timeline).', tone: 'info' }} placement="bottom">
+        <RichTooltip content={{ title: t('quickshow.ttOpenTitle'), text: t('quickshow.ttOpenText'), tone: 'info' }} placement="bottom">
           <button title={t('open') || 'Open'} onClick={() => loadProject(setQs, audioFile, setSections, setManualCues, setEfxTracks, setFixtureTracks, setColorTracks, setStrobeTracks, setDimmerTracks, setChaserTracks, setShowTracks, setSceneTracks, setDisabledFixtures, setFixtureDefs)} className="p-1 rounded text-gray-400 hover:text-white">
             <FolderOpen className="w-3.5 h-3.5" />
           </button>
         </RichTooltip>
-        <RichTooltip content={{ title: 'Effacer (Clear)', text: 'Vide la timeline et le montage (cues, sections, EFX, tracks). L\'audio reste chargé.', tone: 'danger' }} placement="bottom">
+        <RichTooltip content={{ title: t('quickshow.ttClearTitle'), text: t('quickshow.ttClearText'), tone: 'danger' }} placement="bottom">
           <button title={t('clear') || 'Clear'} onClick={clearAudio} className="p-1 rounded text-gray-400 hover:text-red-400">
             <Trash2 className="w-3.5 h-3.5" />
           </button>
         </RichTooltip>
 
         {/* Magnétisme timeline : snap sections/pistes sur les beats */}
-        <RichTooltip content={{ title: 'Magnétisme (snap aux beats)', text: 'ON : déplacer/redimensionner une section ou un bloc de piste les aligne sur les beats détectés (points roses du waveform, barres verticales de la timeline). OFF : placement libre.', tone: 'info' }} placement="bottom">
+        <RichTooltip content={{ title: t('quickshow.ttSnapTitle'), text: t('quickshow.ttSnapText'), tone: 'info' }} placement="bottom">
           <button
             onClick={() => setSnapToBeats((v) => !v)}
-            title={snapToBeats ? 'Magnétisme ON : aligné sur les beats (cliquer pour désactiver)' : 'Magnétisme OFF : placement libre (cliquer pour activer)'}
+            title={snapToBeats ? t('quickshow.snapOnTitle') : t('quickshow.snapOffTitle')}
             className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold border transition-all ${
               snapToBeats
                 ? 'bg-violet-600/30 text-violet-200 border-violet-500/60 shadow-[0_0_6px_rgba(139,92,246,0.4)]'
@@ -4092,27 +4082,27 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
             }`}
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M5 4h4l3 8 3-8h4v7a5 5 0 0 1-10 0V4z" /><path d="M12 16v5" /></svg>
-            <span>{snapToBeats ? 'SNAP ON' : 'SNAP OFF'}</span>
+            <span>{snapToBeats ? t('quickshow.snapOn') : t('quickshow.snapOff')}</span>
           </button>
         </RichTooltip>
 
         <div className="h-5 border-l border-gray-700 mx-1" />
 
         {/* New audio file */}
-        <RichTooltip content={{ title: 'Nouveau fichier audio', text: 'Charge un nouveau fichier audio (mp3/wav), détecte le BPM et le découpe en sections automatiquement.', example: 'Idéal pour démarrer un nouveau titre: chargez le son → l\'app crée les 8/16/32 zones.', tone: 'info' }} placement="bottom">
-          <button title="Nouveau fichier audio" onClick={handleNewAudioFile} className="p-1 rounded text-gray-400 hover:text-green-400">
+        <RichTooltip content={{ title: t('quickshow.ttNewAudioTitle'), text: t('quickshow.ttNewAudioText'), example: t('quickshow.ttNewAudioEx'), tone: 'info' }} placement="bottom">
+          <button title={t('quickshow.newAudioFile')} onClick={handleNewAudioFile} className="p-1 rounded text-gray-400 hover:text-green-400">
             <Music className="w-3.5 h-3.5" />
           </button>
         </RichTooltip>
 
         {/* Presets dropdown */}
         <div className="relative">
-          <RichTooltip content={{ title: 'Presets', text: 'Sauvegardez, rechargez ou exportez vos configurations .lmpreset (scènes, EFX, audio associé).', tone: 'info' }} placement="bottom">
+          <RichTooltip content={{ title: t('quickshow.ttPresetsTitle'), text: t('quickshow.ttPresetsText'), tone: 'info' }} placement="bottom">
             <button
               ref={presetsBtnRef}
               onClick={() => setPresetsDropdown(v => !v)}
               className="p-1 rounded text-gray-400 hover:text-yellow-400"
-              title="Presets"
+              title={t('quickshow.presetsTitle')}
             >
               <Layers className="w-3.5 h-3.5" />
             </button>
@@ -4120,13 +4110,13 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           {presetsDropdown && (
             <div className="absolute top-full right-0 mt-1 z-50 bg-[#1a1a2e] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[220px]">
               <button onClick={() => { setPresetsDropdown(false); setPromptAction('save'); }} className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2">
-                <Save className="w-3 h-3" /> Save Preset
+                <Save className="w-3 h-3" /> {t('quickshow.savePreset')}
               </button>
               <button onClick={() => { setPresetsDropdown(false); loadPresetFile(); }} className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2">
-                <FolderOpen className="w-3 h-3" /> Load from file...
+                <FolderOpen className="w-3 h-3" /> {t('quickshow.loadFromFile')}
               </button>
               <button onClick={() => { setPresetsDropdown(false); setPromptAction('export'); }} className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2">
-                <Download className="w-3 h-3" /> Export to file...
+                <Download className="w-3 h-3" /> {t('quickshow.exportToFile')}
               </button>
               <button
                 onClick={async () => {
@@ -4136,19 +4126,19 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                   const report = await api.repairAudio();
                   if (!report) return; // dialogue annulé
                   const lines = [
-                    `Dossier : ${report.folder}`,
-                    `${report.total} preset(s) — OK : ${report.alreadyOk.length}, réparés : ${report.repaired.length}, sans audio retrouvée : ${report.missing.length}, erreurs : ${report.errors.length}`,
+                    t('quickshow.repairFolder', { folder: report.folder }),
+                    t('quickshow.repairSummary', { total: report.total, ok: report.alreadyOk.length, repaired: report.repaired.length, missing: report.missing.length, errors: report.errors.length }),
                   ];
-                  for (const r of report.repaired) lines.push(`✔ ${r.file} (${(r.audioLen / 1048576).toFixed(1)} Mo ré-embarqués)`);
-                  for (const m of report.missing) lines.push(`✘ ${m.file} : audio « ${m.expectedAudio} » introuvable — rechargez-le puis ré-exportez`);
-                  for (const e of report.errors) lines.push(`⚠ ${e.file} : ${e.error}`);
+                  for (const r of report.repaired) lines.push(t('quickshow.repairOk', { file: r.file, size: (r.audioLen / 1048576).toFixed(1) }));
+                  for (const m of report.missing) lines.push(t('quickshow.repairMissing', { file: m.file, expected: m.expectedAudio }));
+                  for (const e of report.errors) lines.push(t('quickshow.repairError', { file: e.file, error: e.error }));
                   console.error('[repairAudio]\n' + lines.join('\n'));
                   alert(lines.join('\n'));
                 }}
                 className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 flex items-center gap-2"
-                title="Scanne un dossier de .lmpreset et ré-embarque le son manquant depuis le cache"
+                title={t('quickshow.scanPresetsHint')}
               >
-                <Wrench className="w-3 h-3" /> Réparer l'audio des presets…
+                <Wrench className="w-3 h-3" /> {t('quickshow.repairPresetsAudio')}
               </button>
               {savedPresets.length > 0 && <div className="border-t border-gray-800 my-0.5" />}
               {savedPresets.map((p, i) => (
@@ -4162,7 +4152,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 </div>
               ))}
               {savedPresets.length === 0 && (
-                <div className="px-3 py-1.5 text-[10px] text-gray-600 italic">No saved presets</div>
+                <div className="px-3 py-1.5 text-[10px] text-gray-600 italic">{t('quickshow.noSavedPresets')}</div>
               )}
             </div>
           )}
@@ -4183,12 +4173,12 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
         {/* Color scheme — Palette : les couleurs émises (gamme visuelle) */}
         <div className="flex items-center gap-1">
-          <span className="text-[9px] text-gray-500 font-semibold uppercase tracking-wider select-none">Palette</span>
+          <span className="text-[9px] text-gray-500 font-semibold uppercase tracking-wider select-none">{t('quickshow.paletteLabel')}</span>
           <select
             value={qs.colorScheme || 'auto'}
             onChange={e => setQs({ colorScheme: e.target.value })}
             className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300"
-            title="Palette de couleurs : seule la gamme visuelle (roues couleur / RGB) change. « Auto » détecte la couleur dominante de l'analyse audio."
+            title={t('quickshow.paletteHint')}
           >
             {['auto', 'warm', 'cool', 'party', 'monochrome', 'neon', 'pastel', 'dance', 'disco', 'techno', 'rock', 'rnb', 'reggaeton', 'latino', 'electro', 'house', 'dubstep', 'hiphop', 'funk'].map(s => (
               <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
@@ -4198,12 +4188,12 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
         {/* Genre — Style/Rythme : la grammaire du show (mouvements, strobe, énergie) */}
         <div className="flex items-center gap-1">
-          <span className="text-[9px] text-gray-500 font-semibold uppercase tracking-wider select-none">Style</span>
+          <span className="text-[9px] text-gray-500 font-semibold uppercase tracking-wider select-none">{t('quickshow.styleLabel')}</span>
           <select
             value={qs.musicStyle || 'dance'}
             onChange={e => setQs({ musicStyle: e.target.value })}
             className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300"
-            title="Style musical : structure rythmique du show (patterns de mouvement, strobe, intensité par section). « Auto » suit le genre détecté de l'analyse audio."
+            title={t('quickshow.musicStyleHint')}
           >
             {['dance','techno','house','hiphop','dubstep','drum_and_bass','trance','disco','electro','pop','rock','rnb','reggaeton','latino','funk','ballad','reggae','trap','jazz','blues','latin','lo_fi','ambient'].map(s => (
               <option key={s} value={s}>{(s.charAt(0).toUpperCase() + s.slice(1)).replace(/_/g, ' ')}</option>
@@ -4246,7 +4236,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         <Chip
           active={qs.sectionAware !== false}
           onClick={() => setQs({ sectionAware: !(qs.sectionAware !== false) })}
-          label="Section"
+          label={t('quickshow.chipSection')}
           icon={<Layers className="w-3 h-3" />}
         />
 
@@ -4254,7 +4244,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         <Chip
           active={!!qs.useScenesInAutoscript}
           onClick={() => setQs({ useScenesInAutoscript: !qs.useScenesInAutoscript })}
-          label="Scènes"
+          label={t('quickshow.chipScenes')}
           icon={<Sparkles className="w-3 h-3" />}
         />
         {qs.useScenesInAutoscript && (
@@ -4267,7 +4257,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         <Chip
           active={qs.audioReactive !== false}
           onClick={() => setQs({ audioReactive: !(qs.audioReactive !== false) })}
-          label="Audio"
+          label={t('quickshow.chipAudio')}
           icon={<Zap className="w-3 h-3" />}
         />
 
@@ -4339,7 +4329,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         {movingHeads.length > 0 && (
           <div className="relative">
             <details className="text-xs text-gray-500">
-              <summary className="cursor-pointer text-[10px] select-none">Limites par head ({movingHeads.length})</summary>
+              <summary className="cursor-pointer text-[10px] select-none">{t('quickshow.headLimits', { count: movingHeads.length })}</summary>
               <div className="absolute z-30 left-0 top-full mt-1 bg-[#0d0d14] border border-gray-800 rounded p-2 shadow-2xl max-h-72 overflow-y-auto min-w-[250px]">
                 {movingHeads.map(pf => {
                   const panDeg = qs.forcedPanMaxDeg?.[pf.id] ?? qs.panMaxDeg ?? 270;
@@ -4359,7 +4349,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                         <span className={qs.forcedTiltMaxDeg?.[pf.id] !== undefined ? 'text-blue-300 w-7' : 'text-gray-600 w-7'}>{tiltDeg}°</span>
                       </label>
                       {hasOverride && (
-                        <button className="text-[9px] text-gray-500 hover:text-red-400 px-1" title="Réinitialiser" onClick={() => { setForcedPanMax(pf.id, null); setForcedTiltMax(pf.id, null); }}>✕</button>
+                        <button className="text-[9px] text-gray-500 hover:text-red-400 px-1" title={t('common.reset')} onClick={() => { setForcedPanMax(pf.id, null); setForcedTiltMax(pf.id, null); }}>✕</button>
                       )}
                     </div>
                   );
@@ -4553,23 +4543,23 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         <button
           onClick={() => { void runAiStructure(); }}
           disabled={aiStatus.phase === 'running' || aiStatus.phase === 'checking'}
-          title="Structure IA (All-In-One, offline) : analyse le morceau chargé et remplace les sections."
+          title={t('quickshow.aiStructureHint')}
           className="ml-2 px-2 py-0.5 rounded text-[10px] text-emerald-400 border border-emerald-700/50 hover:bg-emerald-400/10 cursor-pointer flex items-center gap-1 disabled:opacity-40"
         >
           <Sparkles className="w-3 h-3" />
-          {aiStatus.phase === 'running' ? 'IA…' : aiStatus.phase === 'checking' ? '…' : 'Structure IA'}
+          {aiStatus.phase === 'running' ? t('quickshow.aiRunningShort') : aiStatus.phase === 'checking' ? t('quickshow.aiCheckingShort') : t('quickshow.aiStructure')}
         </button>
         {(aiStatus.phase === 'running' || aiStatus.phase === 'checking') && (
           <button
             onClick={cancelAiStructure}
             className="px-2 py-0.5 rounded text-[10px] text-red-400 border border-red-700/50 hover:bg-red-400/10 cursor-pointer"
           >
-            Annuler
+            {t('common.cancel')}
           </button>
         )}
         {aiSections && (
           <div
-            title="Choisir le jeu de sections : IA ou moteur local (les deux sont gardés, sans recalcul)"
+            title={t('quickshow.aiChooseSourceHint')}
             className="flex items-center rounded border border-gray-700 overflow-hidden text-[10px]"
           >
             {(['ai', 'local'] as const).map((src) => (
@@ -4590,7 +4580,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         {aiAvailable === true && (
           <>
             <label
-              title="Lancer la Structure IA automatiquement à chaque nouvel audio"
+              title={t('quickshow.aiAutoHint')}
               className="flex items-center gap-1 px-1 text-[10px] text-gray-500 cursor-pointer select-none"
             >
               <input
@@ -4602,7 +4592,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 }}
                 className="accent-emerald-500"
               />
-              auto
+              {t('quickshow.aiAutoLabel')}
             </label>
             <select
               value={aiModel}
@@ -4610,7 +4600,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 setAiModel(e.target.value);
                 try { localStorage.setItem('lm-ai-model', e.target.value); } catch {}
               }}
-              title="Modèle IA : ensemble précis (lent) ou fold unique rapide"
+              title={t('quickshow.aiModelHint')}
               className="px-1 py-0.5 rounded text-[10px] text-gray-400 bg-gray-800/50 border border-gray-700"
             >
               <option value="harmonix-all">IA précise</option>
@@ -4626,7 +4616,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         {aiAvailable !== true && (
           <button
             onClick={importAllInOneFile}
-            title="Importer une structure All-In-One (.json produit par scripts/allinone_import.py)"
+            title={t('quickshow.importAioHint')}
             className="px-2 py-0.5 rounded text-[10px] text-emerald-400/70 border border-emerald-700/30 hover:bg-emerald-400/10 cursor-pointer flex items-center gap-1"
           >
             <Upload className="w-3 h-3" />
@@ -4638,68 +4628,68 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           className="ml-2 px-2 py-0.5 rounded text-[10px] text-cyan-400 border border-cyan-700/50 hover:bg-cyan-400/10 cursor-pointer flex items-center gap-1"
         >
           <Plus className="w-3 h-3" />
-          EFX Track
+          {t('quickshow.trackEfx')}
         </button>
         <button
           onClick={openColorTrackModal}
           className="ml-1 px-2 py-0.5 rounded text-[10px] text-pink-400 border border-pink-700/50 hover:bg-pink-400/10 cursor-pointer flex items-center gap-1"
         >
           <Plus className="w-3 h-3" />
-          Color Track
+          {t('quickshow.trackColor')}
         </button>
         <button
           onClick={openStrobeTrackModal}
           className="ml-1 px-2 py-0.5 rounded text-[10px] text-purple-400 border border-purple-700/50 hover:bg-purple-400/10 cursor-pointer flex items-center gap-1"
         >
           <Plus className="w-3 h-3" />
-          Strobe Track
+          {t('quickshow.trackStrobe')}
         </button>
         <button
           onClick={openDimmerTrackModal}
           className="ml-1 px-2 py-0.5 rounded text-[10px] text-orange-400 border border-orange-700/50 hover:bg-orange-400/10 cursor-pointer flex items-center gap-1"
         >
           <Plus className="w-3 h-3" />
-          Dimmer Track
+          {t('quickshow.trackDimmer')}
         </button>
         <button
           onClick={handleAddChaserTrack}
           className="ml-1 px-2 py-0.5 rounded text-[10px] text-emerald-400 border border-emerald-700/50 hover:bg-emerald-400/10 cursor-pointer flex items-center gap-1"
-          title="Piste de chaser : importe un chaser qui prend la main sur ses fixtures pendant sa plage"
+          title={t('quickshow.chaserTrackHint')}
         >
           <Plus className="w-3 h-3" />
-          Chaser Track
+          {t('quickshow.trackChaser')}
         </button>
         <button
           onClick={handleAddShowTrack}
           className="ml-1 px-2 py-0.5 rounded text-[10px] text-amber-400 border border-amber-700/50 hover:bg-amber-400/10 cursor-pointer flex items-center gap-1"
-          title="Piste de show : importe un show complet qui prend le dessus sur l'autoscript pendant sa plage"
+          title={t('quickshow.showTrackHint')}
         >
           <Plus className="w-3 h-3" />
-          Show Track
+          {t('quickshow.trackShow')}
         </button>
         <button
           onClick={handleAddSceneTrack}
           className="ml-1 px-2 py-0.5 rounded text-[10px] text-cyan-300 border border-cyan-700/50 hover:bg-cyan-300/10 cursor-pointer flex items-center gap-1"
-          title="Piste de scènes : importe une scène statique qui prend la main sur ses fixtures pendant sa plage"
+          title={t('quickshow.sceneTrackHint')}
         >
           <Plus className="w-3 h-3" />
-          Scenes Track
+          {t('quickshow.trackScenes')}
         </button>
         <button
           onClick={handleAddMatrixTrack}
           className="ml-1 px-2 py-0.5 rounded text-[10px] text-pink-400 border border-pink-700/50 hover:bg-pink-400/10 cursor-pointer flex items-center gap-1"
-          title="Piste matrice : joue une matrice RGB qui prend la main sur son groupe pendant sa plage"
+          title={t('quickshow.matrixTrackHint')}
         >
           <Plus className="w-3 h-3" />
-          Matrice Track
+          {t('quickshow.trackMatrix')}
         </button>
         <button
           onClick={() => setFadeModal(!fadeModal)}
           className="ml-1 px-2 py-0.5 rounded text-[10px] text-purple-400 border border-purple-700/50 hover:bg-purple-400/10 cursor-pointer flex items-center gap-1"
-          title="Fondu"
+          title={t('quickshow.fadeTitle')}
         >
           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" opacity="0.3"/><circle cx="12" cy="12" r="10" strokeDasharray="32 31"/></svg>
-          Fade
+          {t('quickshow.trackFade')}
         </button>
         {fadeModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setFadeModal(false)}>
@@ -4707,14 +4697,14 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
             <div className="relative bg-[#1a1a2e] border border-purple-700/40 rounded-xl shadow-2xl p-6 min-w-[300px] max-w-[360px]" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2 mb-3">
                 <svg className="w-5 h-5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" opacity="0.3"/><circle cx="12" cy="12" r="10" strokeDasharray={`${((qs.colorFadeMs || 250) / 2000) * 63} 63`}/></svg>
-                <span className="text-sm font-medium text-gray-200">Fondu enchaîné</span>
+                <span className="text-sm font-medium text-gray-200">{t('quickshow.crossfadeTitle')}</span>
                 <span className="ml-auto text-lg font-bold text-purple-400">{qs.colorFadeMs || 250}<span className="text-xs text-gray-500 ml-0.5">ms</span></span>
               </div>
-              <p className="text-xs text-gray-500 leading-relaxed mb-4">Vous pouvez régler ici le temps de transition entre vos couleurs. Une valeur plus élevée donne un morphing progressif, idéal pour les ambiances douces.</p>
+              <p className="text-xs text-gray-500 leading-relaxed mb-4">{t('quickshow.crossfadeHint')}</p>
               <input type="range" min={0} max={2000} step={50} value={qs.colorFadeMs || 250} onChange={e => setQs({ colorFadeMs: Number(e.target.value) })} className="w-full accent-purple-500" />
               <div className="flex justify-between text-[10px] text-gray-600 mt-1">
-                <span>Instantané</span>
-                <span>2 secondes</span>
+                <span>{t('quickshow.instantSnap')}</span>
+                <span>{t('quickshow.twoSeconds')}</span>
               </div>
               <div className="flex gap-2 mt-4">
                 {[0, 250, 500, 1000].map(v => (
@@ -4728,16 +4718,16 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
       {/* Transport — tout en bas, sous les boutons +Track : jamais masqué par les modales */}
       <div className="px-3 py-2 border-t border-gray-800/50 bg-[#0d0d14] flex items-center gap-2 shrink-0">
-        <button onClick={() => audioFile.seek(0)} className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Début">
+        <button onClick={() => audioFile.seek(0)} className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title={t('quickshow.transportStart')}>
           <SkipBack size={14} />
         </button>
-        <button onClick={audioFile.isPlaying ? audioFile.pause : audioFile.play} className="p-2 rounded-full bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 transition-colors" title={audioFile.isPlaying ? 'Pause (Espace)' : 'Lecture (Espace)'}>
+        <button onClick={audioFile.isPlaying ? audioFile.pause : audioFile.play} className="p-2 rounded-full bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 transition-colors" title={audioFile.isPlaying ? t('quickshow.transportPause') : t('quickshow.transportPlay')}>
           {audioFile.isPlaying ? <Pause size={16} /> : <Play size={16} />}
         </button>
-        <button onClick={() => audioFile.stop()} className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Stop">
+        <button onClick={() => audioFile.stop()} className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title={t('common.stop')}>
           <Square size={14} />
         </button>
-        <button onClick={() => audioFile.seek(resolvedAnalysis?.duration || 0)} className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Fin">
+        <button onClick={() => audioFile.seek(resolvedAnalysis?.duration || 0)} className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title={t('quickshow.transportEnd')}>
           <SkipForward size={14} />
         </button>
         <span className="text-[11px] text-gray-400 font-mono w-20 text-right">
@@ -4773,10 +4763,10 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setSectionModal(null)}>
             <div className="bg-[#12121a] border border-gray-700 rounded-xl p-5 w-[380px] max-w-[95vw] shadow-2xl" onClick={(e) => e.stopPropagation()}>
-              <h4 className="text-sm font-bold text-white mb-3">Section — précision</h4>
+              <h4 className="text-sm font-bold text-white mb-3">{t('quickshow.sectionPrecision')}</h4>
               <div className="space-y-3">
                 <div>
-                  <label className="text-[11px] text-gray-500">Type</label>
+                  <label className="text-[11px] text-gray-500">{t('quickshow.sectionTypeLabel')}</label>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {(['intro', 'verse', 'chorus', 'bridge', 'drop', 'outro', 'build', 'unknown'] as TrackSection['type'][]).map(type => (
                       <button key={type} onClick={() => changeType(sectionModal.idx, type)}
@@ -4789,22 +4779,22 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[11px] text-gray-500">Début (s)</label>
+                    <label className="text-[11px] text-gray-500">{t('quickshow.sectionStart')}</label>
                     <input type="number" step="0.01" min={0} max={dur} defaultValue={s.startTime} id="__sec_start"
                       className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200 outline-none focus:border-purple-500" />
                   </div>
                   <div>
-                    <label className="text-[11px] text-gray-500">Fin (s)</label>
+                    <label className="text-[11px] text-gray-500">{t('quickshow.sectionEnd')}</label>
                     <input type="number" step="0.01" min={0} max={dur} defaultValue={s.endTime} id="__sec_end"
                       className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200 outline-none focus:border-purple-500" />
                   </div>
                 </div>
-                <p className="text-[10px] text-gray-600">Ex: intro 0 → 15.25s. Durée audio {dur.toFixed(2)}s.</p>
+                <p className="text-[10px] text-gray-600">{t('quickshow.sectionExample', { dur: dur.toFixed(2) })}</p>
               </div>
               <div className="flex justify-between gap-2 mt-5">
-                <button onClick={() => { pushHistory(); setSections(prev => prev.filter((_, i) => i !== sectionModal.idx)); setSectionModal(null); }} className="px-3 py-1.5 bg-red-600/20 text-red-300 rounded text-xs hover:bg-red-600/30">Supprimer</button>
+                <button onClick={() => { pushHistory(); setSections(prev => prev.filter((_, i) => i !== sectionModal.idx)); setSectionModal(null); }} className="px-3 py-1.5 bg-red-600/20 text-red-300 rounded text-xs hover:bg-red-600/30">{t('common.delete')}</button>
                 <div className="flex gap-2">
-                  <button onClick={() => setSectionModal(null)} className="px-3 py-1.5 bg-gray-800 text-gray-300 rounded text-xs">Annuler</button>
+                  <button onClick={() => setSectionModal(null)} className="px-3 py-1.5 bg-gray-800 text-gray-300 rounded text-xs">{t('common.cancel')}</button>
                   <button onClick={() => {
                     const st = Number((document.getElementById('__sec_start') as HTMLInputElement).value);
                     const en = Number((document.getElementById('__sec_end') as HTMLInputElement).value);
@@ -4841,7 +4831,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                       return out.filter(s=>s.endTime - s.startTime > minLen);
                     });
                     setSectionModal(null);
-                  }} className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs hover:bg-purple-500">Appliquer</button>
+                  }} className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs hover:bg-purple-500">{t('quickshow.apply')}</button>
                 </div>
               </div>
             </div>
@@ -4908,16 +4898,16 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           <div className="absolute inset-0 bg-black/70" />
           <div className="relative z-10 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-6 w-[420px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2"><Palette className="w-4 h-4 text-purple-400" /><span className="text-sm font-semibold text-gray-200">Choix de couleur</span></div>
+              <div className="flex items-center gap-2"><Palette className="w-4 h-4 text-purple-400" /><span className="text-sm font-semibold text-gray-200">{t('quickshow.colorChoice')}</span></div>
               <button className="text-gray-500 hover:text-white text-lg px-1" onClick={() => setGradientPicker(null)}>✕</button>
             </div>
             <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-3 mb-4">
-              <div className="flex items-start gap-2 mb-2"><span className="w-5 h-5 rounded-full bg-purple-500/30 text-purple-300 text-[10px] flex items-center justify-center font-bold shrink-0 mt-0.5">1</span><p className="text-[11px] text-gray-400 leading-relaxed">Choisissez votre <b className="text-purple-300">couleur de départ</b>. Elle servira de teinte dominante pour ce cue.</p></div>
-              <div className="flex items-start gap-2"><span className="w-5 h-5 rounded-full bg-cyan-500/30 text-cyan-300 text-[10px] flex items-center justify-center font-bold shrink-0 mt-0.5">2</span><p className="text-[11px] text-gray-400 leading-relaxed">Choisissez une <b className="text-cyan-300">couleur d'arrivée</b> différente pour un dégradé progressif, ou identique pour une teinte constante.</p></div>
+              <div className="flex items-start gap-2 mb-2"><span className="w-5 h-5 rounded-full bg-purple-500/30 text-purple-300 text-[10px] flex items-center justify-center font-bold shrink-0 mt-0.5">1</span><p className="text-[11px] text-gray-400 leading-relaxed">{t('quickshow.gradStep1a')} <b className="text-purple-300">{t('quickshow.gradStep1b')}</b>{t('quickshow.gradStep1c')}</p></div>
+              <div className="flex items-start gap-2"><span className="w-5 h-5 rounded-full bg-cyan-500/30 text-cyan-300 text-[10px] flex items-center justify-center font-bold shrink-0 mt-0.5">2</span><p className="text-[11px] text-gray-400 leading-relaxed">{t('quickshow.gradStep2a')} <b className="text-cyan-300">{t('quickshow.gradStep2b')}</b>{t('quickshow.gradStep2c')}</p></div>
             </div>
             <div className="grid grid-cols-2 gap-4 mb-4">
-              <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Départ</label><div className="flex items-center gap-2"><input type="color" value={gradientPicker.startColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, startColor: e.target.value, endColor: prev.constantColor ? e.target.value : prev.endColor } : null)} className="w-10 h-10 rounded-lg border-2 border-gray-700 cursor-pointer" /><span className="text-xs text-gray-300 font-mono">{gradientPicker.startColor}</span></div></div>
-              <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Arrivée</label><div className="flex items-center gap-2"><input type="color" value={gradientPicker.endColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, endColor: e.target.value } : null)} disabled={gradientPicker.constantColor} className={'w-10 h-10 rounded-lg border-2 border-purple-700 cursor-pointer ' + (gradientPicker.constantColor ? 'opacity-30 cursor-not-allowed' : '')} /><span className="text-xs text-gray-300 font-mono">{gradientPicker.endColor}</span></div></div>
+              <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">{t('quickshow.fromLabel')}</label><div className="flex items-center gap-2"><input type="color" value={gradientPicker.startColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, startColor: e.target.value, endColor: prev.constantColor ? e.target.value : prev.endColor } : null)} className="w-10 h-10 rounded-lg border-2 border-gray-700 cursor-pointer" /><span className="text-xs text-gray-300 font-mono">{gradientPicker.startColor}</span></div></div>
+              <div><label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">{t('quickshow.toLabel')}</label><div className="flex items-center gap-2"><input type="color" value={gradientPicker.endColor} onChange={e => setGradientPicker(prev => prev ? { ...prev, endColor: e.target.value } : null)} disabled={gradientPicker.constantColor} className={'w-10 h-10 rounded-lg border-2 border-purple-700 cursor-pointer ' + (gradientPicker.constantColor ? 'opacity-30 cursor-not-allowed' : '')} /><span className="text-xs text-gray-300 font-mono">{gradientPicker.endColor}</span></div></div>
             </div>
             <div className="h-3 rounded-full mb-4" style={{ background: 'linear-gradient(90deg, ' + gradientPicker.startColor + ', ' + gradientPicker.endColor + ')' }} />
             <div className="flex flex-wrap gap-1.5 mb-4">
@@ -4927,11 +4917,11 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
             </div>
             <label className="flex items-center gap-2 text-[10px] text-gray-500 mb-4 cursor-pointer">
               <input type="checkbox" checked={gradientPicker.endColor === gradientPicker.startColor} onChange={e => { if (e.target.checked) setGradientPicker(prev => prev ? { ...prev, endColor: prev.startColor, constantColor: true } : null); else setGradientPicker(prev => prev ? { ...prev, constantColor: false } : null); }} className="accent-purple-500" />
-              Couleur constante (départ = arrivée)
+              {t('quickshow.constantColor')}
             </label>
             <div className="flex justify-end gap-2">
-              <button onClick={() => setGradientPicker(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Annuler</button>
-              <button onClick={() => { if (!gradientPicker) return; const { sectionType, colorIdx, endColor, startColor } = gradientPicker; const arr = [...(customPal[sectionType] || [])]; arr[colorIdx] = endColor; const newPal = { ...customPal, [sectionType]: arr }; setCustomPal(newPal); setQs({ customPalette: newPal, customGradients: { ...(qs.customGradients || {}), [sectionType]: { start: startColor, end: endColor } } }); setGradientPicker(null); }} className="px-4 py-2 rounded-lg text-xs font-medium bg-purple-600 text-white hover:bg-purple-500">Appliquer</button>
+              <button onClick={() => setGradientPicker(null)} className="px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">{t('common.cancel')}</button>
+              <button onClick={() => { if (!gradientPicker) return; const { sectionType, colorIdx, endColor, startColor } = gradientPicker; const arr = [...(customPal[sectionType] || [])]; arr[colorIdx] = endColor; const newPal = { ...customPal, [sectionType]: arr }; setCustomPal(newPal); setQs({ customPalette: newPal, customGradients: { ...(qs.customGradients || {}), [sectionType]: { start: startColor, end: endColor } } }); setGradientPicker(null); }} className="px-4 py-2 rounded-lg text-xs font-medium bg-purple-600 text-white hover:bg-purple-500">{t('quickshow.apply')}</button>
             </div>
           </div>
         </div>
@@ -4946,19 +4936,19 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-1.5 text-[10px] text-cyan-400 uppercase tracking-wider border-b border-gray-800">
-            EFX Track
-          </div>
+              {t('quickshow.trackEfx')}
+            </div>
           <button
             onClick={() => handleRemoveEfxTrack(efxContextMenu.trackId)}
             className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
           >
-            Delete track
+            {t('quickshow.deleteTrack')}
           </button>
           <button
             onClick={() => setEfxContextMenu(null)}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
           >
-            Cancel
+            {t('common.cancel')}
           </button>
         </div>
       )}
@@ -4975,7 +4965,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               {efxEntryMenu.entry.label || `${efxEntryMenu.entry.effectName} (${efxEntryMenu.entry.pattern})`}
             </div>
             <div className="px-4 pt-3">
-              <label className="text-[10px] text-gray-500 block mb-1">Nom de la section</label>
+              <label className="text-[10px] text-gray-500 block mb-1">{t('quickshow.sectionName')}</label>
               <input type="text"
                 defaultValue={efxEntryMenu.entry.label || ''}
                 placeholder={efxEntryMenu.entry.effectName}
@@ -4983,15 +4973,15 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
             </div>
             <div className="grid grid-cols-2 gap-3 px-4 py-3">
-              <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={efxEntryMenu.entry.time} id="__efx_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
-              <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={efxEntryMenu.entry.endTime} id="__efx_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionStart')}</label><input type="number" step="0.01" defaultValue={efxEntryMenu.entry.time} id="__efx_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionEnd')}</label><input type="number" step="0.01" defaultValue={efxEntryMenu.entry.endTime} id="__efx_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
             </div>
             <div className="flex gap-2 px-4 pb-2">
               <button onClick={() => {
                 const label = (document.getElementById('__efx_label') as HTMLInputElement).value;
                 handleRenameEfxEntry(efxEntryMenu.trackId, efxEntryMenu.entry, label);
-              }} className="flex-1 py-1.5 rounded bg-cyan-600/20 text-cyan-300 text-xs hover:bg-cyan-600/30">Renommer</button>
-              <button onClick={() => handleModifyEfxEntry(efxEntryMenu.trackId, efxEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Modifier</button>
+              }} className="flex-1 py-1.5 rounded bg-cyan-600/20 text-cyan-300 text-xs hover:bg-cyan-600/30">{t('common.rename')}</button>
+              <button onClick={() => handleModifyEfxEntry(efxEntryMenu.trackId, efxEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">{t('common.edit')}</button>
             </div>
             <div className="flex gap-2 px-4 pb-2">
               <button onClick={() => {
@@ -5003,10 +4993,10 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 const idx = tr ? tr.entries.findIndex(e => e.time === efxEntryMenu.entry.time && e.endTime === efxEntryMenu.entry.endTime) : -1;
                 if (idx >= 0) { pushHistory(); setEfxTracks(prev => prev.map(t => t.id === efxEntryMenu.trackId ? { ...t, entries: t.entries.map((e,i) => i===idx ? { ...e, time: st, endTime: en } : e) } : t)); }
                 setEfxEntryMenu(null);
-              }} className="flex-1 py-1.5 rounded bg-cyan-600 text-white text-xs hover:bg-cyan-500">Appliquer</button>
-              <button onClick={() => handleRemoveEfxEntry(efxEntryMenu.trackId, efxEntryMenu.entry)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs hover:bg-red-600/30">Supprimer</button>
+              }} className="flex-1 py-1.5 rounded bg-cyan-600 text-white text-xs hover:bg-cyan-500">{t('quickshow.apply')}</button>
+              <button onClick={() => handleRemoveEfxEntry(efxEntryMenu.trackId, efxEntryMenu.entry)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs hover:bg-red-600/30">{t('common.delete')}</button>
             </div>
-            <button onClick={() => setEfxEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">Fermer</button>
+            <button onClick={() => setEfxEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">{t('common.close')}</button>
           </div>
         </div>
       )}
@@ -5022,19 +5012,19 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-1.5 text-[10px] text-pink-400 uppercase tracking-wider border-b border-gray-800">
-              Color Track
+              {t('quickshow.trackColor')}
             </div>
             <button
               onClick={() => handleRemoveColorTrack(colorContextMenu.trackId)}
               className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
             >
-              Delete track
+              {t('quickshow.deleteTrack')}
             </button>
             <button
               onClick={() => setColorContextMenu(null)}
               className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </>
@@ -5057,7 +5047,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               )}
             </div>
             <div className="px-4 pt-3">
-              <label className="text-[10px] text-gray-500 block mb-1">Nom de la section</label>
+              <label className="text-[10px] text-gray-500 block mb-1">{t('quickshow.sectionName')}</label>
               <input type="text"
                 defaultValue={colorEntryMenu.entry.label || ''}
                 placeholder={`${colorEntryMenu.entry.color}${colorEntryMenu.entry.endColor && colorEntryMenu.entry.endColor !== colorEntryMenu.entry.color ? ` → ${colorEntryMenu.entry.endColor}` : ''}`}
@@ -5065,15 +5055,15 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
             </div>
             <div className="grid grid-cols-2 gap-3 px-4 py-3">
-              <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={colorEntryMenu.entry.time} id="__color_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
-              <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={colorEntryMenu.entry.endTime} id="__color_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionStart')}</label><input type="number" step="0.01" defaultValue={colorEntryMenu.entry.time} id="__color_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionEnd')}</label><input type="number" step="0.01" defaultValue={colorEntryMenu.entry.endTime} id="__color_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
             </div>
             <div className="flex gap-2 px-4 pb-2">
               <button onClick={() => {
                 const label = (document.getElementById('__color_label') as HTMLInputElement).value;
                 handleRenameColorEntry(colorEntryMenu.trackId, colorEntryMenu.entry, label);
-              }} className="flex-1 py-1.5 rounded bg-pink-600/20 text-pink-300 text-xs hover:bg-pink-600/30">Renommer</button>
-              <button onClick={() => handleModifyColorEntry(colorEntryMenu.trackId, colorEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Modifier</button>
+              }} className="flex-1 py-1.5 rounded bg-pink-600/20 text-pink-300 text-xs hover:bg-pink-600/30">{t('common.rename')}</button>
+              <button onClick={() => handleModifyColorEntry(colorEntryMenu.trackId, colorEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">{t('common.edit')}</button>
             </div>
             <div className="flex gap-2 px-4 pb-2">
               <button onClick={() => {
@@ -5085,10 +5075,10 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 const idx = tr ? tr.entries.findIndex(e => e.time === colorEntryMenu.entry.time && e.endTime === colorEntryMenu.entry.endTime) : -1;
                 if (idx >= 0) handleColorEntryChange(colorEntryMenu.trackId, idx, st, en);
                 setColorEntryMenu(null);
-              }} className="flex-1 py-1.5 rounded bg-pink-600 text-white text-xs hover:bg-pink-500">Appliquer</button>
-              <button onClick={() => handleRemoveColorEntry(colorEntryMenu.trackId, colorEntryMenu.entry.time)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">Supprimer</button>
+              }} className="flex-1 py-1.5 rounded bg-pink-600 text-white text-xs hover:bg-pink-500">{t('quickshow.apply')}</button>
+              <button onClick={() => handleRemoveColorEntry(colorEntryMenu.trackId, colorEntryMenu.entry.time)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">{t('common.delete')}</button>
             </div>
-            <button onClick={() => setColorEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">Fermer</button>
+            <button onClick={() => setColorEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">{t('common.close')}</button>
           </div>
         </div>
       )}
@@ -5137,7 +5127,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
       {!showFloating3D && (
         <button onClick={() => setShowFloating3D(true)} className="fixed bottom-4 right-4 z-40 bg-purple-600/80 hover:bg-purple-500 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg transition-all">
-          🎥 3D View
+          {t('quickshow.open3dView')}
         </button>
       )}
 
@@ -5147,13 +5137,13 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
             <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-semibold text-gray-200">{efxEditTarget ? 'Modifier la section EFX' : 'New EFX Track'}</span>
+                <span className="text-sm font-semibold text-gray-200">{efxEditTarget ? t('quickshow.editEfxSection') : t('quickshow.newEfxTrack')}</span>
                 <button onClick={() => { setEfxTrackModal(false); setEfxEditTarget(null); }} className="text-gray-500 hover:text-white">✕</button>
               </div>
 
               {/* Track name */}
               {!efxEditTarget && (<>
-              <label className="block text-[10px] text-gray-400 mb-1">Track Name</label>
+              <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.trackName')}</label>
               <input
                 autoFocus
                 value={efxTrackName}
@@ -5162,16 +5152,16 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                   if (e.key === 'Enter' && efxTrackName.trim()) handleAddEfxTrack();
                   if (e.key === 'Escape') setEfxTrackModal(false);
                 }}
-                placeholder="e.g. Circle Wash"
+                placeholder={t('quickshow.trackNameEfxPh')}
                 className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none mb-4"
               />
 
               {/* Target type */}
-<label className="block text-[10px] text-gray-400 mb-1">Apply EFX To</label>
+<label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.applyEfxTo')}</label>
 <div className="grid grid-cols-2 gap-2 mb-3">
   {([
-    { type: 'group' as const, label: 'Group', icon: '📁' },
-    { type: 'fixture' as const, label: 'Single Fixture', icon: '💡' },
+    { type: 'group' as const, label: t('quickshow.targetGroup'), icon: '📁' },
+    { type: 'fixture' as const, label: t('quickshow.targetSingle'), icon: '💡' },
   ]).map(opt => (
     <button key={opt.type}
       onClick={() => {
@@ -5194,15 +5184,15 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               {/* Group selector */}
               {efxTargetType === 'group' && (
                 <div className="mb-3">
-                  <label className="block text-[10px] text-gray-400 mb-1">Select Group</label>
+                  <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.selectGroup')}</label>
 <select
     value={efxTargetGroupId}
     onChange={e => { setEfxTargetGroupId(e.target.value); setEfxCustomEffectId(''); }}
     className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
   >
-                    <option value="">-- Choose group --</option>
+                    <option value="">{t('quickshow.chooseGroup')}</option>
                     {fixtureGroups.map(g => (
-                      <option key={g.id} value={g.id}>{g.name} ({g.fixtureIds.length} fixtures)</option>
+                      <option key={g.id} value={g.id}>{t('quickshow.groupOption', { name: g.name, count: g.fixtureIds.length })}</option>
                     ))}
                   </select>
                 </div>
@@ -5211,13 +5201,13 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               {/* Fixture picker (single) */}
               {efxTargetType === 'fixture' && (
                 <div className="mb-3">
-                  <label className="block text-[10px] text-gray-400 mb-1">Select Fixture</label>
+                  <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.selectFixture')}</label>
 <select
     value={efxTargetFixtureIds[0] || ''}
     onChange={e => { setEfxTargetFixtureIds(e.target.value ? [e.target.value] : []); setEfxCustomEffectId(''); }}
     className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
   >
-                    <option value="">-- Choose fixture --</option>
+                    <option value="">{t('quickshow.chooseFixture')}</option>
                     {patchedFixtures.filter(f => f.enabled !== false).map(f => (
                       <option key={f.id} value={f.id}>{f.name} ({f.universeId} ch.{f.startAddress})</option>
                     ))}
@@ -5228,8 +5218,8 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               {/* Fixture count display */}
               {efxTargetFixtureNames.length > 0 && (
                 <div className="text-[10px] text-cyan-400/70 mb-4 bg-cyan-400/5 border border-cyan-400/10 rounded-lg px-3 py-2">
-                  Target: <span className="text-gray-300">{efxTargetFixtureNames.length} fixture{efxTargetFixtureNames.length > 1 ? 's' : ''}</span>
-                  <span className="text-yellow-300/80 ml-2">💡 allumée(s) en surbrillance</span>
+                  {t('quickshow.targetLabel')} <span className="text-gray-300">{efxTargetFixtureNames.length} {efxTargetFixtureNames.length > 1 ? t('quickshow.fixtureMany') : t('quickshow.fixtureOne')}</span>
+                  <span className="text-yellow-300/80 ml-2">{t('quickshow.highlightedHint')}</span>
                   <span className="text-gray-600 ml-2 max-w-[250px] truncate inline-block align-bottom">
                     ({efxTargetFixtureNames.slice(0, 5).join(', ')}{efxTargetFixtureNames.length > 5 ? `... +${efxTargetFixtureNames.length - 5}` : ''})
                   </span>
@@ -5238,7 +5228,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               </>)}
 
               {/* Custom effects */}
-              <label className="block text-[10px] text-gray-400 mb-1">Custom Effect</label>
+              <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.customEffect')}</label>
               {(() => {
                 const customEffects = efxFilteredEffects;
                 const noTarget = !efxEditTarget
@@ -5247,8 +5237,8 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                   return (
                     <div className="text-[11px] text-yellow-400/80 bg-yellow-400/5 border border-yellow-400/15 rounded-lg px-3 py-2.5 mb-4">
                       {noTarget
-                        ? '⚠ Aucun effet custom. Créez d\'abord un effet de mouvement dans l\'onglet EFX.'
-                        : '⚠ Aucun effet ne correspond à ce groupe / cette fixture. Choisissez un autre ciblage ou créez un effet pour ces fixtures.'}
+                        ? t('quickshow.noCustomEffectNoTarget')
+                        : t('quickshow.noCustomEffectNoMatch')}
                     </div>
                   );
                 }
@@ -5268,14 +5258,14 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               <div className="flex justify-end gap-2">
                 <button onClick={() => { setEfxTrackModal(false); setEfxEditTarget(null); }}
                   className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   onClick={handleAddEfxTrack}
                   disabled={!efxEditTarget && !efxTrackName.trim()}
                   className="px-4 py-1.5 rounded-lg text-xs font-medium bg-cyan-600 text-white hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {efxEditTarget ? 'Appliquer' : 'Add Track'}
+                  {efxEditTarget ? t('quickshow.apply') : t('quickshow.addTrack')}
                 </button>
               </div>
             </div>
@@ -5295,19 +5285,19 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-1.5 text-[10px] text-purple-400 uppercase tracking-wider border-b border-gray-800">
-              Strobe Track
+              {t('quickshow.trackStrobe')}
             </div>
             <button
               onClick={() => { handleDeleteStrobeTrack(scmPos.trackId); setScmPos(null); }}
               className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
             >
-              Delete track
+              {t('quickshow.deleteTrack')}
             </button>
             <button
               onClick={() => setScmPos(null)}
               className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </>
@@ -5330,7 +5320,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               )}
             </div>
             <div className="px-4 pt-3">
-              <label className="text-[10px] text-gray-500 block mb-1">Nom de la section</label>
+              <label className="text-[10px] text-gray-500 block mb-1">{t('quickshow.sectionName')}</label>
               <input type="text"
                 defaultValue={strobeEntryMenu.entry.label || ''}
                 placeholder={`${strobeEntryMenu.entry.speed} Hz${strobeEntryMenu.entry.endSpeed !== undefined && strobeEntryMenu.entry.endSpeed !== strobeEntryMenu.entry.speed ? ` → ${strobeEntryMenu.entry.endSpeed} Hz` : ''}`}
@@ -5338,15 +5328,15 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
             </div>
             <div className="grid grid-cols-2 gap-3 px-4 py-3">
-              <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={strobeEntryMenu.entry.time} id="__strobe_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
-              <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={strobeEntryMenu.entry.endTime} id="__strobe_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionStart')}</label><input type="number" step="0.01" defaultValue={strobeEntryMenu.entry.time} id="__strobe_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionEnd')}</label><input type="number" step="0.01" defaultValue={strobeEntryMenu.entry.endTime} id="__strobe_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
             </div>
             <div className="flex gap-2 px-4 pb-2">
               <button onClick={() => {
                 const label = (document.getElementById('__strobe_label') as HTMLInputElement).value;
                 handleRenameStrobeEntry(strobeEntryMenu.trackId, strobeEntryMenu.entry, label);
-              }} className="flex-1 py-1.5 rounded bg-purple-600/20 text-purple-300 text-xs hover:bg-purple-600/30">Renommer</button>
-              <button onClick={() => handleModifyStrobeEntry(strobeEntryMenu.trackId, strobeEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Modifier</button>
+              }} className="flex-1 py-1.5 rounded bg-purple-600/20 text-purple-300 text-xs hover:bg-purple-600/30">{t('common.rename')}</button>
+              <button onClick={() => handleModifyStrobeEntry(strobeEntryMenu.trackId, strobeEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">{t('common.edit')}</button>
             </div>
             <div className="flex gap-2 px-4 pb-2">
               <button onClick={() => {
@@ -5357,10 +5347,10 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 const idx = strobeTracks.find(t => t.id === strobeEntryMenu.trackId)?.entries.findIndex(e => e.id === strobeEntryMenu.entry.id) ?? -1;
                 if (idx >= 0) { pushHistory(); setStrobeTracks(prev => prev.map(t => t.id === strobeEntryMenu.trackId ? { ...t, entries: t.entries.map((e,i) => i===idx ? { ...e, time: st, endTime: en } : e) } : t)); }
                 setStrobeEntryMenu(null);
-              }} className="flex-1 py-1.5 rounded bg-purple-600 text-white text-xs hover:bg-purple-500">Appliquer</button>
-              <button onClick={() => handleRemoveStrobeEntry(strobeEntryMenu.trackId, strobeEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">Supprimer</button>
+              }} className="flex-1 py-1.5 rounded bg-purple-600 text-white text-xs hover:bg-purple-500">{t('quickshow.apply')}</button>
+              <button onClick={() => handleRemoveStrobeEntry(strobeEntryMenu.trackId, strobeEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">{t('common.delete')}</button>
             </div>
-            <button onClick={() => setStrobeEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">Fermer</button>
+            <button onClick={() => setStrobeEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">{t('common.close')}</button>
           </div>
         </div>
       )}
@@ -5376,19 +5366,19 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-1.5 text-[10px] text-orange-400 uppercase tracking-wider border-b border-gray-800">
-              Dimmer Track
+              {t('quickshow.trackDimmer')}
             </div>
             <button
               onClick={() => { handleDeleteDimmerTrack(dimmerInsertMenu.trackId); setDimmerInsertMenu(null); }}
               className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
             >
-              Delete track
+              {t('quickshow.deleteTrack')}
             </button>
             <button
               onClick={() => setDimmerInsertMenu(null)}
               className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </>
@@ -5411,7 +5401,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               )}
             </div>
             <div className="px-4 pt-3">
-              <label className="text-[10px] text-gray-500 block mb-1">Nom de la section</label>
+              <label className="text-[10px] text-gray-500 block mb-1">{t('quickshow.sectionName')}</label>
               <input type="text"
                 defaultValue={dimmerEntryMenu.entry.label || ''}
                 placeholder={`${dimmerEntryMenu.entry.value}%${dimmerEntryMenu.entry.endValue !== undefined && dimmerEntryMenu.entry.endValue !== dimmerEntryMenu.entry.value ? ` → ${dimmerEntryMenu.entry.endValue}%` : ''}`}
@@ -5419,15 +5409,15 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
             </div>
             <div className="grid grid-cols-2 gap-3 px-4 py-3">
-              <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={dimmerEntryMenu.entry.time} id="__dimmer_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
-              <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={dimmerEntryMenu.entry.endTime} id="__dimmer_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionStart')}</label><input type="number" step="0.01" defaultValue={dimmerEntryMenu.entry.time} id="__dimmer_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionEnd')}</label><input type="number" step="0.01" defaultValue={dimmerEntryMenu.entry.endTime} id="__dimmer_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
             </div>
             <div className="flex gap-2 px-4 pb-2">
               <button onClick={() => {
                 const label = (document.getElementById('__dimmer_label') as HTMLInputElement).value;
                 handleRenameDimmerEntry(dimmerEntryMenu.trackId, dimmerEntryMenu.entry, label);
-              }} className="flex-1 py-1.5 rounded bg-orange-600/20 text-orange-300 text-xs hover:bg-orange-600/30">Renommer</button>
-              <button onClick={() => handleModifyDimmerEntry(dimmerEntryMenu.trackId, dimmerEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Modifier</button>
+              }} className="flex-1 py-1.5 rounded bg-orange-600/20 text-orange-300 text-xs hover:bg-orange-600/30">{t('common.rename')}</button>
+              <button onClick={() => handleModifyDimmerEntry(dimmerEntryMenu.trackId, dimmerEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">{t('common.edit')}</button>
             </div>
             <div className="flex gap-2 px-4 pb-2">
               <button onClick={() => {
@@ -5438,10 +5428,10 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 const idx = dimmerTracks.find(t => t.id === dimmerEntryMenu.trackId)?.entries.findIndex(e => e.id === dimmerEntryMenu.entry.id) ?? -1;
                 if (idx >= 0) { pushHistory(); setDimmerTracks(prev => prev.map(t => t.id === dimmerEntryMenu.trackId ? { ...t, entries: t.entries.map((e,i) => i===idx ? { ...e, time: st, endTime: en } : e) } : t)); }
                 setDimmerEntryMenu(null);
-              }} className="flex-1 py-1.5 rounded bg-orange-600 text-white text-xs hover:bg-orange-500">Appliquer</button>
-              <button onClick={() => handleRemoveDimmerEntry(dimmerEntryMenu.trackId, dimmerEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">Supprimer</button>
+              }} className="flex-1 py-1.5 rounded bg-orange-600 text-white text-xs hover:bg-orange-500">{t('quickshow.apply')}</button>
+              <button onClick={() => handleRemoveDimmerEntry(dimmerEntryMenu.trackId, dimmerEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">{t('common.delete')}</button>
             </div>
-            <button onClick={() => setDimmerEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">Fermer</button>
+            <button onClick={() => setDimmerEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">{t('common.close')}</button>
           </div>
         </div>
       )}
@@ -5456,19 +5446,19 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-1.5 text-[10px] text-emerald-400 uppercase tracking-wider border-b border-gray-800">
-              Chaser Track
+              {t('quickshow.trackChaser')}
             </div>
             <button
               onClick={() => { handleDeleteChaserTrack(chaserInsertMenu.trackId); setChaserInsertMenu(null); }}
               className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
             >
-              Delete track
+              {t('quickshow.deleteTrack')}
             </button>
             <button
               onClick={() => setChaserInsertMenu(null)}
               className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </>
@@ -5482,22 +5472,22 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 py-1.5 text-[11px] text-emerald-400 uppercase tracking-wider border-b border-gray-800">
-              {chaserEntryMenu.entry.label || chaserEntryMenu.entry.chaserName || 'Chaser'} — {chaserEntryMenu.entry.time.toFixed(2)}s → {chaserEntryMenu.entry.endTime.toFixed(2)}s
+              {chaserEntryMenu.entry.label || chaserEntryMenu.entry.chaserName || t('quickshow.defaultChaser')} — {chaserEntryMenu.entry.time.toFixed(2)}s → {chaserEntryMenu.entry.endTime.toFixed(2)}s
             </div>
             <div className="px-4 pt-3">
-              <label className="text-[10px] text-gray-500">Nom de la section</label>
-              <input defaultValue={chaserEntryMenu.entry.label || chaserEntryMenu.entry.chaserName || ''} id="__chaser_label" placeholder={chaserEntryMenu.entry.chaserName || 'Chaser'} className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
+              <label className="text-[10px] text-gray-500">{t('quickshow.sectionName')}</label>
+              <input defaultValue={chaserEntryMenu.entry.label || chaserEntryMenu.entry.chaserName || ''} id="__chaser_label" placeholder={chaserEntryMenu.entry.chaserName || t('quickshow.defaultChaser')} className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
             </div>
             <div className="flex gap-2 px-4 py-3">
               <button onClick={() => {
                 const label = (document.getElementById('__chaser_label') as HTMLInputElement).value;
                 handleRenameChaserEntry(chaserEntryMenu.trackId, chaserEntryMenu.entry, label);
-              }} className="flex-1 py-1.5 rounded bg-emerald-600/20 text-emerald-300 text-xs hover:bg-emerald-600/30">Renommer</button>
-              <button onClick={() => handleModifyChaserEntry(chaserEntryMenu.trackId, chaserEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Modifier</button>
+              }} className="flex-1 py-1.5 rounded bg-emerald-600/20 text-emerald-300 text-xs hover:bg-emerald-600/30">{t('common.rename')}</button>
+              <button onClick={() => handleModifyChaserEntry(chaserEntryMenu.trackId, chaserEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">{t('common.edit')}</button>
             </div>
             <div className="grid grid-cols-2 gap-3 px-4 py-0">
-              <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={chaserEntryMenu.entry.time} id="__chaser_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
-              <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={chaserEntryMenu.entry.endTime} id="__chaser_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionStart')}</label><input type="number" step="0.01" defaultValue={chaserEntryMenu.entry.time} id="__chaser_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionEnd')}</label><input type="number" step="0.01" defaultValue={chaserEntryMenu.entry.endTime} id="__chaser_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
             </div>
             <div className="flex gap-2 px-4 pb-2 pt-3">
               <button onClick={() => {
@@ -5508,10 +5498,10 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 const idx = chaserTracks.find(t => t.id === chaserEntryMenu.trackId)?.entries.findIndex(e => e.id === chaserEntryMenu.entry.id) ?? -1;
                 if (idx >= 0) handleChaserEntryChange(chaserEntryMenu.trackId, idx, st, en);
                 setChaserEntryMenu(null);
-              }} className="flex-1 py-1.5 rounded bg-emerald-600 text-white text-xs hover:bg-emerald-500">Appliquer</button>
-              <button onClick={() => handleRemoveChaserEntry(chaserEntryMenu.trackId, chaserEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">Supprimer</button>
+              }} className="flex-1 py-1.5 rounded bg-emerald-600 text-white text-xs hover:bg-emerald-500">{t('quickshow.apply')}</button>
+              <button onClick={() => handleRemoveChaserEntry(chaserEntryMenu.trackId, chaserEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">{t('common.delete')}</button>
             </div>
-            <button onClick={() => setChaserEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">Fermer</button>
+            <button onClick={() => setChaserEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">{t('common.close')}</button>
           </div>
         </div>
       )}
@@ -5522,12 +5512,12 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
             <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-semibold text-gray-200">{colorEditTarget ? 'Modifier la section Color' : 'New Color Track'}</span>
+                <span className="text-sm font-semibold text-gray-200">{colorEditTarget ? t('quickshow.editColorSection') : t('quickshow.newColorTrack')}</span>
                 <button onClick={() => { setColorTrackModal(false); setColorEditTarget(null); }} className="text-gray-500 hover:text-white">✕</button>
               </div>
 
               {!colorEditTarget && (<>
-              <label className="block text-[10px] text-gray-400 mb-1">Track Name</label>
+              <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.trackName')}</label>
               <input
                 autoFocus
                 value={colorTrackName}
@@ -5536,16 +5526,16 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                   if (e.key === 'Enter' && colorTrackName.trim()) handleAddColorTrack();
                   if (e.key === 'Escape') setColorTrackModal(false);
                 }}
-                placeholder="e.g. Blue Wash"
+                placeholder={t('quickshow.trackNameColorPh')}
                 className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none mb-4"
               />
 
-              <label className="block text-[10px] text-gray-400 mb-1">Apply Color To</label>
+              <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.applyColorTo')}</label>
               <div className="grid grid-cols-3 gap-2 mb-3">
                 {([
-                  { type: 'all' as const, label: 'All Fixtures', icon: '🌐' },
-                  { type: 'group' as const, label: 'Group', icon: '📁' },
-                  { type: 'fixture' as const, label: 'Single Fixture', icon: '💡' },
+                  { type: 'all' as const, label: t('quickshow.targetAll'), icon: '🌐' },
+                  { type: 'group' as const, label: t('quickshow.targetGroup'), icon: '📁' },
+                  { type: 'fixture' as const, label: t('quickshow.targetSingle'), icon: '💡' },
                 ]).map(opt => (
                   <button key={opt.type}
                     onClick={() => {
@@ -5567,15 +5557,15 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
               {colorTargetType === 'group' && (
                 <div className="mb-3">
-                  <label className="block text-[10px] text-gray-400 mb-1">Select Group</label>
+                  <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.selectGroup')}</label>
                   <select
                     value={colorTargetGroupId}
                     onChange={e => setColorTargetGroupId(e.target.value)}
                     className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
                   >
-                    <option value="">-- Choose group --</option>
+                    <option value="">{t('quickshow.chooseGroup')}</option>
                     {fixtureGroups.map(g => (
-                      <option key={g.id} value={g.id}>{g.name} ({g.fixtureIds.length} fixtures)</option>
+                      <option key={g.id} value={g.id}>{t('quickshow.groupOption', { name: g.name, count: g.fixtureIds.length })}</option>
                     ))}
                   </select>
                 </div>
@@ -5583,13 +5573,13 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
               {colorTargetType === 'fixture' && (
                 <div className="mb-3">
-                  <label className="block text-[10px] text-gray-400 mb-1">Select Fixture</label>
+                  <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.selectFixture')}</label>
                   <select
                     value={colorTargetFixtureIds[0] || ''}
                     onChange={e => setColorTargetFixtureIds(e.target.value ? [e.target.value] : [])}
                     className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
                   >
-                    <option value="">-- Choose fixture --</option>
+                    <option value="">{t('quickshow.chooseFixture')}</option>
                     {patchedFixtures.filter(f => f.enabled !== false).map(f => (
                       <option key={f.id} value={f.id}>{f.name} ({f.universeId} ch.{f.startAddress})</option>
                     ))}
@@ -5598,7 +5588,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               )}
               </>)}
 
-              <label className="block text-[10px] text-gray-400 mb-1">Couleur de début (posée à 10 s)</label>
+              <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.colorStartLabel')}</label>
               <div className="flex gap-1 flex-wrap mb-2">
                 {COLOR_PALETTE.map(c => (
                   <button key={'s'+c} onClick={() => setColorTrackStartColor(c)}
@@ -5606,7 +5596,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                     style={{ backgroundColor: c }} title={c} />
                 ))}
               </div>
-              <label className="block text-[10px] text-gray-400 mb-1">Couleur de fin</label>
+              <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.colorEndLabel')}</label>
               <div className="flex gap-1 flex-wrap mb-2">
                 {COLOR_PALETTE.map(c => (
                   <button key={'e'+c} onClick={() => setColorTrackEndColor(c)}
@@ -5617,20 +5607,20 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               <div className="flex items-center gap-2 mb-4">
                 <div className="flex-1 h-4 rounded"
                   style={{ background: `linear-gradient(to right, ${colorTrackStartColor}, ${colorTrackEndColor})` }} />
-                <span className="text-[9px] text-gray-500">aperçu dégradé ({colorTrackStartColor} → {colorTrackEndColor})</span>
+                <span className="text-[9px] text-gray-500">{t('quickshow.gradientPreview', { start: colorTrackStartColor, end: colorTrackEndColor })}</span>
               </div>
 
               <div className="flex justify-end gap-2">
                 <button onClick={() => { setColorTrackModal(false); setColorEditTarget(null); }}
                   className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   onClick={handleAddColorTrack}
                   disabled={!colorEditTarget && !colorTrackName.trim()}
                   className="px-4 py-1.5 rounded-lg text-xs font-medium bg-pink-600 text-white hover:bg-pink-500 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {colorEditTarget ? 'Appliquer' : 'Add Track'}
+                  {colorEditTarget ? t('quickshow.apply') : t('quickshow.addTrack')}
                 </button>
               </div>
             </div>
@@ -5645,12 +5635,12 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
             <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-semibold text-gray-200">{strobeEditTarget ? 'Modifier la section Strobe' : 'New Strobe Track'}</span>
+                <span className="text-sm font-semibold text-gray-200">{strobeEditTarget ? t('quickshow.editStrobeSection') : t('quickshow.newStrobeTrack')}</span>
                 <button onClick={() => { setStrobeTrackModal(false); setStrobeEditTarget(null); }} className="text-gray-500 hover:text-white">✕</button>
               </div>
 
               {!strobeEditTarget && (<>
-              <label className="block text-[10px] text-gray-400 mb-1">Track Name</label>
+              <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.trackName')}</label>
               <input
                 autoFocus
                 value={strobeTrackName}
@@ -5659,16 +5649,16 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                   if (e.key === 'Enter' && strobeTrackName.trim()) handleAddStrobeTrack();
                   if (e.key === 'Escape') setStrobeTrackModal(false);
                 }}
-                placeholder="e.g. Fast Strobe"
+                placeholder={t('quickshow.trackNameStrobePh')}
                 className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none mb-4"
               />
 
-              <label className="block text-[10px] text-gray-400 mb-1">Apply Strobe To</label>
+              <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.applyStrobeTo')}</label>
               <div className="grid grid-cols-3 gap-2 mb-3">
                 {([
-                  { type: 'all' as const, label: 'All Fixtures', icon: '🌐' },
-                  { type: 'group' as const, label: 'Group', icon: '📁' },
-                  { type: 'fixture' as const, label: 'Single Fixture', icon: '💡' },
+                  { type: 'all' as const, label: t('quickshow.targetAll'), icon: '🌐' },
+                  { type: 'group' as const, label: t('quickshow.targetGroup'), icon: '📁' },
+                  { type: 'fixture' as const, label: t('quickshow.targetSingle'), icon: '💡' },
                 ]).map(opt => (
                   <button key={opt.type}
                     onClick={() => {
@@ -5690,15 +5680,15 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
               {strobeTargetType === 'group' && (
                 <div className="mb-3">
-                  <label className="block text-[10px] text-gray-400 mb-1">Select Group</label>
+                  <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.selectGroup')}</label>
                   <select
                     value={strobeTargetGroupId}
                     onChange={e => setStrobeTargetGroupId(e.target.value)}
                     className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
                   >
-                    <option value="">-- Choose group --</option>
+                    <option value="">{t('quickshow.chooseGroup')}</option>
                     {fixtureGroups.map(g => (
-                      <option key={g.id} value={g.id}>{g.name} ({g.fixtureIds.length} fixtures)</option>
+                      <option key={g.id} value={g.id}>{t('quickshow.groupOption', { name: g.name, count: g.fixtureIds.length })}</option>
                     ))}
                   </select>
                 </div>
@@ -5706,13 +5696,13 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
               {strobeTargetType === 'fixture' && (
                 <div className="mb-3">
-                  <label className="block text-[10px] text-gray-400 mb-1">Select Fixture</label>
+                  <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.selectFixture')}</label>
                   <select
                     value={strobeTargetFixtureIds[0] || ''}
                     onChange={e => setStrobeTargetFixtureIds(e.target.value ? [e.target.value] : [])}
                     className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
                   >
-                    <option value="">-- Choose fixture --</option>
+                    <option value="">{t('quickshow.chooseFixture')}</option>
                     {patchedFixtures.filter(f => f.enabled !== false).map(f => (
                       <option key={f.id} value={f.id}>{f.name} ({f.universeId} ch.{f.startAddress})</option>
                     ))}
@@ -5721,32 +5711,32 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               )}
               </>)}
 
-              <label className="block text-[10px] text-gray-400 mb-1">Frég. de début (Hz)</label>
+              <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.strobeFreqStart')}</label>
               <input type="number" min={1} max={25} value={strobeTrackSpeed}
                 onChange={e => setStrobeTrackSpeed(Math.max(1, Math.min(25, Number(e.target.value) || 10)))}
                 className="w-24 mb-2 bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none" />
-              <label className="block text-[10px] text-gray-400 mb-1">Frég. de fin (Hz)</label>
+              <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.strobeFreqEnd')}</label>
               <input type="number" min={1} max={25} value={strobeTrackEndSpeed}
                 onChange={e => setStrobeTrackEndSpeed(Math.max(1, Math.min(25, Number(e.target.value) || 10)))}
                 className="w-24 mb-2 bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none" />
               <div className="flex items-center gap-2 mb-4 text-[10px] text-gray-500">
-                <span>Début {strobeTrackSpeed} Hz</span>
+                <span>{t('quickshow.strobeStartVal', { value: strobeTrackSpeed })}</span>
                 <span>→</span>
-                <span>Fin {strobeTrackEndSpeed} Hz</span>
-                <span className="text-gray-400">(accumulé sur 10 s)</span>
+                <span>{t('quickshow.strobeEndVal', { value: strobeTrackEndSpeed })}</span>
+                <span className="text-gray-400">{t('quickshow.accumulated10s')}</span>
               </div>
 
               <div className="flex justify-end gap-2">
                 <button onClick={() => { setStrobeTrackModal(false); setStrobeEditTarget(null); }}
                   className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   onClick={handleAddStrobeTrack}
                   disabled={!strobeEditTarget && !strobeTrackName.trim()}
                   className="px-4 py-1.5 rounded-lg text-xs font-medium bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {strobeEditTarget ? 'Appliquer' : 'Add Track'}
+                  {strobeEditTarget ? t('quickshow.apply') : t('quickshow.addTrack')}
                 </button>
               </div>
             </div>
@@ -5761,12 +5751,12 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
             <div className="bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-semibold text-gray-200">{dimmerEditTarget ? 'Modifier la section Dimmer' : 'New Dimmer Track'}</span>
+                <span className="text-sm font-semibold text-gray-200">{dimmerEditTarget ? t('quickshow.editDimmerSection') : t('quickshow.newDimmerTrack')}</span>
                 <button onClick={() => { setDimmerTrackModal(false); setDimmerEditTarget(null); }} className="text-gray-500 hover:text-white">✕</button>
               </div>
 
               {!dimmerEditTarget && (<>
-              <label className="block text-[10px] text-gray-400 mb-1">Track Name</label>
+              <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.trackName')}</label>
               <input
                 autoFocus
                 value={dimmerTrackName}
@@ -5775,16 +5765,16 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                   if (e.key === 'Enter' && dimmerTrackName.trim()) handleAddDimmerTrackFromModal();
                   if (e.key === 'Escape') setDimmerTrackModal(false);
                 }}
-                placeholder="e.g. Dimmer Fade"
+                placeholder={t('quickshow.trackNameDimmerPh')}
                 className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none mb-4"
               />
 
-              <label className="block text-[10px] text-gray-400 mb-1">Apply Dimmer To</label>
+              <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.applyDimmerTo')}</label>
               <div className="grid grid-cols-3 gap-2 mb-3">
                 {([
-                  { type: 'all' as const, label: 'All Fixtures', icon: '🌐' },
-                  { type: 'group' as const, label: 'Group', icon: '📁' },
-                  { type: 'fixture' as const, label: 'Single Fixture', icon: '💡' },
+                  { type: 'all' as const, label: t('quickshow.targetAll'), icon: '🌐' },
+                  { type: 'group' as const, label: t('quickshow.targetGroup'), icon: '📁' },
+                  { type: 'fixture' as const, label: t('quickshow.targetSingle'), icon: '💡' },
                 ]).map(opt => (
                   <button key={opt.type}
                     onClick={() => {
@@ -5806,15 +5796,15 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
               {dimmerTargetType === 'group' && (
                 <div className="mb-3">
-                  <label className="block text-[10px] text-gray-400 mb-1">Select Group</label>
+                  <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.selectGroup')}</label>
                   <select
                     value={dimmerTargetGroupId}
                     onChange={e => setDimmerTargetGroupId(e.target.value)}
                     className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
                   >
-                    <option value="">-- Choose group --</option>
+                    <option value="">{t('quickshow.chooseGroup')}</option>
                     {fixtureGroups.map(g => (
-                      <option key={g.id} value={g.id}>{g.name} ({g.fixtureIds.length} fixtures)</option>
+                      <option key={g.id} value={g.id}>{t('quickshow.groupOption', { name: g.name, count: g.fixtureIds.length })}</option>
                     ))}
                   </select>
                 </div>
@@ -5822,13 +5812,13 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
               {dimmerTargetType === 'fixture' && (
                 <div className="mb-3">
-                  <label className="block text-[10px] text-gray-400 mb-1">Select Fixture</label>
+                  <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.selectFixture')}</label>
                   <select
                     value={dimmerTargetFixtureIds[0] || ''}
                     onChange={e => setDimmerTargetFixtureIds(e.target.value ? [e.target.value] : [])}
                     className="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none"
                   >
-                    <option value="">-- Choose fixture --</option>
+                    <option value="">{t('quickshow.chooseFixture')}</option>
                     {patchedFixtures.filter(f => f.enabled !== false).map(f => (
                       <option key={f.id} value={f.id}>{f.name} ({f.universeId} ch.{f.startAddress})</option>
                     ))}
@@ -5837,7 +5827,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               )}
               </>)}
 
-              <label className="block text-[10px] text-gray-400 mb-1">Valeur de début (%)</label>
+              <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.dimmerValueStart')}</label>
               <input type="number" min={0} max={100} value={dimmerTrackValue}
                 onChange={e => {
                   // Champ vide → 0 (pas 100 : l'ancien `Number(...) || 100`
@@ -5847,7 +5837,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                   if (!Number.isNaN(v)) setDimmerTrackValue(Math.max(0, Math.min(100, v)));
                 }}
                 className="w-24 mb-2 bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none" />
-              <label className="block text-[10px] text-gray-400 mb-1">Valeur de fin (%)</label>
+              <label className="block text-[10px] text-gray-400 mb-1">{t('quickshow.dimmerValueEnd')}</label>
               <input type="number" min={0} max={100} value={dimmerTrackEndValue}
                 onChange={e => {
                   if (e.target.value.trim() === '') { setDimmerTrackEndValue(0); return; }
@@ -5856,23 +5846,23 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 }}
                 className="w-24 mb-2 bg-gray-800/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none" />
               <div className="flex items-center gap-2 mb-4 text-[10px] text-gray-500">
-                <span>Début {dimmerTrackValue} %</span>
+                <span>{t('quickshow.dimmerStartVal', { value: dimmerTrackValue })}</span>
                 <span>→</span>
-                <span>Fin {dimmerTrackEndValue} %</span>
-                <span className="text-gray-400">(fondu sur 10 s)</span>
+                <span>{t('quickshow.dimmerEndVal', { value: dimmerTrackEndValue })}</span>
+                <span className="text-gray-400">{t('quickshow.fade10s')}</span>
               </div>
 
               <div className="flex justify-end gap-2">
                 <button onClick={() => { setDimmerTrackModal(false); setDimmerEditTarget(null); }}
                   className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   onClick={handleAddDimmerTrackFromModal}
                   disabled={!dimmerEditTarget && !dimmerTrackName.trim()}
                   className="px-4 py-1.5 rounded-lg text-xs font-medium bg-orange-600 text-white hover:bg-orange-500 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {dimmerEditTarget ? 'Appliquer' : 'Add Track'}
+                  {dimmerEditTarget ? t('quickshow.apply') : t('quickshow.addTrack')}
                 </button>
               </div>
             </div>
@@ -5887,18 +5877,18 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
             <div className="bg-[#1a1a2e] border border-emerald-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-gray-200">{chaserPickModal.entryId ? 'Modifier la section chaser' : 'Sélectionner un chaser'}</span>
+                <span className="text-sm font-semibold text-gray-200">{chaserPickModal.entryId ? t('quickshow.editChaserSection') : t('quickshow.selectChaser')}</span>
                 <button onClick={() => setChaserPickModal(null)} className="text-gray-500 hover:text-white">✕</button>
               </div>
 
               <p className="text-[10px] text-gray-500 leading-relaxed mb-4">
-                Le chaser joue ses propres fixtures et prend le dessus sur l'autoscript pendant sa plage, puis rend la main.
+                {t('quickshow.chaserHint')}
               </p>
 
               {entityChaserList.length === 0 ? (
                 <div className="text-[11px] text-gray-600 py-6 text-center border border-dashed border-gray-800 rounded-lg">
-                  Aucun chaser sauvegardé.<br />
-                  <span className="text-gray-500">Créez-en un dans Design → Chasers, puis réessayez.</span>
+                  {t('quickshow.noChaserSaved')}<br />
+                  <span className="text-gray-500">{t('quickshow.createChaserHint')}</span>
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -5918,7 +5908,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               <div className="flex justify-end mt-4">
                 <button onClick={() => setChaserPickModal(null)}
                   className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
-                  Fermer
+                  {t('common.close')}
                 </button>
               </div>
             </div>
@@ -5931,16 +5921,16 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
             <div className="bg-[#1a1a2e] border border-amber-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-gray-200">{showPickModal.entryId ? 'Modifier la section show' : 'Sélectionner un show'}</span>
+                <span className="text-sm font-semibold text-gray-200">{showPickModal.entryId ? t('quickshow.editShowSection') : t('quickshow.selectShow')}</span>
                 <button onClick={() => setShowPickModal(null)} className="text-gray-500 hover:text-white">✕</button>
               </div>
               <p className="text-[10px] text-gray-500 leading-relaxed mb-4">
-                Le show complet prend le dessus sur l'autoscript pendant sa plage (comme un chaser mais pour tout le show).
+                {t('quickshow.showHint')}
               </p>
               {useShowStore.getState().shows.length === 0 ? (
                 <div className="text-[11px] text-gray-600 py-6 text-center border border-dashed border-gray-800 rounded-lg">
-                  Aucun show sauvegardé.<br />
-                  <span className="text-gray-500">Créez-en un dans Design → Show, puis réessayez.</span>
+                  {t('quickshow.noShowSaved')}<br />
+                  <span className="text-gray-500">{t('quickshow.createShowHint')}</span>
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -5957,7 +5947,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 </div>
               )}
               <div className="flex justify-end mt-4">
-                <button onClick={() => setShowPickModal(null)} className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">Fermer</button>
+                <button onClick={() => setShowPickModal(null)} className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">{t('common.close')}</button>
               </div>
             </div>
           </div>
@@ -5965,29 +5955,29 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
       )}
       {showInsertMenu && (
         <div className="fixed z-50 bg-[#1a1a2e] border border-amber-700/50 rounded-lg shadow-xl py-1 min-w-[160px]" style={{ left: showInsertMenu.x, top: showInsertMenu.y }}>
-          <div className="px-3 py-1.5 text-[10px] text-amber-400 uppercase tracking-wider border-b border-gray-800">Show Track</div>
-          <button onClick={() => { handleDeleteShowTrack(showInsertMenu.trackId); setShowInsertMenu(null); }} className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800">Delete track</button>
-          <button onClick={() => setShowInsertMenu(null)} className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800">Cancel</button>
+          <div className="px-3 py-1.5 text-[10px] text-amber-400 uppercase tracking-wider border-b border-gray-800">{t('quickshow.trackShow')}</div>
+          <button onClick={() => { handleDeleteShowTrack(showInsertMenu.trackId); setShowInsertMenu(null); }} className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800">{t('quickshow.deleteTrack')}</button>
+          <button onClick={() => setShowInsertMenu(null)} className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800">{t('common.cancel')}</button>
         </div>
       )}
       {showEntryMenu && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowEntryMenu(null)}>
           <div className="bg-[#1a1a2e] border border-amber-700/50 rounded-xl shadow-2xl py-3 w-[360px] max-w-[95vw]" onClick={(e) => e.stopPropagation()}>
-            <div className="px-4 py-1.5 text-[11px] text-amber-400 uppercase tracking-wider border-b border-gray-800">{showEntryMenu.entry.label || showEntryMenu.entry.showName || 'Show'} — {showEntryMenu.entry.time.toFixed(2)}s → {showEntryMenu.entry.endTime.toFixed(2)}s</div>
+            <div className="px-4 py-1.5 text-[11px] text-amber-400 uppercase tracking-wider border-b border-gray-800">{showEntryMenu.entry.label || showEntryMenu.entry.showName || t('quickshow.defaultShow')} — {showEntryMenu.entry.time.toFixed(2)}s → {showEntryMenu.entry.endTime.toFixed(2)}s</div>
             <div className="px-4 pt-3">
-              <label className="text-[10px] text-gray-500">Nom de la section</label>
-              <input defaultValue={showEntryMenu.entry.label || showEntryMenu.entry.showName || ''} id="__show_label" placeholder={showEntryMenu.entry.showName || 'Show'} className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
+              <label className="text-[10px] text-gray-500">{t('quickshow.sectionName')}</label>
+              <input defaultValue={showEntryMenu.entry.label || showEntryMenu.entry.showName || ''} id="__show_label" placeholder={showEntryMenu.entry.showName || t('quickshow.defaultShow')} className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
             </div>
             <div className="flex gap-2 px-4 py-3">
               <button onClick={() => {
                 const label = (document.getElementById('__show_label') as HTMLInputElement).value;
                 handleRenameShowEntry(showEntryMenu.trackId, showEntryMenu.entry, label);
-              }} className="flex-1 py-1.5 rounded bg-amber-600/20 text-amber-300 text-xs hover:bg-amber-600/30">Renommer</button>
-              <button onClick={() => handleModifyShowEntry(showEntryMenu.trackId, showEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Modifier</button>
+              }} className="flex-1 py-1.5 rounded bg-amber-600/20 text-amber-300 text-xs hover:bg-amber-600/30">{t('common.rename')}</button>
+              <button onClick={() => handleModifyShowEntry(showEntryMenu.trackId, showEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">{t('common.edit')}</button>
             </div>
             <div className="grid grid-cols-2 gap-3 px-4 py-0">
-              <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={showEntryMenu.entry.time} id="__show_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
-              <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={showEntryMenu.entry.endTime} id="__show_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionStart')}</label><input type="number" step="0.01" defaultValue={showEntryMenu.entry.time} id="__show_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionEnd')}</label><input type="number" step="0.01" defaultValue={showEntryMenu.entry.endTime} id="__show_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
             </div>
             <div className="flex gap-2 px-4 pb-2">
               <button onClick={() => {
@@ -5998,10 +5988,10 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 const idx = showTracks.find(t => t.id === showEntryMenu.trackId)?.entries.findIndex(e => e.id === showEntryMenu.entry.id) ?? -1;
                 if (idx >= 0) handleShowEntryChange(showEntryMenu.trackId, idx, st, en);
                 setShowEntryMenu(null);
-              }} className="flex-1 py-1.5 rounded bg-amber-600 text-white text-xs hover:bg-amber-500">Appliquer</button>
-              <button onClick={() => handleRemoveShowEntry(showEntryMenu.trackId, showEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">Supprimer</button>
+              }} className="flex-1 py-1.5 rounded bg-amber-600 text-white text-xs hover:bg-amber-500">{t('quickshow.apply')}</button>
+              <button onClick={() => handleRemoveShowEntry(showEntryMenu.trackId, showEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">{t('common.delete')}</button>
             </div>
-            <button onClick={() => setShowEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">Fermer</button>
+            <button onClick={() => setShowEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">{t('common.close')}</button>
           </div>
         </div>
       )}
@@ -6011,18 +6001,18 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
             <div className="bg-[#1a1a2e] border border-cyan-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-gray-200">{scenePickModal.entryId ? 'Modifier la section scène' : 'Sélectionner une scène'}</span>
+                <span className="text-sm font-semibold text-gray-200">{scenePickModal.entryId ? t('quickshow.editSceneSection') : t('quickshow.selectScene')}</span>
                 <button onClick={() => setScenePickModal(null)} className="text-gray-500 hover:text-white">✕</button>
               </div>
 
               <p className="text-[10px] text-gray-500 leading-relaxed mb-4">
-                La scène statique prend le dessus sur l'autoscript pendant sa plage (comme un chaser mais avec les canaux exacts de la scène), puis rend la main.
+                {t('quickshow.sceneHint')}
               </p>
 
               {entitySceneList.length === 0 ? (
                 <div className="text-[11px] text-gray-600 py-6 text-center border border-dashed border-gray-800 rounded-lg">
-                  Aucune scène sauvegardée.<br />
-                  <span className="text-gray-500">Créez-en une dans Design → Scènes, puis réessayez.</span>
+                  {t('quickshow.noSceneSaved')}<br />
+                  <span className="text-gray-500">{t('quickshow.createSceneHint')}</span>
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -6042,7 +6032,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               <div className="flex justify-end mt-4">
                 <button onClick={() => setScenePickModal(null)}
                   className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
-                  Fermer
+                  {t('common.close')}
                 </button>
               </div>
             </div>
@@ -6058,19 +6048,19 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-1.5 text-[10px] text-cyan-400 uppercase tracking-wider border-b border-gray-800">
-              Scenes Track
+              {t('quickshow.trackScenes')}
             </div>
             <button
               onClick={() => { handleDeleteSceneTrack(sceneInsertMenu.trackId); setSceneInsertMenu(null); }}
               className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
             >
-              Delete track
+              {t('quickshow.deleteTrack')}
             </button>
             <button
               onClick={() => setSceneInsertMenu(null)}
               className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </>
@@ -6082,22 +6072,22 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 py-1.5 text-[11px] text-cyan-400 uppercase tracking-wider border-b border-gray-800">
-              {sceneEntryMenu.entry.label || sceneEntryMenu.entry.sceneName || 'Scène'} — {sceneEntryMenu.entry.time.toFixed(2)}s → {sceneEntryMenu.entry.endTime.toFixed(2)}s
+              {sceneEntryMenu.entry.label || sceneEntryMenu.entry.sceneName || t('quickshow.defaultScene')} — {sceneEntryMenu.entry.time.toFixed(2)}s → {sceneEntryMenu.entry.endTime.toFixed(2)}s
             </div>
             <div className="px-4 pt-3">
-              <label className="text-[10px] text-gray-500">Nom de la section</label>
-              <input defaultValue={sceneEntryMenu.entry.label || sceneEntryMenu.entry.sceneName || ''} id="__scene_label" placeholder={sceneEntryMenu.entry.sceneName || 'Scène'} className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
+              <label className="text-[10px] text-gray-500">{t('quickshow.sectionName')}</label>
+              <input defaultValue={sceneEntryMenu.entry.label || sceneEntryMenu.entry.sceneName || ''} id="__scene_label" placeholder={sceneEntryMenu.entry.sceneName || t('quickshow.defaultScene')} className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
             </div>
             <div className="flex gap-2 px-4 py-3">
               <button onClick={() => {
                 const label = (document.getElementById('__scene_label') as HTMLInputElement).value;
                 handleRenameSceneEntry(sceneEntryMenu.trackId, sceneEntryMenu.entry, label);
-              }} className="flex-1 py-1.5 rounded bg-cyan-600/20 text-cyan-300 text-xs hover:bg-cyan-600/30">Renommer</button>
-              <button onClick={() => handleModifySceneEntry(sceneEntryMenu.trackId, sceneEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Modifier</button>
+              }} className="flex-1 py-1.5 rounded bg-cyan-600/20 text-cyan-300 text-xs hover:bg-cyan-600/30">{t('common.rename')}</button>
+              <button onClick={() => handleModifySceneEntry(sceneEntryMenu.trackId, sceneEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">{t('common.edit')}</button>
             </div>
             <div className="grid grid-cols-2 gap-3 px-4 py-0">
-              <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={sceneEntryMenu.entry.time} id="__scene_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
-              <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={sceneEntryMenu.entry.endTime} id="__scene_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionStart')}</label><input type="number" step="0.01" defaultValue={sceneEntryMenu.entry.time} id="__scene_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionEnd')}</label><input type="number" step="0.01" defaultValue={sceneEntryMenu.entry.endTime} id="__scene_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
             </div>
             <div className="flex gap-2 px-4 pb-2 pt-3">
               <button onClick={() => {
@@ -6108,10 +6098,10 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 const idx = sceneTracks.find(t => t.id === sceneEntryMenu.trackId)?.entries.findIndex(e => e.id === sceneEntryMenu.entry.id) ?? -1;
                 if (idx >= 0) handleSceneEntryChange(sceneEntryMenu.trackId, idx, st, en);
                 setSceneEntryMenu(null);
-              }} className="flex-1 py-1.5 rounded bg-cyan-600 text-white text-xs hover:bg-cyan-500">Appliquer</button>
-              <button onClick={() => handleRemoveSceneEntry(sceneEntryMenu.trackId, sceneEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">Supprimer</button>
+              }} className="flex-1 py-1.5 rounded bg-cyan-600 text-white text-xs hover:bg-cyan-500">{t('quickshow.apply')}</button>
+              <button onClick={() => handleRemoveSceneEntry(sceneEntryMenu.trackId, sceneEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">{t('common.delete')}</button>
             </div>
-            <button onClick={() => setSceneEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">Fermer</button>
+            <button onClick={() => setSceneEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">{t('common.close')}</button>
           </div>
         </div>
       )}
@@ -6121,18 +6111,18 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
             <div className="bg-[#1a1a2e] border border-pink-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto" style={{ pointerEvents: 'auto' }}>
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-gray-200">{matrixPickModal.entryId ? 'Modifier la section matrice' : 'Sélectionner une matrice'}</span>
+                <span className="text-sm font-semibold text-gray-200">{matrixPickModal.entryId ? t('quickshow.editMatrixSection') : t('quickshow.selectMatrix')}</span>
                 <button onClick={() => setMatrixPickModal(null)} className="text-gray-500 hover:text-white">✕</button>
               </div>
 
               <p className="text-[10px] text-gray-500 leading-relaxed mb-4">
-                La matrice RGB prend le dessus sur son groupe de fixtures pendant sa plage (motif, couleurs, vitesse définis dans Matrice RGB), puis rend la main à l'autoscript.
+                {t('quickshow.matrixHint')}
               </p>
 
               {entityMatrixList.length === 0 ? (
                 <div className="text-[11px] text-gray-600 py-6 text-center border border-dashed border-gray-800 rounded-lg">
-                  Aucune matrice sauvegardée.<br />
-                  <span className="text-gray-500">Créez-en une dans Matrice RGB, puis réessayez.</span>
+                  {t('quickshow.noMatrixSaved')}<br />
+                  <span className="text-gray-500">{t('quickshow.createMatrixHint')}</span>
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -6147,7 +6137,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                       >
                         <span className="text-pink-400">🔳</span>
                         <span className="flex-1">{mx.name}</span>
-                        <span className="text-[9px] text-gray-500">{grp ? grp.name : 'groupe inconnu'} · {n} fixtures</span>
+                        <span className="text-[9px] text-gray-500">{grp ? grp.name : t('quickshow.unknownGroup')} · {t('quickshow.matrixGroupCount', { count: n })}</span>
                       </button>
                     );
                   })}
@@ -6157,7 +6147,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               <div className="flex justify-end mt-4">
                 <button onClick={() => setMatrixPickModal(null)}
                   className="px-4 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
-                  Fermer
+                  {t('common.close')}
                 </button>
               </div>
             </div>
@@ -6173,25 +6163,25 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-1.5 text-[10px] text-pink-400 uppercase tracking-wider border-b border-gray-800">
-              Matrix Track — {matrixInsertMenu.time.toFixed(2)}s
+              {t('quickshow.matrixTrackAt', { time: matrixInsertMenu.time.toFixed(2) })}
             </div>
             <button
               onClick={() => { const tid = matrixInsertMenu.trackId, at = matrixInsertMenu.time; setMatrixInsertMenu(null); setMatrixPickModal({ trackId: tid, atTime: at }); }}
               className="w-full text-left px-3 py-1.5 text-xs text-pink-300 hover:bg-gray-800"
             >
-              Importer une matrice ici
+              {t('quickshow.importMatrixHere')}
             </button>
             <button
               onClick={() => { handleDeleteMatrixTrack(matrixInsertMenu.trackId); setMatrixInsertMenu(null); }}
               className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
             >
-              Supprimer la piste
+              {t('quickshow.deleteTrack')}
             </button>
             <button
               onClick={() => setMatrixInsertMenu(null)}
               className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-800"
             >
-              Annuler
+              {t('common.cancel')}
             </button>
           </div>
         </>
@@ -6203,22 +6193,22 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-4 py-1.5 text-[11px] text-pink-400 uppercase tracking-wider border-b border-gray-800">
-              {matrixEntryMenu.entry.label || matrixEntryMenu.entry.matrixName || 'Matrice'} — {matrixEntryMenu.entry.time.toFixed(2)}s → {matrixEntryMenu.entry.endTime.toFixed(2)}s
+              {matrixEntryMenu.entry.label || matrixEntryMenu.entry.matrixName || t('quickshow.defaultMatrix')} — {matrixEntryMenu.entry.time.toFixed(2)}s → {matrixEntryMenu.entry.endTime.toFixed(2)}s
             </div>
             <div className="px-4 pt-3">
-              <label className="text-[10px] text-gray-500">Nom de la section</label>
-              <input defaultValue={matrixEntryMenu.entry.label || matrixEntryMenu.entry.matrixName || ''} id="__matrix_label" placeholder={matrixEntryMenu.entry.matrixName || 'Matrice'} className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
+              <label className="text-[10px] text-gray-500">{t('quickshow.sectionName')}</label>
+              <input defaultValue={matrixEntryMenu.entry.label || matrixEntryMenu.entry.matrixName || ''} id="__matrix_label" placeholder={matrixEntryMenu.entry.matrixName || t('quickshow.defaultMatrix')} className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" />
             </div>
             <div className="flex gap-2 px-4 py-3">
               <button onClick={() => {
                 const label = (document.getElementById('__matrix_label') as HTMLInputElement).value;
                 handleRenameMatrixEntry(matrixEntryMenu.trackId, matrixEntryMenu.entry, label);
-              }} className="flex-1 py-1.5 rounded bg-pink-600/20 text-pink-300 text-xs hover:bg-pink-600/30">Renommer</button>
-              <button onClick={() => handleModifyMatrixEntry(matrixEntryMenu.trackId, matrixEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">Changer de matrice</button>
+              }} className="flex-1 py-1.5 rounded bg-pink-600/20 text-pink-300 text-xs hover:bg-pink-600/30">{t('common.rename')}</button>
+              <button onClick={() => handleModifyMatrixEntry(matrixEntryMenu.trackId, matrixEntryMenu.entry)} className="flex-1 py-1.5 rounded bg-gray-800 text-gray-300 text-xs hover:bg-gray-700">{t('quickshow.changeMatrix')}</button>
             </div>
             <div className="grid grid-cols-2 gap-3 px-4 py-0">
-              <div><label className="text-[10px] text-gray-500">Début (s)</label><input type="number" step="0.01" defaultValue={matrixEntryMenu.entry.time} id="__matrix_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
-              <div><label className="text-[10px] text-gray-500">Fin (s)</label><input type="number" step="0.01" defaultValue={matrixEntryMenu.entry.endTime} id="__matrix_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionStart')}</label><input type="number" step="0.01" defaultValue={matrixEntryMenu.entry.time} id="__matrix_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionEnd')}</label><input type="number" step="0.01" defaultValue={matrixEntryMenu.entry.endTime} id="__matrix_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
             </div>
             <div className="flex gap-2 px-4 pb-2 pt-3">
               <button onClick={() => {
@@ -6229,10 +6219,10 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
                 const idx = matrixTracks.find(t => t.id === matrixEntryMenu.trackId)?.entries.findIndex(e => e.id === matrixEntryMenu.entry.id) ?? -1;
                 if (idx >= 0) handleMatrixEntryChange(matrixEntryMenu.trackId, idx, st, en);
                 setMatrixEntryMenu(null);
-              }} className="flex-1 py-1.5 rounded bg-pink-600 text-white text-xs hover:bg-pink-500">Appliquer</button>
-              <button onClick={() => handleRemoveMatrixEntry(matrixEntryMenu.trackId, matrixEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">Supprimer</button>
+              }} className="flex-1 py-1.5 rounded bg-pink-600 text-white text-xs hover:bg-pink-500">{t('quickshow.apply')}</button>
+              <button onClick={() => handleRemoveMatrixEntry(matrixEntryMenu.trackId, matrixEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">{t('common.delete')}</button>
             </div>
-            <button onClick={() => setMatrixEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">Fermer</button>
+            <button onClick={() => setMatrixEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">{t('common.close')}</button>
           </div>
         </div>
       )}
