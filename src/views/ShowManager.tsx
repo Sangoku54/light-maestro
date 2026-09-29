@@ -62,6 +62,8 @@ export const ShowManager: React.FC = () => {
   const [editItemName, setEditItemName] = useState('');
   const [editItemFadeIn, setEditItemFadeIn] = useState(0);
   const [editItemFadeOut, setEditItemFadeOut] = useState(0);
+  const [editItemStart, setEditItemStart] = useState(0);
+  const [editItemDuration, setEditItemDuration] = useState(5000);
   const [draggingItem, setDraggingItem] = useState<{ itemId: string; trackId: string; startX: number; origStartTime: number } | null>(null);
   const [resizingItem, setResizingItem] = useState<{ itemId: string; trackId: string; edge: 'left' | 'right'; startX: number; origStartTime: number; origDuration: number } | null>(null);
   const [scrollStart, setScrollStart] = useState({ x: 0, scrollLeft: 0 });
@@ -557,20 +559,29 @@ export const ShowManager: React.FC = () => {
     setEditItemName(item.name);
     setEditItemFadeIn(item.fadeIn);
     setEditItemFadeOut(item.fadeOut);
+    setEditItemStart(Math.round(item.startTime / 1000));
+    setEditItemDuration(Math.max(0.2, Math.round(item.duration / 100) / 10));
   };
 
   const handleSaveItemEdit = () => {
     if (!selectedShow || !editingItemId) return;
+    const newStart = Math.max(0, Math.round(Number(editItemStart) * 1000));
+    const newDur = Math.max(200, Math.round(Number(editItemDuration) * 1000));
     updateShow(selectedShow.id, {
       tracks: selectedShow.tracks.map((t) => ({
         ...t,
         items: t.items.map((it) =>
           it.id === editingItemId
-            ? { ...it, name: editItemName, fadeIn: editItemFadeIn, fadeOut: editItemFadeOut }
+            ? { ...it, name: editItemName, fadeIn: editItemFadeIn, fadeOut: editItemFadeOut, startTime: newStart, duration: newDur }
             : it
         ),
       })),
     });
+    // La durée du show suit si le bloc la dépasse.
+    const latestShow = useShowStore.getState().shows.find((s) => s.id === selectedShow.id);
+    if (latestShow && newStart + newDur > latestShow.duration) {
+      updateShow(selectedShow.id, { duration: newStart + newDur });
+    }
     setEditingItemId(null);
   };
 
@@ -1383,9 +1394,9 @@ export const ShowManager: React.FC = () => {
                           />
                         )}
 
-                        {/* Label */}
-                        <div className="px-2 py-0.5 text-[9px] text-gray-300 truncate select-none" title={resourceName}>
-                          {resourceName}
+                        {/* Label : nom + durée réelle (pas la position de fin) */}
+                        <div className="px-2 py-0.5 text-[9px] text-gray-300 truncate select-none" title={`${resourceName} — ${fmtTime(item.duration)}`}>
+                          {resourceName} · {fmtTime(item.duration)}
                         </div>
                         <div className="px-2 text-[8px] text-gray-500 select-none">
                           {fmtTime(item.fadeIn)} / {fmtTime(item.fadeOut)}
@@ -1557,38 +1568,47 @@ export const ShowManager: React.FC = () => {
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={() => setEditingItemId(null)}>
             <div className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-80" onClick={(e) => e.stopPropagation()}>
               <div className="px-5 py-3 border-b border-gray-800/50 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-white">Edit Item</h3>
+                <h3 className="text-sm font-bold text-white">{t('showManager.editItem')}</h3>
                 <button onClick={() => setEditingItemId(null)} className="text-gray-600 hover:text-gray-400">✕</button>
               </div>
               <div className="p-5 space-y-4">
                 <div>
-                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">Name</label>
+                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('showManager.itemName')}</label>
                   <input type="text" value={editItemName} onChange={(e) => setEditItemName(e.target.value)}
                     className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300" />
                 </div>
                 <div>
-                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">Fade In (ms)</label>
+                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('showManager.itemFadeIn')}</label>
                   <input type="number" value={editItemFadeIn} onChange={(e) => setEditItemFadeIn(Number(e.target.value))}
                     min={0} className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300" />
                 </div>
                 <div>
-                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">Fade Out (ms)</label>
+                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('showManager.itemFadeOut')}</label>
                   <input type="number" value={editItemFadeOut} onChange={(e) => setEditItemFadeOut(Number(e.target.value))}
                     min={0} className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300" />
                 </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('showManager.itemStart')}</label>
+                    <input type="number" value={editItemStart} onChange={(e) => setEditItemStart(Number(e.target.value))}
+                      min={0} step={0.1} className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('showManager.itemDuration')}</label>
+                    <input type="number" value={editItemDuration} onChange={(e) => setEditItemDuration(Number(e.target.value))}
+                      min={0.2} step={0.1} className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300" />
+                  </div>
+                </div>
                 <div>
-                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">Resource</label>
+                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('showManager.itemResource')}</label>
                   <div className="text-xs text-gray-500 mt-1 bg-gray-800/30 rounded px-2 py-1.5">
                     {item.resourceId} ({item.name})
                   </div>
                 </div>
-                <div className="text-[10px] text-gray-600">
-                  Start: {fmtTime(item.startTime)} · Duration: {fmtTime(item.duration)}
-                </div>
               </div>
               <div className="px-5 py-3 border-t border-gray-800/50 flex justify-end gap-2">
-                <button onClick={() => setEditingItemId(null)} className="px-4 py-1.5 bg-gray-800/50 text-gray-400 rounded text-xs hover:bg-gray-700/50">Cancel</button>
-                <button onClick={handleSaveItemEdit} className="px-4 py-1.5 bg-purple-600/30 text-purple-300 rounded text-xs font-medium hover:bg-purple-600/50">Save</button>
+                <button onClick={() => setEditingItemId(null)} className="px-4 py-1.5 bg-gray-800/50 text-gray-400 rounded text-xs hover:bg-gray-700/50">{t('common.cancel')}</button>
+                <button onClick={handleSaveItemEdit} className="px-4 py-1.5 bg-purple-600/30 text-purple-300 rounded text-xs font-medium hover:bg-purple-600/50">{t('common.save')}</button>
               </div>
             </div>
           </div>

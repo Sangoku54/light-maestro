@@ -1164,7 +1164,14 @@
     "saveShow": "Sauvegarder le Show",
     "loadShow": "Charger le Show",
     "save": "Sauvegarder",
-    "load": "Charger"
+    "load": "Charger",
+    "editItem": "Modifier l'élément",
+    "itemName": "Nom",
+    "itemFadeIn": "Fade In (ms)",
+    "itemFadeOut": "Fade Out (ms)",
+    "itemStart": "Début (s)",
+    "itemDuration": "Durée (s)",
+    "itemResource": "Ressource"
   },
   "programmer": {
     "save": "Enregistrer",
