@@ -1433,7 +1433,11 @@
       "network": "Erreur réseau",
       "loginFailed": "Connexion échouée",
       "registerFailed": "Inscription échouée",
-      "checkoutFailed": "Checkout indisponible"
+      "checkoutFailed": "Checkout indisponible",
+      "email_taken": "Un compte existe déjà avec cet email",
+      "invalid_credentials": "Identifiants invalides",
+      "invalid_token": "Session expirée — reconnectez-vous",
+      "invalid_edition": "Édition inconnue"
     }
   },
   "audio": {
@@ -1742,5 +1746,11 @@
     "start": "Départ",
     "strobeBadge": "⚡ STROBE",
     "tooltipCueDefault": "Cue"
+  },
+  "dialogs": {
+    "filterShow": "Show Light Maestro",
+    "filterProject": "Projet Light Maestro",
+    "filterPreset": "Preset Light Maestro",
+    "filterAudio": "Audio"
   }
 }

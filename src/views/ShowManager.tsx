@@ -1013,7 +1013,7 @@ export const ShowManager: React.FC = () => {
                 };
                 // Save via system file dialog
                 const saved = await window.lightMaestro.dialog.saveFile(
-                  [{ name: 'Light Maestro Show', extensions: ['lmshow'] }],
+                  [{ name: t('dialogs.filterShow'), extensions: ['lmshow'] }],
                   `${selectedShow.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.lmshow`,
                   JSON.stringify(p, null, 2)
                 );

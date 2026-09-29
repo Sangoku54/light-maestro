@@ -234,7 +234,14 @@ const App: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // ─── Licence : charger l'état au démarrage (édition + limites) ────
+  // + pousser la langue au main (tray + dialogues natifs localisés).
   useEffect(() => {
+    try {
+      const lang = localStorage.getItem('light-maestro-lang');
+      if (lang === 'fr' || lang === 'en') {
+        (window as any).lightMaestro?.app?.setLocale?.(lang)?.catch?.(() => {});
+      }
+    } catch { /* main non dispo */ }
     useLicenseStore.getState().refresh();
   }, []);
 

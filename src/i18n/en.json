@@ -1433,7 +1433,11 @@
       "network": "Network error",
       "loginFailed": "Sign-in failed",
       "registerFailed": "Sign-up failed",
-      "checkoutFailed": "Checkout unavailable"
+      "checkoutFailed": "Checkout unavailable",
+      "email_taken": "An account already exists with this email",
+      "invalid_credentials": "Invalid credentials",
+      "invalid_token": "Session expired — please sign in again",
+      "invalid_edition": "Unknown edition"
     }
   },
   "audio": {
@@ -1742,5 +1746,11 @@
     "start": "Start",
     "strobeBadge": "⚡ STROBE",
     "tooltipCueDefault": "Cue"
+  },
+  "dialogs": {
+    "filterShow": "Light Maestro Show",
+    "filterProject": "Light Maestro Project",
+    "filterPreset": "Light Maestro Preset",
+    "filterAudio": "Audio"
   }
 }

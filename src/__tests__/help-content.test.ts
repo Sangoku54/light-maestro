@@ -3,6 +3,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { HELP_GROUPS, HELP_PAGES } from '../components/help/helpContent';
+import { HELP_GROUPS_EN, HELP_PAGES_EN } from '../components/help/helpContent.en';
 
 describe('centre d’aide — contenu', () => {
   it('19 fiches, ids uniques, groupes valides', () => {
@@ -28,6 +29,20 @@ describe('centre d’aide — contenu', () => {
       for (const s of [...p.steps, ...p.tips, p.challenge]) {
         expect(s.length, `${p.id} texte vide`).toBeGreaterThan(10);
       }
+    }
+  });
+
+  it('miroir anglais : mêmes ids, même ordre, groupes valides', () => {
+    expect(HELP_PAGES_EN.length).toBe(HELP_PAGES.length);
+    expect(HELP_PAGES_EN.map((p) => p.id)).toEqual(HELP_PAGES.map((p) => p.id));
+    expect(HELP_GROUPS_EN.length).toBe(HELP_GROUPS.length);
+    for (const p of HELP_PAGES_EN) {
+      expect(HELP_GROUPS_EN).toContain(p.group);
+      expect(p.title.length).toBeGreaterThan(3);
+      expect(p.pitch.length).toBeGreaterThan(20);
+      expect(p.steps.length).toBeGreaterThanOrEqual(3);
+      expect(p.tips.length).toBeGreaterThanOrEqual(2);
+      expect(p.challenge.length).toBeGreaterThan(10);
     }
   });
 });

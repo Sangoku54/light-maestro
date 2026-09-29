@@ -8,17 +8,21 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HELP_GROUPS, HELP_PAGES, getHelpDone, setHelpDone } from './helpContent';
+import { HELP_GROUPS_EN, HELP_PAGES_EN } from './helpContent.en';
 
 export const HelpModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
-  const { t } = useTranslation();
-  const [pageId, setPageId] = useState<string>(HELP_PAGES[0].id);
+  const { t, i18n } = useTranslation();
+  const groups = i18n.language === 'en' ? HELP_GROUPS_EN : HELP_GROUPS;
+  const pages = i18n.language === 'en' ? HELP_PAGES_EN : HELP_PAGES;
+  const [pageId, setPageId] = useState<string>(pages[0].id);
   const [done, setDone] = useState<Record<string, boolean>>(getHelpDone);
 
-  const page = HELP_PAGES.find((p) => p.id === pageId) ?? HELP_PAGES[0];
-  const idx = HELP_PAGES.findIndex((p) => p.id === page.id);
+  const page = pages.find((p) => p.id === pageId) ?? pages[0];
+  const idx = pages.findIndex((p) => p.id === page.id);
   const doneCount = useMemo(
-    () => HELP_PAGES.filter((p) => done[p.id]).length,
-    [done],
+    () => pages.filter((p) => done[p.id]).length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [done, pageId],
   );
 
   const toggleDone = () => {
@@ -28,7 +32,7 @@ export const HelpModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   };
 
   const go = (dir: 1 | -1) => {
-    const next = HELP_PAGES[(idx + dir + HELP_PAGES.length) % HELP_PAGES.length];
+    const next = pages[(idx + dir + pages.length) % pages.length];
     setPageId(next.id);
   };
 
@@ -56,18 +60,18 @@ export const HelpModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             <div className="mt-1.5 h-1.5 rounded-full bg-gray-800 overflow-hidden">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-purple-500 to-cyan-400 transition-all"
-                style={{ width: `${Math.round((doneCount / HELP_PAGES.length) * 100)}%` }}
+                style={{ width: `${Math.round((doneCount / pages.length) * 100)}%` }}
               />
             </div>
             <div className="text-[10px] text-gray-500 mt-1 px-1">
-              {t('help.progress', { done: doneCount, total: HELP_PAGES.length })}
-              {doneCount === HELP_PAGES.length ? ` ${t('help.graduate')}` : ''}
+              {t('help.progress', { done: doneCount, total: pages.length })}
+              {doneCount === pages.length ? ` ${t('help.graduate')}` : ''}
             </div>
           </div>
-          {HELP_GROUPS.map((g) => (
+          {groups.map((g) => (
             <div key={g}>
               <div className="text-[10px] uppercase tracking-wider text-gray-500 px-1 mb-1">{g}</div>
-              {HELP_PAGES.filter((p) => p.group === g).map((p) => (
+              {pages.filter((p) => p.group === g).map((p) => (
                 <button
                   key={p.id}
                   onClick={() => setPageId(p.id)}
@@ -129,7 +133,7 @@ export const HelpModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
           <div className="px-6 py-3 border-t border-gray-800/50 flex items-center justify-between">
             <button onClick={() => go(-1)} className="px-3 py-1.5 rounded-md text-xs text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">{t('help.prev')}</button>
-            <span className="text-[11px] text-gray-600">{idx + 1} / {HELP_PAGES.length}</span>
+            <span className="text-[11px] text-gray-600">{idx + 1} / {pages.length}</span>
             <button onClick={() => go(1)} className="px-3 py-1.5 rounded-md text-xs text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">{t('help.next')}</button>
           </div>
         </div>

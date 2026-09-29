@@ -98,7 +98,7 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
         set({ ...r.state, loginError: null });
         return true;
       }
-      set({ loginError: r.message || 'loginFailed' });
+      set({ loginError: (r as any).code || r.message || 'loginFailed' });
       return false;
     } catch {
       set({ loginError: 'network' });
@@ -115,7 +115,7 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
         set({ ...r.state, loginError: null });
         return true;
       }
-      set({ loginError: r.message || 'registerFailed' });
+      set({ loginError: (r as any).code || r.message || 'registerFailed' });
       return false;
     } catch {
       set({ loginError: 'network' });
@@ -132,7 +132,7 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
         await a.openUrl(r.url).catch(() => {});
         return r.url;
       }
-      set({ loginError: r.message || 'checkoutFailed' });
+      set({ loginError: (r as any).code || r.message || 'checkoutFailed' });
       return null;
     } catch {
       set({ loginError: 'network' });

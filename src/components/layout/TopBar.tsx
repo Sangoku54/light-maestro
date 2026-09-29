@@ -42,6 +42,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
     const next = i18n.language === 'fr' ? 'en' : 'fr';
     i18n.changeLanguage(next);
     localStorage.setItem('light-maestro-lang', next);
+    try { (window as any).lightMaestro?.app?.setLocale?.(next); } catch { /* main non dispo */ }
   };
 
   const [showLicense, setShowLicense] = useState(false);

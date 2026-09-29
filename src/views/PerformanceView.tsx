@@ -1084,7 +1084,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                   if (newType === 'loadShow') {
                     try {
                       const r = await window.lightMaestro?.dialog?.openFile?.([
-                        { name: 'Light Maestro Show', extensions: ['lmshow', 'lmproj'] },
+                        { name: t('dialogs.filterShow'), extensions: ['lmshow', 'lmproj'] },
                       ]);
                       if (r?.content) {
                         const p = JSON.parse(r.content);
@@ -1147,7 +1147,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                   <button
                     onClick={async () => {
                       try {
-                        const r = await window.lightMaestro?.dialog?.openFile?.([{ name: 'Light Maestro Show', extensions: ['lmshow', 'lmproj'] }]);
+                        const r = await window.lightMaestro?.dialog?.openFile?.([{ name: t('dialogs.filterShow'), extensions: ['lmshow', 'lmproj'] }]);
                         if (!r?.content) return;
                         const p = JSON.parse(r.content);
                         setConfig({ ...config, showName: p.name || r.filePath?.split(/[\\/]/).pop()?.replace(/\.(lmshow|lmproj)$/,''), showData: p });
@@ -1190,7 +1190,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                     onClick={async () => {
                       try {
                         const r = await window.lightMaestro?.dialog?.openFile?.([
-                          { name: 'Light Maestro Preset', extensions: ['lmpreset'] },
+                          { name: t('dialogs.filterPreset'), extensions: ['lmpreset'] },
                         ]);
                         if (!r?.content) return;
                         let p = JSON.parse(r.content);
@@ -1907,7 +1907,7 @@ const VCButtonWidget: React.FC<{
             ) as any;
           }
           if (!p) {
-            const r = await window.lightMaestro?.dialog?.openFile?.([{ name: 'Light Maestro Show', extensions: ['lmshow', 'lmproj'] }]);
+            const r = await window.lightMaestro?.dialog?.openFile?.([{ name: t('dialogs.filterShow'), extensions: ['lmshow', 'lmproj'] }]);
             if (!r?.content) return;
             p = JSON.parse(r.content);
           }
