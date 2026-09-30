@@ -28,17 +28,34 @@
 
 <section id="dl" class="section">
   <div class="wrap">
+    <div class="card" id="dl-gate" style="margin-bottom:16px; border-color:#7c3aed">
+      <div id="dl-form">
+        <h3 class="h3">🔑 Connecte-toi pour télécharger</h3>
+        <p style="margin-top:8px">Ton compte, c'est ta licence (Gratuite, Standard ou Complète). L'app applique ton édition quand tu t'y connectes.</p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px">
+          <input id="dl-email" type="email" placeholder="vous@exemple.com" style="flex:1; min-width:200px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/>
+          <input id="dl-pass" type="password" placeholder="Mot de passe" style="flex:1; min-width:160px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/>
+          <button id="dl-login" class="btn btn-primary">Se connecter</button>
+          <button id="dl-register" class="btn btn-ghost">Créer un compte</button>
+        </div>
+        <div class="meta" id="dl-msg" style="margin-top:10px"></div>
+      </div>
+      <div id="dl-ok" style="display:none">
+        <h3 class="h3">✅ Téléchargement débloqué</h3>
+        <p style="margin-top:8px">Connecté : <b id="dl-email-shown" style="color:white"></b> — édition <b id="dl-edition" style="color:#c084fc"></b>. Les liens ci-dessous sont actifs.</p>
+      </div>
+    </div>
     <div class="grid grid-2">
       <div class="card">
         <div style="display:flex; gap:10px; align-items:center"><span class="badge violet">Recommandé</span><span class="badge cyan">Portable • x64</span></div>
         <h2 class="h3" style="margin-top:12px; font-size:22px">Version portable</h2>
         <p>Un seul .exe, pas d'installation, pas de droits admin. Idéal pour clé USB, régie partagée, test rapide, tournée — gardez l'ancienne version à côté pour rollback immédiat.</p>
         <div style="background: rgba(255,255,255,.04); border:1px solid #1f1f2e; border-radius:12px; padding:12px; margin-top:12px">
-          <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro 1.0.37.exe • 97.3 MB</div>
-          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 97FC88E96A1C60591E8906E5C6C4F7D13814842362BFD220A9BC8B648621E57E</div>
+          <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro 1.0.37.exe • 92.8 MB</div>
+          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 897BCA9FD1204B9C7930949AC29584A239144ADDDDBC4D1A11D32FEC5F8105BB</div>
         </div>
-        <a class="btn btn-primary btn-wide disabled" style="margin-top:14px; opacity:.45; pointer-events:none" aria-disabled="true">⬇ Bientôt disponible</a>
-        <div class="meta" style="margin-top:10px">Version 1.0.37 en préparation — ouverture imminente. Les empreintes SHA seront publiées ici.</div>
+        <a id="dl-btn-portable" class="btn btn-primary btn-wide disabled" style="margin-top:14px; opacity:.45; pointer-events:none" aria-disabled="true" href="./downloads/Light%20Maestro%201.0.37.exe" download>⬇ Télécharger — Portable</a>
+        <div class="meta" style="margin-top:10px">Liens actifs après connexion ci-dessus. Vérifie l'empreinte SHA après téléchargement.</div>
         <div class="meta" style="margin-top:10px">Double-clic → lance. Vos projets restent dans <span class="mono">%APPDATA%/Light Maestro</span></div>
       </div>
       <div class="card">
@@ -46,10 +63,10 @@
         <h2 class="h3" style="margin-top:12px; font-size:22px">Installeur Windows</h2>
         <p>Installation en 30s, raccourcis bureau & menu démarrer. Pour votre machine principale et les postes fixes.</p>
         <div style="background: rgba(255,255,255,.04); border:1px solid #1f1f2e; border-radius:12px; padding:12px; margin-top:12px">
-          <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro Setup 1.0.37.exe • 97.5 MB</div>
-          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 138C68E62F2950A38505A3D4541CC326CCD7CDD581688507C95517E099F2EB5C</div>
+          <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro Setup 1.0.37.exe • 93 MB</div>
+          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : FD564CFAE65CE6E9F347C232CBE8BEAF7B372A6F9D29E7511557C77081463D14</div>
         </div>
-        <a class="btn btn-ghost btn-wide disabled" style="margin-top:14px; opacity:.45; pointer-events:none" aria-disabled="true">⬇ Bientôt disponible</a>
+        <a id="dl-btn-setup" class="btn btn-ghost btn-wide disabled" style="margin-top:14px; opacity:.45; pointer-events:none" aria-disabled="true" href="./downloads/Light%20Maestro%20Setup%201.0.37.exe" download>⬇ Télécharger — Installeur</a>
         <div class="meta" style="margin-top:10px">Windows 10/11 64-bit • 4 Go RAM mini • 500 Mo disque • USB / ArtNet / sACN</div>
       </div>
     </div>
@@ -105,6 +122,43 @@
     </div>
   </div>
 </footer>
+<script>
+(function(){
+  var API='https://light-maestro.com/api', K='lm-dl-session';
+  function $(id){return document.getElementById(id);}
+  function setMsg(t,err){var m=$('dl-msg');if(!m)return;m.textContent=t||'';m.style.color=err?'#f87171':'';}
+  function unlock(sess){
+    $('dl-form').style.display='none';$('dl-ok').style.display='block';
+    $('dl-email-shown').textContent=sess.email||'';
+    $('dl-edition').textContent=sess.edition==='full'?'Complète':sess.edition==='standard'?'Standard':'Gratuite';
+    ['dl-btn-portable','dl-btn-setup'].forEach(function(id){
+      var a=$(id);if(!a)return;
+      a.style.opacity='1';a.style.pointerEvents='auto';
+      a.removeAttribute('aria-disabled');a.classList.remove('disabled');
+    });
+    try{sessionStorage.setItem(K,JSON.stringify(sess));}catch(e){}
+  }
+  async function call(path,body){
+    var r=await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    var d={};try{d=await r.json();}catch(e){}
+    if(!r.ok)throw new Error(d.message||d.error||('HTTP '+r.status));
+    return d;
+  }
+  async function go(mode){
+    var email=$('dl-email').value.trim(),pass=$('dl-pass').value;
+    if(!email||!pass){setMsg('Indique ton email et ton mot de passe.',true);return;}
+    setMsg(mode==='register'?'Création du compte…':'Connexion…');
+    try{
+      var d=await call(mode==='register'?'/auth/register':'/auth/login',{email:email,password:pass});
+      unlock({email:d.email||email,edition:d.edition||'free'});
+      setMsg('');
+    }catch(e){setMsg('Échec : '+e.message+'. Serveur de licence en cours d’activation ? → Support & FAQ.',true);}
+  }
+  $('dl-login').addEventListener('click',function(){go('login');});
+  $('dl-register').addEventListener('click',function(){go('register');});
+  try{var s=JSON.parse(sessionStorage.getItem(K)||'null');if(s&&s.email)unlock(s);}catch(e){}
+})();
+</script>
 <script src="./assets/site.js"></script>
 </body>
 </html>
