@@ -16,7 +16,7 @@ import { AudioAnalyzer } from './audio/analyzer';
 import { crashLogger } from './utils/crash-logger';
 import { packProject, unpackProject } from './project-envelope';
 import { LicenseStore } from './license/store';
-import { loginWithLicense, registerWithLicense, startCheckout, LicenseError } from './license/server';
+import { loginWithLicense, registerWithLicense, refreshLicense, startCheckout, LicenseError } from './license/server';
 
 // Disable GPU cache to avoid permission errors on Windows
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
@@ -792,6 +792,26 @@ ipcMain.handle('license:checkout', async (_event, edition: string) => {
   const url = await startCheckout(token, edition);
   if (!url) return { ok: false, code: 'network', message: 'Checkout indisponible' };
   return { ok: true, url };
+});
+ipcMain.handle('license:refresh', async () => {
+  // Revalidation serveur (ex. après un achat Stripe) : sans elle, l'app
+  // ne découvrirait la nouvelle édition qu'à la prochaine connexion.
+  try {
+    const token = licenseStore.getToken();
+    if (!token) return { ok: true, state: licenseStore.getState() };
+    const result = await refreshLicense(token);
+    if (result) {
+      licenseStore.setLicense({
+        edition: result.edition,
+        email: result.email,
+        displayName: result.displayName,
+        token: result.token ?? token,
+      });
+    }
+    return { ok: true, state: licenseStore.getState() };
+  } catch {
+    return { ok: false, code: 'network', message: 'Actualisation impossible', state: licenseStore.getState() };
+  }
 });
 ipcMain.handle('license:openUrl', async (_event, url: string) => {
   try {

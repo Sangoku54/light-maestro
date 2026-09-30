@@ -229,6 +229,7 @@ contextBridge.exposeInMainWorld('lightMaestro', {
       ipcRenderer.invoke('license:register', email, password, displayName),
     checkout: (edition: 'standard' | 'full') =>
       ipcRenderer.invoke('license:checkout', edition),
+    refresh: () => ipcRenderer.invoke('license:refresh'),
     openUrl: (url: string) => ipcRenderer.invoke('license:openUrl', url),
     logout: () => ipcRenderer.invoke('license:logout'),
   },

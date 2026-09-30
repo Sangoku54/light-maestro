@@ -47,6 +47,7 @@ interface LicenseApi {
   login: (email: string, password: string) => Promise<LoginResponse>;
   register: (email: string, password: string, displayName?: string) => Promise<LoginResponse>;
   checkout: (edition: 'standard' | 'full') => Promise<CheckoutResponse>;
+  refresh: () => Promise<{ ok: boolean; state?: LicenseState }>;
   openUrl: (url: string) => Promise<{ ok: boolean }>;
   logout: () => Promise<{ ok: boolean; state?: LicenseState }>;
 }
@@ -82,8 +83,12 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
     const a = api();
     if (!a) { set({ ...DEFAULT_STATE, loading: false }); return; }
     try {
-      const s = await a.getState();
-      set({ ...s, loading: false, loginError: null });
+      // Revalidation serveur d'abord (capte un achat Stripe récent),
+      // repli sur l'état local persisté si le pont ne l'expose pas encore.
+      const r = typeof a.refresh === 'function' ? await a.refresh() : { ok: true, state: await a.getState() };
+      const s = (r as any).state;
+      if (s) set({ ...(s as LicenseState), loading: false, loginError: null });
+      else set({ loading: false });
     } catch {
       set({ ...DEFAULT_STATE, loading: false });
     }

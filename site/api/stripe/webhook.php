@@ -33,8 +33,17 @@ if ($event->type === 'checkout.session.completed') {
     $edition = $metadata['edition'] ?? '';
 
     if ($userId > 0 && ($edition === 'standard' || $edition === 'full')) {
-        // Active la licence (paiement unique → edition persistée).
-        db()->prepare('UPDATE users SET edition = ? WHERE id = ?')->execute([$edition, $userId]);
+        // Anti-downgrade : on ne monte que l'édition (un rachat standard
+        // par erreur ne doit jamais faire perdre une édition full).
+        $rank = ['free' => 0, 'standard' => 1, 'full' => 2];
+        $cur = db()->prepare('SELECT edition FROM users WHERE id = ?');
+        $cur->execute([$userId]);
+        $row = $cur->fetch();
+        $current = is_array($row) ? (string)($row['edition'] ?? 'free') : 'free';
+        if (($rank[$edition] ?? 0) > ($rank[$current] ?? 0)) {
+            // Active la licence (paiement unique → edition persistée).
+            db()->prepare('UPDATE users SET edition = ? WHERE id = ?')->execute([$edition, $userId]);
+        }
 
         // Trace le paiement (audit / SAV). Ignore les doublons (même intent).
         try {

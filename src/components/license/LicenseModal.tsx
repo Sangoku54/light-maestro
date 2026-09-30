@@ -23,6 +23,9 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  // Vrai après l'ouverture du checkout Stripe : propose la vérification
+  // d'achat (le webhook a entre-temps activé l'édition côté serveur).
+  const [checkoutPending, setCheckoutPending] = useState(false);
 
   const doSubmit = async () => {
     if (!email || !password) return;
@@ -46,8 +49,26 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
 
   const doCheckout = async (edition: 'standard' | 'full') => {
     setBusy(true);
-    await state.checkout(edition);
+    const url = await state.checkout(edition);
     setBusy(false);
+    if (url) setCheckoutPending(true);
+  };
+
+  const doVerifyPurchase = async () => {
+    setBusy(true);
+    await state.refresh();
+    setBusy(false);
+    const cur = useLicenseStore.getState();
+    if (cur.licensed) {
+      setCheckoutPending(false);
+      try {
+        const meta = EDITION_META[cur.edition] ?? EDITION_META.free;
+        toast(t('license.purchaseReady', { label: t(meta.labelKey) }), 'ok');
+      } catch {}
+      onClose();
+    } else {
+      try { toast(t('license.purchaseWaiting'), 'err'); } catch {}
+    }
   };
 
   const info = EDITION_META[state.edition] ?? EDITION_META.free;
@@ -87,6 +108,15 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                   {t('license.checkoutFull')}
                 </button>
               )}
+              {checkoutPending && (
+                <button
+                  onClick={doVerifyPurchase}
+                  disabled={busy}
+                  className="w-full px-3 py-2 rounded-md bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-500 disabled:opacity-40"
+                >
+                  {busy ? t('license.busy') : t('license.checkPurchase')}
+                </button>
+              )}
               <button
                 onClick={() => {
                   if (!confirmLogout) { setConfirmLogout(true); return; }
@@ -118,6 +148,15 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
               >
                 {t('license.checkoutFullFree')}
               </button>
+              {checkoutPending && (
+                <button
+                  onClick={doVerifyPurchase}
+                  disabled={busy}
+                  className="w-full px-3 py-2 rounded-md bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-500 disabled:opacity-40"
+                >
+                  {busy ? t('license.busy') : t('license.checkPurchase')}
+                </button>
+              )}
               <button
                 onClick={() => {
                   if (!confirmLogout) { setConfirmLogout(true); return; }
