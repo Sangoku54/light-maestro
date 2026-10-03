@@ -88,7 +88,7 @@ export function buildAkaiSurfaceWidgets(
       y: 0,
       width: FRAME_W,
       height: FRAME_H,
-      config: { title: 'Akai MIDIMIX', color: COLORS.frame },
+      config: { title: 'Pads + Faders', color: COLORS.frame },
       pageIndex,
     },
   ];

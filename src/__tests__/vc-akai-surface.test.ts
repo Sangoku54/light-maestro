@@ -126,7 +126,7 @@ describe('surface Akai (preset de page Console Virtuelle)', () => {
       const after = usePerformStore.getState();
 
       expect(index).toBe(before.vcPages.length);
-      expect(after.vcPages[index].name).toBe('Akai MIDIMIX');
+      expect(after.vcPages[index].name).toBe('Pads + Faders');
       expect(after.vcActivePage).toBe(index);
 
       const added: ConsoleWidget[] = after.vcWidgets.filter((w) => w.pageIndex === index);

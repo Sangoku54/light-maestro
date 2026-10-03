@@ -340,7 +340,7 @@ export const usePerformStore = create<PerformState>()(
     const pageIndex = get().vcPages.length;
     const widgets = buildAkaiSurfaceWidgets(preset, pageIndex, generateWidgetId);
     set((s) => ({
-      vcPages: [...s.vcPages, { name: 'Akai MIDIMIX' }],
+      vcPages: [...s.vcPages, { name: 'Pads + Faders' }],
       vcWidgets: [...s.vcWidgets, ...widgets],
       vcActivePage: pageIndex,
     }));
