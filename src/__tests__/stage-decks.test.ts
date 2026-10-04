@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import {
   defaultStageDecks,
   defaultNewDeckHeight,
+  sanitizeDeckUpdates,
   migrateStageDecks,
   deckContains,
   deckTopAt,
@@ -86,5 +87,16 @@ describe('stage-decks — plateaux multi-rects', () => {
     expect(defaultNewDeckHeight([])).toBe(0.4);
     expect(defaultNewDeckHeight(defaultStageDecks())).toBe(1.9);
     expect(defaultNewDeckHeight([T(0.5, 0.5, 1, 1, 1.0), T(0.5, 0.7, 0.4, 0.3, 1.9)])).toBe(2.3);
+  });
+
+  it('sanitizeDeckUpdates : vide/invalide ignoré, jamais de NaN en store', () => {
+    // Champ vidé → Number('') === 0 : le store doit l'ignorer (pas de H à 0).
+    expect(sanitizeDeckUpdates({ h: 0, w: 0.4 })).toEqual({ h: 0, w: 0.4 });
+    expect(sanitizeDeckUpdates({ h: Number('') })).toEqual({ h: 0 });
+    expect(sanitizeDeckUpdates({ h: NaN })).toEqual({});
+    expect(sanitizeDeckUpdates({ h: undefined })).toEqual({});
+    expect(sanitizeDeckUpdates({ name: '   ' })).toEqual({});
+    expect(sanitizeDeckUpdates({ name: 'Runway' })).toEqual({ name: 'Runway' });
+    expect(sanitizeDeckUpdates({})).toEqual({});
   });
 });

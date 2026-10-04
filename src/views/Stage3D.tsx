@@ -3357,13 +3357,27 @@ export const Stage3D: React.FC<{
                 setDeckDrafts((prev) => ({ ...prev, [deck.id]: { ...(prev[deck.id] ?? deckToMeters(deck, stageDims)), [field]: v } }));
               const commitF = (field: string) => {
                 const cur = deckDrafts[deck.id] ?? deckToMeters(deck, stageDims);
+                const revert = () =>
+                  setDeckDrafts((prev) => ({ ...prev, [deck.id]: deckToMeters(deck, stageDims) }));
                 if (field === 'name') {
-                  updateStageDeck(deck.id, { name: String(cur.name).trim() || deck.name });
-                } else {
-                  updateStageDeck(deck.id, deckFromMeters({
-                    x: Number(cur.x), y: Number(cur.y), w: Number(cur.w), d: Number(cur.d), h: Number(cur.h),
-                  }, stageDims));
+                  const name = String(cur.name).trim();
+                  // Nom vidé : on restaure l'affichage, on ne commite rien.
+                  if (!name) { revert(); return; }
+                  updateStageDeck(deck.id, { name });
+                  return;
                 }
+                // Champ numérique vidé/invalide (ex. en cours de frappe) :
+                // on restaure l'affichage au lieu de commiter 0/NaN
+                // (un H à 0 coule le plateau sous le sol → « disparu »).
+                for (const v of [cur.x, cur.y, cur.w, cur.d, cur.h]) {
+                  if (v === '' || v === null || v === undefined || !Number.isFinite(Number(v))) {
+                    revert();
+                    return;
+                  }
+                }
+                updateStageDeck(deck.id, deckFromMeters({
+                  x: Number(cur.x), y: Number(cur.y), w: Number(cur.w), d: Number(cur.d), h: Number(cur.h),
+                }, stageDims));
               };
               const num = (field: 'x' | 'y' | 'w' | 'd' | 'h', label: string) => (
                 <label key={field} className="flex flex-col items-center gap-0.5" onClick={(e) => e.stopPropagation()}>

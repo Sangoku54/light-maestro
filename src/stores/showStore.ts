@@ -11,7 +11,7 @@ import type { DmxCue } from '../hooks/dmx-cues';
 import { normalizeFolderName } from '../utils/scene-fixtures';
 import type { MusicianRoster } from '../utils/musicians';
 import type { FixtureSupport } from '../utils/supports';
-import { defaultStageDecks, defaultNewDeckHeight, migrateStageDecks, type StageDeck } from '../utils/stage-decks';
+import { defaultStageDecks, defaultNewDeckHeight, migrateStageDecks, sanitizeDeckUpdates, type StageDeck } from '../utils/stage-decks';
 import { useAppStore } from './appStore';
 import { getLicenseLimits } from './licenseStore';
 
@@ -727,8 +727,11 @@ export const useShowStore = create<ShowState>((set, get) => ({
     return id;
   },
   updateStageDeck: (id, updates) => {
+    // Champs vides/invalides ignorés (jamais de NaN/0 accidentel en store).
+    const clean = sanitizeDeckUpdates(updates);
+    if (Object.keys(clean).length === 0) return;
     set((state) => ({
-      stageDecks: state.stageDecks.map((d) => (d.id === id ? { ...d, ...updates, id: d.id } : d)),
+      stageDecks: state.stageDecks.map((d) => (d.id === id ? { ...d, ...clean } : d)),
     }));
     useAppStore.getState().markDirty();
   },

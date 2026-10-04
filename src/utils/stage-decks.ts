@@ -146,3 +146,20 @@ export function defaultNewDeckHeight(decks: StageDeck[]): number {
   }
   return Math.round((top + 0.4) * 10) / 10;
 }
+
+/**
+ * Assainit une mise à jour de plateau : ignore les champs vides/invalides
+ * (ex. champ vidé → `Number('') === 0` → plateau coulé à 0 par accident).
+ * Ne conserve que les valeurs finies + nom non vide.
+ */
+export function sanitizeDeckUpdates(updates: Partial<StageDeck>): Partial<StageDeck> {
+  const clean: Partial<StageDeck> = {};
+  if (typeof updates.name === 'string' && updates.name.trim()) {
+    clean.name = updates.name.trim().slice(0, 40);
+  }
+  for (const k of ['cx', 'cy', 'w', 'd', 'h'] as const) {
+    const v = updates[k];
+    if (typeof v === 'number' && Number.isFinite(v)) clean[k] = v;
+  }
+  return clean;
+}
