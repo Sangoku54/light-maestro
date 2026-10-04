@@ -37,6 +37,7 @@ import { useTranslation } from 'react-i18next';
 import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X, LayoutGrid, Music, Zap, List, Search, Crosshair, Sparkles, LampDesk, Undo2, RotateCcw } from 'lucide-react';
 import { DEFAULT_POSITIONS, MUSICIAN_KINDS, isRosterEmpty, normalizeRoster, rosterTotal, type MusicianKind, type MusicianRoster } from '../utils/musicians';
 import { SUPPORT_KINDS, needsSupportGeometry, resolveSupportKind, supportColumnHeight, type FixtureSupport } from '../utils/supports';
+import { deckTopAt, deckRectMeters, deckToMeters, deckFromMeters, type StageDeck } from '../utils/stage-decks';
 import clavierImg from '../assets/musicians/clavier.png';
 import chanteuseImg from '../assets/musicians/chanteuse.png';
 import chanteurImg from '../assets/musicians/chanteur.png';
@@ -706,9 +707,39 @@ export const Stage3D: React.FC<{
   const [musiciansMenuOpen, setMusiciansMenuOpen] = useState(false);
   const musiciansBtnRef = useRef<HTMLButtonElement>(null);
   const [supportsMenuOpen, setSupportsMenuOpen] = useState(false);
+  const [decksMenuOpen, setDecksMenuOpen] = useState(false);
+  // Brouillons d'édition des plateaux (commit au blur/Entrée : évite de
+  // reconstruire la scène 3D à chaque frappe, comme draftDims).
+  const [deckDrafts, setDeckDrafts] = useState<Record<string, { name: string; x: number | string; y: number | string; w: number | string; d: number | string; h: number | string }>>({});
   const [musiciansMenuPos, setMusiciansMenuPos] = useState<{ top: number; left: number } | null>(null);
   const stageDims = useShowStore((s) => s.stageDims);
   const setStageDims = useShowStore((s) => s.setStageDims);
+  // ── Plateaux multi-rects (podium, runway en T…) ──
+  // Même repère normalisé que les fixtures : aucun déplacement existant.
+  // La base de chaque fixture = dessus du plateau sous ses pieds.
+  const stageDecks = useShowStore((s) => s.stageDecks);
+  const addStageDeck = useShowStore((s) => s.addStageDeck);
+  const updateStageDeck = useShowStore((s) => s.updateStageDeck);
+  const removeStageDeck = useShowStore((s) => s.removeStageDeck);
+  const stageDecksRef = useRef(stageDecks);
+  stageDecksRef.current = stageDecks;
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
+  const selectedDeckIdRef = useRef<string | null>(null);
+  selectedDeckIdRef.current = selectedDeckId;
+  // Arêtes des plateaux (surlignage du plateau sélectionné sans rebuild).
+  const deckEdgesRef = useRef<Array<{ id: string; line: THREE.LineSegments }>>([]);
+  useEffect(() => {
+    const next: typeof deckDrafts = {};
+    for (const deck of stageDecks) next[deck.id] = deckToMeters(deck, stageDims);
+    setDeckDrafts(next);
+  }, [stageDecks, stageDims.width, stageDims.depth]);
+  useEffect(() => {
+    for (const { id, line } of deckEdgesRef.current) {
+      try {
+        (line.material as THREE.LineBasicMaterial).color.setHex(id === selectedDeckId ? 0xa855f7 : 0x3a3a5e);
+      } catch { /* arête déjà disposée */ }
+    }
+  }, [selectedDeckId]);
   // ── Resizable stage dimensions (width × depth, meters) ──
   // Fixture positions are normalized (0-1), so resizing scales hardware spacing proportionally.
   const stageDimsRef = useRef(stageDims);
@@ -812,8 +843,8 @@ export const Stage3D: React.FC<{
     const group = new THREE.Group();
     const stageX = (pos.x - 0.5) * stageDimsRef.current.width;
     const stageZ = (pos.y - 0.5) * stageDimsRef.current.depth;
-    // Map h (0-1) to actual meters: 0 → 0m, 1 → 5m
-    const stageY = STAGE_HEIGHT + pos.h * 5.0;
+    // Map h (0-1) to actual meters above the deck below: 0 → deck top, 1 → +5m
+    const stageY = deckTopAt(stageDecksRef.current, pos.x, pos.y) + pos.h * 5.0;
     group.position.set(stageX, stageY, stageZ);
     // Apply heading rotation (degrees → radians, Y axis rotation).
     // Mode « hanging » : yaw auto-aim vers le centre de scène (vers le public).
@@ -1267,41 +1298,50 @@ export const Stage3D: React.FC<{
     gridHelper.position.set(0, 0.005, -4);
     scene.add(gridHelper);
 
-    // Stage volume (3D box for thickness)
-    const stageVolumeGeo = new THREE.BoxGeometry(STAGE_WIDTH + 0.1, STAGE_THICKNESS, STAGE_DEPTH + 0.1);
-    const stageVolumeMat = new THREE.MeshStandardMaterial({
-      color: 0x111122,
-      roughness: 0.8,
-      metalness: 0.1,
-    });
-    const stageVolume = new THREE.Mesh(stageVolumeGeo, stageVolumeMat);
-    stageVolume.position.y = STAGE_HEIGHT - STAGE_THICKNESS / 2;
-    stageVolume.receiveShadow = true;
-    stageVolume.castShadow = true;
-    scene.add(stageVolume);
+    // Stage decks (multi-rects : podium, runway en T…) — un volume par plateau.
+    // Par défaut un seul plateau identique à l'ancien rectangle (rendu inchangé).
+    deckEdgesRef.current = [];
+    for (const deck of stageDecksRef.current) {
+      const r = deckRectMeters(deck, { width: STAGE_WIDTH, depth: STAGE_DEPTH });
+      const deckVolumeGeo = new THREE.BoxGeometry(r.w + 0.1, STAGE_THICKNESS, r.d + 0.1);
+      const deckVolumeMat = new THREE.MeshStandardMaterial({
+        color: 0x111122,
+        roughness: 0.8,
+        metalness: 0.1,
+      });
+      const deckVolume = new THREE.Mesh(deckVolumeGeo, deckVolumeMat);
+      deckVolume.position.set(r.x, deck.h - STAGE_THICKNESS / 2, r.z);
+      deckVolume.receiveShadow = true;
+      deckVolume.castShadow = true;
+      scene.add(deckVolume);
 
-    // Stage platform top
-    const stageGeo = new THREE.PlaneGeometry(STAGE_WIDTH, STAGE_DEPTH);
-    const stageMat = new THREE.MeshStandardMaterial({
-      color: 0x151525,
-      roughness: 0.7,
-      metalness: 0.05,
-    });
-    const stage = new THREE.Mesh(stageGeo, stageMat);
-    stage.rotation.x = -Math.PI / 2;
-    stage.position.y = STAGE_HEIGHT + 0.01;
-    stage.receiveShadow = true;
-    scene.add(stage);
+      // Deck platform top
+      const deckGeo = new THREE.PlaneGeometry(r.w, r.d);
+      const deckMat = new THREE.MeshStandardMaterial({
+        color: 0x151525,
+        roughness: 0.7,
+        metalness: 0.05,
+      });
+      const deckTop = new THREE.Mesh(deckGeo, deckMat);
+      deckTop.rotation.x = -Math.PI / 2;
+      deckTop.position.set(r.x, deck.h + 0.01, r.z);
+      deckTop.receiveShadow = true;
+      scene.add(deckTop);
 
-    // Stage edge line
-    const edgeGeo = new THREE.EdgesGeometry(stageGeo);
-    const edgeLine = new THREE.LineSegments(
-      edgeGeo,
-      new THREE.LineBasicMaterial({ color: 0x3a3a5e, linewidth: 1 }),
-    );
-    edgeLine.rotation.x = -Math.PI / 2;
-    edgeLine.position.y = STAGE_HEIGHT + 0.015;
-    scene.add(edgeLine);
+      // Deck edge line (violet si sélectionné dans l'éditeur)
+      const deckEdgeGeo = new THREE.EdgesGeometry(deckGeo);
+      const deckEdgeLine = new THREE.LineSegments(
+        deckEdgeGeo,
+        new THREE.LineBasicMaterial({
+          color: selectedDeckIdRef.current === deck.id ? 0xa855f7 : 0x3a3a5e,
+          linewidth: 1,
+        }),
+      );
+      deckEdgeLine.rotation.x = -Math.PI / 2;
+      deckEdgeLine.position.set(r.x, deck.h + 0.015, r.z);
+      scene.add(deckEdgeLine);
+      deckEdgesRef.current.push({ id: deck.id, line: deckEdgeLine });
+    }
 
     // Stage front lip overlay (reinforces the edge visually)
     const lipGeo = new THREE.BoxGeometry(STAGE_WIDTH + 0.05, 0.04, 0.15);
@@ -1548,7 +1588,7 @@ export const Stage3D: React.FC<{
         container.removeChild(renderer.domElement);
       }
     };
-  }, [stageDims]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [stageDims, stageDecks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Overlay gizmo (axes) ──────────────────────────
   // Minimal gizmo via HTML (évite 2e renderer) — coin bas-gauche
@@ -1666,8 +1706,8 @@ export const Stage3D: React.FC<{
         sprite.userData.musicianId = id;
         const personH = MUSICIAN_HEIGHTS[kind];
         sprite.scale.set(personH, personH, 1); // placeholder; aspect set on load
-        const baseY = STAGE_HEIGHT + personH / 2;
         const pos = musicianPositionsRef.current[id] ?? DEFAULT_POSITIONS[kind];
+        const baseY = deckTopAt(stageDecksRef.current, pos.x, pos.z) + personH / 2;
         sprite.position.set((pos.x - 0.5) * dims.width, baseY, (pos.z - 0.5) * dims.depth);
         group.add(sprite);
         refs.push({ sprite, phase: i * 1.3, baseY });
@@ -1688,7 +1728,7 @@ export const Stage3D: React.FC<{
 
     musiciansRef.current = refs;
     scene.add(group);
-  }, [musicians, stageDims]);
+  }, [musicians, stageDims, stageDecks]);
 
   // ── Virtual musicians: drag to reposition on stage ──
   useEffect(() => {
@@ -1747,6 +1787,9 @@ export const Stage3D: React.FC<{
       if (m) {
         m.sprite.position.x = (nx - 0.5) * dims.width;
         m.sprite.position.z = (nz - 0.5) * dims.depth;
+        // Remonte sur le plateau d'arrivée (runway vs podium…).
+        m.baseY = deckTopAt(stageDecksRef.current, nx, nz) + m.sprite.scale.y / 2;
+        m.sprite.position.y = m.baseY;
       }
     };
 
@@ -1766,7 +1809,7 @@ export const Stage3D: React.FC<{
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [stageDims]);
+  }, [stageDims, stageDecks]);
 
   // ── Truss visibility by stage scene ────────────────
   useEffect(() => {
@@ -1911,7 +1954,7 @@ export const Stage3D: React.FC<{
         f3d.floorGlow = floorGlow;
 
         fixturesRef.current.set(pf.id, f3d);
-        updateFixtureSupport(scene, f3d, pos, stageDimsRef.current);
+        updateFixtureSupport(scene, f3d, pos, stageDimsRef.current, stageDecksRef.current);
 
         // Movement trail line
         const trailGeo = new THREE.BufferGeometry();
@@ -1939,7 +1982,7 @@ export const Stage3D: React.FC<{
         const pos = fixturePositions[pf.id] || { x: 0.5, y: 0.3, h: 0.5, heading: 0 };
         const stageX = (pos.x - 0.5) * stageDimsRef.current.width;
         const stageZ = (pos.y - 0.5) * stageDimsRef.current.depth;
-        const stageY = STAGE_HEIGHT + pos.h * 5.0;
+        const stageY = deckTopAt(stageDecksRef.current, pos.x, pos.y) + pos.h * 5.0;
         f3d.group.position.set(stageX, stageY, stageZ);
         f3d.group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current);
         if (pos.mountMode) f3d.mountMode = pos.mountMode;
@@ -1962,7 +2005,7 @@ export const Stage3D: React.FC<{
             eh.beamCone.position.set(0, -ch / 2, 0);
           }
         }
-        updateFixtureSupport(scene, f3d, pos, stageDimsRef.current);
+        updateFixtureSupport(scene, f3d, pos, stageDimsRef.current, stageDecksRef.current);
       }
 
       // Publie les channelMaps après sync complète (add + remove) pour
@@ -1984,7 +2027,7 @@ export const Stage3D: React.FC<{
       }
       fixturesRef.current.clear();
     };
-  }, [fixtureDefsReady, patchedFixtures, showBeams, createFixtureGeometry, stageDims]);
+  }, [fixtureDefsReady, patchedFixtures, showBeams, createFixtureGeometry, stageDims, stageDecks]);
 
   // ── Update fixture positions from store ─────────────
   // Separate effect - only updates positions, doesn't recreate geometry
@@ -1996,7 +2039,7 @@ export const Stage3D: React.FC<{
       if (!pos) continue;
       const stageX = (pos.x - 0.5) * stageDimsRef.current.width;
       const stageZ = (pos.y - 0.5) * stageDimsRef.current.depth;
-      const stageY = STAGE_HEIGHT + pos.h * 5.0;
+      const stageY = deckTopAt(stageDecksRef.current, pos.x, pos.y) + pos.h * 5.0;
       f3d.group.position.set(stageX, stageY, stageZ);
       f3d.group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current);
       if (pos.mountMode) f3d.mountMode = pos.mountMode;
@@ -2019,9 +2062,9 @@ export const Stage3D: React.FC<{
           eh.beamCone.position.set(0, -ch / 2, 0);
         }
       }
-      updateFixtureSupport(sceneRef.current, f3d, pos, stageDimsRef.current);
+      updateFixtureSupport(sceneRef.current, f3d, pos, stageDimsRef.current, stageDecksRef.current);
     }
-  }, [fixturePositions, patchedFixtures]);
+  }, [fixturePositions, patchedFixtures, stageDecks]);
 
   // ── Show/hide beams toggle ──────────────────────────
   useEffect(() => {
@@ -3211,6 +3254,14 @@ export const Stage3D: React.FC<{
                 </button>
               </RichTooltip>
             </div>
+            <div className="relative flex items-center">
+              <LayoutGrid size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
+              <RichTooltip content={{ title: t('stage3D.decksTipTitle'), text: t('stage3D.decksTipText'), tone: 'info' }} placement="bottom">
+                <button onClick={() => setDecksMenuOpen(v => !v)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50 whitespace-nowrap" title={t('stage3D.decksBtnTitle')}>
+                  {t('stage3D.decksBtn')} ({stageDecks.length})
+                </button>
+              </RichTooltip>
+            </div>
         </div>
       </div>
       {/* Musiciens popup — centrée comme toutes les modales */}
@@ -3264,6 +3315,96 @@ export const Stage3D: React.FC<{
               );
             })}
             <p className="px-2 pt-1 text-[9px] text-gray-600">{t('stage3D.supportHint')}</p>
+          </div>
+        </div>
+      )}
+      {/* Decks popup — éditeur de plateaux multi-rects (T de défilé, podium…) */}
+      {decksMenuOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setDecksMenuOpen(false)}>
+          <div className="w-80 max-h-[80vh] overflow-y-auto rounded-lg border border-gray-700/60 bg-[#0d0d14] shadow-xl shadow-black/60 p-2" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
+              <span className="text-[10px] font-medium text-gray-300">{t('stage3D.decksTitle')} ({stageDecks.length})</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const id = addStageDeck();
+                    setSelectedDeckId(id);
+                  }}
+                  className="text-[9px] text-purple-300 hover:text-purple-200"
+                >
+                  + {t('stage3D.addDeck')}
+                </button>
+                <button onClick={() => setDecksMenuOpen(false)} className="text-gray-500 hover:text-gray-300 text-sm px-1">✕</button>
+              </div>
+            </div>
+            {stageDecks.map((deck) => {
+              const dr = deckDrafts[deck.id] ?? deckToMeters(deck, stageDims);
+              const sel = (selectedDeckId ?? stageDecks[0]?.id) === deck.id;
+              const setF = (field: string, v: string) =>
+                setDeckDrafts((prev) => ({ ...prev, [deck.id]: { ...(prev[deck.id] ?? deckToMeters(deck, stageDims)), [field]: v } }));
+              const commitF = (field: string) => {
+                const cur = deckDrafts[deck.id] ?? deckToMeters(deck, stageDims);
+                if (field === 'name') {
+                  updateStageDeck(deck.id, { name: String(cur.name).trim() || deck.name });
+                } else {
+                  updateStageDeck(deck.id, deckFromMeters({
+                    x: Number(cur.x), y: Number(cur.y), w: Number(cur.w), d: Number(cur.d), h: Number(cur.h),
+                  }, stageDims));
+                }
+              };
+              const num = (field: 'x' | 'y' | 'w' | 'd' | 'h', label: string) => (
+                <label key={field} className="flex flex-col items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                  <span className="text-[8px] text-gray-600">{label}</span>
+                  <input
+                    type="number" step={0.5} min={0} value={dr[field] as number | string}
+                    onChange={(e) => setF(field, e.target.value)}
+                    onBlur={() => commitF(field)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') commitF(field); }}
+                    className="w-full bg-black/30 border border-gray-800 rounded px-1 py-0.5 text-[10px] text-gray-200 text-center focus:outline-none focus:border-purple-500/50"
+                  />
+                </label>
+              );
+              return (
+                <div
+                  key={deck.id}
+                  onClick={() => setSelectedDeckId(deck.id)}
+                  className={`rounded border px-2 py-1.5 mb-1 cursor-pointer ${sel ? 'border-purple-500/50 bg-purple-600/10' : 'border-gray-800/60'}`}
+                >
+                  <div className="flex items-center gap-1">
+                    <input
+                      value={dr.name}
+                      onChange={(e) => setF('name', e.target.value)}
+                      onBlur={() => commitF('name')}
+                      onKeyDown={(e) => { if (e.key === 'Enter') commitF('name'); }}
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={t('stage3D.decksTitle')}
+                      className="flex-1 min-w-0 bg-transparent text-[11px] text-gray-200 focus:outline-none border-b border-transparent focus:border-purple-500/50"
+                    />
+                    <span className="text-[9px] text-gray-500 font-mono">{Number(dr.h)}m</span>
+                    {stageDecks.length > 1 && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeStageDeck(deck.id);
+                          if (selectedDeckId === deck.id) {
+                            const rest = stageDecks.filter((d) => d.id !== deck.id);
+                            setSelectedDeckId(rest[0]?.id ?? null);
+                          }
+                        }}
+                        className="text-gray-600 hover:text-red-400 text-xs px-1"
+                        title={t('stage3D.deleteDeck')}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-5 gap-1 mt-1">
+                    {num('x', 'X')}{num('y', 'Y')}{num('w', 'L')}{num('d', 'P')}{num('h', 'H')}
+                  </div>
+                </div>
+              );
+            })}
+            <p className="px-2 pt-1 text-[9px] text-gray-600">{t('stage3D.decksHint')}</p>
           </div>
         </div>
       )}
@@ -4266,20 +4407,22 @@ function updateFixtureSupport(
   f3d: Fixture3D,
   pos: FixturePos,
   stageDims: { width: number; depth: number },
+  decks: StageDeck[],
 ): void {
   if (!scene) return;
   const kind = resolveSupportKind(pos.support);
   const stageX = (pos.x - 0.5) * stageDims.width;
   const stageZ = (pos.y - 0.5) * stageDims.depth;
-  const stageY = STAGE_HEIGHT + pos.h * 5.0;
-  const height = supportColumnHeight(stageY, STAGE_HEIGHT);
+  const baseY = deckTopAt(decks, pos.x, pos.y);
+  const stageY = baseY + pos.h * 5.0;
+  const height = supportColumnHeight(stageY, baseY);
   const key = `${kind}:${Math.round(stageX * 20)}:${Math.round(stageZ * 20)}:${Math.round(height * 20)}`;
   if (f3d.supportGroup && f3d.supportKey === key) return;
   clearFixtureSupport(scene, f3d);
   if (!needsSupportGeometry(kind, height)) return;
   const g = buildSupportVisual(kind, height);
   if (!g) return;
-  g.position.set(stageX, STAGE_HEIGHT, stageZ);
+  g.position.set(stageX, baseY, stageZ);
   scene.add(g);
   f3d.supportGroup = g;
   f3d.supportKey = key;

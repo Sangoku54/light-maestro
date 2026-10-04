@@ -140,6 +140,7 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
       showStore: {
         patchedFixtures: showState.patchedFixtures,
         stageDims: showState.stageDims,
+        stageDecks: showState.stageDecks,
         universes: showState.universes,
         fixturePositions: showState.fixturePositions,
         fixtureGroups: showState.fixtureGroups,
@@ -439,6 +440,9 @@ const App: React.FC = () => {
         if (data.showStore) {
           if (data.showStore.patchedFixtures) ss.setPatchedFixtures(data.showStore.patchedFixtures);
           if (data.showStore.stageDims) ss.setStageDims(data.showStore.stageDims);
+          // Inconditionnel (migration) : un projet sans plateaux reçoit le
+          // plateau unique historique, sans hériter du projet précédent.
+          ss.setStageDecks(data.showStore.stageDecks);
           if (data.showStore.universes) { ss.setShowUniverses(data.showStore.universes); syncUniversesToEngine(data.showStore.universes); }
           if (data.showStore.fixturePositions) ss.setFixturePositions(data.showStore.fixturePositions);
           if (data.showStore.fixtureGroups) ss.setFixtureGroups(data.showStore.fixtureGroups);

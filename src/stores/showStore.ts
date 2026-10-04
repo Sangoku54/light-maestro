@@ -11,6 +11,7 @@ import type { DmxCue } from '../hooks/dmx-cues';
 import { normalizeFolderName } from '../utils/scene-fixtures';
 import type { MusicianRoster } from '../utils/musicians';
 import type { FixtureSupport } from '../utils/supports';
+import { defaultStageDecks, migrateStageDecks, type StageDeck } from '../utils/stage-decks';
 import { useAppStore } from './appStore';
 import { getLicenseLimits } from './licenseStore';
 
@@ -340,6 +341,14 @@ interface ShowState {
   fixturePositions: Record<string, FixturePos>;
   stageDims: { width: number; depth: number };
   setStageDims: (dims: { width: number; depth: number }) => void;
+  /** Plateaux multi-rects (podium, runway en T…). Repère normalisé 0-1
+   *  (même repère que FixturePos), hauteurs en mètres. Défaut = plateau
+   *  unique identique à l'ancien rectangle (rendu inchangé). */
+  stageDecks: StageDeck[];
+  setStageDecks: (decks: StageDeck[]) => void;
+  addStageDeck: (deck?: Partial<StageDeck>) => string;
+  updateStageDeck: (id: string, updates: Partial<StageDeck>) => void;
+  removeStageDeck: (id: string) => void;
   setFixturePosition: (id: string, pos: Partial<FixturePos>) => void;
   setFixturePositions: (positions: Record<string, FixturePos>) => void;
   initFixturePosition: (id: string, fixtureType: string, index: number) => void;
@@ -451,6 +460,7 @@ function saveUniverses(universes: ShowUniverse[]): void {
 export const useShowStore = create<ShowState>((set, get) => ({
   patchedFixtures: [],
   stageDims: { width: 10, depth: 8 },
+  stageDecks: defaultStageDecks(),
   universes: loadUniverses(),
 
   patchFixture: (fixture) => {
@@ -687,6 +697,43 @@ export const useShowStore = create<ShowState>((set, get) => ({
   },
   setStageDims: (dims) => {
     set({ stageDims: dims });
+    useAppStore.getState().markDirty();
+  },
+  setStageDecks: (decks) => {
+    set({ stageDecks: migrateStageDecks(decks) });
+    useAppStore.getState().markDirty();
+  },
+  addStageDeck: (deck) => {
+    const id = `deck-${Date.now().toString(36)}`;
+    set((state) => ({
+      stageDecks: [
+        ...state.stageDecks,
+        {
+          id,
+          name: `Plateau ${state.stageDecks.length + 1}`,
+          cx: 0.5,
+          cy: 0.7,
+          w: 0.4,
+          d: 0.3,
+          h: 0.4,
+          ...deck,
+        },
+      ],
+    }));
+    useAppStore.getState().markDirty();
+    return id;
+  },
+  updateStageDeck: (id, updates) => {
+    set((state) => ({
+      stageDecks: state.stageDecks.map((d) => (d.id === id ? { ...d, ...updates, id: d.id } : d)),
+    }));
+    useAppStore.getState().markDirty();
+  },
+  removeStageDeck: (id) => {
+    set((state) => ({
+      // Toujours ≥ 1 plateau (la scène ne disparaît jamais).
+      stageDecks: state.stageDecks.length > 1 ? state.stageDecks.filter((d) => d.id !== id) : state.stageDecks,
+    }));
     useAppStore.getState().markDirty();
   },
 
