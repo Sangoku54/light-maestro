@@ -27,6 +27,14 @@ export interface StageDeck {
   d: number;
   /** Hauteur du dessus du plateau en mètres (sol = 0). */
   h: number;
+  /** Rotation PLANE autour du centre, en degrés, sens horaire vu du dessus
+   *  (0 = aligné). Pas de bascule 3D : le plateau reste horizontal. */
+  rot?: number;
+}
+
+/** Angle normalisé 0-360 (degrés). */
+export function normAngle(deg: number): number {
+  return ((deg % 360) + 360) % 360;
 }
 
 /** Hauteur historique du plateau unique (rendu inchangé par défaut). */
@@ -53,14 +61,23 @@ export function migrateStageDecks(saved: unknown): StageDeck[] {
       w: Math.min(2, Math.max(0.05, num(r.w, 0.4))),
       d: Math.min(2, Math.max(0.05, num(r.d, 0.3))),
       h: Math.min(10, Math.max(0, num(r.h, 0.4))),
+      rot: normAngle(num(r.rot, 0)),
     });
   }
   return decks.length > 0 ? decks : defaultStageDecks();
 }
 
-/** Le point normalisé (x, y) est-il sur le plateau ? */
+/** Le point normalisé (x, y) est-il sur le plateau (repère pivoté) ? */
 export function deckContains(deck: StageDeck, x: number, y: number): boolean {
-  return Math.abs(x - deck.cx) <= deck.w / 2 && Math.abs(y - deck.cy) <= deck.d / 2;
+  const a = ((deck.rot ?? 0) * Math.PI) / 180;
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  // Monde → repère du plateau (rotation inverse de celle du rendu).
+  const dx = x - deck.cx;
+  const dy = y - deck.cy;
+  const lx = dx * c + dy * s;
+  const lz = -dx * s + dy * c;
+  return Math.abs(lx) <= deck.w / 2 && Math.abs(lz) <= deck.d / 2;
 }
 
 /**
@@ -98,7 +115,7 @@ export function deckRectMeters(
 export function deckToMeters(
   deck: StageDeck,
   stageDims: { width: number; depth: number },
-): { name: string; x: number; y: number; w: number; d: number; h: number } {
+): { name: string; x: number; y: number; w: number; d: number; h: number; r: number } {
   return {
     name: deck.name,
     x: Math.round((deck.cx - deck.w / 2) * stageDims.width * 10) / 10,
@@ -106,6 +123,7 @@ export function deckToMeters(
     w: Math.round(deck.w * stageDims.width * 10) / 10,
     d: Math.round(deck.d * stageDims.depth * 10) / 10,
     h: deck.h,
+    r: Math.round(normAngle(deck.rot ?? 0) * 10) / 10,
   };
 }
 
@@ -160,6 +178,9 @@ export function sanitizeDeckUpdates(updates: Partial<StageDeck>): Partial<StageD
   for (const k of ['cx', 'cy', 'w', 'd', 'h'] as const) {
     const v = updates[k];
     if (typeof v === 'number' && Number.isFinite(v)) clean[k] = v;
+  }
+  if (typeof updates.rot === 'number' && Number.isFinite(updates.rot)) {
+    clean.rot = normAngle(updates.rot);
   }
   return clean;
 }

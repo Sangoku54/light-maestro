@@ -98,5 +98,24 @@ describe('stage-decks — plateaux multi-rects', () => {
     expect(sanitizeDeckUpdates({ name: '   ' })).toEqual({});
     expect(sanitizeDeckUpdates({ name: 'Runway' })).toEqual({ name: 'Runway' });
     expect(sanitizeDeckUpdates({})).toEqual({});
+    expect(sanitizeDeckUpdates({ rot: 450 })).toEqual({ rot: 90 });
+    expect(sanitizeDeckUpdates({ rot: NaN })).toEqual({});
+  });
+
+  it('rotation plane : contenance dans le repère pivoté', () => {
+    // Carré 0,4 × 0,4 pivoté à 45° → losange, pointes sur les axes à .283.
+    const deck = { ...T(0.5, 0.5, 0.4, 0.4, 0.8), rot: 45 };
+    expect(deckContains(deck, 0.5, 0.5)).toBe(true);
+    expect(deckContains(deck, 0.5, 0.78)).toBe(true);
+    expect(deckContains(deck, 0.5, 0.79)).toBe(false);
+    // Ancien coin (.7, .7) : hors du losange.
+    expect(deckContains(deck, 0.7, 0.7)).toBe(false);
+    // Au-delà de la pointe Est (.783).
+    expect(deckContains(deck, 0.85, 0.5)).toBe(false);
+    // Sans rotation : comportement inchangé.
+    expect(deckContains({ ...deck, rot: 0 }, 0.7, 0.5)).toBe(true);
+    // Base (deckTopAt) suit la rotation.
+    expect(deckTopAt([deck], 0.5, 0.78)).toBe(0.8);
+    expect(deckTopAt([deck], 0.7, 0.7)).toBe(0);
   });
 });

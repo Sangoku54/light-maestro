@@ -719,6 +719,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
           d: 0.3,
           // Empilé visible d'office (jamais enterré) ; l'utilisateur ajuste H ensuite.
           h: defaultNewDeckHeight(state.stageDecks),
+          rot: 0,
           ...deck,
         },
       ],

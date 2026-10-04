@@ -708,9 +708,14 @@ export const Stage3D: React.FC<{
   const musiciansBtnRef = useRef<HTMLButtonElement>(null);
   const [supportsMenuOpen, setSupportsMenuOpen] = useState(false);
   const [decksMenuOpen, setDecksMenuOpen] = useState(false);
+  const decksMenuOpenRef = useRef(false);
+  decksMenuOpenRef.current = decksMenuOpen;
+  // Drag d'un plateau au clic gauche (éditeur Plateaux ouvert uniquement :
+  // sinon le clic gauche reste réservé à l'orbite et aux fixtures).
+  const deckDragRef = useRef<{ id: string } | null>(null);
   // Brouillons d'édition des plateaux (commit au blur/Entrée : évite de
   // reconstruire la scène 3D à chaque frappe, comme draftDims).
-  const [deckDrafts, setDeckDrafts] = useState<Record<string, { name: string; x: number | string; y: number | string; w: number | string; d: number | string; h: number | string }>>({});
+  const [deckDrafts, setDeckDrafts] = useState<Record<string, { name: string; x: number | string; y: number | string; w: number | string; d: number | string; h: number | string; r: number | string }>>({});
   const [musiciansMenuPos, setMusiciansMenuPos] = useState<{ top: number; left: number } | null>(null);
   const stageDims = useShowStore((s) => s.stageDims);
   const setStageDims = useShowStore((s) => s.setStageDims);
@@ -729,6 +734,15 @@ export const Stage3D: React.FC<{
   selectedDeckIdRef.current = selectedDeckId;
   // Arêtes des plateaux (surlignage du plateau sélectionné sans rebuild).
   const deckEdgesRef = useRef<Array<{ id: string; line: THREE.LineSegments }>>([]);
+  // Groupes des plateaux (déplacement/rotation sans rebuild géométrie).
+  const deckGroupsRef = useRef(new Map<string, { group: THREE.Group; top: THREE.Mesh }>());
+  // Signature géométrique des plateaux : la scène ne se reconstruit que si
+  // elle change (taille/hauteur/ajout/suppression). Déplacement et rotation
+  // passent par l'effet de synchro (fluide, caméra conservée).
+  const deckGeoKey = useMemo(
+    () => stageDecks.map((d) => [d.id, d.w, d.d, d.h].join(':')).join('|'),
+    [stageDecks],
+  );
   useEffect(() => {
     const next: typeof deckDrafts = {};
     for (const deck of stageDecks) next[deck.id] = deckToMeters(deck, stageDims);
@@ -1299,11 +1313,18 @@ export const Stage3D: React.FC<{
     gridHelper.position.set(0, 0.005, -4);
     scene.add(gridHelper);
 
-    // Stage decks (multi-rects : podium, runway en T…) — un volume par plateau.
+    // Stage decks (multi-rects : podium, runway en T…) — un groupe par plateau
+    // (position/rotation modifiables sans rebuild, voir l'effet de synchro).
     // Par défaut un seul plateau identique à l'ancien rectangle (rendu inchangé).
     deckEdgesRef.current = [];
+    deckGroupsRef.current = new Map();
     for (const deck of stageDecksRef.current) {
       const r = deckRectMeters(deck, { width: STAGE_WIDTH, depth: STAGE_DEPTH });
+      const rotY = -((deck.rot ?? 0) * Math.PI) / 180; // horaire vu du dessus
+      const g = new THREE.Group();
+      g.position.set(r.x, 0, r.z);
+      g.rotation.y = rotY;
+      g.userData.deckId = deck.id;
       const deckVolumeGeo = new THREE.BoxGeometry(r.w + 0.1, STAGE_THICKNESS, r.d + 0.1);
       const deckVolumeMat = new THREE.MeshStandardMaterial({
         color: 0x111122,
@@ -1311,12 +1332,12 @@ export const Stage3D: React.FC<{
         metalness: 0.1,
       });
       const deckVolume = new THREE.Mesh(deckVolumeGeo, deckVolumeMat);
-      deckVolume.position.set(r.x, deck.h - STAGE_THICKNESS / 2, r.z);
+      deckVolume.position.set(0, deck.h - STAGE_THICKNESS / 2, 0);
       deckVolume.receiveShadow = true;
       deckVolume.castShadow = true;
-      scene.add(deckVolume);
+      g.add(deckVolume);
 
-      // Deck platform top
+      // Deck platform top (cible du drag au clic gauche)
       const deckGeo = new THREE.PlaneGeometry(r.w, r.d);
       const deckMat = new THREE.MeshStandardMaterial({
         color: 0x151525,
@@ -1325,9 +1346,10 @@ export const Stage3D: React.FC<{
       });
       const deckTop = new THREE.Mesh(deckGeo, deckMat);
       deckTop.rotation.x = -Math.PI / 2;
-      deckTop.position.set(r.x, deck.h + 0.01, r.z);
+      deckTop.position.set(0, deck.h + 0.01, 0);
       deckTop.receiveShadow = true;
-      scene.add(deckTop);
+      deckTop.userData.deckId = deck.id;
+      g.add(deckTop);
 
       // Deck edge line (violet si sélectionné dans l'éditeur)
       const deckEdgeGeo = new THREE.EdgesGeometry(deckGeo);
@@ -1339,9 +1361,11 @@ export const Stage3D: React.FC<{
         }),
       );
       deckEdgeLine.rotation.x = -Math.PI / 2;
-      deckEdgeLine.position.set(r.x, deck.h + 0.015, r.z);
-      scene.add(deckEdgeLine);
+      deckEdgeLine.position.set(0, deck.h + 0.015, 0);
+      g.add(deckEdgeLine);
+      scene.add(g);
       deckEdgesRef.current.push({ id: deck.id, line: deckEdgeLine });
+      deckGroupsRef.current.set(deck.id, { group: g, top: deckTop });
     }
 
     // Stage front lip overlay (reinforces the edge visually)
@@ -1589,7 +1613,7 @@ export const Stage3D: React.FC<{
         container.removeChild(renderer.domElement);
       }
     };
-  }, [stageDims, stageDecks]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [stageDims, deckGeoKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Overlay gizmo (axes) ──────────────────────────
   // Minimal gizmo via HTML (évite 2e renderer) — coin bas-gauche
@@ -1729,7 +1753,7 @@ export const Stage3D: React.FC<{
 
     musiciansRef.current = refs;
     scene.add(group);
-  }, [musicians, stageDims, stageDecks]);
+  }, [musicians, stageDims, deckGeoKey]);
 
   // ── Virtual musicians: drag to reposition on stage ──
   useEffect(() => {
@@ -2028,7 +2052,7 @@ export const Stage3D: React.FC<{
       }
       fixturesRef.current.clear();
     };
-  }, [fixtureDefsReady, patchedFixtures, showBeams, createFixtureGeometry, stageDims, stageDecks]);
+  }, [fixtureDefsReady, patchedFixtures, showBeams, createFixtureGeometry, stageDims, deckGeoKey]);
 
   // ── Update fixture positions from store ─────────────
   // Separate effect - only updates positions, doesn't recreate geometry
@@ -2066,6 +2090,21 @@ export const Stage3D: React.FC<{
       updateFixtureSupport(sceneRef.current, f3d, pos, stageDimsRef.current, stageDecksRef.current);
     }
   }, [fixturePositions, patchedFixtures, stageDecks]);
+
+  // ── Deck transforms (drag/rotation) : positions sans rebuild géométrie ──
+  // La caméra est conservée et le drag reste fluide (la géométrie ne se
+  // reconstruit que si w/d/h changent, via deckGeoKey).
+  useEffect(() => {
+    if (deckGroupsRef.current.size === 0) return;
+    const dims = stageDimsRef.current;
+    for (const deck of stageDecks) {
+      const entry = deckGroupsRef.current.get(deck.id);
+      if (!entry) continue;
+      const r = deckRectMeters(deck, dims);
+      entry.group.position.set(r.x, 0, r.z);
+      entry.group.rotation.y = -((deck.rot ?? 0) * Math.PI) / 180;
+    }
+  }, [stageDecks, stageDims]);
 
   // ── Show/hide beams toggle ──────────────────────────
   useEffect(() => {
@@ -2719,6 +2758,24 @@ export const Stage3D: React.FC<{
           }
         }
       }
+    } else if (decksMenuOpenRef.current) {
+      // Mode édition plateaux : attraper un plateau au clic gauche.
+      // Les fixtures restent prioritaires (testées ci-dessus) ; l'orbite
+      // reste disponible en partant du sol / hors plateaux.
+      raycasterRef.current.setFromCamera(mouseRef.current, camera);
+      const tops: THREE.Object3D[] = [];
+      for (const { top } of deckGroupsRef.current.values()) tops.push(top);
+      const deckHits = tops.length > 0 ? raycasterRef.current.intersectObjects(tops, false) : [];
+      if (deckHits.length > 0) {
+        const deckId = (deckHits[0].object.userData?.deckId
+          ?? (deckHits[0].object.parent as any)?.userData?.deckId) as string | undefined;
+        if (deckId) {
+          if (deckId !== selectedDeckIdRef.current) setSelectedDeckId(deckId);
+          deckDragRef.current = { id: deckId };
+          if (controlsRef.current) controlsRef.current.enabled = false;
+          e.preventDefault();
+        }
+      }
     } else {
       // Clic à côté du panneau : on ne désélectionne PAS — la modale reste
       // ouverte (fermeture via le X du panneau). Sinon le moindre clic sur le
@@ -2760,6 +2817,29 @@ export const Stage3D: React.FC<{
   // ── Rotate selected fixture on drag (position) + Direct Pan/Tilt via programmer ──
   useEffect(() => {
     const onMove = (ev: MouseEvent) => {
+      // Drag de plateau (clic gauche, éditeur ouvert) : prioritaire sur
+      // l'orbite, après les fixtures (testées au mousedown).
+      if (deckDragRef.current) {
+        const { id } = deckDragRef.current;
+        const st = useShowStore.getState();
+        const deck = st.stageDecks.find((d) => d.id === id);
+        const dims = stageDimsRef.current;
+        const camera = cameraRef.current;
+        const container = containerRef.current;
+        if (!deck || !camera || !container) return;
+        const rect = container.getBoundingClientRect();
+        mouseRef.current.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+        mouseRef.current.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+        raycasterRef.current.setFromCamera(mouseRef.current, camera);
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -deck.h);
+        const pt = new THREE.Vector3();
+        if (!raycasterRef.current.ray.intersectPlane(plane, pt)) return;
+        const cx = Math.min(1.3, Math.max(-0.3, pt.x / dims.width + 0.5));
+        const cy = Math.min(1.3, Math.max(-0.3, pt.z / dims.depth + 0.5));
+        st.updateStageDeck(id, { cx, cy });
+        if (controlsRef.current) controlsRef.current.enabled = false;
+        return;
+      }
       // Direct Pan/Tilt has priority when directMode
       if (panTiltDragRef.current) {
         const { fixtureId, startX, startY, startPan, startTilt } = panTiltDragRef.current;
@@ -2798,6 +2878,10 @@ export const Stage3D: React.FC<{
       dragRotateRef.current = { startX: ev.clientX, startY: ev.clientY, fixtureId };
     };
     const onUp = () => {
+      if (deckDragRef.current) {
+        deckDragRef.current = null;
+        if (controlsRef.current) controlsRef.current.enabled = true;
+      }
       if (panTiltDragRef.current) {
         panTiltDragRef.current = null;
         if (controlsRef.current) controlsRef.current.enabled = true;
@@ -3369,21 +3453,24 @@ export const Stage3D: React.FC<{
                 // Champ numérique vidé/invalide (ex. en cours de frappe) :
                 // on restaure l'affichage au lieu de commiter 0/NaN
                 // (un H à 0 coule le plateau sous le sol → « disparu »).
-                for (const v of [cur.x, cur.y, cur.w, cur.d, cur.h]) {
+                for (const v of [cur.x, cur.y, cur.w, cur.d, cur.h, cur.r]) {
                   if (v === '' || v === null || v === undefined || !Number.isFinite(Number(v))) {
                     revert();
                     return;
                   }
                 }
-                updateStageDeck(deck.id, deckFromMeters({
-                  x: Number(cur.x), y: Number(cur.y), w: Number(cur.w), d: Number(cur.d), h: Number(cur.h),
-                }, stageDims));
+                updateStageDeck(deck.id, {
+                  ...deckFromMeters({
+                    x: Number(cur.x), y: Number(cur.y), w: Number(cur.w), d: Number(cur.d), h: Number(cur.h),
+                  }, stageDims),
+                  rot: ((Number(cur.r) % 360) + 360) % 360,
+                });
               };
-              const num = (field: 'x' | 'y' | 'w' | 'd' | 'h', label: string) => (
+              const num = (field: 'x' | 'y' | 'w' | 'd' | 'h' | 'r', label: string) => (
                 <label key={field} className="flex flex-col items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                   <span className="text-[8px] text-gray-600">{label}</span>
                   <input
-                    type="number" step={0.5} min={0} value={dr[field] as number | string}
+                    type="number" step={field === 'r' ? 5 : 0.5} min={0} value={dr[field] as number | string}
                     onChange={(e) => setF(field, e.target.value)}
                     onBlur={() => commitF(field)}
                     onKeyDown={(e) => { if (e.key === 'Enter') commitF(field); }}
@@ -3425,8 +3512,8 @@ export const Stage3D: React.FC<{
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-5 gap-1 mt-1">
-                    {num('x', 'X')}{num('y', 'Y')}{num('w', 'L')}{num('d', 'P')}{num('h', 'H')}
+                  <div className="grid grid-cols-6 gap-1 mt-1">
+                    {num('x', 'X')}{num('y', 'Y')}{num('w', 'L')}{num('d', 'P')}{num('h', 'H')}{num('r', 'R°')}
                   </div>
                 </div>
               );

@@ -236,22 +236,29 @@ export const Stage2DEditor: React.FC = () => {
       ctx.lineWidth = 2;
       ctx.strokeRect(padX, padY, sw, sh);
 
-      // Decks (plateaux multi-rects) — remplissage + nom + hauteur
+      // Decks (plateaux multi-rects, rotation plane) — remplissage + nom + hauteur
       for (const deck of stageDecks) {
         const r = deckRectMeters(deck, stageDims);
-        // mètres → px (repère centré comme les fixtures)
-        const dx = padX + ((r.x - r.w / 2) / stageDims.width + 0.5) * sw;
-        const dy = padY + ((r.z - r.d / 2) / stageDims.depth + 0.5) * sh;
+        // centre en px (même repère centré que les fixtures)
+        const cxp = padX + ((r.x / stageDims.width) + 0.5) * sw;
+        const cyp = padY + ((r.z / stageDims.depth) + 0.5) * sh;
         const dw = (r.w / stageDims.width) * sw;
         const dh = (r.d / stageDims.depth) * sh;
+        ctx.save();
+        ctx.translate(cxp, cyp);
+        // Même sens qu'en 3D : horaire vu du dessus (écran : +z vers le bas).
+        ctx.rotate(((deck.rot ?? 0) * Math.PI) / 180);
         ctx.fillStyle = 'rgba(168, 85, 247, 0.07)';
-        ctx.fillRect(dx, dy, dw, dh);
+        ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
         ctx.strokeStyle = '#6d5aa8';
         ctx.lineWidth = 1.5;
-        ctx.strokeRect(dx, dy, dw, dh);
+        ctx.strokeRect(-dw / 2, -dh / 2, dw, dh);
+        ctx.restore();
         ctx.fillStyle = '#8b7ab8';
         ctx.font = '9px Inter, sans-serif';
-        ctx.fillText(`${deck.name} · ${deck.h}m`, dx + 4, dy + 12);
+        ctx.textAlign = 'center';
+        ctx.fillText(`${deck.name} · ${deck.h}m`, cxp, cyp);
+        ctx.textAlign = 'left';
       }
 
       // Stage label
