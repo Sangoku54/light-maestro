@@ -708,8 +708,6 @@ export const Stage3D: React.FC<{
   const musiciansBtnRef = useRef<HTMLButtonElement>(null);
   const [supportsMenuOpen, setSupportsMenuOpen] = useState(false);
   const [decksMenuOpen, setDecksMenuOpen] = useState(false);
-  const decksMenuOpenRef = useRef(false);
-  decksMenuOpenRef.current = decksMenuOpen;
   // Drag d'un plateau au clic gauche (éditeur Plateaux ouvert uniquement :
   // sinon le clic gauche reste réservé à l'orbite et aux fixtures).
   const deckDragRef = useRef<{ id: string } | null>(null);
@@ -1362,6 +1360,8 @@ export const Stage3D: React.FC<{
       );
       deckEdgeLine.rotation.x = -Math.PI / 2;
       deckEdgeLine.position.set(0, deck.h + 0.015, 0);
+      // Arêtes exclues du picking (seuils des Lines fausseraient la visée).
+      deckEdgeLine.raycast = () => {};
       g.add(deckEdgeLine);
       scene.add(g);
       deckEdgesRef.current.push({ id: deck.id, line: deckEdgeLine });
@@ -2758,17 +2758,18 @@ export const Stage3D: React.FC<{
           }
         }
       }
-    } else if (decksMenuOpenRef.current) {
-      // Mode édition plateaux : attraper un plateau au clic gauche.
-      // Les fixtures restent prioritaires (testées ci-dessus) ; l'orbite
-      // reste disponible en partant du sol / hors plateaux.
+    } else if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      // Maj/Ctrl + clic gauche : attraper un plateau (dessus ET côtés),
+      // éditeur ouvert ou non. Les fixtures restent prioritaires
+      // (multi-sélection, testée ci-dessus) ; sinon, orbite normale.
       raycasterRef.current.setFromCamera(mouseRef.current, camera);
-      const tops: THREE.Object3D[] = [];
-      for (const { top } of deckGroupsRef.current.values()) tops.push(top);
-      const deckHits = tops.length > 0 ? raycasterRef.current.intersectObjects(tops, false) : [];
+      const deckRoots: THREE.Object3D[] = [];
+      for (const { group } of deckGroupsRef.current.values()) deckRoots.push(group);
+      const deckHits = deckRoots.length > 0 ? raycasterRef.current.intersectObjects(deckRoots, true) : [];
       if (deckHits.length > 0) {
-        const deckId = (deckHits[0].object.userData?.deckId
-          ?? (deckHits[0].object.parent as any)?.userData?.deckId) as string | undefined;
+        let o: THREE.Object3D | null = deckHits[0].object;
+        while (o && !o.userData?.deckId) o = o.parent;
+        const deckId = o?.userData?.deckId as string | undefined;
         if (deckId) {
           if (deckId !== selectedDeckIdRef.current) setSelectedDeckId(deckId);
           deckDragRef.current = { id: deckId };
@@ -2817,8 +2818,8 @@ export const Stage3D: React.FC<{
   // ── Rotate selected fixture on drag (position) + Direct Pan/Tilt via programmer ──
   useEffect(() => {
     const onMove = (ev: MouseEvent) => {
-      // Drag de plateau (clic gauche, éditeur ouvert) : prioritaire sur
-      // l'orbite, après les fixtures (testées au mousedown).
+      // Drag de plateau (Maj/Ctrl + clic, armé au mousedown) : prioritaire
+      // sur l'orbite, après les fixtures (testées au mousedown).
       if (deckDragRef.current) {
         const { id } = deckDragRef.current;
         const st = useShowStore.getState();

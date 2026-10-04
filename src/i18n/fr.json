@@ -1110,7 +1110,7 @@
     "addDeck": "Plateau",
     "deleteDeck": "Supprimer ce plateau",
     "resetDecks": "Réinitialiser",
-    "decksHint": "X/Y = coin en mètres · L/P = dimensions · H = hauteur, R = rotation horaire. Glisse un plateau au clic gauche (éditeur ouvert). En cas de chevauchement, le plus haut gagne.",
+    "decksHint": "X/Y = coin en mètres · L/P = dimensions · H = hauteur, R = rotation horaire. Maj ou Ctrl + clic gauche sur un plateau (dessus ou côtés) pour le déplacer. En cas de chevauchement, le plus haut gagne.",
     "statusHint": "Glisser = orbiter • Clic = sélectionner • Ctrl+clic = multi • Target = viser un point",
     "statusHintLegacy": "{{count}} fixtures · glisser pour orbiter · clic pour sélectionner · liste « Fixtures » pour retrouver une light",
     "support": "Support",

@@ -1110,7 +1110,7 @@
     "addDeck": "Deck",
     "deleteDeck": "Delete this deck",
     "resetDecks": "Reset",
-    "decksHint": "X/Y = corner in meters · W/D = size · H = height, R = clockwise rotation. Drag a deck with left-click (editor open). On overlap, the tallest wins.",
+    "decksHint": "X/Y = corner in meters · W/D = size · H = height, R = clockwise rotation. Shift or Ctrl + left-click a deck (top or sides) to move it. On overlap, the tallest wins.",
     "statusHint": "Drag = orbit • Click = select • Ctrl+click = multi • Target = aim at a point",
     "statusHintLegacy": "{{count}} fixtures · drag to orbit · click to select · use the “Fixtures” list to find a light",
     "support": "Support",
