@@ -853,18 +853,21 @@ const SceneList: React.FC = () => {
               key={scene.id}
               draggable
               onClick={() => {
-                // Clic = toujours sélectionner + jouer. Re-clic sur la tuile
-                // déjà sélectionnée = re-lancer (replay), JAMAIS désélectionner
-                // : l'ancien toggle (→ null) déclenchait le blackout 512 zéros
-                // de SceneEditor — symptôme « tuile générée mais ne déclenche rien »
-                // (cas Store : la scène est déjà sélectionnée après la modale).
+                // Clic = sélectionner + jouer. Re-clic sur la tuile ACTIVE
+                // = stopper (désélection → l'effet preview éteint en
+                // zéros transient, sans blocage persistant). Re-cliquer
+                // une fois éteint rejoue depuis le début (= replay).
                 if (isSelected) {
-                  (window as any).__lm_sceneReplayAt = Date.now();
+                  setSelectedSceneId(null);
+                  // Écriture synchrone (même motif qu'à la sélection) : la
+                  // boucle EFX lit window et s'arrête à la frame suivante.
+                  (window as any).__lm_selectedSceneId = null;
+                } else {
+                  setSelectedSceneId(scene.id);
+                  // Écriture synchrone : l'éditeur lit window via poll — ne pas
+                  // attendre l'effet React (1 frame) pour que la scène joue.
+                  (window as any).__lm_selectedSceneId = scene.id;
                 }
-                setSelectedSceneId(scene.id);
-                // Écriture synchrone : l'éditeur lit window via poll — ne pas
-                // attendre l'effet React (1 frame) pour que la scène joue.
-                (window as any).__lm_selectedSceneId = scene.id;
               }}
               onDragStart={(e) => {
                 e.dataTransfer.effectAllowed = 'move';
@@ -1141,6 +1144,8 @@ const SceneEditor: React.FC = () => {
   const [expandedFixtures, setExpandedFixtures] = useState<Set<string>>(new Set());
   const [fixtureAnalyses, setFixtureAnalyses] = useState<Map<string, AnalyzedFixtureChannels>>(new Map());
   const [testActive, setTestActive] = useState(false);
+  // Timeout de fin du test (annulable par le bouton Stop).
+  const testTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [musicians, setMusicians] = useState<MusicianRoster>({});
   const [stageScene, setStageScene] = useState<StageScene>('empty');
   const [showFloating3D, setShowFloating3D] = useState(false);
@@ -1517,7 +1522,8 @@ const SceneEditor: React.FC = () => {
     setTestActive(true);
     try {
       await sendChannelsToHardwareAndStore(editChannels, patchedFixtures, universes);
-      setTimeout(async () => {
+      testTimeoutRef.current = setTimeout(async () => {
+        testTimeoutRef.current = null;
         // Reset all channels to 0 — TRANSIENT (2 s): the zeros flush the
         // hardware, then the design-test source is released so the engine
         // regains control (a persistent LTP zero block would keep the
@@ -1531,6 +1537,27 @@ const SceneEditor: React.FC = () => {
       }, 3000);
     } catch {
       setTestActive(false);
+    }
+  };
+
+  // Stop : coupe le test en cours (zéros immédiats) ou, à défaut,
+  // stoppe la preview en désélectionnant la scène (même chemin que
+  // le re-clic sur la tuile active).
+  const handleStop = async () => {
+    if (testTimeoutRef.current) {
+      clearTimeout(testTimeoutRef.current);
+      testTimeoutRef.current = null;
+    }
+    if (testActive) {
+      setTestActive(false);
+      const zeros: Record<number, number> = {};
+      for (const addr of Object.keys(editChannels)) {
+        zeros[Number(addr)] = 0;
+      }
+      try { await sendChannelsToHardwareAndStore(zeros, patchedFixtures, universes, 'design-test', 2000); } catch {}
+    } else if (scene) {
+      setSelectedSceneId(null);
+      (window as any).__lm_selectedSceneId = null;
     }
   };
 
@@ -1665,7 +1692,15 @@ const SceneEditor: React.FC = () => {
               : 'bg-green-600/10 text-green-400 border-green-500/20 hover:bg-green-600/20'
           }`}
         >
-          <Play size={14} /> {testActive ? 'Testing...' : 'Test Scene'}
+          <Play size={14} /> {testActive ? t('testing') : t('testScene')}
+        </button>
+        <button
+          onClick={handleStop}
+          disabled={!testActive && !scene}
+          title={t('stopScene')}
+          className="px-4 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border bg-red-600/10 text-red-400 border-red-500/20 hover:bg-red-600/20 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Square size={14} /> {t('stopScene')}
         </button>
         <div className="flex-1" />
         <button onClick={allExpanded ? collapseAll : expandAll} className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors">

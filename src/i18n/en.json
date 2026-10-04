@@ -328,6 +328,7 @@
     "chaserName": "Chaser Name",
     "saveScene": "Save Scene",
     "testScene": "Test Scene",
+    "stopScene": "Stop",
     "testing": "Testing…",
     "noSceneSelected": "No scene selected",
     "createNewSceneHint": "Create a new scene from the left panel to start editing",

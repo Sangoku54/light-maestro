@@ -328,6 +328,7 @@
     "chaserName": "Nom du Chaser",
     "saveScene": "Enregistrer la Scène",
     "testScene": "Tester la Scène",
+    "stopScene": "Stopper",
     "testing": "Test en cours…",
     "noSceneSelected": "Aucune scène sélectionnée",
     "createNewSceneHint": "Créez une nouvelle scène depuis le panneau de gauche pour commencer",
