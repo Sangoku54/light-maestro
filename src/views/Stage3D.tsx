@@ -3403,11 +3403,12 @@ export const Stage3D: React.FC<{
           </div>
         </div>
       )}
-      {/* Decks popup — éditeur de plateaux multi-rects (T de défilé, podium…) */}
+      {/* Decks popup — panneau latéral NON modal : le canvas reste cliquable
+          pour attraper les plateaux au clic gauche pendant l'édition.
+          (Un backdrop plein écran fermerait l'éditeur à chaque clic 3D.) */}
       {decksMenuOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setDecksMenuOpen(false)}>
-          <div className="w-80 max-h-[80vh] overflow-y-auto rounded-lg border border-gray-700/60 bg-[#0d0d14] shadow-xl shadow-black/60 p-2" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
+        <div className="fixed right-3 top-16 bottom-10 w-80 z-40 flex flex-col rounded-lg border border-gray-700/60 bg-[#0d0d14]/95 shadow-xl shadow-black/60 p-2 overflow-y-auto">
+          <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
               <span className="text-[10px] font-medium text-gray-300">{t('stage3D.decksTitle')} ({stageDecks.length})</span>
               <div className="flex items-center gap-2">
                 <button
@@ -3519,7 +3520,6 @@ export const Stage3D: React.FC<{
               );
             })}
             <p className="px-2 pt-1 text-[9px] text-gray-600">{t('stage3D.decksHint')}</p>
-          </div>
         </div>
       )}
       {/* Toolbar legacy — conservée cachée pour compat, le nouveau header la remplace */}
