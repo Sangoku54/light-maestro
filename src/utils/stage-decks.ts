@@ -134,3 +134,15 @@ export function largestDeck(decks: StageDeck[]): StageDeck | null {
   }
   return best;
 }
+
+/**
+ * Hauteur par défaut d'un plateau ajouté : empilé 0,4 m AU-DESSUS du plus
+ * haut existant (jamais enterré dans un autre volume → visible aussitôt).
+ */
+export function defaultNewDeckHeight(decks: StageDeck[]): number {
+  let top = 0;
+  for (const deck of decks) {
+    if (deck.h > top) top = deck.h;
+  }
+  return Math.round((top + 0.4) * 10) / 10;
+}

@@ -721,6 +721,7 @@ export const Stage3D: React.FC<{
   const addStageDeck = useShowStore((s) => s.addStageDeck);
   const updateStageDeck = useShowStore((s) => s.updateStageDeck);
   const removeStageDeck = useShowStore((s) => s.removeStageDeck);
+  const resetStageDecks = useShowStore((s) => s.resetStageDecks);
   const stageDecksRef = useRef(stageDecks);
   stageDecksRef.current = stageDecks;
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
@@ -3334,6 +3335,18 @@ export const Stage3D: React.FC<{
                 >
                   + {t('stage3D.addDeck')}
                 </button>
+                {stageDecks.length > 1 && (
+                  <button
+                    onClick={() => {
+                      resetStageDecks();
+                      setSelectedDeckId(null);
+                    }}
+                    className="text-[9px] text-gray-500 hover:text-red-300"
+                    title={t('stage3D.resetDecks')}
+                  >
+                    {t('stage3D.resetDecks')}
+                  </button>
+                )}
                 <button onClick={() => setDecksMenuOpen(false)} className="text-gray-500 hover:text-gray-300 text-sm px-1">✕</button>
               </div>
             </div>

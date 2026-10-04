@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   defaultStageDecks,
+  defaultNewDeckHeight,
   migrateStageDecks,
   deckContains,
   deckTopAt,
@@ -79,5 +80,11 @@ describe('stage-decks — plateaux multi-rects', () => {
     const small = T(0.1, 0.1, 0.2, 0.2, 0.4, 's', 'Petit');
     const big = T(0.5, 0.5, 0.8, 0.8, 1.0, 'b', 'Grand');
     expect(largestDeck([small, big])).toBe(big);
+  });
+
+  it('defaultNewDeckHeight : empilé visible, jamais enterré', () => {
+    expect(defaultNewDeckHeight([])).toBe(0.4);
+    expect(defaultNewDeckHeight(defaultStageDecks())).toBe(1.9);
+    expect(defaultNewDeckHeight([T(0.5, 0.5, 1, 1, 1.0), T(0.5, 0.7, 0.4, 0.3, 1.9)])).toBe(2.3);
   });
 });

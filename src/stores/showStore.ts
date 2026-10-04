@@ -11,7 +11,7 @@ import type { DmxCue } from '../hooks/dmx-cues';
 import { normalizeFolderName } from '../utils/scene-fixtures';
 import type { MusicianRoster } from '../utils/musicians';
 import type { FixtureSupport } from '../utils/supports';
-import { defaultStageDecks, migrateStageDecks, type StageDeck } from '../utils/stage-decks';
+import { defaultStageDecks, defaultNewDeckHeight, migrateStageDecks, type StageDeck } from '../utils/stage-decks';
 import { useAppStore } from './appStore';
 import { getLicenseLimits } from './licenseStore';
 
@@ -349,6 +349,8 @@ interface ShowState {
   addStageDeck: (deck?: Partial<StageDeck>) => string;
   updateStageDeck: (id: string, updates: Partial<StageDeck>) => void;
   removeStageDeck: (id: string) => void;
+  /** Retour à la configuration initiale (plateau unique historique). */
+  resetStageDecks: () => void;
   setFixturePosition: (id: string, pos: Partial<FixturePos>) => void;
   setFixturePositions: (positions: Record<string, FixturePos>) => void;
   initFixturePosition: (id: string, fixtureType: string, index: number) => void;
@@ -715,7 +717,8 @@ export const useShowStore = create<ShowState>((set, get) => ({
           cy: 0.7,
           w: 0.4,
           d: 0.3,
-          h: 0.4,
+          // Empilé visible d'office (jamais enterré) ; l'utilisateur ajuste H ensuite.
+          h: defaultNewDeckHeight(state.stageDecks),
           ...deck,
         },
       ],
@@ -734,6 +737,10 @@ export const useShowStore = create<ShowState>((set, get) => ({
       // Toujours ≥ 1 plateau (la scène ne disparaît jamais).
       stageDecks: state.stageDecks.length > 1 ? state.stageDecks.filter((d) => d.id !== id) : state.stageDecks,
     }));
+    useAppStore.getState().markDirty();
+  },
+  resetStageDecks: () => {
+    set({ stageDecks: defaultStageDecks() });
     useAppStore.getState().markDirty();
   },
 
