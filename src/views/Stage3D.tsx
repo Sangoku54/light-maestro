@@ -36,7 +36,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X, LayoutGrid, Music, Zap, List, Search, Crosshair, Sparkles, LampDesk, Undo2, RotateCcw } from 'lucide-react';
 import { DEFAULT_POSITIONS, MUSICIAN_KINDS, isRosterEmpty, normalizeRoster, rosterTotal, type MusicianKind, type MusicianRoster } from '../utils/musicians';
-import { SUPPORT_KINDS, needsSupportGeometry, resolveSupportKind, supportColumnHeight, type FixtureSupport } from '../utils/supports';
+import { SUPPORT_KINDS, isBarSupport, needsSupportGeometry, resolveSupportKind, supportColumnHeight, DEFAULT_BAR_SPAN, BAR_HUNG_DEFAULT, BAR_DROP, BAR_CABLE_LEN, type FixtureSupport } from '../utils/supports';
 import { deckTopAt, deckRectMeters, deckToMeters, deckFromMeters, type StageDeck } from '../utils/stage-decks';
 import clavierImg from '../assets/musicians/clavier.png';
 import chanteuseImg from '../assets/musicians/chanteuse.png';
@@ -3347,8 +3347,8 @@ export const Stage3D: React.FC<{
                   {t('stage3D.decksBtn')} ({stageDecks.length})
                 </button>
               </RichTooltip>
-            </div>
-        </div>
+                </div>
+              </div>
       </div>
       {/* Musiciens popup — centrée comme toutes les modales */}
       {musiciansMenuOpen && (
@@ -4021,12 +4021,14 @@ export const Stage3D: React.FC<{
                 <div className="flex justify-between text-[10px]">
                   <span className="text-gray-500">{t('stage3D.support')}</span>
                 </div>
-                <div className="grid grid-cols-4 gap-1">
+                <div className="grid grid-cols-6 gap-1">
                   {([
                     { v: 'truss' as const, label: t('stage3D.support_truss'), icon: '🏗', tip: { title: t('stage3D.supportTrussTipTitle'), text: t('stage3D.supportTrussTipText'), example: t('stage3D.supportTrussTipExample'), tone: 'info' as const } },
                     { v: 'totem' as const, label: t('stage3D.support_totem'), icon: '🗼', tip: { title: t('stage3D.supportTotemTipTitle'), text: t('stage3D.supportTotemTipText'), example: t('stage3D.supportTotemTipExample'), tone: 'info' as const } },
                     { v: 'tripod' as const, label: t('stage3D.support_tripod'), icon: '📷', tip: { title: t('stage3D.supportTripodTipTitle'), text: t('stage3D.supportTripodTipText'), example: t('stage3D.supportTripodTipExample'), tone: 'info' as const } },
                     { v: 'floor' as const, label: t('stage3D.support_floor'), icon: '🟫', tip: { title: t('stage3D.supportFloorTipTitle'), text: t('stage3D.supportFloorTipText'), example: t('stage3D.supportFloorTipExample'), tone: 'info' as const } },
+                    { v: 'frontBar' as const, label: t('stage3D.support_frontBar'), icon: '▬', tip: { title: t('stage3D.supportFrontBarTipTitle'), text: t('stage3D.supportFrontBarTipText'), tone: 'info' as const } },
+                    { v: 'backBar' as const, label: t('stage3D.support_backBar'), icon: '▬', tip: { title: t('stage3D.supportBackBarTipTitle'), text: t('stage3D.supportBackBarTipText'), tone: 'info' as const } },
                   ]).map(opt => (
                     <RichTooltip key={opt.v} content={opt.tip}>
                       <button
@@ -4043,6 +4045,48 @@ export const Stage3D: React.FC<{
                   ))}
                 </div>
               </div>
+
+              {/* Longueur + suspension : uniquement pour les barres avant/arrière.
+                  Longueur LIBRE en mètres (1-12), jamais dérivée des plateaux. */}
+              {(selectedPos.support === 'frontBar' || selectedPos.support === 'backBar') && (
+                <div className="space-y-1 rounded-lg border border-gray-800/60 bg-black/20 p-2">
+                  <div className="flex justify-between text-[10px]">
+                    <span className="text-gray-500">{t('stage3D.barSpan')}</span>
+                    <span className="text-gray-400 font-mono">{(selectedPos.barSpan ?? DEFAULT_BAR_SPAN).toFixed(1)}m</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={12}
+                    step={0.5}
+                    value={selectedPos.barSpan ?? DEFAULT_BAR_SPAN}
+                    onChange={(e) => setFixturePosition(selectedFixture.id, { barSpan: parseFloat(e.target.value) })}
+                    className="w-full h-1 accent-purple-500 cursor-pointer"
+                  />
+                  <div className="grid grid-cols-2 gap-1 pt-1">
+                    <button
+                      onClick={() => setFixturePosition(selectedFixture.id, { barHung: true })}
+                      className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                        (selectedPos.barHung ?? true)
+                          ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
+                          : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
+                      }`}
+                    >
+                      {t('stage3D.barHung')}
+                    </button>
+                    <button
+                      onClick={() => setFixturePosition(selectedFixture.id, { barHung: false })}
+                      className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                        !(selectedPos.barHung ?? true)
+                          ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
+                          : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
+                      }`}
+                    >
+                      {t('stage3D.barStanding')}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Direct DMX — intensity + couleur (programmer) */}
               <div className="space-y-2 p-2 rounded-lg bg-violet-600/10 border border-violet-500/20">
@@ -4469,9 +4513,48 @@ function strutBetween(a: THREE.Vector3, b: THREE.Vector3, r: number, mat: THREE.
   return mesh;
 }
 
-function buildSupportVisual(kind: FixtureSupport, height: number): THREE.Group | null {
+function buildSupportVisual(
+  kind: FixtureSupport,
+  height: number,
+  opts?: { span?: number; hung?: boolean },
+): THREE.Group | null {
   if (!needsSupportGeometry(kind, height)) return null;
   const g = new THREE.Group();
+  if (isBarSupport(kind)) {
+    // Barre avant/arrière : la fixture pend SOUS une barre horizontale
+    // (axe X), de longueur LIBRE (jamais dérivée des plateaux).
+    const span = Math.min(12, Math.max(1, opts?.span ?? DEFAULT_BAR_SPAN));
+    const hung = opts?.hung ?? BAR_HUNG_DEFAULT;
+    const barY = height + BAR_DROP;
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, span, 10), supportMetalMat);
+    bar.rotation.z = Math.PI / 2;
+    bar.position.y = barY;
+    g.add(bar);
+    // Manchon : barre → tête de fixture.
+    const clamp = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, BAR_DROP, 8), supportBaseMat);
+    clamp.position.y = height + BAR_DROP / 2;
+    g.add(clamp);
+    const ex = Math.max(0.2, span / 2 - 0.15);
+    if (hung) {
+      // Suspendue : 2 câbles vers le haut, aucun pied.
+      for (const sx of [-ex, ex]) {
+        const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, BAR_CABLE_LEN, 6), supportMetalMat);
+        cable.position.set(sx, barY + BAR_CABLE_LEN / 2, 0);
+        g.add(cable);
+      }
+    } else {
+      // Sur pied : 2 mâts + embases jusqu'au plateau.
+      for (const sx of [-ex, ex]) {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, barY, 8), supportMetalMat);
+        pole.position.set(sx, barY / 2, 0);
+        g.add(pole);
+        const foot = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.3), supportBaseMat);
+        foot.position.set(sx, 0.025, 0);
+        g.add(foot);
+      }
+    }
+    return g;
+  }
   if (kind === 'totem') {
     const col = new THREE.Mesh(new THREE.BoxGeometry(0.34, height, 0.34), supportMetalMat);
     col.position.y = height / 2;
@@ -4531,11 +4614,13 @@ function updateFixtureSupport(
   const baseY = deckTopAt(decks, pos.x, pos.y);
   const stageY = baseY + pos.h * 5.0;
   const height = supportColumnHeight(stageY, baseY);
-  const key = `${kind}:${Math.round(stageX * 20)}:${Math.round(stageZ * 20)}:${Math.round(height * 20)}`;
+  const span = pos.barSpan ?? DEFAULT_BAR_SPAN;
+  const hung = pos.barHung ?? BAR_HUNG_DEFAULT;
+  const key = `${kind}:${Math.round(stageX * 20)}:${Math.round(stageZ * 20)}:${Math.round(height * 20)}:${Math.round(span * 10)}:${hung ? 1 : 0}`;
   if (f3d.supportGroup && f3d.supportKey === key) return;
   clearFixtureSupport(scene, f3d);
   if (!needsSupportGeometry(kind, height)) return;
-  const g = buildSupportVisual(kind, height);
+  const g = buildSupportVisual(kind, height, { span, hung });
   if (!g) return;
   g.position.set(stageX, baseY, stageZ);
   scene.add(g);

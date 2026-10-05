@@ -190,6 +190,11 @@ export interface FixturePos {
   /** Support physique visible en 3D (pont/totem/trépied/sol). Absent = 'truss'
    *  (rendu historique : rien de dessiné, projets existants inchangés). */
   support?: FixtureSupport;
+  /** Longueur de barre (mètres, 1-12) pour frontBar/backBar. Longueur LIBRE,
+   *  jamais dérivée de la taille des plateaux. Absent = 4 m. */
+  barSpan?: number;
+  /** Barre suspendue par câbles (true, défaut) vs posée sur pieds (false). */
+  barHung?: boolean;
 }
 
 /**
