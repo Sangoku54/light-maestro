@@ -4503,6 +4503,17 @@ function disposeFixture3D(f3d: Fixture3D): void {
 // (rendu historique : projets existants inchangés).
 const supportMetalMat = new THREE.MeshStandardMaterial({ color: 0x23232e, roughness: 0.5, metalness: 0.7 });
 const supportBaseMat = new THREE.MeshStandardMaterial({ color: 0x14141c, roughness: 0.6, metalness: 0.5 });
+// ── Barres avant/arrière : alu CLAIR + légère émission (le métal sombre
+// est invisible sur scène sombre — « noir sur noir »). Partagés, jamais
+// disposés (même convention que les autres matériaux supports).
+const barMetalMat = new THREE.MeshStandardMaterial({
+  color: 0xb9becb, roughness: 0.32, metalness: 0.85,
+  emissive: 0x3a3f52, emissiveIntensity: 0.55,
+});
+const barCableMat = new THREE.MeshStandardMaterial({
+  color: 0x9aa0b5, roughness: 0.4, metalness: 0.8,
+  emissive: 0x2e3247, emissiveIntensity: 0.6,
+});
 
 function strutBetween(a: THREE.Vector3, b: THREE.Vector3, r: number, mat: THREE.Material): THREE.Mesh {
   const dir = new THREE.Vector3().subVectors(b, a);
@@ -4526,29 +4537,29 @@ function buildSupportVisual(
     const span = Math.min(12, Math.max(1, opts?.span ?? DEFAULT_BAR_SPAN));
     const hung = opts?.hung ?? BAR_HUNG_DEFAULT;
     const barY = height + BAR_DROP;
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, span, 10), supportMetalMat);
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, span, 12), barMetalMat);
     bar.rotation.z = Math.PI / 2;
     bar.position.y = barY;
     g.add(bar);
     // Manchon : barre → tête de fixture.
-    const clamp = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, BAR_DROP, 8), supportBaseMat);
+    const clamp = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, BAR_DROP, 8), barCableMat);
     clamp.position.y = height + BAR_DROP / 2;
     g.add(clamp);
     const ex = Math.max(0.2, span / 2 - 0.15);
     if (hung) {
       // Suspendue : 2 câbles vers le haut, aucun pied.
       for (const sx of [-ex, ex]) {
-        const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, BAR_CABLE_LEN, 6), supportMetalMat);
+        const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, BAR_CABLE_LEN, 6), barCableMat);
         cable.position.set(sx, barY + BAR_CABLE_LEN / 2, 0);
         g.add(cable);
       }
     } else {
       // Sur pied : 2 mâts + embases jusqu'au plateau.
       for (const sx of [-ex, ex]) {
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, barY, 8), supportMetalMat);
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, barY, 8), barMetalMat);
         pole.position.set(sx, barY / 2, 0);
         g.add(pole);
-        const foot = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.3), supportBaseMat);
+        const foot = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, 0.34), barMetalMat);
         foot.position.set(sx, 0.025, 0);
         g.add(foot);
       }
@@ -4616,7 +4627,7 @@ function updateFixtureSupport(
   const height = supportColumnHeight(stageY, baseY);
   const span = pos.barSpan ?? DEFAULT_BAR_SPAN;
   const hung = pos.barHung ?? BAR_HUNG_DEFAULT;
-  const key = `${kind}:${Math.round(stageX * 20)}:${Math.round(stageZ * 20)}:${Math.round(height * 20)}:${Math.round(span * 10)}:${hung ? 1 : 0}`;
+  const key = `${kind}:${Math.round(stageX * 20)}:${Math.round(stageZ * 20)}:${Math.round(height * 20)}:${Math.round(span * 10)}:${hung ? 1 : 0}:v2`;
   if (f3d.supportGroup && f3d.supportKey === key) return;
   clearFixtureSupport(scene, f3d);
   if (!needsSupportGeometry(kind, height)) return;
