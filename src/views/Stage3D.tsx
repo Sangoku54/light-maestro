@@ -707,6 +707,8 @@ export const Stage3D: React.FC<{
   const [musiciansMenuOpen, setMusiciansMenuOpen] = useState(false);
   const musiciansBtnRef = useRef<HTMLButtonElement>(null);
   const [supportsMenuOpen, setSupportsMenuOpen] = useState(false);
+  /** Cible d'application des supports : la sélection (Ctrl+clic) ou toutes. */
+  const [supportsTarget, setSupportsTarget] = useState<'selection' | 'all'>('selection');
   const [decksMenuOpen, setDecksMenuOpen] = useState(false);
   // Drag d'un plateau au clic gauche (éditeur Plateaux ouvert uniquement :
   // sinon le clic gauche reste réservé à l'orbite et aux fixtures).
@@ -3335,7 +3337,7 @@ export const Stage3D: React.FC<{
             <div className="relative flex items-center">
               <LampDesk size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
               <RichTooltip content={{ title: t('stage3D.supportsTipTitle'), text: t('stage3D.supportsTipText'), tone: 'info' }} placement="bottom">
-                <button onClick={() => setSupportsMenuOpen(v => !v)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50 whitespace-nowrap" title={t('stage3D.supportsBtnTitle')}>
+                <button onClick={() => { setSupportsMenuOpen(v => !v); setDecksMenuOpen(false); }} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50 whitespace-nowrap" title={t('stage3D.supportsBtnTitle')}>
                   {t('stage3D.supportsBtn')}
                 </button>
               </RichTooltip>
@@ -3343,7 +3345,7 @@ export const Stage3D: React.FC<{
             <div className="relative flex items-center">
               <LayoutGrid size={12} className="text-gray-400 absolute left-2 pointer-events-none" />
               <RichTooltip content={{ title: t('stage3D.decksTipTitle'), text: t('stage3D.decksTipText'), tone: 'info' }} placement="bottom">
-                <button onClick={() => setDecksMenuOpen(v => !v)} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50 whitespace-nowrap" title={t('stage3D.decksBtnTitle')}>
+                <button onClick={() => { setDecksMenuOpen(v => !v); setSupportsMenuOpen(false); }} className="bg-black/30 text-gray-300 text-[10px] pl-7 pr-2 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 focus:outline-none focus:border-purple-500/50 whitespace-nowrap" title={t('stage3D.decksBtnTitle')}>
                   {t('stage3D.decksBtn')} ({stageDecks.length})
                 </button>
               </RichTooltip>
@@ -3374,36 +3376,70 @@ export const Stage3D: React.FC<{
           </div>
         </div>
       )}
-      {/* Supports popup — centrée comme toutes les modales : applique à toutes les fixtures */}
-      {supportsMenuOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setSupportsMenuOpen(false)}>
-          <div className="w-64 rounded-lg border border-gray-700/60 bg-[#0d0d14] shadow-xl shadow-black/60 p-2" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
-              <span className="text-[10px] font-medium text-gray-300">{t('stage3D.supportsTitle')}</span>
-              <button onClick={() => setSupportsMenuOpen(false)} className="text-gray-500 hover:text-gray-300 text-sm px-1">✕</button>
-            </div>
-            {SUPPORT_KINDS.map(kind => {
-              const count = patchedFixtures.filter(pf => resolveSupportKind(fixturePositions[pf.id]?.support) === kind).length;
-              return (
-                <button
-                  key={kind}
-                  onClick={() => {
-                    const st = useShowStore.getState();
-                    for (const pf of st.patchedFixtures) st.setFixturePosition(pf.id, { support: kind });
-                    setSupportsMenuOpen(false);
-                  }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-800/30 text-left"
-                  title={kind === 'truss' ? t('stage3D.trussHistoricTip') : t('stage3D.supportApplyAll', { count: patchedFixtures.length, label: t(`stage3D.support_${kind}`).toLowerCase() })}
-                >
-                  <span className="text-[10px] text-gray-200 flex-1">{t(`stage3D.support_${kind}`)}</span>
-                  <span className="text-[10px] text-gray-500 tabular-nums">{count}</span>
-                </button>
-              );
-            })}
-            <p className="px-2 pt-1 text-[9px] text-gray-600">{t('stage3D.supportHint')}</p>
+      {/* Supports — panneau latéral NON modal : applique le support à la
+          SÉLECTION (Ctrl+clic pour multi-sélectionner) ou à toutes. Le panneau
+          reste ouvert : enchaîne plusieurs supports pour des groupes différents. */}
+      {supportsMenuOpen && (() => {
+        const targetIds = new Set<string>();
+        if (multiSelectedIds.size > 0) { for (const id of multiSelectedIds) targetIds.add(id); }
+        else if (selectedFixtureId) targetIds.add(selectedFixtureId);
+        const selCount = targetIds.size;
+        const useSelection = supportsTarget === 'selection' && selCount > 0;
+        const targetCount = useSelection ? selCount : patchedFixtures.length;
+        const applySupport = (kind: FixtureSupport) => {
+          const st = useShowStore.getState();
+          const ids = useSelection ? [...targetIds] : st.patchedFixtures.map((pf) => pf.id);
+          for (const id of ids) st.setFixturePosition(id, { support: kind });
+          // Ne pas fermer : permet d'enchaîner un autre support (multi-choix).
+        };
+        return (
+        <div className="fixed right-3 top-16 w-72 z-40 flex flex-col rounded-lg border border-gray-700/60 bg-[#0d0d14]/95 shadow-xl shadow-black/60 p-2">
+          <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
+            <span className="text-[10px] font-medium text-gray-300">{t('stage3D.supportsTitle')}</span>
+            <button onClick={() => setSupportsMenuOpen(false)} className="text-gray-500 hover:text-gray-300 text-sm px-1">✕</button>
           </div>
+          {/* Cible : la sélection (Ctrl+clic) ou toutes les fixtures */}
+          <div className="grid grid-cols-2 gap-1 mb-1.5">
+            <button
+              onClick={() => setSupportsTarget('selection')}
+              disabled={selCount === 0}
+              className={`px-2 py-1 rounded text-[10px] font-medium border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                useSelection
+                  ? 'bg-purple-600/30 text-purple-300 border-purple-500/40'
+                  : 'bg-gray-800/50 text-gray-500 border-gray-700 hover:text-gray-300'
+              }`}
+            >
+              {t('stage3D.supportsTargetSelection', { count: selCount })}
+            </button>
+            <button
+              onClick={() => setSupportsTarget('all')}
+              className={`px-2 py-1 rounded text-[10px] font-medium border transition-colors ${
+                !useSelection
+                  ? 'bg-purple-600/30 text-purple-300 border-purple-500/40'
+                  : 'bg-gray-800/50 text-gray-500 border-gray-700 hover:text-gray-300'
+              }`}
+            >
+              {t('stage3D.supportsTargetAll', { count: patchedFixtures.length })}
+            </button>
+          </div>
+          {SUPPORT_KINDS.map(kind => {
+            const count = patchedFixtures.filter(pf => resolveSupportKind(fixturePositions[pf.id]?.support) === kind).length;
+            return (
+              <button
+                key={kind}
+                onClick={() => applySupport(kind)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-800/30 text-left"
+                title={t('stage3D.supportApplyTo', { count: targetCount, label: t(`stage3D.support_${kind}`).toLowerCase() })}
+              >
+                <span className="text-[10px] text-gray-200 flex-1">{t(`stage3D.support_${kind}`)}</span>
+                <span className="text-[10px] text-gray-500 tabular-nums">{count}</span>
+              </button>
+            );
+          })}
+          <p className="px-2 pt-1 text-[9px] text-gray-600">{t('stage3D.supportsMultiHint')}</p>
         </div>
-      )}
+        );
+      })()}
       {/* Decks popup — panneau latéral NON modal : le canvas reste cliquable
           pour attraper les plateaux au clic gauche pendant l'édition.
           (Un backdrop plein écran fermerait l'éditeur à chaque clic 3D.) */}
