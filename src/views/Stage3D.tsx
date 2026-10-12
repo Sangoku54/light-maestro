@@ -38,6 +38,7 @@ import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVer
 import { DEFAULT_POSITIONS, MUSICIAN_KINDS, isRosterEmpty, normalizeRoster, rosterTotal, type MusicianKind, type MusicianRoster } from '../utils/musicians';
 import { SUPPORT_KINDS, isBarSupport, needsSupportGeometry, resolveSupportKind, supportColumnHeight, DEFAULT_BAR_SPAN, BAR_HUNG_DEFAULT, BAR_DROP, BAR_CABLE_LEN, type FixtureSupport } from '../utils/supports';
 import { deckTopAt, deckRectMeters, deckToMeters, deckFromMeters, type StageDeck } from '../utils/stage-decks';
+import { RIG_KINDS, DEFAULT_RIG_SPANS, DEFAULT_RIG_HEIGHTS, type RigKind, type StageRig, migrateStageRigs, sanitizeRigUpdates, rigRectMeters, rigToMeters, rigFromMeters } from '../utils/stage-rigs';
 import clavierImg from '../assets/musicians/clavier.png';
 import chanteuseImg from '../assets/musicians/chanteuse.png';
 import chanteurImg from '../assets/musicians/chanteur.png';
@@ -713,6 +714,8 @@ export const Stage3D: React.FC<{
   // Drag d'un plateau au clic gauche (éditeur Plateaux ouvert uniquement :
   // sinon le clic gauche reste réservé à l'orbite et aux fixtures).
   const deckDragRef = useRef<{ id: string } | null>(null);
+  // Drag d'un support (rig) au clic gauche (éditeur Supports ouvert).
+  const rigDragRef = useRef<{ id: string } | null>(null);
   // Brouillons d'édition des plateaux (commit au blur/Entrée : évite de
   // reconstruire la scène 3D à chaque frappe, comme draftDims).
   const [deckDrafts, setDeckDrafts] = useState<Record<string, { name: string; x: number | string; y: number | string; w: number | string; d: number | string; h: number | string; r: number | string }>>({});
@@ -720,8 +723,6 @@ export const Stage3D: React.FC<{
   const stageDims = useShowStore((s) => s.stageDims);
   const setStageDims = useShowStore((s) => s.setStageDims);
   // ── Plateaux multi-rects (podium, runway en T…) ──
-  // Même repère normalisé que les fixtures : aucun déplacement existant.
-  // La base de chaque fixture = dessus du plateau sous ses pieds.
   const stageDecks = useShowStore((s) => s.stageDecks);
   const addStageDeck = useShowStore((s) => s.addStageDeck);
   const updateStageDeck = useShowStore((s) => s.updateStageDeck);
@@ -731,9 +732,34 @@ export const Stage3D: React.FC<{
   stageDecksRef.current = stageDecks;
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const selectedDeckIdRef = useRef<string | null>(null);
+  // ── Structures libres (supports : ponts, barres, totems, T) ──
+  const stageRigs = useShowStore((s) => s.stageRigs);
+  const addStageRig = useShowStore((s) => s.addStageRig);
+  const updateStageRig = useShowStore((s) => s.updateStageRig);
+  const removeStageRig = useShowStore((s) => s.removeStageRig);
+  const resetStageRigs = useShowStore((s) => s.resetStageRigs);
+  const stageRigsRef = useRef(stageRigs);
+  stageRigsRef.current = stageRigs;
+  const [selectedRigId, setSelectedRigId] = useState<string | null>(null);
+  const selectedRigIdRef = useRef<string | null>(null);
+  const rigGeoKey = useMemo(
+    () => stageRigs.map((r) => [r.id, r.kind, r.span, r.h, r.hung].join(':')).join('|'),
+    [stageRigs],
+  );
+  const rigGroupsRef = useRef<Map<string, { group: THREE.Group; top: THREE.Mesh }>>(new Map());
+  // Brouillons d'édition des supports (rigs) — mêmes principes que les decks.
+  const [rigDrafts, setRigDrafts] = useState<Record<string, { name: string; x: number | string; y: number | string; w: number | string; d: number | string; h: number | string; r: number | string }>>({});
+  // Sync des brouillons rigs quand stageRigs/stageDims changent.
+  useEffect(() => {
+    const next: typeof rigDrafts = {};
+    for (const rig of stageRigs) next[rig.id] = rigToMeters(rig, stageDims);
+    setRigDrafts(next);
+  }, [stageRigs, stageDims.width, stageDims.depth]);
   selectedDeckIdRef.current = selectedDeckId;
   // Arêtes des plateaux (surlignage du plateau sélectionné sans rebuild).
   const deckEdgesRef = useRef<Array<{ id: string; line: THREE.LineSegments }>>([]);
+  // Arêtes des supports (rigs) (surlignage sans rebuild).
+  const rigEdgesRef = useRef<Array<{ id: string; line: THREE.LineSegments }>>([]);
   // Groupes des plateaux (déplacement/rotation sans rebuild géométrie).
   const deckGroupsRef = useRef(new Map<string, { group: THREE.Group; top: THREE.Mesh }>());
   // Signature géométrique des plateaux : la scène ne se reconstruit que si
@@ -1370,6 +1396,44 @@ export const Stage3D: React.FC<{
       deckGroupsRef.current.set(deck.id, { group: g, top: deckTop });
     }
 
+    // ── Structures libres (supports : ponts, barres, totems, T) ──
+    // Un groupe par rig : position/rotation modifiables sans rebuild (effet de synchro).
+    // Par défaut aucun rig (scène nue).
+    rigEdgesRef.current = [];
+    rigGroupsRef.current = new Map();
+    for (const rig of stageRigsRef.current) {
+      const g = buildStandaloneRigVisual(rig);
+      if (!g) continue;
+      const r = rigRectMeters(rig, { width: STAGE_WIDTH, depth: STAGE_DEPTH });
+      const rotY = -((rig.rot ?? 0) * Math.PI) / 180; // horaire vu du dessus
+      const group = new THREE.Group();
+      group.position.set(r.x, 0, r.z);
+      group.rotation.y = -((rig.rot ?? 0) * Math.PI) / 180;
+      group.userData.rigId = rig.id;
+      group.add(g);
+      scene.add(group);
+ 
+      // Arête de sélection (violet si sélectionné dans l'éditeur)
+      const edgeGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(
+        rig.kind === 'truss' || rig.kind === 'frontBar' || rig.kind === 'backBar' ? rig.span : 1,
+        rig.h,
+        rig.kind === 'truss' || rig.kind === 'frontBar' || rig.kind === 'backBar' ? rig.span : 1
+      ));
+      const edgeLine = new THREE.LineSegments(
+        edgeGeo,
+        new THREE.LineBasicMaterial({
+          color: selectedRigIdRef.current === rig.id ? 0xa855f7 : 0x6d5aa8,
+          linewidth: 1,
+        }),
+      );
+      edgeLine.position.y = rig.h / 2;
+      // Arêtes exclues du picking (seuils des Lines fausseraient la visée).
+      edgeLine.raycast = () => {};
+      group.add(edgeLine);
+      rigEdgesRef.current.push({ id: rig.id, line: edgeLine });
+      rigGroupsRef.current.set(rig.id, { group, top: null });
+    }
+ 
     // Stage front lip overlay (reinforces the edge visually)
     const lipGeo = new THREE.BoxGeometry(STAGE_WIDTH + 0.05, 0.04, 0.15);
     const lipMat = new THREE.MeshStandardMaterial({
@@ -2108,6 +2172,21 @@ export const Stage3D: React.FC<{
     }
   }, [stageDecks, stageDims]);
 
+  // ── Rig transforms (drag/rotation) : positions sans rebuild géométrie ──
+  // La caméra est conservée et le drag reste fluide (la géométrie ne se
+  // reconstruit que si w/d/h changent, via rigGeoKey).
+  useEffect(() => {
+    if (rigGroupsRef.current.size === 0) return;
+    const dims = stageDimsRef.current;
+    for (const rig of stageRigs) {
+      const entry = rigGroupsRef.current.get(rig.id);
+      if (!entry) continue;
+      const r = rigRectMeters(rig, dims);
+      entry.group.position.set(r.x, 0, r.z);
+      entry.group.rotation.y = -((rig.rot ?? 0) * Math.PI) / 180;
+    }
+  }, [stageRigs, stageDims]);
+
   // ── Show/hide beams toggle ──────────────────────────
   useEffect(() => {
     for (const f3d of fixturesRef.current.values()) {
@@ -2779,6 +2858,26 @@ export const Stage3D: React.FC<{
           e.preventDefault();
         }
       }
+      // Maj/Ctrl + clic gauche sur un support (rig) : attraper le support.
+      // Les fixtures restent prioritaires (multi-sélection testée ci-dessus).
+      // L'éditeur Supports n'a pas besoin d'être ouvert.
+      else {
+        raycasterRef.current.setFromCamera(mouseRef.current, camera);
+        const rigRoots: THREE.Object3D[] = [];
+        for (const { group } of rigGroupsRef.current.values()) rigRoots.push(group);
+        const rigHits = rigRoots.length > 0 ? raycasterRef.current.intersectObjects(rigRoots, true) : [];
+        if (rigHits.length > 0) {
+          let o: THREE.Object3D | null = rigHits[0].object;
+          while (o && !o.userData?.rigId) o = o.parent;
+          const rigId = o?.userData?.rigId as string | undefined;
+          if (rigId) {
+            if (rigId !== selectedRigIdRef.current) setSelectedRigId(rigId);
+            rigDragRef.current = { id: rigId };
+            if (controlsRef.current) controlsRef.current.enabled = false;
+            e.preventDefault();
+          }
+        }
+      }
     } else {
       // Clic à côté du panneau : on ne désélectionne PAS — la modale reste
       // ouverte (fermeture via le X du panneau). Sinon le moindre clic sur le
@@ -2843,6 +2942,29 @@ export const Stage3D: React.FC<{
         if (controlsRef.current) controlsRef.current.enabled = false;
         return;
       }
+      // Drag de support (rig) : Maj/Ctrl + clic, éditeur Supports ouvert.
+      // Même principe que les plateaux : plan à la hauteur du support.
+      if (rigDragRef.current) {
+        const { id } = rigDragRef.current;
+        const st = useShowStore.getState();
+        const rig = st.stageRigs.find((r) => r.id === id);
+        const dims = stageDimsRef.current;
+        const camera = cameraRef.current;
+        const container = containerRef.current;
+        if (!rig || !camera || !container) return;
+        const rect = container.getBoundingClientRect();
+        mouseRef.current.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+        mouseRef.current.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+        raycasterRef.current.setFromCamera(mouseRef.current, camera);
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -rig.h);
+        const pt = new THREE.Vector3();
+        if (!raycasterRef.current.ray.intersectPlane(plane, pt)) return;
+        const cx = Math.min(1.3, Math.max(-0.3, pt.x / dims.width + 0.5));
+        const cy = Math.min(1.3, Math.max(-0.3, pt.z / dims.depth + 0.5));
+        st.updateStageRig(id, { cx, cy });
+        if (controlsRef.current) controlsRef.current.enabled = false;
+        return;
+      }
       // Direct Pan/Tilt has priority when directMode
       if (panTiltDragRef.current) {
         const { fixtureId, startX, startY, startPan, startTilt } = panTiltDragRef.current;
@@ -2883,6 +3005,10 @@ export const Stage3D: React.FC<{
     const onUp = () => {
       if (deckDragRef.current) {
         deckDragRef.current = null;
+        if (controlsRef.current) controlsRef.current.enabled = true;
+      }
+      if (rigDragRef.current) {
+        rigDragRef.current = null;
         if (controlsRef.current) controlsRef.current.enabled = true;
       }
       if (panTiltDragRef.current) {
@@ -3376,68 +3502,135 @@ export const Stage3D: React.FC<{
           </div>
         </div>
       )}
-      {/* Supports — panneau latéral NON modal : applique le support à la
-          SÉLECTION (Ctrl+clic pour multi-sélectionner) ou à toutes. Le panneau
-          reste ouvert : enchaîne plusieurs supports pour des groupes différents. */}
+      {/* Supports — panneau latéral NON modal : éditeur de structures libres
+          (ponts, barres, totems, T). Le panneau reste ouvert : enchaîne
+          plusieurs supports pour des groupes différents. */}
       {supportsMenuOpen && (() => {
-        const targetIds = new Set<string>();
-        if (multiSelectedIds.size > 0) { for (const id of multiSelectedIds) targetIds.add(id); }
-        else if (selectedFixtureId) targetIds.add(selectedFixtureId);
-        const selCount = targetIds.size;
-        const useSelection = supportsTarget === 'selection' && selCount > 0;
-        const targetCount = useSelection ? selCount : patchedFixtures.length;
-        const applySupport = (kind: FixtureSupport) => {
-          const st = useShowStore.getState();
-          const ids = useSelection ? [...targetIds] : st.patchedFixtures.map((pf) => pf.id);
-          for (const id of ids) st.setFixturePosition(id, { support: kind });
-          // Ne pas fermer : permet d'enchaîner un autre support (multi-choix).
-        };
         return (
-        <div className="fixed right-3 top-16 w-72 z-40 flex flex-col rounded-lg border border-gray-700/60 bg-[#0d0d14]/95 shadow-xl shadow-black/60 p-2">
+        <div className="fixed right-3 top-16 w-80 z-40 flex flex-col rounded-lg border border-gray-700/60 bg-[#0d0d14]/95 shadow-xl shadow-black/60 p-2 max-h-[80vh] overflow-y-auto">
           <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
-            <span className="text-[10px] font-medium text-gray-300">{t('stage3D.supportsTitle')}</span>
+            <span className="text-[10px] font-medium text-gray-300">{t('stage3D.supportsTitle')} ({stageRigs.length})</span>
             <button onClick={() => setSupportsMenuOpen(false)} className="text-gray-500 hover:text-gray-300 text-sm px-1">✕</button>
           </div>
-          {/* Cible : la sélection (Ctrl+clic) ou toutes les fixtures */}
-          <div className="grid grid-cols-2 gap-1 mb-1.5">
-            <button
-              onClick={() => setSupportsTarget('selection')}
-              disabled={selCount === 0}
-              className={`px-2 py-1 rounded text-[10px] font-medium border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                useSelection
-                  ? 'bg-purple-600/30 text-purple-300 border-purple-500/40'
-                  : 'bg-gray-800/50 text-gray-500 border-gray-700 hover:text-gray-300'
-              }`}
-            >
-              {t('stage3D.supportsTargetSelection', { count: selCount })}
-            </button>
-            <button
-              onClick={() => setSupportsTarget('all')}
-              className={`px-2 py-1 rounded text-[10px] font-medium border transition-colors ${
-                !useSelection
-                  ? 'bg-purple-600/30 text-purple-300 border-purple-500/40'
-                  : 'bg-gray-800/50 text-gray-500 border-gray-700 hover:text-gray-300'
-              }`}
-            >
-              {t('stage3D.supportsTargetAll', { count: patchedFixtures.length })}
-            </button>
-          </div>
-          {SUPPORT_KINDS.map(kind => {
-            const count = patchedFixtures.filter(pf => resolveSupportKind(fixturePositions[pf.id]?.support) === kind).length;
-            return (
+          {/* Ajout d'un nouveau support */}
+          <div className="flex flex-wrap gap-1 mb-2">
+            {RIG_KINDS.map(kind => (
               <button
                 key={kind}
-                onClick={() => applySupport(kind)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-800/30 text-left"
-                title={t('stage3D.supportApplyTo', { count: targetCount, label: t(`stage3D.support_${kind}`).toLowerCase() })}
+                onClick={() => { const id = addStageRig(kind); setSelectedRigId(id); }}
+                className="px-2 py-1 rounded text-[10px] border bg-gray-800/50 text-gray-300 border-gray-700 hover:bg-purple-600/20 hover:text-purple-300 hover:border-purple-500/40 flex items-center gap-1"
               >
-                <span className="text-[10px] text-gray-200 flex-1">{t(`stage3D.support_${kind}`)}</span>
-                <span className="text-[10px] text-gray-500 tabular-nums">{count}</span>
+                + {t(`stage3D.support_${kind}`)}
               </button>
-            );
-          })}
-          <p className="px-2 pt-1 text-[9px] text-gray-600">{t('stage3D.supportsMultiHint')}</p>
-        </div>
+            ))}
+          </div>
+          {stageRigs.length === 0 ? (
+            <p className="px-2 pt-1 text-[10px] text-gray-500">{t('stage3D.rigsEmpty')}</p>
+          ) : (
+            stageRigs.map((rig) => {
+              const dr = rigDrafts[rig.id] ?? rigToMeters(rig, stageDims);
+              const sel = (selectedRigId ?? stageRigs[0]?.id) === rig.id;
+              const setF = (field: string, v: string) =>
+                setRigDrafts((prev) => ({ ...prev, [rig.id]: { ...(prev[rig.id] ?? rigToMeters(rig, stageDims)), [field]: v } }));
+              const commitF = (field: string) => {
+                const cur = rigDrafts[rig.id] ?? rigToMeters(rig, stageDims);
+                if (field === 'name') {
+                  updateStageRig(rig.id, { name: String(cur.name).trim() || rig.name });
+                } else {
+                  updateStageRig(rig.id, rigFromMeters({
+                    x: Number(cur.x), y: Number(cur.y), w: Number(cur.w), d: Number(cur.d), h: Number(cur.h), r: Number(cur.r || 0),
+                  }, stageDims));
+                }
+              };
+              const num = (field: 'x' | 'y' | 'w' | 'd' | 'h' | 'r', label: string) => (
+                <label key={field} className="flex flex-col items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                  <span className="text-[8px] text-gray-600">{label}</span>
+                  <input
+                    type="number" step={field === 'r' ? 5 : 0.5} min={0} value={dr[field] as number | string}
+                    onChange={(e) => setF(field, e.target.value)}
+                    onBlur={() => commitF(field)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') commitF(field); }}
+                    className="w-full bg-black/30 border border-gray-800 rounded px-1 py-0.5 text-[10px] text-gray-200 text-center focus:outline-none focus:border-purple-500/50"
+                  />
+                </label>
+              );
+              const showSpan = rig.kind === 'truss' || rig.kind === 'frontBar' || rig.kind === 'backBar';
+              const showHung = rig.kind === 'frontBar' || rig.kind === 'backBar';
+              const showBarHung = rig.kind === 'frontBar' || rig.kind === 'backBar';
+              return (
+                <div
+                  key={rig.id}
+                  onClick={() => setSelectedRigId(rig.id)}
+                  className={`rounded border px-2 py-1.5 mb-1 cursor-pointer ${sel ? 'border-purple-500/50 bg-purple-600/10' : 'border-gray-800/60'}`}
+                >
+                  <div className="flex items-center gap-1">
+                    <input
+                      value={dr.name}
+                      onChange={(e) => setF('name', e.target.value)}
+                      onBlur={() => commitF('name')}
+                      onKeyDown={(e) => { if (e.key === 'Enter') commitF('name'); }}
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={t('stage3D.rigsTitle')}
+                      className="flex-1 min-w-0 bg-transparent text-[11px] text-gray-200 focus:outline-none border-b border-transparent focus:border-purple-500/50"
+                    />
+                    <span className="text-[9px] text-gray-500 font-mono">{rig.h.toFixed(1)}m</span>
+                    {stageRigs.length > 1 && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); removeStageRig(rig.id); if (selectedRigId === rig.id) { const rest = stageRigs.filter((r) => r.id !== rig.id); setSelectedRigId(rest[0]?.id ?? null); } }}
+                        className="text-gray-600 hover:text-red-400 text-xs px-1"
+                        title={t('stage3D.rigDeleteTitle')}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-6 gap-1 mt-1">
+                    {num('x', 'X')}{num('y', 'Y')}{num('w', 'L')}{num('d', 'P')}{num('h', 'H')}{num('r', 'R°')}
+                  </div>
+                  {showSpan && (
+                    <div className="space-y-1 mt-1 pt-1 border-t border-gray-800">
+                      <div className="flex justify-between text-[10px]">
+                        <span className="text-gray-500">{t('stage3D.barSpan')}</span>
+                        <span className="text-gray-400 font-mono">{(Number(dr.w) || 0).toFixed(1)}m</span>
+                      </div>
+                      <input
+                        type="number" step={0.5} min={1} max={12} value={dr.w}
+                        onChange={(e) => setF('w', e.target.value)}
+                        onBlur={() => commitF('w')}
+                        onKeyDown={(e) => { if (e.key === 'Enter') commitF('w'); }}
+                        className="w-full h-1 accent-purple-500 cursor-pointer"
+                      />
+                    </div>
+                  )}
+                  {showBarHung && (
+                    <div className="grid grid-cols-2 gap-1 pt-1">
+                      <button
+                        onClick={() => setFixturePosition(selectedRigId, { barHung: true })}
+                        className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                          (rig.hung ?? true)
+                            ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
+                            : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
+                        }`}
+                      >
+                        {t('stage3D.barHung')}
+                      </button>
+                      <button
+                        onClick={() => setFixturePosition(selectedRigId, { barHung: false })}
+                        className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                          !(rig.hung ?? true)
+                            ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
+                            : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
+                        }`}
+                      >
+                        {t('stage3D.barStanding')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            }))}
+            <p className="px-2 pt-1 text-[9px] text-gray-600">{t('stage3D.rigsHint')}</p>
+          </div>
         );
       })()}
       {/* Decks popup — panneau latéral NON modal : le canvas reste cliquable
@@ -4550,6 +4743,55 @@ const barCableMat = new THREE.MeshStandardMaterial({
   color: 0x9aa0b5, roughness: 0.4, metalness: 0.8,
   emissive: 0x2e3247, emissiveIntensity: 0.6,
 });
+// ── Truss du décor : alu clair + forte émission (visible sur scène sombre) ──
+const trussMat = new THREE.MeshStandardMaterial({
+  color: 0xc8d0db, roughness: 0.22, metalness: 0.95,
+});
+
+/** Construit un tronçon de treillis triangulaire (3 cordes + entretoises). */
+function buildTriTruss(length: number, axis: 'x' | 'y' | 'z', mat?: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const m = mat ?? trussMat;
+  const chordR = 0.04;
+  const diagR = 0.02;
+  const triW = 0.55;
+  const triH = 0.55;
+  const half = length / 2;
+
+  const chordGeo = new THREE.CylinderGeometry(chordR, chordR, length, 10);
+  chordGeo.rotateZ(Math.PI / 2);
+  const chordYs = [triH / 2, -triH / 2, -triH / 2];
+  const chordZs = [0, -triW / 2, triW / 2];
+  for (let i = 0; i < 3; i++) {
+    const c = new THREE.Mesh(chordGeo, m);
+    c.position.set(0, chordYs[i], chordZs[i]);
+    g.add(c);
+  }
+
+  const panel = 0.5;
+  const nPanels = Math.max(1, Math.round(length / panel));
+  const p = length / nPanels;
+  const top = (x: number) => new THREE.Vector3(x, triH / 2, 0);
+  const botL = (x: number) => new THREE.Vector3(x, -triH / 2, -triW / 2);
+  const botR = (x: number) => new THREE.Vector3(x, -triH / 2, triW / 2);
+
+  for (let i = 0; i <= nPanels; i++) {
+    const x = -half + i * p;
+    const rung = strutBetween(botL(x), botR(x), diagR, m);
+    if (rung) g.add(rung);
+    if (i < nPanels) {
+      const xn = x + p;
+      const d1 = strutBetween(top(x), botL(xn), diagR, m);
+      const d2 = strutBetween(top(x), botR(xn), diagR, m);
+      if (d1) g.add(d1);
+      if (d2) g.add(d2);
+    }
+  }
+
+  if (axis === 'z') g.rotation.y = Math.PI / 2;
+  else if (axis === 'y') g.rotation.z = Math.PI / 2;
+  return g;
+}
 
 function strutBetween(a: THREE.Vector3, b: THREE.Vector3, r: number, mat: THREE.Material): THREE.Mesh {
   const dir = new THREE.Vector3().subVectors(b, a);
@@ -4634,6 +4876,85 @@ function buildSupportVisual(
     g.add(foot);
   }
   return g;
+}
+
+/**
+ * Construit le mesh 3D d'une structure de scène (rig) indépendante.
+ * Pour les barres/pont : la barre est AU NIVEAU h (pas height+drop comme les fixtures).
+ * Pour totem/T : la colonne monte de 0 à h.
+ */
+function buildStandaloneRigVisual(rig: StageRig): THREE.Group | null {
+  const g = new THREE.Group();
+  const kind = rig.kind;
+  if (kind === 'truss') {
+    const beam = buildTriTruss(Math.max(1, rig.span), 'x');
+    beam.position.y = rig.h;
+    g.add(beam);
+    return g;
+  }
+  if (kind === 'frontBar' || kind === 'backBar') {
+    const span = Math.max(1, rig.span);
+    const barY = rig.h;
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, rig.span, 12), barMetalMat);
+    bar.rotation.z = Math.PI / 2;
+    bar.position.y = barY;
+    g.add(bar);
+    const clamp = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, BAR_DROP, 8), barCableMat);
+    clamp.position.y = rig.h + BAR_DROP / 2;
+    g.add(clamp);
+    const ex = Math.max(0.2, rig.span / 2 - 0.15);
+    if ((rig.hung ?? true)) {
+      for (const sx of [-ex, ex]) {
+        const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, BAR_CABLE_LEN, 6), barCableMat);
+        cable.position.set(sx, rig.h + BAR_CABLE_LEN / 2, 0);
+        g.add(cable);
+      }
+    } else {
+      for (const sx of [-ex, ex]) {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, rig.h, 8), barMetalMat);
+        pole.position.set(sx, rig.h / 2, 0);
+        g.add(pole);
+        const foot = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, 0.34), barMetalMat);
+        foot.position.set(sx, 0.025, 0);
+        g.add(foot);
+      }
+    }
+    return g;
+  }
+  if (kind === 'totem') {
+    const col = new THREE.Mesh(new THREE.BoxGeometry(0.34, rig.h, 0.34), supportMetalMat);
+    col.position.y = rig.h / 2;
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.06, 0.8), supportBaseMat);
+    base.position.y = 0.03;
+    const top = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.05, 0.42), supportBaseMat);
+    top.position.y = Math.max(0.06, rig.h - 0.025);
+    g.add(col, base, top);
+    return g;
+  }
+  if (kind === 'tBar') {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, rig.h, 10), supportMetalMat);
+    pole.position.y = rig.h / 2;
+    g.add(pole);
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.1, 8), supportMetalMat);
+    bar.rotation.z = Math.PI / 2;
+    bar.position.y = Math.max(0.1, rig.h - 0.05);
+    g.add(bar);
+    const hubY = Math.min(0.55, Math.max(0.2, rig.h * 0.4));
+    const spread = Math.min(0.9, 0.25 + rig.h * 0.15);
+    for (let k = 0; k < 3; k++) {
+      const a = (k / 3) * Math.PI * 2;
+      g.add(strutBetween(
+        new THREE.Vector3(0, hubY, 0),
+        new THREE.Vector3(Math.cos(a) * 0.9, 0.02, Math.sin(a) * 0.9),
+        0.025, supportMetalMat,
+      ));
+    }
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.05, 12), supportBaseMat);
+    foot.position.y = 0.025;
+    g.add(foot);
+    return g;
+  }
+  return null;
 }
 
 function clearFixtureSupport(scene: THREE.Scene | null, f3d: Fixture3D): void {

@@ -141,6 +141,7 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
         patchedFixtures: showState.patchedFixtures,
         stageDims: showState.stageDims,
         stageDecks: showState.stageDecks,
+        stageRigs: showState.stageRigs,
         universes: showState.universes,
         fixturePositions: showState.fixturePositions,
         fixtureGroups: showState.fixtureGroups,
@@ -443,6 +444,9 @@ const App: React.FC = () => {
           // Inconditionnel (migration) : un projet sans plateaux reçoit le
           // plateau unique historique, sans hériter du projet précédent.
           ss.setStageDecks(data.showStore.stageDecks);
+          // Inconditionnel (migration) : un projet sans structures reçoit la
+          // liste vide, sans hériter du projet précédent.
+          ss.setStageRigs(data.showStore.stageRigs);
           if (data.showStore.universes) { ss.setShowUniverses(data.showStore.universes); syncUniversesToEngine(data.showStore.universes); }
           if (data.showStore.fixturePositions) ss.setFixturePositions(data.showStore.fixturePositions);
           if (data.showStore.fixtureGroups) ss.setFixtureGroups(data.showStore.fixtureGroups);

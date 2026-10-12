@@ -12,6 +12,7 @@ import { normalizeFolderName } from '../utils/scene-fixtures';
 import type { MusicianRoster } from '../utils/musicians';
 import type { FixtureSupport } from '../utils/supports';
 import { defaultStageDecks, defaultNewDeckHeight, migrateStageDecks, sanitizeDeckUpdates, type StageDeck } from '../utils/stage-decks';
+import { defaultStageRigs, makeRig, migrateStageRigs, sanitizeRigUpdates, type RigKind, type StageRig } from '../utils/stage-rigs';
 import { useAppStore } from './appStore';
 import { getLicenseLimits } from './licenseStore';
 
@@ -356,7 +357,16 @@ interface ShowState {
   removeStageDeck: (id: string) => void;
   /** Retour à la configuration initiale (plateau unique historique). */
   resetStageDecks: () => void;
-  setFixturePosition: (id: string, pos: Partial<FixturePos>) => void;
+  /** Structures libres placées dans le décor (ponts, barres, totems, T),
+   *  indépendantes des fixtures — avec ou sans projecteur dessus. */
+  stageRigs: StageRig[];
+  setStageRigs: (rigs: StageRig[]) => void;
+  addStageRig: (kind: RigKind) => string;
+  updateStageRig: (id: string, updates: Partial<StageRig>) => void;
+   removeStageRig: (id: string) => void;
+   /** Retour à la configuration initiale (aucune structure). */
+   resetStageRigs: () => void;
+   setFixturePosition: (id: string, pos: Partial<FixturePos>) => void;
   setFixturePositions: (positions: Record<string, FixturePos>) => void;
   initFixturePosition: (id: string, fixtureType: string, index: number) => void;
 
@@ -468,6 +478,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
   patchedFixtures: [],
   stageDims: { width: 10, depth: 8 },
   stageDecks: defaultStageDecks(),
+  stageRigs: defaultStageRigs(),
   universes: loadUniverses(),
 
   patchFixture: (fixture) => {
@@ -750,6 +761,34 @@ export const useShowStore = create<ShowState>((set, get) => ({
   },
   resetStageDecks: () => {
     set({ stageDecks: defaultStageDecks() });
+    useAppStore.getState().markDirty();
+  },
+  setStageRigs: (rigs) => {
+    set({ stageRigs: migrateStageRigs(rigs) });
+    useAppStore.getState().markDirty();
+  },
+  addStageRig: (kind) => {
+    const id = `rig-${Date.now().toString(36)}`;
+    set((state) => ({
+      stageRigs: [...state.stageRigs, makeRig(id, kind, state.stageRigs.length + 1)],
+    }));
+    useAppStore.getState().markDirty();
+    return id;
+  },
+  updateStageRig: (id, updates) => {
+    const clean = sanitizeRigUpdates(updates);
+    if (Object.keys(clean).length === 0) return;
+    set((state) => ({
+      stageRigs: state.stageRigs.map((r) => (r.id === id ? { ...r, ...clean } : r)),
+    }));
+    useAppStore.getState().markDirty();
+  },
+  removeStageRig: (id) => {
+    set((state) => ({ stageRigs: state.stageRigs.filter((r) => r.id !== id) }));
+    useAppStore.getState().markDirty();
+  },
+  resetStageRigs: () => {
+    set({ stageRigs: defaultStageRigs() });
     useAppStore.getState().markDirty();
   },
 
