@@ -760,7 +760,7 @@ export const Stage3D: React.FC<{
     () => stageRigs.map((r) => [r.id, r.kind, r.span, r.h, r.hung].join(':')).join('|'),
     [stageRigs],
   );
-  const rigGroupsRef = useRef<Map<string, { group: THREE.Group; top: THREE.Mesh }>>(new Map());
+  const rigGroupsRef = useRef<Map<string, { group: THREE.Group; top: THREE.Mesh; geoKey: string }>>(new Map());
   // Which rigs are currently in the scene (added dynamically).
   const rigInSceneRef = useRef<Set<string>>(new Set());
   // Brouillons d'édition des supports (rigs) — mêmes principes que les decks.
@@ -924,7 +924,7 @@ export const Stage3D: React.FC<{
       metalness: 0.3,
     });
     const accentMat = new THREE.MeshStandardMaterial({
-      color: tierColor,
+      color: 0x2a2a35,
       roughness: 0.4,
       metalness: 0.5,
       emissive: tierColor,
@@ -940,7 +940,7 @@ export const Stage3D: React.FC<{
           color: 0x2a2a35, roughness: 0.3, metalness: 0.8,
         });
         const headMat = new THREE.MeshStandardMaterial({
-          color: tierColor, roughness: 0.35, metalness: 0.5,
+          color: 0x2a2a35, roughness: 0.35, metalness: 0.5,
           emissive: tierColor, emissiveIntensity: 0,
         });
 
@@ -1098,7 +1098,7 @@ export const Stage3D: React.FC<{
           color: 0x2a2a35, roughness: 0.3, metalness: 0.8,
         });
         const headMatDef = new THREE.MeshStandardMaterial({
-          color: tierColor, roughness: 0.35, metalness: 0.5,
+          color: 0x2a2a35, roughness: 0.35, metalness: 0.5,
           emissive: tierColor, emissiveIntensity: 0,
         });
 
@@ -1173,7 +1173,7 @@ export const Stage3D: React.FC<{
       : [];
     if (extraTilts.length > 0 && armGroup) {
       const extraMat = new THREE.MeshStandardMaterial({
-        color: tierColor, roughness: 0.35, metalness: 0.5,
+        color: 0x2a2a35, roughness: 0.35, metalness: 0.5,
         emissive: tierColor, emissiveIntensity: 0,
       });
       const n = extraTilts.length;
@@ -2229,12 +2229,54 @@ export const Stage3D: React.FC<{
         edgeLine.raycast = () => {};
         group.add(edgeLine);
         rigEdgesRef.current.push({ id: rig.id, line: edgeLine });
-        rigGroupsRef.current.set(rig.id, { group, top: null });
+        rigGroupsRef.current.set(rig.id, { group, top: null, geoKey: [rig.kind, rig.span, rig.h, rig.hung].join(':') });
         inScene.add(rig.id);
       } else {
-        // Update existing rig position
         const entry = rigGroupsRef.current.get(rig.id);
-        if (entry) {
+        const geoKey = [rig.kind, rig.span, rig.h, rig.hung].join(':');
+        if (entry && entry.geoKey !== geoKey) {
+          // Géométrie modifiée (hauteur, longueur, type, suspendu/posé) :
+          // reconstruit le visuel au lieu de juste déplacer.
+          scene.remove(entry.group);
+          rigGroupsRef.current.delete(rig.id);
+          rigEdgesRef.current = rigEdgesRef.current.filter((e) => e.id !== rig.id);
+          inScene.delete(rig.id);
+          const g = buildStandaloneRigVisual(rig);
+          if (g) {
+            const r2 = rigRectMeters(rig, dims);
+            const group2 = new THREE.Group();
+            group2.position.set(r2.x, 0, r2.z);
+            group2.rotation.y = -((rig.rot ?? 0) * Math.PI) / 180;
+            group2.userData.rigId = rig.id;
+            group2.add(g);
+            scene.add(group2);
+            const isBar2 = rig.kind === 'truss' || rig.kind === 'frontBar' || rig.kind === 'backBar';
+            const edgeGeo2 = new THREE.EdgesGeometry(
+              new THREE.BoxGeometry(
+                isBar2 ? Math.max(0.5, rig.span) : 0.6,
+                isBar2 ? 0.8 : Math.max(0.5, rig.h),
+                isBar2 ? 0.8 : 0.6,
+              ),
+            );
+            const isSel2 = selectedRigIdRef.current === rig.id;
+            const edgeLine2 = new THREE.LineSegments(
+              edgeGeo2,
+              new THREE.LineBasicMaterial({
+                color: isSel2 ? 0xa855f7 : 0x6d5aa8,
+                linewidth: 1,
+                transparent: true,
+                opacity: isSel2 ? 1.0 : 0.0,
+              }),
+            );
+            edgeLine2.position.y = isBar2 ? rig.h : rig.h / 2;
+            edgeLine2.raycast = () => {};
+            group2.add(edgeLine2);
+            rigEdgesRef.current.push({ id: rig.id, line: edgeLine2 });
+            rigGroupsRef.current.set(rig.id, { group: group2, top: null, geoKey });
+            inScene.add(rig.id);
+          }
+        } else if (entry) {
+          // Update existing rig position
           const r = rigRectMeters(rig, dims);
           entry.group.position.set(r.x, 0, r.z);
           entry.group.rotation.y = -((rig.rot ?? 0) * Math.PI) / 180;
@@ -2888,6 +2930,27 @@ export const Stage3D: React.FC<{
 
     const intersects = raycasterRef.current.intersectObjects(targets, false);
 
+    // Panneau Supports ouvert + clic simple (sans Maj/Ctrl) : les rigs sont
+    // prioritaires — clic sur un support = sélection + drag immédiat.
+    // Clic ailleurs (fixture ou vide) : comportement normal inchangé.
+    if (supportsMenuOpen && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      const rigRoots: THREE.Object3D[] = [];
+      for (const { group } of rigGroupsRef.current.values()) rigRoots.push(group);
+      const rigHits = rigRoots.length > 0 ? raycasterRef.current.intersectObjects(rigRoots, true) : [];
+      if (rigHits.length > 0) {
+        let o: THREE.Object3D | null = rigHits[0].object;
+        while (o && !o.userData?.rigId) o = o.parent;
+        const rigId = o?.userData?.rigId as string | undefined;
+        if (rigId) {
+          if (rigId !== selectedRigIdRef.current) setSelectedRigId(rigId);
+          rigDragRef.current = { id: rigId };
+          if (controlsRef.current) controlsRef.current.enabled = false;
+          e.preventDefault();
+          return;
+        }
+      }
+    }
+
     if (intersects.length > 0) {
       let obj: THREE.Object3D | null = intersects[0].object;
       while (obj && !obj.userData?.fixtureId) obj = obj.parent;
@@ -2967,7 +3030,7 @@ export const Stage3D: React.FC<{
       // ouverte (fermeture via le X du panneau). Sinon le moindre clic sur le
       // canvas faisait disparaître la modale en cours d'édition.
     }
-  }, [selectedFixtureId, directMode, patchedFixtures, pickTargetPoint, aimFixturesAtPoint, ensureTargetMarker]);
+  }, [selectedFixtureId, directMode, patchedFixtures, pickTargetPoint, aimFixturesAtPoint, ensureTargetMarker, supportsMenuOpen]);
 
   // ── Hover handler ────────────────────────────────────
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -3638,6 +3701,18 @@ export const Stage3D: React.FC<{
                   />
                 </label>
               );
+              const numPos = (field: 'x' | 'y', label: string, tip: string) => (
+                <label key={field} className="flex flex-col items-center gap-0.5" onClick={(e) => e.stopPropagation()} title={tip}>
+                  <span className="text-[8px] text-gray-400 font-medium">{label} <span className="text-gray-600">(m)</span></span>
+                  <input
+                    type="number" step={0.5} min={0} value={dr[field] as number | string}
+                    onChange={(e) => setF(field, e.target.value)}
+                    onBlur={() => commitF(field)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') commitF(field); }}
+                    className="w-full bg-black/30 border border-purple-500/30 rounded px-1 py-0.5 text-[10px] text-gray-200 text-center focus:outline-none focus:border-purple-500/50"
+                  />
+                </label>
+              );
               const showSpan = rig.kind === 'truss' || rig.kind === 'frontBar' || rig.kind === 'backBar';
               const showHung = rig.kind === 'frontBar' || rig.kind === 'backBar';
               const showBarHung = rig.kind === 'frontBar' || rig.kind === 'backBar';
@@ -3668,8 +3743,12 @@ export const Stage3D: React.FC<{
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-6 gap-1 mt-1">
-                    {num('x', 'X')}{num('y', 'Y')}{num('w', 'L')}{num('d', 'P')}{num('h', 'H')}{num('r', 'R°')}
+                  {/* Position vue public : distances depuis bord gauche et nez de scène */}
+                  <div className="grid grid-cols-2 gap-1 mt-1">
+                    {numPos('x', t('stage3D.rigPosLeft'), t('stage3D.rigPosLeftTip'))}{numPos('y', t('stage3D.rigPosFront'), t('stage3D.rigPosFrontTip'))}
+                  </div>
+                  <div className="grid grid-cols-4 gap-1 mt-1">
+                    {num('w', 'L')}{num('d', 'P')}{num('h', 'H')}{num('r', 'R°')}
                   </div>
                   {showSpan && (
                     <div className="space-y-1 mt-1 pt-1 border-t border-gray-800">

@@ -769,9 +769,18 @@ export const useShowStore = create<ShowState>((set, get) => ({
   },
   addStageRig: (kind) => {
     const id = `rig-${Date.now().toString(36)}`;
-    set((state) => ({
-      stageRigs: [...state.stageRigs, makeRig(id, kind, state.stageRigs.length + 1)],
-    }));
+    set((state) => {
+      const sameKind = state.stageRigs.filter((r) => r.kind === kind).length;
+      const rig = makeRig(id, kind, state.stageRigs.length + 1);
+      if (sameKind > 0) {
+        // Décale chaque nouveau support du même type pour ne pas l'empiler
+        // exactement sur l'existant (sinon invisible, on croit que rien ne se passe).
+        rig.cx = Math.min(1.3, rig.cx + 0.07 * sameKind);
+        const side = sameKind % 2 === 0 ? 1 : -1;
+        rig.cy = Math.min(1.3, Math.max(-0.3, rig.cy + side * 0.05 * Math.ceil(sameKind / 2)));
+      }
+      return { stageRigs: [...state.stageRigs, rig] };
+    });
     useAppStore.getState().markDirty();
     return id;
   },
