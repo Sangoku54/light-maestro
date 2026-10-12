@@ -747,6 +747,8 @@ export const Stage3D: React.FC<{
     [stageRigs],
   );
   const rigGroupsRef = useRef<Map<string, { group: THREE.Group; top: THREE.Mesh }>>(new Map());
+  // Which rigs are currently in the scene (added dynamically).
+  const rigInSceneRef = useRef<Set<string>>(new Set());
   // Brouillons d'édition des supports (rigs) — mêmes principes que les decks.
   const [rigDrafts, setRigDrafts] = useState<Record<string, { name: string; x: number | string; y: number | string; w: number | string; d: number | string; h: number | string; r: number | string }>>({});
   // Sync des brouillons rigs quand stageRigs/stageDims changent.
@@ -2187,6 +2189,71 @@ export const Stage3D: React.FC<{
     }
   }, [stageRigs, stageDims]);
 
+  // ── Dynamically add/remove rigs from the 3D scene ──────────────
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const dims = stageDimsRef.current;
+    const inScene = rigInSceneRef.current;
+    const currentIds = new Set(stageRigs.map((r) => r.id));
+
+    // Remove rigs no longer in stageRigs
+    for (const id of inScene) {
+      if (!currentIds.has(id)) {
+        const entry = rigGroupsRef.current.get(id);
+        if (entry) {
+          scene.remove(entry.group);
+          rigGroupsRef.current.delete(id);
+          inScene.delete(id);
+        }
+      }
+    }
+    // Add new rigs
+    for (const rig of stageRigs) {
+      if (!inScene.has(rig.id)) {
+        const g = buildStandaloneRigVisual(rig);
+        if (!g) continue;
+        const r = rigRectMeters(rig, dims);
+        const group = new THREE.Group();
+        group.position.set(r.x, 0, r.z);
+        group.rotation.y = -((rig.rot ?? 0) * Math.PI) / 180;
+        group.userData.rigId = rig.id;
+        group.add(g);
+        scene.add(group);
+
+        // Selection edge outline
+        const edgeGeo = new THREE.EdgesGeometry(
+          new THREE.BoxGeometry(
+            rig.kind === 'truss' || rig.kind === 'frontBar' || rig.kind === 'backBar' ? rig.span : 1,
+            rig.h,
+            rig.kind === 'truss' || rig.kind === 'frontBar' || rig.kind === 'backBar' ? rig.span : 1,
+          ),
+        );
+        const edgeLine = new THREE.LineSegments(
+          edgeGeo,
+          new THREE.LineBasicMaterial({
+            color: selectedRigIdRef.current === rig.id ? 0xa855f7 : 0x6d5aa8,
+            linewidth: 1,
+          }),
+        );
+        edgeLine.position.y = rig.h / 2;
+        edgeLine.raycast = () => {};
+        group.add(edgeLine);
+        rigEdgesRef.current.push({ id: rig.id, line: edgeLine });
+        rigGroupsRef.current.set(rig.id, { group, top: null });
+        inScene.add(rig.id);
+      } else {
+        // Update existing rig position
+        const entry = rigGroupsRef.current.get(rig.id);
+        if (entry) {
+          const r = rigRectMeters(rig, dims);
+          entry.group.position.set(r.x, 0, r.z);
+          entry.group.rotation.y = -((rig.rot ?? 0) * Math.PI) / 180;
+        }
+      }
+    }
+  }, [stageRigs, stageDims]);
+
   // ── Show/hide beams toggle ──────────────────────────
   useEffect(() => {
     for (const f3d of fixturesRef.current.values()) {
@@ -3602,30 +3669,30 @@ export const Stage3D: React.FC<{
                       />
                     </div>
                   )}
-                  {showBarHung && (
-                    <div className="grid grid-cols-2 gap-1 pt-1">
-                      <button
-                        onClick={() => setFixturePosition(selectedRigId, { barHung: true })}
-                        className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-                          (rig.hung ?? true)
-                            ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
-                            : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
-                        }`}
-                      >
-                        {t('stage3D.barHung')}
-                      </button>
-                      <button
-                        onClick={() => setFixturePosition(selectedRigId, { barHung: false })}
-                        className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-                          !(rig.hung ?? true)
-                            ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
-                            : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
-                        }`}
-                      >
-                        {t('stage3D.barStanding')}
-                      </button>
-                    </div>
-                  )}
+                   {showBarHung && (
+                     <div className="grid grid-cols-2 gap-1 pt-1">
+                       <button
+                         onClick={() => updateStageRig(rig.id, { hung: true })}
+                         className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                           (rig.hung ?? true)
+                             ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
+                             : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
+                         }`}
+                       >
+                         {t('stage3D.barHung')}
+                       </button>
+                       <button
+                         onClick={() => updateStageRig(rig.id, { hung: false })}
+                         className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                           !(rig.hung ?? true)
+                             ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
+                             : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
+                         }`}
+                       >
+                         {t('stage3D.barStanding')}
+                       </button>
+                     </div>
+                   )}
                 </div>
               );
             }))}
