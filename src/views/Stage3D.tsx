@@ -3657,7 +3657,18 @@ export const Stage3D: React.FC<{
         <div className="fixed right-3 top-16 w-80 z-40 flex flex-col rounded-lg border border-gray-700/60 bg-[#0d0d14]/95 shadow-xl shadow-black/60 p-2 max-h-[80vh] overflow-y-auto">
           <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
             <span className="text-[10px] font-medium text-gray-300">{t('stage3D.supportsTitle')} ({stageRigs.length})</span>
-            <button onClick={() => setSupportsMenuOpen(false)} className="text-gray-500 hover:text-gray-300 text-sm px-1">✕</button>
+            <div className="flex items-center gap-1">
+              {stageRigs.length > 0 && (
+                <button
+                  onClick={() => { resetStageRigs(); setSelectedRigId(null); }}
+                  className="text-[9px] text-gray-600 hover:text-red-400 px-1"
+                  title={t('stage3D.rigsResetTitle')}
+                >
+                  Tout supprimer
+                </button>
+              )}
+              <button onClick={() => setSupportsMenuOpen(false)} className="text-gray-500 hover:text-gray-300 text-sm px-1">✕</button>
+            </div>
           </div>
           {/* Ajout d'un nouveau support */}
           <div className="flex flex-wrap gap-1 mb-2">
@@ -3671,6 +3682,20 @@ export const Stage3D: React.FC<{
               </button>
             ))}
           </div>
+          {/* Totalisateurs par type */}
+          {stageRigs.length > 0 && (
+            <div className="flex flex-wrap gap-1 px-1 py-1 mb-1 border-t border-gray-800/60 text-[9px] text-gray-500">
+              {(['truss', 'frontBar', 'backBar', 'totem', 'tBar'] as const).map((k) => {
+                const count = stageRigs.filter((r) => r.kind === k).length;
+                if (count === 0) return null;
+                return (
+                  <span key={k} className="bg-gray-800/40 px-1.5 py-0.5 rounded">
+                    {t(`stage3D.support_${k}`)}×{count}
+                  </span>
+                );
+              })}
+            </div>
+          )}
           {stageRigs.length === 0 ? (
             <p className="px-2 pt-1 text-[10px] text-gray-500">{t('stage3D.rigsEmpty')}</p>
           ) : (

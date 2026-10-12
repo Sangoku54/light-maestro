@@ -1144,6 +1144,7 @@
     "rigsHint": "Click + to add, then drag the rig directly in 3D (single click). Multiple bars allowed, each with its own height.",
     "rigsTitle": "Rigs",
     "rigDeleteTitle": "Delete this rig",
+    "rigsResetTitle": "Delete all rigs",
     "support_tBar": "T-stand",
     "support_floor": "Floor",
     "support_totem": "Totem",

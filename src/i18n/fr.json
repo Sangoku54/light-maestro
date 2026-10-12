@@ -1144,6 +1144,7 @@
     "rigsHint": "Cliquez + pour ajouter, puis glissez le support directement dans la 3D (clic simple). Plusieurs barres possibles, chacune avec sa hauteur.",
     "rigsTitle": "Supports",
     "rigDeleteTitle": "Supprimer ce support",
+    "rigsResetTitle": "Supprimer tous les supports",
     "support_tBar": "Support T",
     "support_floor": "Sol",
     "support_totem": "Totem",
