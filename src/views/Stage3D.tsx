@@ -619,6 +619,24 @@ export const Stage3D: React.FC<{
   // Clear any stale test state when the 3D view opens so fixtures start dark
   useEffect(() => {
     try { fixtureTestState.clearAll(); } catch {}
+    // Reset DMX bridge cache and appStore channelData to ensure no residual values
+    const bridge = dmxBridge;
+    // Clear appStore channelData for all known universes
+    const app = useAppStore.getState();
+    for (let i = 0; i < (app.dmx?.universes?.length ?? 0); i++) {
+      app.setUniverseData(i, {});
+    }
+    // Release any lingering LTP sources on the bridge
+    try { bridge.release('design-test'); } catch {}
+    try { bridge.release('design-efx'); } catch {}
+    try { bridge.release('scene-efx'); } catch {}
+    try { bridge.release('programmer'); } catch {}
+    try { bridge.release('quickshow'); } catch {}
+    try { bridge.release('simple-desk'); } catch {}
+    try { bridge.release('song-preset'); } catch {}
+    try { bridge.release('fixture-test'); } catch {}
+    try { bridge.release('rgb-matrix'); } catch {}
+    try { bridge.release('autoloop'); } catch {}
   }, []);
 
   const trussBeamsRef = useRef<{ back: THREE.Object3D | null; front: THREE.Object3D | null; left: THREE.Object3D | null; right: THREE.Object3D | null; poles: THREE.Object3D[] }>({ back: null, front: null, left: null, right: null, poles: [] });
