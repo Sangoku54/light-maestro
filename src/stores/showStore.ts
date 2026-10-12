@@ -807,14 +807,26 @@ export const useShowStore = create<ShowState>((set, get) => ({
       const col = index % 6;
       const row = Math.floor(index / 6);
       const isOverhead = fixtureType === 'moving_head' || fixtureType === 'scanner';
+      // Auto-détection du mountMode selon la position sur la scène :
+      // - Arrière (y > 0.7) : fixture « accrochée » derrière → faisceau vers l'avant
+      // - Devant (y < 0.3) : fixture au sol devant → faisceau vers l'arrière
+      // - Côtés (x < 0.3 ou x > 0.7) : fixture latérale → faisceau vers le centre
+      // - Centre : par défaut hanging (faisceau vers le public)
+      const normX = 0.1 + col * 0.16;
+      const normY = 0.1 + row * 0.18;
+      let mountMode: FixturePos['mountMode'] = 'hanging';
+      if (normY > 0.75) mountMode = 'rear';
+      else if (normY < 0.25) mountMode = 'ground';
+      else if (normX < 0.25 || normX > 0.75) mountMode = 'hanging';
       return {
         fixturePositions: {
           ...state.fixturePositions,
           [id]: {
-            x: 0.1 + col * 0.16,
-            y: 0.1 + row * 0.18,
+            x: normX,
+            y: normY,
             h: isOverhead ? 0.6 : 0.3,
             heading: 0,
+            mountMode,
           },
         },
       };
