@@ -928,7 +928,7 @@ export const Stage3D: React.FC<{
       roughness: 0.4,
       metalness: 0.5,
       emissive: tierColor,
-      emissiveIntensity: 0.3,
+      emissiveIntensity: 0, // off by default — render loop sets it based on DMX
     });
 
     // Normalize: "Moving Head" → "moving_head", "Color Changer" → "color_changer", etc.
@@ -941,7 +941,7 @@ export const Stage3D: React.FC<{
         });
         const headMat = new THREE.MeshStandardMaterial({
           color: tierColor, roughness: 0.35, metalness: 0.5,
-          emissive: tierColor, emissiveIntensity: 0.2,
+          emissive: tierColor, emissiveIntensity: 0,
         });
 
         // ── BASE: minimal anchor disc ──
@@ -1099,7 +1099,7 @@ export const Stage3D: React.FC<{
         });
         const headMatDef = new THREE.MeshStandardMaterial({
           color: tierColor, roughness: 0.35, metalness: 0.5,
-          emissive: tierColor, emissiveIntensity: 0.2,
+          emissive: tierColor, emissiveIntensity: 0,
         });
 
         // Base plate: minimal anchor disc
@@ -1174,7 +1174,7 @@ export const Stage3D: React.FC<{
     if (extraTilts.length > 0 && armGroup) {
       const extraMat = new THREE.MeshStandardMaterial({
         color: tierColor, roughness: 0.35, metalness: 0.5,
-        emissive: tierColor, emissiveIntensity: 0.2,
+        emissive: tierColor, emissiveIntensity: 0,
       });
       const n = extraTilts.length;
       extraTilts.forEach((off, k) => {
@@ -2314,12 +2314,29 @@ export const Stage3D: React.FC<{
         rawData = buf;
       }
       if (!rawData) {
-        if (f3d.pointLight) { f3d.pointLight.intensity = 0; f3d.pointLight.visible = false; }
-        for (const eh of f3d.extraHeads ?? []) {
-          if (eh.pointLight) { eh.pointLight.intensity = 0; eh.pointLight.visible = false; }
-        }
-        if (f3d.beamCone) { (f3d.beamCone.material as THREE.MeshBasicMaterial).opacity = 0; }
-        // Auto-sweep: slow stage scan when no DMX for 3+ seconds
+         if (f3d.pointLight) { f3d.pointLight.intensity = 0; f3d.pointLight.visible = false; }
+         for (const eh of f3d.extraHeads ?? []) {
+           if (eh.pointLight) { eh.pointLight.intensity = 0; eh.pointLight.visible = false; }
+         }
+         if (f3d.beamCone) { (f3d.beamCone.material as THREE.MeshBasicMaterial).opacity = 0; }
+         // Reset body emissive so the fixture model doesn't glow with its tier color
+         const bMat = f3d.bodyMesh?.material as THREE.MeshStandardMaterial | undefined;
+         if (bMat && !Array.isArray(bMat)) bMat.emissiveIntensity = 0;
+         else if (Array.isArray(bMat)) bMat.forEach((m) => { m.emissiveIntensity = 0; });
+         // Also reset emissive on ALL meshes in the fixture (head, accent parts, extra heads)
+         f3d.group.traverse((child) => {
+           if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
+             child.material.emissiveIntensity = 0;
+           }
+         });
+         for (const eh of f3d.extraHeads ?? []) {
+           eh.headGroup?.traverse((child) => {
+             if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
+               child.material.emissiveIntensity = 0;
+             }
+           });
+         }
+         // Auto-sweep: slow stage scan when no DMX for 3+ seconds
         const idleSec = (performance.now() - dmxLastActivityRef.current) / 1000;
         if (idleSec > 3 && f3d.armGroup && f3d.headGroup) {
           const t = performance.now() * 0.001;
