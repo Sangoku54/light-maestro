@@ -47,21 +47,23 @@ html, body, #root {
 /* ─── Scrollbar ───────────────────────────────────────────── */
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: #0a0a14;
+  border: 1px solid #1a1a2e;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1f1f2e;
-  border-radius: 3px;
+  background: #3a3a5e;
+  border: 2px solid #0a0a14;
+  border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #2d2d3f;
+  background: #5a5a8e;
 }
 
 /* ─── Electron drag region ────────────────────────────────── */

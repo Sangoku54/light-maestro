@@ -1403,6 +1403,7 @@ export const Stage3D: React.FC<{
     // Par défaut aucun rig (scène nue).
     rigEdgesRef.current = [];
     rigGroupsRef.current = new Map();
+    rigInSceneRef.current = new Set();
     for (const rig of stageRigsRef.current) {
       const g = buildStandaloneRigVisual(rig);
       if (!g) continue;
