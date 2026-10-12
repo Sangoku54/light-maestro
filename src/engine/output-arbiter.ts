@@ -180,6 +180,13 @@ export class OutputArbiter {
   getActiveUniverses(): number[] {
     return [...this._values.keys()];
   }
+
+  /** Release every registered source and clear all buffers. */
+  clearAll() {
+    for (const id of [...this._sources.keys()]) {
+      this.release(id);
+    }
+  }
 }
 
 /** Singleton used by the renderer bridge (see src/utils/dmx-bridge.ts). */

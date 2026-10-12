@@ -619,24 +619,14 @@ export const Stage3D: React.FC<{
   // Clear any stale test state when the 3D view opens so fixtures start dark
   useEffect(() => {
     try { fixtureTestState.clearAll(); } catch {}
-    // Reset DMX bridge cache and appStore channelData to ensure no residual values
-    const bridge = dmxBridge;
-    // Clear appStore channelData for all known universes
+    // Full reset of the DMX bridge — clears cache, releases all LTP sources,
+    // and cancels pending transients. Guarantees a clean (all-zeros) state.
+    try { dmxBridge.clearAll(); } catch {}
+    // Also clear the persisted channelData in appStore so the mirror starts clean
     const app = useAppStore.getState();
     for (let i = 0; i < (app.dmx?.universes?.length ?? 0); i++) {
-      app.setUniverseData(i, {});
+      try { app.setUniverseData(i, {}); } catch {}
     }
-    // Release any lingering LTP sources on the bridge
-    try { bridge.release('design-test'); } catch {}
-    try { bridge.release('design-efx'); } catch {}
-    try { bridge.release('scene-efx'); } catch {}
-    try { bridge.release('programmer'); } catch {}
-    try { bridge.release('quickshow'); } catch {}
-    try { bridge.release('simple-desk'); } catch {}
-    try { bridge.release('song-preset'); } catch {}
-    try { bridge.release('fixture-test'); } catch {}
-    try { bridge.release('rgb-matrix'); } catch {}
-    try { bridge.release('autoloop'); } catch {}
   }, []);
 
   const trussBeamsRef = useRef<{ back: THREE.Object3D | null; front: THREE.Object3D | null; left: THREE.Object3D | null; right: THREE.Object3D | null; poles: THREE.Object3D[] }>({ back: null, front: null, left: null, right: null, poles: [] });

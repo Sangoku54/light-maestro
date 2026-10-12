@@ -164,6 +164,15 @@ export const dmxBridge = {
     this.write('design-test', universe, merged);
   },
 
+  /** Clear all cached channel data and release every registered source.
+   *  Use on app mount / view re-open to guarantee a clean (all-zeros) DMX state. */
+  clearAll() {
+    _channelCache.clear();
+    outputArbiter.clearAll();
+    for (const t of transientTimers.values()) clearTimeout(t);
+    transientTimers.clear();
+  },
+
   /** Stage3D reads the latest channel values for a universe */
   getChannels(universe: number): Record<number, number> | undefined {
     return _channelCache.get(universe);
