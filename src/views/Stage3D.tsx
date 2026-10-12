@@ -1681,7 +1681,7 @@ export const Stage3D: React.FC<{
         container.removeChild(renderer.domElement);
       }
     };
-  }, [stageDims, deckGeoKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [stageDims, deckGeoKey, rigGeoKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Overlay gizmo (axes) ──────────────────────────
   // Minimal gizmo via HTML (évite 2e renderer) — coin bas-gauche
@@ -2206,6 +2206,8 @@ export const Stage3D: React.FC<{
           rigGroupsRef.current.delete(id);
           inScene.delete(id);
         }
+        // Nettoyer l'arête de sélection
+        rigEdgesRef.current = rigEdgesRef.current.filter((e) => e.id !== id);
       }
     }
     // Add new rigs
