@@ -615,6 +615,12 @@ export const Stage3D: React.FC<{
   useEffect(() => {
     musicianPositionsRef.current = buildRosterPositions(musicians);
   }, [musicians]);
+
+  // Clear any stale test state when the 3D view opens so fixtures start dark
+  useEffect(() => {
+    try { fixtureTestState.clearAll(); } catch {}
+  }, []);
+
   const trussBeamsRef = useRef<{ back: THREE.Object3D | null; front: THREE.Object3D | null; left: THREE.Object3D | null; right: THREE.Object3D | null; poles: THREE.Object3D[] }>({ back: null, front: null, left: null, right: null, poles: [] });
   const [selectedFixtureId, setSelectedFixtureId] = useState<string | null>(null);
   // ── Sélection multiple 3D + mode Target ─────────────────
