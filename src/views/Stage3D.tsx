@@ -1398,44 +1398,12 @@ export const Stage3D: React.FC<{
       deckGroupsRef.current.set(deck.id, { group: g, top: deckTop });
     }
 
-    // ── Structures libres (supports : ponts, barres, totems, T) ──
-    // Un groupe par rig : position/rotation modifiables sans rebuild (effet de synchro).
-    // Par défaut aucun rig (scène nue).
+    // ── Structures libres (supports) : gérés par l'effet dynamique
+    // (ajout/suppression à chaud via rigInSceneRef). Pas de build ici
+    // pour éviter les doublons.
     rigEdgesRef.current = [];
     rigGroupsRef.current = new Map();
     rigInSceneRef.current = new Set();
-    for (const rig of stageRigsRef.current) {
-      const g = buildStandaloneRigVisual(rig);
-      if (!g) continue;
-      const r = rigRectMeters(rig, { width: STAGE_WIDTH, depth: STAGE_DEPTH });
-      const rotY = -((rig.rot ?? 0) * Math.PI) / 180; // horaire vu du dessus
-      const group = new THREE.Group();
-      group.position.set(r.x, 0, r.z);
-      group.rotation.y = -((rig.rot ?? 0) * Math.PI) / 180;
-      group.userData.rigId = rig.id;
-      group.add(g);
-      scene.add(group);
- 
-      // Arête de sélection (violet si sélectionné dans l'éditeur)
-      const edgeGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(
-        rig.kind === 'truss' || rig.kind === 'frontBar' || rig.kind === 'backBar' ? rig.span : 1,
-        rig.h,
-        rig.kind === 'truss' || rig.kind === 'frontBar' || rig.kind === 'backBar' ? rig.span : 1
-      ));
-      const edgeLine = new THREE.LineSegments(
-        edgeGeo,
-        new THREE.LineBasicMaterial({
-          color: selectedRigIdRef.current === rig.id ? 0xa855f7 : 0x6d5aa8,
-          linewidth: 1,
-        }),
-      );
-      edgeLine.position.y = rig.h / 2;
-      // Arêtes exclues du picking (seuils des Lines fausseraient la visée).
-      edgeLine.raycast = () => {};
-      group.add(edgeLine);
-      rigEdgesRef.current.push({ id: rig.id, line: edgeLine });
-      rigGroupsRef.current.set(rig.id, { group, top: null });
-    }
  
     // Stage front lip overlay (reinforces the edge visually)
     const lipGeo = new THREE.BoxGeometry(STAGE_WIDTH + 0.05, 0.04, 0.15);
@@ -2224,22 +2192,26 @@ export const Stage3D: React.FC<{
         group.add(g);
         scene.add(group);
 
-        // Selection edge outline
+        // Selection edge outline — resserré autour de la géométrie réelle,
+        // visible uniquement quand le rig est sélectionné
+        const isBar = rig.kind === 'truss' || rig.kind === 'frontBar' || rig.kind === 'backBar';
+        const edgeW = isBar ? Math.max(0.5, rig.span) : 0.6;
+        const edgeH = isBar ? 0.8 : Math.max(0.5, rig.h);
+        const edgeD = isBar ? 0.8 : 0.6;
         const edgeGeo = new THREE.EdgesGeometry(
-          new THREE.BoxGeometry(
-            rig.kind === 'truss' || rig.kind === 'frontBar' || rig.kind === 'backBar' ? rig.span : 1,
-            rig.h,
-            rig.kind === 'truss' || rig.kind === 'frontBar' || rig.kind === 'backBar' ? rig.span : 1,
-          ),
+          new THREE.BoxGeometry(edgeW, edgeH, edgeD),
         );
+        const isSel = selectedRigIdRef.current === rig.id;
         const edgeLine = new THREE.LineSegments(
           edgeGeo,
           new THREE.LineBasicMaterial({
-            color: selectedRigIdRef.current === rig.id ? 0xa855f7 : 0x6d5aa8,
+            color: isSel ? 0xa855f7 : 0x6d5aa8,
             linewidth: 1,
+            transparent: true,
+            opacity: isSel ? 1.0 : 0.0,
           }),
         );
-        edgeLine.position.y = rig.h / 2;
+        edgeLine.position.y = isBar ? rig.h : rig.h / 2;
         edgeLine.raycast = () => {};
         group.add(edgeLine);
         rigEdgesRef.current.push({ id: rig.id, line: edgeLine });
@@ -2256,6 +2228,17 @@ export const Stage3D: React.FC<{
       }
     }
   }, [stageRigs, stageDims]);
+
+  // ── Met à jour la couleur/visibilité des outlines quand la sélection change ──
+  useEffect(() => {
+    selectedRigIdRef.current = selectedRigId;
+    for (const { id, line } of rigEdgesRef.current) {
+      const isSel = id === selectedRigId;
+      const mat = line.material as THREE.LineBasicMaterial;
+      mat.color.setHex(isSel ? 0xa855f7 : 0x6d5aa8);
+      mat.opacity = isSel ? 1.0 : 0.0;
+    }
+  }, [selectedRigId]);
 
   // ── Show/hide beams toggle ──────────────────────────
   useEffect(() => {
