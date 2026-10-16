@@ -73,7 +73,7 @@ export interface FixtureDefinition {
   id: string;
   manufacturer: string;
   model: string;
-  type: 'Color Changer' | 'Dimmer' | 'Effect' | 'Fan' | 'Flower' | 'Hazer' | 'Laser' | 'Moving Head' | 'Other' | 'Scanner' | 'Smoke' | 'Strobe';
+  type: 'Color Changer' | 'Dimmer' | 'Effect' | 'Fan' | 'Flower' | 'Hazer' | 'Laser' | 'LED Bar' | 'Moving Head' | 'Other' | 'Scanner' | 'Smoke' | 'Strobe';
   author: string;
   modes: FixtureMode[];
   heads?: FixtureHead[];
@@ -844,22 +844,30 @@ export class FixtureLibrary {
       // ── Type from categories ────────────────────────────
       const categories: string[] = data.categories || [];
       let type: FixtureDefinition['type'] = 'Other';
-      for (const cat of categories) {
-        const c = cat.toLowerCase();
-        // « Laser » prioritaire et bloquant : de vrais lasers OFL listent aussi
-        // « Color Changer » / « Effect » après « Laser » (GLP impression Laser,
-        // Minuit Une IVL Carré…) et l'écrasement les déclassait en Color
-        // Changer → isLaser false → bloc laser inactif en lecture.
-        if (c.includes('laser')) { type = 'Laser'; break; }
-        if (c.includes('color')) type = 'Color Changer';
-        else if (c.includes('moving head')) type = 'Moving Head';
-        else if (c.includes('scanner')) type = 'Scanner';
-        else if (c.includes('dimmer')) type = 'Dimmer';
-        else if (c.includes('strobe')) type = 'Strobe';
-        else if (c.includes('hazer') || c.includes('fog') || c.includes('smoke')) type = 'Smoke';
-        else if (c.includes('fan')) type = 'Fan';
-        else if (c.includes('flower')) type = 'Flower';
-        else if (c.includes('effect')) type = 'Effect';
+      // Check for bar-type fixtures FIRST (e.g. GigBar 2 has category 'Laser' but is primarily an LED bar)
+      const modelLower = (data.name || '').toLowerCase();
+      const isLedBar = modelLower.includes('gigbar') || modelLower.includes('led bar') || modelLower.includes('led-bar')
+        || categories.some(c => c.toLowerCase().includes('led bar') || c.toLowerCase().includes('led-bar'));
+      if (isLedBar) {
+        type = 'LED Bar';
+      } else {
+        for (const cat of categories) {
+          const c = cat.toLowerCase();
+          // « Laser » prioritaire et bloquant : de vrais lasers OFL listent aussi
+          // « Color Changer » / « Effect » après « Laser » (GLP impression Laser,
+          // Minuit Une IVL Carré…) et l'écrasement les déclassait en Color
+          // Changer → isLaser false → bloc laser inactif en lecture.
+          if (c.includes('laser')) { type = 'Laser'; break; }
+          if (c.includes('color')) type = 'Color Changer';
+          else if (c.includes('moving head')) type = 'Moving Head';
+          else if (c.includes('scanner')) type = 'Scanner';
+          else if (c.includes('dimmer')) type = 'Dimmer';
+          else if (c.includes('strobe')) type = 'Strobe';
+          else if (c.includes('hazer') || c.includes('fog') || c.includes('smoke')) type = 'Smoke';
+          else if (c.includes('fan')) type = 'Fan';
+          else if (c.includes('flower')) type = 'Flower';
+          else if (c.includes('effect')) type = 'Effect';
+        }
       }
 
       // ── Author ──────────────────────────────────────────

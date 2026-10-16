@@ -332,6 +332,10 @@ interface ShowState {
   moveFixture: (id: string, newAddress: number) => { error?: string };
   getFixturesByTier: (universeId: string, tier: FixtureTier) => PatchedFixture[];
   unpatchFixture: (id: string) => void;
+  copyFixtureId: (id: string) => void;
+  pasteFixture: () => { id: string } | { error: string };
+  /** ID de la fixture en presse-papier 3D (Ctrl+C dans Stage3D). */
+  _clipboardFixtureId: string | null;
   updateFixtureTier: (id: string, tier: FixtureTier) => void;
   setFixtureName: (id: string, name: string) => void;
   setPatchedFixtures: (fixtures: PatchedFixture[]) => void;
@@ -540,6 +544,30 @@ export const useShowStore = create<ShowState>((set, get) => ({
     useAppStore.getState().markDirty();
   },
 
+  copyFixtureId: (id) => {
+    set({ _clipboardFixtureId: id });
+  },
+
+  pasteFixture: () => {
+    const { patchedFixtures, _clipboardFixtureId: clipId } = get();
+    if (!clipId) return { error: 'No fixture in clipboard' };
+    const src = patchedFixtures.find((f) => f.id === clipId);
+    if (!src) return { error: 'Clipboard fixture not found' };
+    const nextAddr = get().getNextFreeAddress(src.universeId, src.channelCount, 1);
+    if (nextAddr <= 0) return { error: 'No free address available' };
+    const id = generateId();
+    const cloned: PatchedFixture = { ...src, id, name: `${src.name} (copie)`, startAddress: nextAddr };
+    set((state) => ({
+      patchedFixtures: [...state.patchedFixtures, cloned],
+      fixturePositions: {
+        ...state.fixturePositions,
+        [id]: { ...state.fixturePositions[clipId], x: Math.min(1.3, (state.fixturePositions[clipId]?.x ?? 0.5) + 0.05) },
+      },
+    }));
+    useAppStore.getState().markDirty();
+    return { id };
+  },
+
   setFixtureName: (id, name) => {
     set((state) => ({
       patchedFixtures: state.patchedFixtures.map((f) =>
@@ -698,6 +726,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   // ── Fixture Positions ──
   fixturePositions: {},
+  _clipboardFixtureId: null,
 
   setFixturePosition: (id, pos) => {
     set((state) => ({

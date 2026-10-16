@@ -254,16 +254,19 @@ export function pickLaserModeCap(caps: DmxFixtureCapability[]): DmxFixtureCapabi
  *  3. (fallback) triple conjonction de canaux : « pattern » + axe de scan
  *     (horizontal/vertical angle · scan · circular) + un canal couleur.
  */
-export function isLaserFixture(pf: PatchedFixture, channels: DmxFixtureChannel[]): boolean {
-  // Exclure les vidéoprojecteurs laser (panasonic PT-RZ120/RZ120L…) : « Laser »
-  // y désigne la source lumineuse (laser-phosphore), pas un effet laser. Leur
-  // signature = contrôles d'optique/entrée propres aux projecteurs.
-  const isVideoProjector = channels.some((c) =>
-    /^(input select|lens|lens function|lens control|geometry|keystone|(custom )?masking|fade in|fade out|light output|slideshow|white balance|dvi|hdmi|sdi)/i.test((c.name ?? '').trim()),
-  );
-  if (isVideoProjector) return false;
-  const norm = String(pf.fixtureType ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (norm.includes('laser')) return true;
+ export function isLaserFixture(pf: PatchedFixture, channels: DmxFixtureChannel[]): boolean {
+   // Exclure les vidéoprojecteurs laser (panasonic PT-RZ120/RZ120L…) : « Laser »
+   // y désigne la source lumineuse (laser-phosphore), pas un effet laser. Leur
+   // signature = contrôles d'optique/entrée propres aux projecteurs.
+   const isVideoProjector = channels.some((c) =>
+     /^(input select|lens|lens function|lens control|geometry|keystone|(custom )?masking|fade in|fade out|light output|slideshow|white balance|dvi|hdmi|sdi)/i.test((c.name ?? '').trim()),
+   );
+   if (isVideoProjector) return false;
+   const norm = String(pf.fixtureType ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+   // Les LED bars (GigBar 2, etc.) peuvent avoir un canal "Laser" dans leur mode
+   // mais ce sont avant tout des barres LED — ne pas les classifier comme lasers.
+   if (norm.includes('ledbar') || norm.includes('led_bar') || norm.includes('ledbar')) return false;
+   if (norm.includes('laser')) return true;
   // Signature laser dans les canaux/caps (ex. « Laser off » est TOUJOURS sur
   // le canal mode d'un laser FX — jamais sur un par/bar LED).
   const laserSig = channels.some(

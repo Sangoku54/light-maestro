@@ -1265,9 +1265,9 @@ export function useDmxPlayback(options: {
             }
           }
           const _dimmerTrackActive = !!(dimmerOverrides && dimmerOverrides.get(pf.id));
-          if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(_dimmerTrackActive){chVals[addr]=mapIntensityVal(dimmerVal,fa);}else if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=mapIntensityVal(dimmerVal,fa);}
-          // Dimmer track: propagate to ALL intensity channels (LED heads 2..N)
-          if(_dimmerTrackActive){for(const li of (fa.ledIntensityOffsets||[])){chVals[pf.startAddress+li]=dimmerVal;}}
+           if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(_dimmerTrackActive){chVals[addr]=mapIntensityVal(dimmerVal,fa);}else if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=mapIntensityVal(dimmerVal,fa);}
+           // Propagate intensity to ALL LED intensity channels (multi-head fixtures: spider, LED bar heads 2..N)
+           for(const li of (fa.ledIntensityOffsets||[])){chVals[pf.startAddress+li]=dimmerVal;}
 
 // Densite par section (activeTiers) : les fixtures hors tiers actifs
             // passent en veilleuse (plancher ~11 % + shutter ouvert) au lieu du
@@ -2146,12 +2146,9 @@ export function computeDmxForCue(
         const addr = pf.startAddress + fa.intensityOffset;
         if (!chVals[addr] || dimmerVal > chVals[addr]) chVals[addr] = mapIntensityVal(dimmerVal, fa);
       }
-      // Dimmer track: force-write the main intensity channel and propagate to
-      // ALL intensity channels (LED heads 2..N) — the track outranks cues.
-      if (dimmerOverride) {
-        if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = mapIntensityVal(dimmerVal, fa);
-        for (const li of (fa.ledIntensityOffsets || [])) chVals[pf.startAddress + li] = dimmerVal;
-      }
+       // Propagate intensity to ALL intensity channels (multi-head fixtures: spider, LED bar heads 2..N)
+       // Main intensity channel already written above; this ensures LED heads 2..N stay in sync.
+       for (const li of (fa.ledIntensityOffsets || [])) chVals[pf.startAddress + li] = dimmerVal;
 
       // Color track > fixture track > cue color
       let paletteColor = (colorTrackColors?.has(pf.id))

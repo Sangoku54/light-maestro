@@ -44,7 +44,7 @@ describe('track dimmer : priorité sur l\'autoscript (toutes fixtures)', () => {
     expect(chv[3]).toBe(128);
   });
 
-  it('sans override : comportement inchangé (LED 2..N non écrites par la cue)', () => {
+  it('sans override : les LED 2..N reçoivent quand même l\'intensité de la cue', () => {
     const res = computeDmxForCue(
       { time: 1, intensity: 'high', section: 'verse', strobe: false, energy: 0.8 } as never,
       [pf({ id: 'M1', fixtureDefId: 'multi-led', fixtureType: 'moving_head', startAddress: 1, channelCount: 3 })],
@@ -53,7 +53,8 @@ describe('track dimmer : priorité sur l\'autoscript (toutes fixtures)', () => {
     );
     const chv = res[0].channelValues;
     expect(chv[1]).toBeGreaterThan(0); // canal principal piloté par la cue
-    expect(chv[2]).toBeUndefined();    // LED 2 jamais écrite (comportement historique)
-    expect(chv[3]).toBeUndefined();
+    // LED 2..N doivent être écrites avec la même intensité (fix multi-head spider)
+    expect(chv[2]).toBe(chv[1]);
+    expect(chv[3]).toBe(chv[1]);
   });
 });

@@ -417,7 +417,13 @@ export const useAppStore = create<AppState>()(
         if (prev instanceof Uint8Array) {
           data = prev;
         } else if (prev && typeof prev === 'object') {
-          data = new Uint8Array(Object.values(prev as Record<number, number>));
+          // Records 1-based (adresse DMX → valeur), possiblement creux :
+          // expansion explicite, jamais Object.values() qui compacterait.
+          data = new Uint8Array(512);
+          for (const k in prev as Record<number, number>) {
+            const ch = Number(k);
+            if (ch >= 1 && ch <= 512) data[ch - 1] = (prev as any)[k];
+          }
         } else {
           data = new Uint8Array(512);
         }
@@ -433,7 +439,13 @@ export const useAppStore = create<AppState>()(
         if (prev instanceof Uint8Array) {
           data = prev; // mutate in-place — avoids 512-byte copy per frame
         } else if (prev && typeof prev === 'object') {
-          data = new Uint8Array(Object.values(prev as Record<number, number>));
+          // Records 1-based (adresse DMX → valeur), possiblement creux :
+          // expansion explicite, jamais Object.values() qui compacterait.
+          data = new Uint8Array(512);
+          for (const k in prev as Record<number, number>) {
+            const ch = Number(k);
+            if (ch >= 1 && ch <= 512) data[ch - 1] = (prev as any)[k];
+          }
         } else {
           data = new Uint8Array(512);
         }

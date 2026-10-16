@@ -62,6 +62,27 @@ export function dispatchChannelsByFixture(
 }
 
 /**
+ * Normalize any DMX buffer shape to 0-based Uint8Array access
+ * (DMX address ch → index ch-1).
+ *
+ * Bridge buffers are Records keyed by 1-based address and may be sparse
+ * (a few faders moved) — `new Uint8Array(Object.values(rec))` would compact
+ * them and shift every index, muting fixtures. Expand explicitly instead.
+ */
+export function normalizeDmxBuffer(
+  rawData: Uint8Array | number[] | Record<number, number>,
+): Uint8Array {
+  if (rawData instanceof Uint8Array) return rawData;
+  if (Array.isArray(rawData)) return Uint8Array.from(rawData);
+  const data = new Uint8Array(512);
+  for (const chStr in rawData) {
+    const ch = Number(chStr);
+    if (ch >= 1 && ch <= 512) data[ch - 1] = rawData[chStr];
+  }
+  return data;
+}
+
+/**
  * Send channel values to all relevant DMX universes based on fixture patch.
  * `sourceId` names the output-arbiter source so priorities apply.
  */

@@ -157,29 +157,50 @@ export function buildRgbSegments(colourChannels: Array<{offset:number;name:strin
   const matches = (name: string, re: RegExp): boolean => re.test(name) || re.test(stripDigits(name));
   const pickIn = (fam: number[], re: RegExp): number =>
     fam.find((j) => !used.has(j) && matches(colourChannels[j].name, re)) ?? -1;
+
+  // Pour chaque famille, on extrait les triplets R/G/B.
+  // Si une famille contient beaucoup de canaux (ex: "Red", "Green", "Blue" répétés
+  // sans numéro de pixel), on les regroupe par triplets consécutifs triés par offset.
   for (const fam of families.values()) {
-    const ri = pickIn(fam, isRed);
-    if (ri < 0) continue;
-    const gi = pickIn(fam, isGreen);
-    if (gi < 0) continue;
-    const bi = pickIn(fam, isBlue); // -1 possible : laser RG -> b null
-    const wi = bi >= 0 ? pickIn(fam, isWhite) : -1;
-    const ai = bi >= 0 ? pickIn(fam, isAmber) : -1;
-    const uvi = bi >= 0 ? pickIn(fam, isUv) : -1;
-    if (bi < 0 && wi >= 0) continue; // R+G+W sans B : ambigu, on ignore
-    used.add(ri); used.add(gi);
-    if (bi >= 0) used.add(bi);
-    if (wi >= 0) used.add(wi);
-    if (ai >= 0) used.add(ai);
-    if (uvi >= 0) used.add(uvi);
-    segments.push({
-      r: colourChannels[ri].offset,
-      g: colourChannels[gi].offset,
-      b: bi >= 0 ? colourChannels[bi].offset : null,
-      w: wi >= 0 ? colourChannels[wi].offset : null,
-      a: ai >= 0 ? colourChannels[ai].offset : null,
-      uv: uvi >= 0 ? colourChannels[uvi].offset : null,
-    });
+    // Trier par offset pour respecter l'ordre DMX
+    fam.sort((a, b) => colourChannels[a].offset - colourChannels[b].offset);
+    // Essai 1 : matching classique par nom (R, G, B distincts)
+    let ri = pickIn(fam, isRed);
+    if (ri >= 0) {
+      let gi = pickIn(fam, isGreen);
+      if (gi < 0) continue;
+      let bi = pickIn(fam, isBlue);
+      const wi = bi >= 0 ? pickIn(fam, isWhite) : -1;
+      const ai = bi >= 0 ? pickIn(fam, isAmber) : -1;
+      const uvi = bi >= 0 ? pickIn(fam, isUv) : -1;
+      if (bi < 0 && wi >= 0) continue;
+      used.add(ri); used.add(gi);
+      if (bi >= 0) used.add(bi);
+      if (wi >= 0) used.add(wi);
+      if (ai >= 0) used.add(ai);
+      if (uvi >= 0) used.add(uvi);
+      segments.push({
+        r: colourChannels[ri].offset, g: colourChannels[gi].offset,
+        b: bi >= 0 ? colourChannels[bi].offset : null,
+        w: wi >= 0 ? colourChannels[wi].offset : null,
+        a: ai >= 0 ? colourChannels[ai].offset : null,
+        uv: uvi >= 0 ? colourChannels[uvi].offset : null,
+      });
+      // Si la famille contient encore beaucoup de canaux non utilisés,
+      //.on les regroupe par triplets consécutifs (barre LED sans numérotation).
+      if (fam.length > 6) {
+        const remaining = fam.filter(j => !used.has(j));
+        for (let k = 0; k + 2 < remaining.length; k += 3) {
+          const [ri2, gi2, bi2] = [remaining[k], remaining[k+1], remaining[k+2]];
+          if (matches(colourChannels[ri2].name, isRed) &&
+              matches(colourChannels[gi2].name, isGreen) &&
+              matches(colourChannels[bi2].name, isBlue)) {
+            used.add(ri2); used.add(gi2); used.add(bi2);
+            segments.push({ r: colourChannels[ri2].offset, g: colourChannels[gi2].offset, b: colourChannels[bi2].offset, w: null, a: null, uv: null });
+          }
+        }
+      }
+    }
   }
   return segments;
 }

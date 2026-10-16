@@ -29,4 +29,20 @@ export function useProgrammerSync() {
       if (!active.has(u)) dmxBridge.release('programmer', u);
     }
   }, [channels, patchedFixtures, universes]);
+
+  // Re-push programmer state on mount in case clearAll() was called
+  // (e.g. Stage3D remount after tab switch or modal open/close).
+  // This ensures the bridge keeps its values even when no fader moved.
+  useEffect(() => {
+    const prog = useProgrammerStore.getState();
+    if (Object.keys(prog.channels).length === 0) {
+      dmxBridge.release('programmer');
+      return;
+    }
+    const dispatched = dispatchChannelsByFixture(prog.channels, patchedFixtures as any, universes as any);
+    for (const [uniStr, vals] of dispatched.entries()) {
+      const uni = Number(uniStr);
+      if (Object.keys(vals).length > 0) dmxBridge.write('programmer', uni, vals);
+    }
+  }, [patchedFixtures, universes]);
 }

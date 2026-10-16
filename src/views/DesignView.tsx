@@ -81,6 +81,19 @@ export const DesignView: React.FC = () => {
   const [editFixtureData, setEditFixtureData] = useState<any>(null);
 
   useProgrammerSync();
+
+  // Clear all programmer state (violet) when DesignView unmounts.
+  // Note: programmer channels written via handleChannelChange are LTP and
+  // should survive. Only reset when leaving the view entirely.
+  useEffect(() => {
+    return () => {
+      useProgrammerStore.getState().clear();
+      // Also release the programmer source from the bridge so it stops
+      // dominating the HTP mix when no one is writing anymore.
+      try { dmxBridge.release('programmer'); } catch {}
+    };
+  }, []);
+
   return (
     <div className="h-full flex flex-col bg-[#0a0a0f]">
       <ProgrammerBar />
@@ -193,7 +206,7 @@ const ShowWith3D: React.FC = () => {
     const sc = shows.find((s) => s.id === selectedShowIdSync);
     if (sc) {
       setShowMusicians(normalizeRoster((sc as any).musicians));
-      setShowStageScene((sc as any).stageScene ?? 'rear-front');
+      setShowStageScene((sc as any).stageScene ?? 'empty');
     } else {
       setShowMusicians({});
       setShowStageScene('empty');
@@ -368,23 +381,36 @@ function analyzeFixtureChannels(
     if (ch.type === 'Tilt' && result.tiltIdx === undefined) result.tiltIdx = i;
     if (ch.type === 'Shutter' && result.shutterIdx === undefined) result.shutterIdx = i;
     if (ch.type === 'Gobo' && result.goboIdx === undefined) result.goboIdx = i;
-    if (ch.type === 'Colour' && result.colorWheelIdx === undefined && !result.rgbGroup) {
-      // Check if this is part of an RGB group
-      const name = ch.name.toUpperCase();
-      if (name.includes('RED') || name.includes(' R ') || name.startsWith('R ')) {
-        // Look for G and B in next 2 channels
-        const nextG = channels[i + 1];
-        const nextB = channels[i + 2];
-        const gName = nextG?.name.toUpperCase() || '';
-        const bName = nextB?.name.toUpperCase() || '';
-        if (nextG?.type === 'Colour' && (gName.includes('GREEN') || gName.includes(' G '))) {
-          if (nextB?.type === 'Colour' && (bName.includes('BLUE') || bName.includes(' B '))) {
-            result.rgbGroup = { r: i, g: i + 1, b: i + 2 };
-            continue;
-          }
-        }
+  }
+
+  // RGB group detection : two-pass. First pass scans for a true R-G-B
+  // triplet (consecutive Colour channels named Red/Green/Blue). Only
+  // after that pass completes do we fall back to colorWheelIdx, so that
+  // non-RGB Colour channels like "Foreground Color" / "Background Color"
+  // (Acme Dotline 360) don't hijack the slot.
+  for (let i = 0; i < channels.length - 2; i++) {
+    const c = channels[i];
+    const n = c.name.toUpperCase();
+    if (c.type !== 'Colour') continue;
+    if (!/RED| R |^R$/.test(n)) continue;
+    const g = channels[i + 1];
+    const b = channels[i + 2];
+    if (!g || g.type !== 'Colour') continue;
+    if (!b || b.type !== 'Colour') continue;
+    const gn = g.name.toUpperCase();
+    const bn = b.name.toUpperCase();
+    if (/GREEN| G |^G$/.test(gn) && /BLUE| B |^B$/.test(bn)) {
+      result.rgbGroup = { r: i, g: i + 1, b: i + 2 };
+      break;
+    }
+  }
+
+  // Second pass : assign colorWheelIdx only to Colour channels not in rgbGroup
+  if (!result.rgbGroup) {
+    for (let i = 0; i < channels.length; i++) {
+      if (channels[i].type === 'Colour' && result.colorWheelIdx === undefined) {
+        result.colorWheelIdx = i;
       }
-      if (!result.rgbGroup) result.colorWheelIdx = i;
     }
   }
 
@@ -1243,7 +1269,8 @@ const SceneEditor: React.FC = () => {
     // Musiciens / ponts (stageScene) ne se rechargent QUE si l'identité de la
     // scène change. Un apply/cancel EFX ne touche que efxId/channels : sans
     // cette garde, l'effet re-tirait scene.musicians (undefined → {}) et
-    // scene.stageScene (undefined → 'rear-front') et écrasait la config 3D.
+    // scene.stageScene (undefined → 'empty') : pas de ponts par défaut,
+    // l'utilisateur les active manuellement si besoin via le sélecteur 3D.
     const sceneId = scene?.id ?? null;
     const sceneChanged = lastSceneKeyRef.current !== sceneId;
     if (sceneChanged) lastSceneKeyRef.current = sceneId;
@@ -1268,7 +1295,7 @@ const SceneEditor: React.FC = () => {
       setEditDuration(scene.duration);
       if (sceneChanged) {
         setMusicians(normalizeRoster(scene.musicians ?? rosterFromBandConfig(scene.bandConfig)));
-        setStageScene(scene.stageScene ?? 'rear-front');
+        setStageScene(scene.stageScene ?? 'empty');
       }
       setEditChannels({ ...scene.channels });
       // Éteint les canaux de la scène précédente qui ne sont pas dans la nouvelle (sinon scène précédente reste allumée)
@@ -1883,6 +1910,9 @@ const TierFixtureSection: React.FC<{
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-medium text-gray-200 truncate flex items-center gap-1.5">
                       {pf.name}
+                      {analysis && analysis.dimmerIdx === undefined && (
+                        <span className="text-[8px] px-1 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 shrink-0" title="Pas de canal Dimmer — intensité fixe à 100%">NO DIM</span>
+                      )}
                       <span className={`inline-block px-1 py-0 rounded text-[8px] ${
                         pf.tier === 'primary' ? 'bg-purple-500/20 text-purple-400' :
                         pf.tier === 'secondary' ? 'bg-blue-500/20 text-blue-400' :
@@ -7020,7 +7050,8 @@ const DesignSettingsPanel: React.FC = () => {
     setLocalUniverses(showUniverses.map(u => ({ ...u })));
   }, [showUniverses]);
   const [portsLoading, setPortsLoading] = useState(false);
-  const [dmxEngineRunning, setDmxEngineRunning] = useState(false);
+   const [dmxEngineRunning, setDmxEngineRunning] = useState(false);
+   const [dmxConnecting, setDmxConnecting] = useState(false);
   // Sync DMX engine state periodically (engine may be started by autoscript)
   useEffect(() => {
     let cancelled = false;
@@ -7088,14 +7119,53 @@ const DesignSettingsPanel: React.FC = () => {
     }
   };
 
-  // Auto-start DMX engine on mount (wait for universes to be ready first)
-  const dmxStartAttempted = useRef(false);
-  useEffect(() => {
-    if (dmxStartAttempted.current) return;
-    if (showUniverses.length === 0) return;
-    dmxStartAttempted.current = true;
-    handleStartDmx();
-  }, [showUniverses.length]); // eslint-disable-line
+   // Auto-start DMX engine on mount — but only after a USB port is detected.
+   // We watch for usb-dmx universes without a port and poll until one appears,
+   // then start the engine automatically (plug-and-play UX).
+   // If there are NO usb-dmx universes at all, skip auto-start (user may be
+   // using Art-Net/sACN only, which don't need a serial port).
+   const dmxAutoStartRef = useRef(false);
+   useEffect(() => {
+     if (dmxAutoStartRef.current) return;
+     dmxAutoStartRef.current = true;
+     if (showUniverses.length === 0) return;
+     const hasUsbUniverse = showUniverses.some((u: any) => u.type === 'usb-dmx');
+     if (!hasUsbUniverse) return; // no USB universe → nothing to auto-detect
+     const hasUsbNoPort = showUniverses.some((u: any) => u.type === 'usb-dmx' && !u.serialPort);
+     if (!hasUsbNoPort) {
+       // All USB universes have ports → start immediately
+       handleStartDmx();
+       return;
+     }
+     // Poll until a DMX adapter appears, then start
+     let tries = 0;
+     let cancelled = false;
+     const tick = async () => {
+       if (cancelled || tries >= 30) { setDmxConnecting(false); return; } // ~60s timeout
+       tries++;
+       setDmxConnecting(true);
+       try {
+         const ports = await window.lightMaestro.dmx.listSerialPorts();
+         const dmxPorts = (ports || []).filter(isDmxPort);
+         if (dmxPorts.length > 0) {
+           const st = useShowStore.getState();
+           const merged = st.universes.map((u: any) =>
+             u.type === 'usb-dmx' && !u.serialPort ? { ...u, serialPort: dmxPorts[0].path } : u
+           );
+           st.setShowUniverses(merged);
+           setDmxConnecting(false);
+           // Show toast to confirm auto-connection
+           try { (window as any).__lm_toast?.(`USB DMX connecté sur ${dmxPorts[0].path}`, 'ok'); } catch {}
+           // Now that a port is assigned, start the engine
+           handleStartDmx();
+           return;
+         }
+       } catch { /* ports not ready */ }
+       setTimeout(tick, 2000);
+     };
+     tick();
+     return () => { cancelled = true; setDmxConnecting(false); };
+   }, [showUniverses]); // eslint-disable-line
 
   // Auto-detect a DMX serial port: keep polling while a usb-dmx universe has no
   // port assigned (the adapter may enumerate a few seconds after boot).
@@ -7172,8 +7242,8 @@ const DesignSettingsPanel: React.FC = () => {
         <div className="flex items-center justify-between">
           <div><h3 className="text-sm font-semibold text-gray-200">DMX Engine</h3><p className="text-[10px] text-gray-500">Must be running before DMX output works</p></div>
           <div className="flex items-center gap-2">
-            <span className={'w-2 h-2 rounded-full ' + (dmxEngineRunning ? 'bg-green-500' : 'bg-gray-600')} />
-            <span className="text-[10px] text-gray-500">{dmxEngineRunning ? t('design.dmxRunning') : t('design.dmxStopped')}</span>
+            <span className={'w-2 h-2 rounded-full ' + (dmxEngineRunning ? 'bg-green-500' : dmxConnecting ? 'bg-yellow-500 animate-pulse' : 'bg-gray-600')} />
+            <span className="text-[10px] text-gray-500">{dmxEngineRunning ? t('design.dmxRunning') : dmxConnecting ? 'Detecting USB…' : t('design.dmxStopped')}</span>
             {dmxEngineRunning ? (
               <button onClick={handleStopDmx} className="px-3 py-1.5 bg-red-600/30 text-red-300 rounded text-[10px] font-semibold hover:bg-red-600/50 border border-red-500/30">{t('common.stop')}</button>
             ) : (

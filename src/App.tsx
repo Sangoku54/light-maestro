@@ -128,7 +128,7 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     // string de V8 (~536 Mo), JSON.stringify jette RangeError et la
     // sauvegarde échoue silencieusement (plus de sauvegarde possible après
     // ~8 presets paramétrés dans des widgets).
-    const storage = (window as any).lightMaestro?.storage;
+    const storage = window.lightMaestro?.storage;
     const { presets: songPresetsOut, shows: showsOut, blobs } = await externalizeProjectAudio(
       showState.songPresets ?? [],
       showState.shows ?? [],
@@ -181,7 +181,7 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
       await writeBlobs();
       // Belt-and-braces : aucun champ non clonable ne doit partir en IPC
       // (functions / symbols → DataCloneError « could not be cloned »).
-      const ok = await (window as any).lightMaestro?.storage?.set('autosave', stripUncloneable(data));
+      const ok = await window.lightMaestro?.storage?.set('autosave', stripUncloneable(data));
       return !!ok;
     }
 
@@ -192,7 +192,7 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     // l'enveloppe venait à perdre un blob, la résolution au rechargement et
     // la résolution à la lecture (ref->hit) le retrouvent quand même en local.
     await writeBlobs();
-    const projectApi = (window as any).lightMaestro?.project;
+    const projectApi = window.lightMaestro?.project;
     if (!projectApi?.save) {
       if (!options.silent) {
         try { toast(t0('toasts.saveApi'), 'err'); } catch {}
@@ -241,7 +241,7 @@ const App: React.FC = () => {
     try {
       const lang = localStorage.getItem('light-maestro-lang');
       if (lang === 'fr' || lang === 'en') {
-        (window as any).lightMaestro?.app?.setLocale?.(lang)?.catch?.(() => {});
+        window.lightMaestro?.app?.setLocale?.(lang)?.catch?.(() => {});
       }
     } catch { /* main non dispo */ }
     useLicenseStore.getState().refresh();
@@ -285,6 +285,16 @@ const App: React.FC = () => {
     } catch { /* ignore */ }
   }, []);
 
+  // Force default view on startup : QuickShow + onglet Script auto.
+  // Persists the last-used mode in localStorage but always resets here
+  // so a fresh launch (or after __lm_new) always starts on the right screen.
+  useEffect(() => {
+    const st = useAppStore.getState();
+    if (st.mode !== 'quick' || st.quickSidebarTab !== 'autoscript') {
+      useAppStore.setState({ mode: 'quick', quickSidebarTab: 'autoscript' });
+    }
+  }, []);
+
   // ─── Close Guard ─────────────────────────────────────────
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -293,7 +303,7 @@ const App: React.FC = () => {
   const [dmxError, setDmxError] = useState<string | null>(null);
 
   useEffect(() => {
-    const api = (window as any).lightMaestro?.dmx;
+    const api = window.lightMaestro?.dmx;
     if (!api?.onError) return;
     const unsub = api.onError((msg: string) => {
       if (!dmxError) setDmxError(msg);
@@ -317,8 +327,7 @@ const App: React.FC = () => {
   // ─── ShowStore: no auto-load on startup (project starts fresh) ──
 
   const syncUniversesToEngine = async (universes: any[]) => {
-    const api = (window as any).lightMaestro?.dmx;
-    if (!api) return;
+    const api = window.lightMaestro?.dmx;
     const configs = (universes || []).map((u: any) => ({
       id: u.id, name: u.name, type: u.type || 'usb-dmx',
       output: true, input: false, channels: u.channels || 512,
@@ -379,7 +388,7 @@ const App: React.FC = () => {
 
     (window as any).__lm_open = async () => {
       try {
-        const result = await (window as any).lightMaestro?.project?.open();
+        const result = await window.lightMaestro?.project?.open();
         if (!result) return;
         const data = JSON.parse(result.content);
         // Ré-importer les fixtures custom embarquées AVANT que les fixtures
@@ -399,7 +408,7 @@ const App: React.FC = () => {
         // Rétro-compat : un ancien .lmproj JSON pur renvoie blobs=[] → on
         // retombe sur les blobs externalisés du userData local (même logique
         // qu'avant). L'ordre de résolution : enveloppe d'abord, puis storage.
-        const storageApi = (window as any).lightMaestro?.storage;
+        const storageApi = window.lightMaestro?.storage;
         const fileBlobMap = new Map<string, string>();
         for (const b of result.blobs ?? []) {
           if (b && typeof b.key === 'string' && typeof b.audioFileBase64 === 'string') {
@@ -611,6 +620,10 @@ const App: React.FC = () => {
       // Sans release, ces valeurs persistent et écrasent le HTP du quickshow
       // (prio 40) → l'autoscript joue mais la 3D reste figée sur la scène.
       dmxBridge.release('default');
+      // Garde le programmeur (faders Live) actif : les faders de DesignView
+      // restent pertinents hors du mode Design (console en overlay, etc.).
+      // On ne le relâche que si on revient en Design (useProgrammerSync
+      // reprend la main dès qu'un fader bouge).
     }
     setMode(newMode);
   }, [setMode]);
@@ -741,7 +754,7 @@ const StatusBar: React.FC = () => {
   useEffect(() => {
     let alive = true;
     const tick = async () => {
-      const api = (window as any).lightMaestro?.dmx;
+      const api = window.lightMaestro?.dmx;
       if (!api?.getStatus) return;
       try { const s = await api.getStatus(); if (alive) setDmxStatus(s); } catch {}
       setLatencyMs(getLatencyMs());

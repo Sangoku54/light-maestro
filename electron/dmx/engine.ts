@@ -59,7 +59,7 @@ interface SacnOutput {
 const DMX_CHANNELS = 512;
 const MAX_UNIVERSES = 16;
 const SAB_SIZE = MAX_UNIVERSES * DMX_CHANNELS;
-const FRAME_RATE = 30;
+const FRAME_RATE = 60;
 const WORKER_TERMINATE_TIMEOUT = 500;
 
 export class DMXEngine extends EventEmitter {
