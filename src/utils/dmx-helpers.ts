@@ -146,6 +146,11 @@ export function buildFixtureOnChannelValues(
   const colorChannels: { offset: number; name: string; caps?: { min: number; max: number; name?: string; color?: string }[] }[] = [];
   const startsWithRgb = /^(red|green|blue|white|amber|uv|warm\s*white|cool\s*white)/i;
   const hasColorWord = /\b(red|green|blue|white|amber|colour|color|rgb|uv|warm|cool)\b/i;
+  // Laser : sa roue « couleur » EST la source lumineuse (gates R/G/Y) —
+  // il faut ouvrir un slot pour l'allumer, même sans slot blanc.
+  const isLaser = channels.some(
+    (c) => /laser/i.test(c.name || '') || (c.capabilities ?? []).some((cap) => /laser/i.test(cap.name || '')),
+  );
 
   for (let i = 0; i < channels.length; i++) {
     const ch = channels[i];
@@ -180,10 +185,17 @@ export function buildFixtureOnChannelValues(
       if (!rgb.includes(c.offset)) out[base + c.offset] = 0;
     }
   } else if (colorChannels.length === 1) {
+    // Roue couleur : n'écrire QUE si un slot blanc/open existe (ou laser —
+    // sa roue est la source, il faut ouvrir une couleur). Sans slot blanc
+    // (ex. AFX Spot 60 : Red 0-29, Green, Blue, Yellow, Magenta, Rainbow —
+    // aucun Open), l'ancien fallback caps[0] allumait la fixture en ROUGE.
+    // Ne pas écrire = position physique par défaut (open/blanc).
     const caps = colorChannels[0].caps?.filter((cap) => cap.color) ?? [];
-    const whiteCap = caps.find((cap) => /white/i.test(cap.name || ''));
-    const cap = whiteCap || caps[0];
-    out[base + colorChannels[0].offset] = cap ? Math.round((cap.min + cap.max) / 2) : 0;
+    const whiteCap = caps.find((cap) => /white|open/i.test(cap.name || '') || /^#fff/i.test(cap.color || ''));
+    const cap = whiteCap ?? (isLaser ? caps[0] : undefined);
+    if (cap) {
+      out[base + colorChannels[0].offset] = Math.round((cap.min + cap.max) / 2);
+    }
   }
 
   // Lasers FX (ex. Galaxian 2 gates R/G, IODA « Program ») : allumer les
@@ -241,6 +253,28 @@ export async function sendFixtureOn(
   universes: UniverseInfo[],
 ): Promise<void> {
   const values = buildFixtureOnChannelValues(pf, channels);
+  // Pan/Tilt jamais écrits (buffer frais : pas d'autoscript, pas de Target)
+  // → centrer à 128. Sinon pan=0 = rotation -270° (mapping ±270°) : le faisceau
+  // part « vers la gauche » en 3D ET sur le matériel réel. Si l'utilisateur a
+  // visé (valeur live présente, même 0 = fond gauche volontaire), on ne touche
+  // pas — le commentaire de buildFixtureOnChannelValues reste vrai.
+  // NB : on lit UNIQUEMENT le bridge arbitré (Record creux 1-based : absence =
+  // jamais écrit). Le miroir appStore est un Uint8Array dense dont les 0 ne
+  // veulent rien dire — s'en servir ferait échouer le centrage.
+  const uniIdx0 = universes.findIndex((u) => u.id === pf.universeId);
+  const arb = uniIdx0 >= 0 ? dmxBridge.getChannels(uniIdx0) : undefined;
+  const panTiltOffsets: number[] = [];
+  channels.forEach((ch, i) => {
+    if ((ch.type === 'Pan' || ch.type === 'Tilt') && !/\bfine\b/i.test(ch.name || '')) {
+      panTiltOffsets.push(i);
+    }
+  });
+  for (const off of panTiltOffsets) {
+    const addr = pf.startAddress + off;
+    if (values[addr] !== undefined) continue;
+    const live = arb && typeof arb[addr] === 'number' ? arb[addr] : undefined;
+    if (live === undefined) values[addr] = 128;
+  }
   if (Object.keys(values).length === 0) return;
   fixtureTestState.set(pf.id, values);
   try { await sendChannelsToHardware(values, patchedFixtures, universes, 'fixture-onoff'); } catch {}

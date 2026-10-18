@@ -148,8 +148,46 @@ export function defaultColorCues(): AttributeCue[] {
     { id: 'c-red', attribute: 'color', values: { red: 255, green: 0, blue: 0 } },
     { id: 'c-green', attribute: 'color', values: { red: 0, green: 255, blue: 0 } },
     { id: 'c-blue', attribute: 'color', values: { red: 0, green: 0, blue: 255 } },
-    { id: 'c-white', attribute: 'color', values: { red: 255, green: 255, blue: 255, white: 255 } },
+    // Blanc PUR : amber/uv à 0 (sinon une teinte résiduelle des cues précédents
+    // colore le blanc sur les fixtures RGBA/RGBAW).
+    { id: 'c-white', attribute: 'color', values: { red: 255, green: 255, blue: 255, white: 255, amber: 0, uv: 0 } },
   ];
+}
+
+/**
+ * Cues de roue couleur pour les SPOTS non-laser (canal `wheel` présent, sans
+ * être la source laser). L'ancienne génération n'écrivait QUE red/green/blue :
+ * les spots à roue (AFX, ACCU…) gardaient leur slot figé pendant tout le
+ * loop. 6 slots répartis sur la plage DMX → variété réelle. Attribut
+ * « wheel » (non « color ») : cadencé par scheduleAttributes, indépendamment
+ * du LRU des couleurs RGB — les deux familles évoluent en parallèle.
+ */
+export function defaultWheelColorCues(): AttributeCue[] {
+  return [20, 60, 100, 140, 180, 220].map((v, i) => ({
+    id: `w-slot-${i + 1}`,
+    attribute: 'wheel',
+    values: { wheel: v },
+    interpolate: false,
+  }));
+}
+
+/**
+ * Respiration d'intensité (Control Track dimmer) : montée pleine → repos,
+ * en rampes symétriques, indépendante de la grille couleur.
+ */
+export function defaultDimmerCues(): AttributeCue[] {
+  return [
+    { id: 'd-peak', attribute: 'dimmer', values: { dimmer: 255 }, rampBeats: 4 },
+    { id: 'd-rest', attribute: 'dimmer', values: { dimmer: 120 }, rampBeats: 4 },
+  ];
+}
+
+/**
+ * Pic de strobe par bar (Control Track strobe) : 255 (flash) puis
+ * refermeture au beat suivant (géré par emitControlTrackKeys).
+ */
+export function defaultStrobeCues(): AttributeCue[] {
+  return [{ id: 's-pulse', attribute: 'strobe', values: { strobe: 255 }, interpolate: false }];
 }
 
 /** Cues de position par défaut : un cercle et un huit (Lissajous 1:2). */
@@ -261,12 +299,16 @@ export function generateBankLoops(
     const hasLaser = fixtures.some((f) => f.category === category && f.isLaser);
     const laserColorCues = hasLaser ? defaultLaserColorCues() : [];
     const laserBeamCues = hasLaser ? defaultLaserBeamCues() : [];
+    // Spots à ROUE non-laser : les cues wheel ne s'appliquent qu'à eux
+    // (channelAddress → null pour les autres) → couleur variée des spots.
+    const hasWheelSpot = fixtures.some((f) => f.category === category && !f.isLaser && f.channelMap['wheel'] !== undefined);
+    const wheelCues = hasWheelSpot ? defaultWheelColorCues() : [];
     return generateAutoscript({
       targetBars: config.targetBars,
       fixtures,
       category,
       positionCues: config.positionCues,
-      attributeCues: [...config.colorCues, ...laserColorCues, ...(config.beamCues ?? []), ...laserBeamCues],
+      attributeCues: [...config.colorCues, ...laserColorCues, ...wheelCues, ...(config.beamCues ?? []), ...laserBeamCues],
     });
   });
 }
@@ -306,14 +348,22 @@ export function buildAutoloopBanks(fixtures: AutoloopFixture[]): BankManager {
       const hasLaser = fixtures.some((f) => f.category === category && f.isLaser);
       const laserColorCues = hasLaser ? defaultLaserColorCues() : [];
       const laserBeamCues = hasLaser ? defaultLaserBeamCues() : [];
+      // Spots à roue non-laser → cues wheel (variété couleur des spots).
+      const hasWheelSpot = fixtures.some((f) => f.category === category && !f.isLaser && f.channelMap['wheel'] !== undefined);
+      const wheelCues = hasWheelSpot ? defaultWheelColorCues() : [];
       // Banque 3 (index 3) ajoute les beamCues, les autres restent couleur/movement purs (comme DEFAULT mais varié)
       const beam = bank === 3 && slot % 3 === 0 ? defaultBeamCues() : [];
+      // Respiration dimmer : banks 1+ ; strobe (1 flash/bar) : bank 3 seulement.
+      const dimmerCues = bank >= 1 ? defaultDimmerCues() : undefined;
+      const strobeCues = bank === 3 ? defaultStrobeCues() : undefined;
       const loop = generateAutoscript({
         targetBars,
         fixtures,
         category,
         positionCues: pos,
-        attributeCues: [...cols, ...laserColorCues, ...beam, ...laserBeamCues],
+        attributeCues: [...cols, ...laserColorCues, ...wheelCues, ...beam, ...laserBeamCues],
+        dimmerCues,
+        strobeCues,
       });
       // ID lisible : autoscript-Wash_Primary-16b-# (déjà généré)
       loops.push(loop);

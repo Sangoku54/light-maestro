@@ -55,7 +55,10 @@ function findWhiteWheelCap(cm: LookChannelMap): { min: number; max: number } | n
     const n = (c.color ?? '').toLowerCase();
     return n === 'white' || n === 'open' || /^#fff/i.test(n);
   });
-  return white ?? (caps.length > 0 ? caps[0] : null);
+  // PAS de fallback caps[0] : sur une roue sans slot blanc (AFX Spot 60 :
+  // Red en premier), ça allumait tout en rouge. null = ne pas écrire la roue
+  // (position physique par défaut = open/blanc sur le matériel).
+  return white ?? null;
 }
 
 /**
@@ -90,12 +93,14 @@ export function captureFixtureLook(
     for (const o of cm.rgbOffsets) channels[base + o] = any ? (readLive(o) ?? 0) : 255;
   } else if (cm.wheelOffset !== null && cm.wheelOffset !== undefined && cm.wheelOffset >= 0) {
     const v = readLive(cm.wheelOffset) ?? 0;
-    let wv = v;
     if (v <= 2) {
       const white = findWhiteWheelCap(cm);
-      wv = white ? midOfCap(white) : 255;
+      // Pas de slot blanc sur la roue → ne PAS écrire (l'ancien fallback 255
+      // tombait dans la zone Rainbow de l'AFX = effet arc-en-ciel permanent).
+      if (white) channels[base + cm.wheelOffset] = midOfCap(white);
+    } else {
+      channels[base + cm.wheelOffset] = v;
     }
-    channels[base + cm.wheelOffset] = wv;
   }
   if (cm.strobeOffset !== null && cm.strobeOffset !== undefined && cm.strobeOffset >= 0) {
     channels[base + cm.strobeOffset] = readLive(cm.strobeOffset) ?? 0;

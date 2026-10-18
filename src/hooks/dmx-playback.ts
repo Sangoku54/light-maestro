@@ -19,7 +19,7 @@ import type { PatchedFixture, FixtureGroup, FixtureTier } from '../stores/showSt
 import type { DmxFixtureDefinition, DmxFixtureCapability } from './dmx-cues';
 import { clampStrobeLimit } from './dmx-cues';
 import { resolveTrackTargets, computeEfxOverrides, type EfxTrackRef, type FixtureTrack, type MovementBlock } from './fixture-tracks';
-import { computeMatrixTrackColors } from './rgb-matrix-playback';
+import { computeMatrixTrackColors, collectActiveMatrixIds, markMatrixPresetDriven, noteEngineTick } from './rgb-matrix-playback';
 
 // ─── Color Track ref type (for DMX playback resolution) ──
 export interface ColorTrackRef {
@@ -869,6 +869,10 @@ export function useDmxPlayback(options: {
     const fadeState=new Map();const FADE_ALPHA=colorFadeMs>0?1-Math.exp(Math.log(0.1)/(colorFadeMs/16.67)):0.98;
         const tick=()=>{
       if(!dmxEnabledRef.current){rafRef.current=requestAnimationFrame(tick);return;}
+      // Posé chaque frame PENDANT la lecture uniquement : le hook RAF de
+      // l'onglet Matrice s'efface (le lecteur possède la sortie). Hors
+      // lecture le drapeau expire (< 600 ms) et la matrice reprend la main.
+      if (isPlaying) noteEngineTick();
       const ct=currentTimeRef.current;
       const c=cuesRef.current;
       const analysis=analysisRef.current;
@@ -928,6 +932,14 @@ export function useDmxPlayback(options: {
         matricesRef?.current || [],
       );
       for (const [fid, hex] of matrixTrack.colors) colorTrackColors.set(fid, hex);
+      // Marque les matrices actives sur pistes comme « pilotées par le preset »
+      // → le hook RAF de l'onglet Matrice les ignore (plus de double pilote).
+      // Vide le marquage hors lecture (pas de liste figée).
+      markMatrixPresetDriven(
+        matrixTracksRef?.current?.length && isPlaying
+          ? collectActiveMatrixIds(matrixTracksRef.current, ct)
+          : [],
+      );
       // (diag colorTrack retiré prod — gardé seulement si __DEBUG__)
 
       // Find active cue: direct latest-before-ct, NO section grouping

@@ -32,6 +32,18 @@ export function hsvToRgb(h: number, s: number, v: number): [number, number, numb
 }
 
 /**
+ * Applique la direction du motif sur une position normalisée (0..1) :
+ *  - forward  : telle quelle
+ *  - backward : inversée (le front repart dans l'autre sens)
+ *  - bounce   : triangle (aller-retour, jamais de saut de fin de cycle)
+ */
+export function applyPatternDirection(pos: number, direction?: string): number {
+  if (direction === 'backward') return 1 - pos;
+  if (direction === 'bounce') return 1 - Math.abs(1 - 2 * pos);
+  return pos;
+}
+
+/**
  * Couleur d'une cellule de matrice pour un motif donné.
  *
  * @param pattern motif (`chase`/`wave`/`burst`/`gradient`/`rainbow`/`random`/
@@ -41,6 +53,8 @@ export function hsvToRgb(h: number, s: number, v: number): [number, number, numb
  * @param phase   progression du motif (croissante, cycle ≈ 1).
  * @param startRgb,endRgb couleurs bornes du dégradé.
  * @param width   largeur du front en % (1..100) pour chase/wave/burst.
+ * @param direction `forward` (défaut) / `backward` / `bounce` — sens du motif.
+ * @param offset  décalage de cellules (rotation du motif sur la grille).
  */
 export function getPatternColor(
   pattern: string,
@@ -50,9 +64,11 @@ export function getPatternColor(
   startRgb: [number, number, number],
   endRgb: [number, number, number],
   width: number,
+  direction?: string,
+  offset: number = 0,
 ): [number, number, number] {
   const cellCount = cols * rows;
-  const cellIndex = row * cols + col;
+  const cellIndex = (((row * cols + col + offset) % cellCount) + cellCount) % cellCount;
 
   let pos: number;
   switch (pattern) {
@@ -86,7 +102,8 @@ export function getPatternColor(
     }
     case 'rainbow': {
       const h = ((phase + cellIndex / cellCount) % 1 + 1) % 1;
-      return hsvToRgb(h, 1, 1);
+      const hd = applyPatternDirection(h, direction);
+      return hsvToRgb(hd, 1, 1);
     }
     case 'random': {
       const seed = Math.sin(cellIndex * 127.1 + Math.floor(phase * 10) * 43758.5453) * 43758.5453;
@@ -105,6 +122,7 @@ export function getPatternColor(
       return startRgb;
   }
 
+  pos = applyPatternDirection(pos, direction);
   const r = Math.round(startRgb[0] + (endRgb[0] - startRgb[0]) * pos);
   const g = Math.round(startRgb[1] + (endRgb[1] - startRgb[1]) * pos);
   const b = Math.round(startRgb[2] + (endRgb[2] - startRgb[2]) * pos);

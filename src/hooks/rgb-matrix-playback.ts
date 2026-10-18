@@ -51,6 +51,7 @@ export function computeMatrixTrackColors(
   matrices: Array<{
     id: string; groupId: string; pattern: string; cols: number; rows: number;
     speed: number; startColor: string; endColor: string; width: number;
+    direction?: string; offset?: number;
   }>,
 ): MatrixTrackColorResult {
   const colors = new Map<string, string>();
@@ -79,7 +80,7 @@ export function computeMatrixTrackColors(
         // Sans ça, couleur et shutter moduleraient ensemble (double flash).
         const [r, g, b] = isStrobe
           ? startRgb
-          : getPatternColor(mx.pattern, col, row, mx.cols, mx.rows, phase, startRgb, endRgb, mx.width);
+          : getPatternColor(mx.pattern, col, row, mx.cols, mx.rows, phase, startRgb, endRgb, mx.width, mx.direction, mx.offset ?? 0);
         const hex = '#' + [r, g, b]
           .map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0'))
           .join('');
@@ -99,7 +100,7 @@ export function computeMatrixTrackColors(
  * Retourne universIdx → canaux, plus le nombre de fixtures résolues.
  */
 export function renderMatrixFrame(
-  matrix: { pattern: string; cols: number; rows: number; speed: number; startColor: string; endColor: string; width: number },
+  matrix: { pattern: string; cols: number; rows: number; speed: number; startColor: string; endColor: string; width: number; direction?: string; offset?: number },
   phaseSec: number,
   groupFixtures: Array<{ id: string; fixtureDefId: string; universeId: string; startAddress: number }>,
   defOf: (fixtureDefId: string) => any | undefined,
@@ -121,6 +122,7 @@ export function renderMatrixFrame(
     const [r, g, b] = getPatternColor(
       matrix.pattern, col, row, cols, rows,
       phaseSec, startRgb, endRgb, matrix.width,
+      matrix.direction, matrix.offset ?? 0,
     );
 
     const def = defOf(fixture.fixtureDefId);
@@ -169,6 +171,37 @@ export function renderMatrixFrame(
 }
 
 /**
+ * Matrices momentanément pilotées par une PISTE de preset (QuickShow) :
+ * le moteur écrit leurs couleurs via colorTrackColors (horloge de lecture).
+ * Le hook RAF ci-dessous doit les IGNORER — sinon double pilote avec deux
+ * horloges différentes (couleurs qui se battent, phases incohérentes).
+ */
+const presetDriven = new Set<string>();
+
+/** Appelé à chaque tick du lecteur avec les ids de matrices actives sur pistes. */
+export function markMatrixPresetDriven(ids: string[]): void {
+  presetDriven.clear();
+  for (const id of ids) presetDriven.add(id);
+}
+
+// ── Verrou « le lecteur possède la sortie » ────────────────────────────────
+// Pendant une lecture QuickShow (preset), la matrice laissée activée dans
+// l'onglet ne doit PAS réécrire ses cellules en LTP (une cellule éteinte
+// dimmer=0 écraserait le dimmer 255 du preset → fixtures à moitié éteintes
+// selon la phase du motif). Le tick du lecteur pose ce drapeau ~60×/s ; le
+// hook RAF s'efface tant qu'il est frais (< 600 ms).
+let lastEngineTickAt = 0;
+
+/** À appeler à chaque frame du lecteur QuickShow (useDmxPlayback). */
+export function noteEngineTick(): void {
+  lastEngineTickAt = performance.now();
+}
+
+function engineOwnsOutput(): boolean {
+  return performance.now() - lastEngineTickAt < 600;
+}
+
+/**
  * Active les matrices données (edge-triggered, mémorise l'état précédent),
  * à appeler à chaque frame de lecture avec les ids en plage.
  */
@@ -202,8 +235,9 @@ export function restoreMatrixEnabled(stash: Map<string, boolean>): void {
  * Extinction de fin : quand plus aucune matrice n'est active, les dernières
  * valeurs écrites resteraient sinon figées dans l'arbitre (contribution
  * persistante) — fixtures allumées alors que le motif est fini. On flush des
- * zéros transitoires (le motif s'éteint, puis la source est relâchée et
- * l'engine dessous reprend la main), puis on vide le registre.
+ * zéros TRANSITOIRES COURTS (150 ms : le motif s'éteint proprement puis la
+ * source est relâchée et le contenu reprend la main — un flush 2 s créait un
+ * blackout de 2 s pendant les shows), puis on vide le registre.
  */
 export function flushMatrixIdle(
   lastAddrs: Map<number, Set<number>>,
@@ -220,7 +254,9 @@ export function flushMatrixIdle(
 
 export function useRgbMatrixPlayback() {
   const rafRef = useRef<number>(0);
-  const startTimeRef = useRef<number>(0);
+  // Horloge PAR ACTIVATION : t=0 quand la matrice passe enabled (toggle tab ou
+  // activation par piste Show) → phase déterministe, pas « phase de l'app ».
+  const activationRef = useRef(new Map<string, number>());
   const lastFrameRef = useRef<number>(0);
   // Adresses écrites par univers : registre d'extinction (flushMatrixIdle).
   const lastAddrsRef = useRef(new Map<number, Set<number>>());
@@ -230,7 +266,6 @@ export function useRgbMatrixPlayback() {
   const lastStatsPushRef = useRef<number>(0);
 
   useEffect(() => {
-    startTimeRef.current = performance.now();
     lastFrameRef.current = 0;
 
     const tick = () => {
@@ -243,16 +278,32 @@ export function useRgbMatrixPlayback() {
       lastFrameRef.current = now;
 
       const matrices = useRgbMatrixStore.getState().matrices.filter(m => m.enabled);
-      if (matrices.length === 0) {
+      // Lecture QuickShow en cours → le lecteur possède la sortie : la matrice
+      // laissée activée dans l'onglet s'efface (sinon ses cellules LTP
+      // écrasent le contenu : une fixture sur deux éteinte selon la phase).
+      // Les matrices actives sur PISTES restent gérées par le lecteur lui-même
+      // (markMatrixPresetDriven + colorTrackColors).
+      if (engineOwnsOutput()) {
+        flushMatrixIdle(lastAddrsRef.current, (uni, zeros) =>
+          dmxBridge.writeTransient('rgb-matrix', uni, zeros, 150),
+        );
+        activationRef.current.clear();
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+      // Les matrices pilotées par une piste preset appartiennent au moteur de
+      // lecture (horloge de lecture) : jamais redessinées ici.
+      const driven = matrices.filter(m => !presetDriven.has(m.id));
+      if (driven.length === 0) {
         // Plus rien à piloter : éteindre ce qu'on allumait (sinon figé).
         flushMatrixIdle(lastAddrsRef.current, (uni, zeros) =>
-          dmxBridge.writeTransient('rgb-matrix', uni, zeros),
+          dmxBridge.writeTransient('rgb-matrix', uni, zeros, 150),
         );
+        activationRef.current.clear();
         rafRef.current = requestAnimationFrame(tick);
         return;
       }
 
-      const elapsed = (now - startTimeRef.current) / 1000;
       const fixtures = useShowStore.getState().patchedFixtures;
       const groups = useShowStore.getState().fixtureGroups;
       const universes = useShowStore.getState().universes;
@@ -264,14 +315,24 @@ export function useRgbMatrixPlayback() {
       const pushStats = now - lastStatsPushRef.current > 500;
       if (pushStats) lastStatsPushRef.current = now;
 
-      for (const matrix of matrices) {
+      for (const matrix of driven) {
+        // t=0 à l'activation (toggle ou entrée de piste) → phase reproductible.
+        if (!activationRef.current.has(matrix.id)) activationRef.current.set(matrix.id, now);
+        const elapsed = (now - activationRef.current.get(matrix.id)!) / 1000;
         const group = groups.find(g => g.id === matrix.groupId);
         if (!group) {
           if (pushStats) useRgbMatrixStore.getState().setStats(matrix.id, { total: 0, resolved: 0 });
           continue;
         }
 
-        const groupFixtures = fixtures.filter(f => group.fixtureIds.includes(f.id));
+        // Ordre CANONIQUE = group.fixtureIds (ordre du groupe, celui du
+        // panneau Groupes) — PAS l'ordre de patch. L'ancien filter() suivait
+        // patchedFixtures : cellules mélangées entre le live, les pistes
+        // matrix et l'aperçu de l'éditeur.
+        const byId = new Map(fixtures.map(f => [f.id, f]));
+        const groupFixtures = group.fixtureIds
+          .map(id => byId.get(id))
+          .filter((f): f is typeof fixtures[number] => !!f);
         if (groupFixtures.length === 0) {
           if (pushStats) useRgbMatrixStore.getState().setStats(matrix.id, { total: 0, resolved: 0 });
           continue;

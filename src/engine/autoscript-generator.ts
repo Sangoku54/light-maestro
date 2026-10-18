@@ -361,6 +361,26 @@ function emitControlTrackKeys(
   const STROBE_LOGICAL = ['strobe', 'shutter'];
   const DIMMER_LOGICAL = ['dimmer', 'intensity'];
 
+  /** Clés logiques des têtes LED secondaires (led1, led2…) — multi-têtes. */
+  const ledKeys = (fixture: AutoloopFixture): string[] =>
+    Object.keys(fixture.channelMap).filter((k) => /^led\d+$/.test(k)).sort();
+
+  /** Propage une écriture dimmer sur TOUTES les têtes LED (led1..ledN) :
+   *  sans ça, seules la LED principale recevait la respiration et les têtes
+   *  secondaires restaient muettes pendant les autoloops. */
+  const pushDimmerWithLeds = (
+    fixture: AutoloopFixture, logical: string, value: number, beat: number, ramp: number,
+  ): void => {
+    const addr = channelAddress(fixture, logical);
+    if (addr === null) return;
+    keys.push({ channel: String(addr), beat, value, rampBeats: ramp });
+    for (const lk of ledKeys(fixture)) {
+      const lAddr = channelAddress(fixture, lk);
+      if (lAddr === null) continue;
+      keys.push({ channel: String(lAddr), beat, value, rampBeats: ramp });
+    }
+  };
+
   // ── Strobe : snap 255 puis refermeture (0) au beat suivant. ──
   for (const [beat, cue] of strobePlacements) {
     for (const fixture of fixtures) {
@@ -380,15 +400,11 @@ function emitControlTrackKeys(
     for (const fixture of fixtures) {
       if (explicit) {
         for (const [logical, value] of Object.entries(cue.values)) {
-          const addr = channelAddress(fixture, logical);
-          if (addr === null) continue;
-          keys.push({ channel: String(addr), beat, value, rampBeats: ramp });
+          pushDimmerWithLeds(fixture, logical, value, beat, ramp);
         }
       } else {
         for (const logical of DIMMER_LOGICAL) {
-          const addr = channelAddress(fixture, logical);
-          if (addr === null) continue;
-          keys.push({ channel: String(addr), beat, value: 255, rampBeats: ramp });
+          pushDimmerWithLeds(fixture, logical, 255, beat, ramp);
         }
       }
     }
@@ -437,25 +453,33 @@ function emitAttributeKeys(
 
     for (const fixture of fixtures) {
       for (const [logical, value] of Object.entries(cue.values)) {
-        const address = channelAddress(fixture, logical);
-        if (address === null) continue; // fixture sans ce canal : on saute
-        const ch = String(address);
+        // Un cue dimmer/intensity dans attributeCues est propagé sur TOUTES
+        // les têtes LED (led1..ledN) — même sémantique que le Control Track.
+        const extras = (logical === 'dimmer' || logical === 'intensity')
+          ? Object.keys(fixture.channelMap).filter((k) => /^led\d+$/.test(k)).sort()
+          : [];
+        const targets = [logical, ...extras];
+        for (const tgt of targets) {
+          const address = channelAddress(fixture, tgt);
+          if (address === null) continue; // fixture sans ce canal : on saute
+          const ch = String(address);
 
-        const prev = current.get(ch);
-        if (ramp > 0 && prev !== undefined) {
-          // Début de rampe : ancre la valeur précédente (snap).
-          const anchorBeat = Math.max(0, beat - ramp);
-          if (anchorBeat < beat) {
-            keys.push({ channel: ch, beat: anchorBeat, value: prev, rampBeats: 0 });
+          const prev = current.get(ch);
+          if (ramp > 0 && prev !== undefined) {
+            // Début de rampe : ancre la valeur précédente (snap).
+            const anchorBeat = Math.max(0, beat - ramp);
+            if (anchorBeat < beat) {
+              keys.push({ channel: ch, beat: anchorBeat, value: prev, rampBeats: 0 });
+            }
+            // Fin de rampe : valeur cible, interpolation sur `ramp`.
+            keys.push({ channel: ch, beat, value, rampBeats: ramp });
+          } else {
+            // Snap (rampe nulle ou première occurrence du canal).
+            keys.push({ channel: ch, beat, value, rampBeats: 0 });
           }
-          // Fin de rampe : valeur cible, interpolation sur `ramp`.
-          keys.push({ channel: ch, beat, value, rampBeats: ramp });
-        } else {
-          // Snap (rampe nulle ou première occurrence du canal).
-          keys.push({ channel: ch, beat, value, rampBeats: 0 });
-        }
 
-        current.set(ch, value);
+          current.set(ch, value);
+        }
       }
     }
   }

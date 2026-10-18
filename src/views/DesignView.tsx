@@ -15,6 +15,7 @@ import { analyzeFixtureChannels as analyzeEngine } from '../engine/fixture-analy
 import { auditFixtureCoverage, formatCoverageWarning } from '../engine/fixture-coverage';
 import { AUTO_LOOP_FOLDER } from '../engine/auto-loops';
 import { groupByTier, TIER_KEYS } from '../engine/tier-utils';
+import { getPatternColor } from '../engine/rgb-matrix-patterns';
 import { sendChannelsToHardware, sendToUniverse, sendFixtureOn, sendFixtureOff, sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { outputArbiter } from '../engine/output-arbiter';
@@ -3279,6 +3280,12 @@ const PATTERNS: { value: string; label: string; icon: string }[] = [
   { value: 'strobe', label: 'Strobe', icon: '⚡' },
 ];
 
+/** `#rrggbb` → [r,g,b] robuste (hex invalide/mal formé → blanc). */
+function hexToRgbSafe(hex: string): [number, number, number] {
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex || '')) return [255, 255, 255];
+  return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+}
+
 const DIRECTIONS = [
   { value: 'forward', label: '→' },
   { value: 'backward', label: '←' },
@@ -3533,46 +3540,20 @@ const RGBMatrixEditor: React.FC = () => {
           {Array.from({ length: active.cols * active.rows }, (_, i) => {
             const col = i % active.cols;
             const row = Math.floor(i / active.cols);
-            const cellIndex = row * active.cols + col;
-            let color = '#1a1a2e';
-
-            const phase = active.enabled ? livePhase : 0;
-            switch (active.pattern) {
-              case 'chase': {
-                const chasePos = ((phase + cellIndex / (active.cols * active.rows)) % 1 + 1) % 1;
-                const thresh = 1 - active.width / 100;
-                if (chasePos >= thresh) {
-                  const pos = (chasePos - thresh) / (1 - thresh);
-                  const r = Math.round(startRgb + (parseInt(active.endColor.slice(1,3),16) - startRgb) * pos);
-                  const g = Math.round(startG + (parseInt(active.endColor.slice(3,5),16) - startG) * pos);
-                  const b = Math.round(startB + (parseInt(active.endColor.slice(5,7),16) - startB) * pos);
-                  color = `rgb(${r},${g},${b})`;
-                }
-                break;
-              }
-              case 'rainbow': {
-                const h = ((phase + cellIndex / (active.cols * active.rows)) % 1 + 1) % 1;
-                color = `hsl(${Math.round(h * 360)}, 100%, 50%)`;
-                break;
-              }
-              case 'gradient': {
-                const pos = cellIndex / Math.max(1, active.cols * active.rows - 1);
-                const r = Math.round(startRgb + (parseInt(active.endColor.slice(1,3),16) - startRgb) * pos);
-                const g = Math.round(startG + (parseInt(active.endColor.slice(3,5),16) - startG) * pos);
-                const b = Math.round(startB + (parseInt(active.endColor.slice(5,7),16) - startB) * pos);
-                color = `rgb(${r},${g},${b})`;
-                break;
-              }
-              case 'solid':
-                color = `rgb(${startRgb},${startG},${startB})`;
-                break;
-              case 'pulse':
-                const pv = 0.3 + 0.7 * Math.abs(Math.sin(phase * Math.PI));
-                color = `rgb(${Math.round(startRgb*pv)},${Math.round(startG*pv)},${Math.round(startB*pv)})`;
-                break;
-              default:
-                color = `rgb(${startRgb},${startG},${startB})`;
-            }
+            // Source de vérité UNIQUE : getPatternColor (moteur de rendu DMX).
+            // L'ancien switch dupliqué n'implémentait que 4 motifs sur 9
+            // (wave/burst/random/strobe s'affichaient en couleur solide) et
+            // ignorait direction/offset.
+            const [r, g, b] = getPatternColor(
+              active.pattern, col, row, active.cols, active.rows,
+              active.enabled ? livePhase : 0,
+              [startRgb, startG, startB],
+              hexToRgbSafe(active.endColor),
+              active.width,
+              active.direction,
+              active.offset,
+            );
+            const color = `rgb(${r},${g},${b})`;
 
             return (
               <div key={i} className="rounded-sm transition-colors duration-75"

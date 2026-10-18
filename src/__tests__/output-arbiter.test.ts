@@ -177,14 +177,30 @@ describe('OutputArbiter — default buffer & edge cases (non-regression)', () =>
   });
 
   it('has every canonical source registered by default with the documented priorities', () => {
-    // Simple Desk is the top control source; RGB matrix is the lowest light source
+    // Simple Desk is the top control source; RGB matrix is an explicit
+    // operator activation → LTP (cellules éteintes gagnent sur l'autoscript)
     expect(outputArbiter.isRegistered('simple-desk')).toBe(true);
     expect(outputArbiter.isRegistered('rgb-matrix')).toBe(true);
     expect(DEFAULT_SOURCES['simple-desk'].mode).toBe('ltp');
     expect(DEFAULT_SOURCES['simple-desk'].priority).toBeGreaterThan(DEFAULT_SOURCES['vc'].priority);
     expect(DEFAULT_SOURCES['vc'].priority).toBeGreaterThan(DEFAULT_SOURCES['quickshow'].priority);
     expect(DEFAULT_SOURCES['quickshow'].mode).toBe('htp');
-    expect(DEFAULT_SOURCES['rgb-matrix'].priority).toBeLessThan(DEFAULT_SOURCES['quickshow'].priority);
+    expect(DEFAULT_SOURCES['rgb-matrix'].mode).toBe('ltp');
+    expect(DEFAULT_SOURCES['rgb-matrix'].priority).toBeGreaterThan(DEFAULT_SOURCES['quickshow'].priority);
+    expect(DEFAULT_SOURCES['rgb-matrix'].priority).toBeLessThan(DEFAULT_SOURCES['vc'].priority);
+  });
+
+  it('matrice RGB LTP : une cellule éteinte (dimmer 0) reste éteinte malgré un preset actif', () => {
+    const arb = new OutputArbiter();
+    // Le preset allume la fixture (dimmer 255, HTP 45)
+    arb.write('song-preset', 0, { 1: 255 });
+    // La matrice éteint cette cellule (dimmer 0, LTP 55)
+    arb.write('rgb-matrix', 0, { 1: 0 });
+    const buf = arb.getBuffer(0) as Record<number, number>;
+    expect(buf[1]).toBe(0);
+    // Release de la matrice → le preset reprend la main
+    arb.release('rgb-matrix', 0);
+    expect((arb.getBuffer(0) as Record<number, number>)[1]).toBe(255);
   });
 
   it('keeps zero values owned by an LTP source (blackout semantics)', () => {

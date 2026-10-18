@@ -266,7 +266,8 @@ type FixtureChannelMap = FixtureChannelAnalysis;
 
 // ─── Color wheel → hex (simplified) ──────────────────────────
 
-function wheelValueToColor(
+/** Roue couleur → hex (partagé live/3D/tests). */
+export function wheelValueToColor(
   value: number,
   caps: DmxFixtureCapability[] | null,
 ): THREE.Color {
@@ -970,8 +971,8 @@ export const Stage3D: React.FC<{
     const stageY = deckTopAt(stageDecksRef.current, pos.x, pos.y) + pos.h * 5.0;
     group.position.set(stageX, stageY, stageZ);
     // Apply heading rotation (degrees → radians, Y axis rotation).
-    // Mode « hanging » : yaw auto-aim vers le centre de scène (vers le public).
-    group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current);
+    // Règle de zone (vue audience) pour les motorisées ; heading = secours sans pan/tilt.
+    group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(channelMap));
     // User data for raycasting identification
     group.userData = { fixtureId: fixture.id, fixtureType: fixture.fixtureType };
 
@@ -2247,7 +2248,7 @@ export const Stage3D: React.FC<{
         const stageZ = (pos.y - 0.5) * stageDimsRef.current.depth;
         const stageY = deckTopAt(stageDecksRef.current, pos.x, pos.y) + pos.h * 5.0;
         f3d.group.position.set(stageX, stageY, stageZ);
-        f3d.group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current);
+        f3d.group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(f3d.channelMap));
         if (pos.mountMode) f3d.mountMode = pos.mountMode;
         fitMountRotation(f3d, pos.mountMode || 'top');
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
@@ -2304,10 +2305,10 @@ export const Stage3D: React.FC<{
       const stageZ = (pos.y - 0.5) * stageDimsRef.current.depth;
       const stageY = deckTopAt(stageDecksRef.current, pos.x, pos.y) + pos.h * 5.0;
       f3d.group.position.set(stageX, stageY, stageZ);
-      f3d.group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current);
+      f3d.group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(f3d.channelMap));
       if (pos.mountMode) f3d.mountMode = pos.mountMode;
-      fitMountRotation(f3d, pos.mountMode || 'top');
-      f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
+       fitMountRotation(f3d, pos.mountMode || 'top');
+       f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
       f3d._zeroPanDeg = pos.zeroPan ?? 0;
       f3d._zeroTiltDeg = pos.zeroTilt ?? 0;
       if (pos.beamAngle !== undefined && f3d.beamCone) {
@@ -2500,10 +2501,14 @@ export const Stage3D: React.FC<{
     const dmxState = useAppStore.getState().dmx;
     // Use arbitrated buffer (LTP fidèle: auto-loop LTP75 > quickshow HTP40) au lieu de channelData brut
     const bridged: Record<number, Uint8Array | number[]> = {};
+    // Records creux 1-based par univers : l'ABSENCE d'une adresse = jamais
+    // écrite par aucune source → pan/tilt neutres (128), pas 0 (fond gauche/bas).
+    const bridgedSparse: Record<number, Record<number, number>> = {};
     const uniCount = universes.length || 1;
     for (let u = 0; u < uniCount; u++) {
       const buf = dmxBridge.getChannels(u);
       if (buf) {
+        bridgedSparse[u] = buf;
         const arr = new Uint8Array(512);
         for (const [chStr, v] of Object.entries(buf)) { const ch = Number(chStr); if (ch >= 1 && ch <= 512) arr[ch - 1] = v as number; }
         bridged[u] = arr;
@@ -2524,6 +2529,7 @@ export const Stage3D: React.FC<{
     for (const f3d of fixturesRef.current.values()) {
       // Get DMX data for this fixture's universe (or synthesize from test override)
       const testVals = fixtureTestState.get(f3d.id);
+      let sparseUni = hasBridged ? bridgedSparse[f3d.universeIndex] : undefined;
       let rawData: Uint8Array | number[] | undefined = channelData[f3d.universeIndex] ?? mirrorData?.[f3d.universeIndex];
       if (testVals) {
         // Merge test values over real data when available (keeps engine/modale pan-tilt).
@@ -2543,6 +2549,8 @@ export const Stage3D: React.FC<{
           if (idx >= 0 && idx < 512) buf[idx] = v;
         }
         rawData = buf;
+        // Les valeurs de test sont explicites : elles comptent comme « écrites »
+        sparseUni = { ...(sparseUni ?? {}), ...testVals };
       }
        if (!rawData) {
           if (f3d.pointLight) { f3d.pointLight.intensity = 0; f3d.pointLight.visible = false; }
@@ -2600,6 +2608,22 @@ export const Stage3D: React.FC<{
 
       const baseAddr = pf.startAddress - 1;
       const cm = f3d.channelMap;
+
+      // Lecture pan/tilt « jamais écrit → neutre 128 ». Le buffer dense ne
+      // distingue pas 0 écrit d'un canal absent : on interroge le record creux
+      // du bridge (1-based). Sans ça, tout allumage sans autoscript/Target lit
+      // pan=tilt=0 → faisceau fond gauche + vers le sol.
+      // Une valeur 0 STOCKÉE (vieilles scènes enregistrées avant le fix du
+      // neutre) est traitée comme non-visée → 128 : pan=0 en scène statique
+      // signifiait « buffer frais », pas « fond gauche volontaire ». Le DMX
+      // réel continue de transmettre la valeur d'origine.
+      const panTiltRead = (off: number | null | undefined): number => {
+        if (off === null || off === undefined || off < 0) return 128;
+        const idx = baseAddr + off;
+        const spVal = sparseUni ? (sparseUni as Record<string, number>)[String(idx + 1)] : undefined;
+        if (spVal === undefined || spVal === 0) return 128;
+        return data[idx] ?? 128;
+      };
 
        // --- Intensity ---
        let intensity = 0;
@@ -2696,16 +2720,24 @@ export const Stage3D: React.FC<{
         const b = (data[baseAddr + cm.rgbOffsets[2]] ?? 0) / 255;
         if (r > 0 || g > 0 || b > 0) color.setRGB(r, g, b);
       } else if (cm.wheelOffset !== null) {
-        const wheelVal = data[baseAddr + cm.wheelOffset] ?? 0;
-        color = wheelValueToColor(wheelVal, cm.wheelCaps);
+        // Roue jamais écrite (ou 0 stocké hérité) → position physique par
+        // défaut = open/BLANC. Ne pas mapper 0 sur la première cap (AFX :
+        // Red 0-29 → tout le statique était rouge).
+        const wIdx = baseAddr + cm.wheelOffset;
+        const wSp = sparseUni ? (sparseUni as Record<string, number>)[String(wIdx + 1)] : undefined;
+        if (wSp === undefined || wSp === 0) {
+          color = new THREE.Color(0xffffff);
+        } else {
+          color = wheelValueToColor(data[wIdx] ?? 0, cm.wheelCaps);
+        }
       }
 
       // --- Pan/Tilt (QLC+ model: arm=pan/Y, head=tilt/X) — les lasers sans
       // pan/tilt typés utilisent leurs axes scan X/Y (IODA…) en équivalent. ---
-      const panVal = cm.panOffset !== null ? (data[baseAddr + cm.panOffset] ?? 128)
-        : (cm.scanXOffset !== null ? (data[baseAddr + cm.scanXOffset] ?? 128) : 128);
-      const tiltVal = cm.tiltOffset !== null ? (data[baseAddr + cm.tiltOffset] ?? 128)
-        : (cm.scanYOffset !== null ? (data[baseAddr + cm.scanYOffset] ?? 128) : 128);
+      const panVal = cm.panOffset !== null ? panTiltRead(cm.panOffset)
+        : (cm.scanXOffset !== null ? panTiltRead(cm.scanXOffset) : 128);
+      const tiltVal = cm.tiltOffset !== null ? panTiltRead(cm.tiltOffset)
+        : (cm.scanYOffset !== null ? panTiltRead(cm.scanYOffset) : 128);
       dmxLastActivityRef.current = performance.now();
       // Derniers bytes vus — pour « capturer l'orientation actuelle » (le bouton
       // lit ces valeurs depuis le panneau).
@@ -2721,7 +2753,8 @@ export const Stage3D: React.FC<{
       const settleK = Math.min(1, dt * 25);
       if (f3d.armGroup) {
         // Zéro VISUEL (rendu) : décalage persistant du faisceau (tare à DMX=128).
-        const panTarget = ((panVal / 255) - 0.5) * Math.PI * 3 + (f3d._zeroPanDeg * Math.PI) / 180;
+        // Zone PAN : ±90° autour de la direction par défaut (jamais derrière).
+        const panTarget = clampPanZone(((panVal / 255) - 0.5) * Math.PI * 3 + (f3d._zeroPanDeg * Math.PI) / 180);
         let panDelta = panTarget - f3d.armGroup.rotation.y;
         while (panDelta > Math.PI) panDelta -= 2 * Math.PI;
         while (panDelta < -Math.PI) panDelta += 2 * Math.PI;
@@ -2731,8 +2764,11 @@ export const Stage3D: React.FC<{
           : panDelta * settleK;
       }
       if (f3d.headGroup) {
+        // Zone TILT : élévation ∈ [-90°, +90°] ; au sol, jamais sous l'horizon.
+        // head = _mountTilt + élévation (invariant validé pour les 3 modes).
         const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI;
-        const tiltTarget = f3d._mountTilt + dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180;
+        const elevation = clampTiltZone(dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180, f3d.mountMode);
+        const tiltTarget = f3d._mountTilt + elevation;
         const tiltDelta = tiltTarget - f3d.headGroup.rotation.x;
         const tiltMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
         f3d.headGroup.rotation.x += Math.abs(tiltDelta) > tiltMaxStep
@@ -2744,9 +2780,10 @@ export const Stage3D: React.FC<{
       for (const eh of f3d.extraHeads ?? []) {
         // Tilt: only for arm-based extra heads (has valid tiltOffset > 0 or from tiltOffsets)
         if (eh.rgbSegmentIdx === undefined && eh.tiltOffset > 0) {
-          const ehTiltVal = data[baseAddr + eh.tiltOffset] ?? 128;
+          const ehTiltVal = panTiltRead(eh.tiltOffset);
           const dmxTilt = ((ehTiltVal / 255) - 0.5) * Math.PI;
-          const ehTarget = eh._mountTilt + dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180;
+          const ehElevation = clampTiltZone(dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180, f3d.mountMode);
+          const ehTarget = eh._mountTilt + ehElevation;
           const ehDelta = ehTarget - eh.headGroup.rotation.x;
           const ehMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
           eh.headGroup.rotation.x += Math.abs(ehDelta) > ehMaxStep
@@ -5499,54 +5536,86 @@ function updateFixtureSupport(
 }
 
 /**
- * Yaw (rotation Y) d'installation d'une fixture. Mode « hanging » (suspendue
- * au-dessus du pont) : le faisceau par défaut vise automatiquement vers le
- * public selon le placement (convention « vue audience ») — arrière → devant,
- * côtés → centre, devant → arrière. On vise le CENTRE de la scène (compromis
- * qui couvre ces trois cas à la fois). Comme solvePanTilt lit headingRad =
- * group.rotation.y, l'outil Aim/Direct reste exact sur ces fixtures.
- * Autres modes : heading utilisateur, inchangé.
+ * Yaw (rotation Y) d'installation d'une fixture — convention « vue audience »
+ * (le public est côté -Z, l'arrière de scène côté +Z).
+ *
+ * Direction par défaut PAR ZONE, faisceaux PARALLÈLES au sol (pas de
+ * convergence vers un point) :
+ *   - devant   (y ≤ 0.25) → +Z  (vers l'arrière de scène)
+ *   - arrière  (y ≥ 0.75) → -Z  (vers le public)
+ *   - côté -X  (x ≤ 0.25) → +X  (vers le centre, direction pure)
+ *   - côté +X  (x ≥ 0.75) → -X  (vers le centre, direction pure)
+ *   - centre              → -Z (vers le public)
+ *
+ * La règle de zone GAGNE TOUJOURS pour les fixtures motorisées (pan/tilt DMX) :
+ * la visée fine se fait via l'outil Aim / les faders pan/tilt (canaux DMX),
+ * jamais via le heading — sinon un heading hérité d'une ancienne session
+ * renvoie les faisceaux dos au public dans toutes les scènes.
+ * Pour une fixture SANS pan/tilt (par, bar…), le heading (drag de rotation)
+ * reste le seul outil d'aim → respecté si ≠ 0.
  */
-export function headingRadForPos(pos: FixturePos, mountMode: string, stageDims: { width: number; depth: number }): number {
-  const heading = ((pos.heading ?? 0) * Math.PI) / 180;
-  if (mountMode !== 'hanging') return heading;
-  const fx = (pos.x - 0.5) * stageDims.width;
-  const fz = (pos.y - 0.5) * stageDims.depth;
-  const dx = -fx; // centre de scène en X (target.x = 0)
-  const dz = -fz; // centre de scène en Z (target.z = 0)
-  if (Math.hypot(dx, dz) < 1e-6) return heading;
-  // Yaw total vers la cible — même formule que solvePanTilt : phi = atan2(-dx, -dz).
-  return Math.atan2(-dx, -dz);
+export function headingRadForPos(pos: FixturePos, _mountMode: string, _stageDims: { width: number; depth: number }, hasPanTilt = true): number {
+  if (!hasPanTilt && pos.heading) return ((pos.heading ?? 0) * Math.PI) / 180;
+  const { x, y } = pos;
+  if (y <= 0.25) return Math.PI;        // devant → vers l'arrière de scène
+  if (y >= 0.75) return 0;              // arrière → vers le public
+  if (x <= 0.25) return -Math.PI / 2;   // côté -X → vers le centre (+X)
+  if (x >= 0.75) return Math.PI / 2;    // côté +X → vers le centre (-X)
+  return 0;                             // centre → vers le public
+}
+
+/** True si la fixture a au moins un canal pan/tilt DMX (fixture motorisée). */
+export function hasPanTiltChannels(cm: { panOffsets?: number[]; panOffset?: number | null; tiltOffsets?: number[]; tiltOffset?: number | null }): boolean {
+  return (cm.panOffsets?.length ?? 0) > 0 || cm.panOffset !== null
+    || (cm.tiltOffsets?.length ?? 0) > 0 || cm.tiltOffset !== null;
+}
+
+/**
+ * Zone d'éclairage utile — clamp du cône de balayage (relatif à la direction
+ * par défaut de la fixture, cf. headingRadForPos) :
+ *   - PAN  : ±90° « face à eux » — une fixture rear ne balaye jamais le mur
+ *     derrière elle, un côté jamais le hors-scène opposé.
+ *   - TILT : ±90° (de la verticale basse à la verticale haute) pour les
+ *     fixtures en hauteur ; au SOL ('ground'), jamais sous l'horizon —
+ *     rien à éclairer dans le plancher.
+ */
+export function clampPanZone(relRad: number): number {
+  return Math.max(-Math.PI / 2, Math.min(Math.PI / 2, relRad));
+}
+
+export function clampTiltZone(elevRad: number, mountMode: string): number {
+  let e = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, elevRad));
+  if (mountMode === 'ground' && e < 0) e = 0;
+  return e;
 }
 
 function fitMountRotation(f3d: Fixture3D, mode: string): void {
   // Keep the base at the bottom in all modes.
   // Rotate only the arm (rear) or head (ground), never the whole group.
   // This avoids the base disc appearing inverted.
+  //
+  // Chaque compensation produit un faisceau NEUTRE horizontal vers -Z (public)
+  // à tilt DMX neutre. La direction (avant/arrière/côtés) est ensuite donnée
+  // par le heading (headingRadForPos) — jamais par une inversion du tilt ici
+  // (une inversion tilt + un heading π s'annulent → direction fausse).
+  //
+  //   rear    : arm +π/2, tilt 0    → (0,0,-1)
+  //   ground  : arm 0,    tilt +π/2 → (0,0,-1)
+  //   hanging : arm π,    tilt -π/2 → (0,0,-1)
+  //   top     : rien (faisceau vers le bas, mode spécifique)
 
-  // Reset
   f3d.group.rotation.x = 0;
   if (f3d.armGroup) f3d.armGroup.rotation.x = 0;
   f3d._mountTilt = 0;
 
   if (mode === 'rear') {
-    // Rotate the yoke horizontal (arm toward -Z / audience, base stays at bottom)
-    // so the beam exits toward the FRONT: alpha=+π/2 → dir=(0,0,-1) quand heading=0.
     if (f3d.armGroup) f3d.armGroup.rotation.x = Math.PI / 2;
   } else if (mode === 'ground') {
-    // Head au sol : faisceau horizontal vers l'avant/public au DMX tilt neutre.
-    // Le balayage tilt (dmxTilt ±90°) couvre alors la scène (en bas) et le
-    // public (en haut). Seule valeur validée : π/2 pointe correctement le public.
     f3d._mountTilt = Math.PI / 2;
   } else if (mode === 'hanging') {
-    // Fixture accrochée AU-DESSUS du pont (suspendue, tête en bas) :
-    // retourne le yoke (arm=π) pour que la tête pende sous le point d'accroche,
-    // puis compense la tête à -π/2 → au DMX neutre (tilt 128) le faisceau sort
-    // HORIZONTAL vers le public (dir=(0,0,-1) quand heading=0), au lieu du plafond.
     if (f3d.armGroup) f3d.armGroup.rotation.x = Math.PI;
     f3d._mountTilt = -Math.PI / 2;
   }
-  // top: no modification (base at bottom, beam down)
 
   // Extra heads follow the mount compensation (no independent static tilt)
   for (const eh of f3d.extraHeads ?? []) {

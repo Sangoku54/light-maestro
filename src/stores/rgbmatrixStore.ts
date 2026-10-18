@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 
 export type RgbMatrixPattern =
   | 'solid' | 'chase' | 'wave' | 'burst' | 'gradient'
@@ -50,50 +49,50 @@ const DEFAULT_MATRIX: Omit<RgbMatrix, 'id' | 'name' | 'groupId'> = {
 };
 
 export const useRgbMatrixStore = create<RgbMatrixStore>()(
-  persist(
-    (set) => ({
-      matrices: [],
-      activeMatrixId: null,
-      stats: {},
+  // PAS de persist localStorage : les matrices sont du CONTENU DE PROJET
+  // (comme les scènes/groupes). Un relancement doit repartir vide — l'ancien
+  // persist laissait survivre des tuiles de test entre les sessions.
+  (set) => ({
+    matrices: [],
+    activeMatrixId: null,
+    stats: {},
 
-      setStats: (id, stats) =>
-        set(s => {
-          const prev = s.stats[id];
-          if (prev && prev.total === stats.total && prev.resolved === stats.resolved) return s;
-          return { stats: { ...s.stats, [id]: stats } };
-        }),
+    setStats: (id, stats) =>
+      set(s => {
+        const prev = s.stats[id];
+        if (prev && prev.total === stats.total && prev.resolved === stats.resolved) return s;
+        return { stats: { ...s.stats, [id]: stats } };
+      }),
 
-      createMatrix: (name, groupId) => {
-        const id = `rgbm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        set(s => ({
-          matrices: [...s.matrices, { id, name, groupId, ...DEFAULT_MATRIX }],
-          activeMatrixId: id,
-        }));
-      },
+    createMatrix: (name, groupId) => {
+      const id = `rgbm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      set(s => ({
+        matrices: [...s.matrices, { id, name, groupId, ...DEFAULT_MATRIX }],
+        activeMatrixId: id,
+      }));
+    },
 
-      updateMatrix: (id, updates) =>
-        set(s => ({
-          matrices: s.matrices.map(m => m.id === id ? { ...m, ...updates } : m),
-        })),
+    updateMatrix: (id, updates) =>
+      set(s => ({
+        matrices: s.matrices.map(m => m.id === id ? { ...m, ...updates } : m),
+      })),
 
-      deleteMatrix: (id) =>
-        set(s => {
-          const stats = { ...s.stats };
-          delete stats[id];
-          return {
-            matrices: s.matrices.filter(m => m.id !== id),
-            activeMatrixId: s.activeMatrixId === id ? null : s.activeMatrixId,
-            stats,
-          };
-        }),
+    deleteMatrix: (id) =>
+      set(s => {
+        const stats = { ...s.stats };
+        delete stats[id];
+        return {
+          matrices: s.matrices.filter(m => m.id !== id),
+          activeMatrixId: s.activeMatrixId === id ? null : s.activeMatrixId,
+          stats,
+        };
+      }),
 
-      setActiveMatrix: (id) => set({ activeMatrixId: id }),
+    setActiveMatrix: (id) => set({ activeMatrixId: id }),
 
-      toggleMatrix: (id) =>
-        set(s => ({
-          matrices: s.matrices.map(m => m.id === id ? { ...m, enabled: !m.enabled } : m),
-        })),
-    }),
-    { name: 'light-maestro-rgbmatrix' }
-  )
+    toggleMatrix: (id) =>
+      set(s => ({
+        matrices: s.matrices.map(m => m.id === id ? { ...m, enabled: !m.enabled } : m),
+      })),
+  })
 );

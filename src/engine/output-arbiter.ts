@@ -46,7 +46,10 @@ export const DEFAULT_SOURCES: Record<string, ArbiterSourceSpec> = {
   'song-preset': { mode: 'htp', priority: 45 },
   'quickshow': { mode: 'htp', priority: 40 },
   'show-manager': { mode: 'htp', priority: 35 },
-  'rgb-matrix': { mode: 'htp', priority: 30 },
+  // Matrice RGB : activation EXPLICITE de l'opérateur → LTP. En HTP, le
+  // dimmer=0 d'une cellule éteinte perdait contre le dimmer 255 de
+  // l'autoscript/preset (max HTP) → cellules impossible à éteindre.
+  'rgb-matrix': { mode: 'ltp', priority: 55 },
 };
 
 interface RegisteredSource extends ArbiterSourceSpec {
