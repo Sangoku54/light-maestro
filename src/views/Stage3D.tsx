@@ -47,6 +47,7 @@ import batteurImg from '../assets/musicians/batteur.png';
 import bassisteImg from '../assets/musicians/bassiste.png';
 import guitaristeImg from '../assets/musicians/guitariste.png';
 import cuivreImg from '../assets/musicians/cuivre.png';
+import djImg from '../assets/musicians/dj.png';
 import { sendFixtureOn, sendFixtureOff, sendChannelsToHardwareAndStore, normalizeDmxBuffer } from '../utils/dmx-helpers';
 import { captureFixtureLook, ensureFixtureLook, setFixtureChannelMaps, type LookChannelMap } from '../utils/scene-look';
 import { fixtureTestState } from '../utils/fixture-test-state';
@@ -104,6 +105,7 @@ const MUSICIAN_IMAGES: Record<MusicianKind, string> = {
   clavier: clavierImg,
   batteur: batteurImg,
   cuivre: cuivreImg,
+  dj: djImg,
 };
 
 const MUSICIAN_HEIGHTS: Record<MusicianKind, number> = {
@@ -114,11 +116,53 @@ const MUSICIAN_HEIGHTS: Record<MusicianKind, number> = {
   clavier: 1.65,
   batteur: 1.6,
   cuivre: 1.7,
+  dj: 1.8, // debout derrière sa cabine (cabine incluse dans la silhouette)
 };
 
 // Beam cone length (m) — petit cône de lumière : s'arrête à la scène depuis la poutre (TRUSS_HEIGHT),
 // au lieu de l'ancien 12.5 m qui traversait le sol et descendait ~9 m sous la scène.
 const BEAM_LENGTH = 4.5; // +50 % par rapport à 3.0 (demande utilisateur)
+/** Longueur max d'un faisceau qui ne touche aucun sol (pointe vers le ciel). */
+const BEAM_SKY_LENGTH = 9;
+
+/**
+ * Texture de fondu le long du faisceau : blanc opaque à la lentille →
+ * transparent au bout. En AdditiveBlending, le noir n'ajoute rien → le
+ * faisceau s'évanouit au lieu de finir par un cercle tranché en plein air.
+ * v=1 = haut du cylindre = côté lentille (flipY=true par défaut).
+ */
+let _beamFadeTex: THREE.CanvasTexture | null = null;
+function getBeamFadeTexture(): THREE.CanvasTexture {
+  if (_beamFadeTex) return _beamFadeTex;
+  const c = document.createElement('canvas');
+  c.width = 2; c.height = 64;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createLinearGradient(0, 0, 0, 64);
+  g.addColorStop(0, '#ffffff');     // v=1 (lentille) : plein
+  g.addColorStop(0.3, 'rgba(255,255,255,0.55)');
+  g.addColorStop(0.7, 'rgba(255,255,255,0.18)');
+  g.addColorStop(1, 'rgba(255,255,255,0)'); // v=0 (bout) : éteint
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 2, 64);
+  _beamFadeTex = new THREE.CanvasTexture(c);
+  _beamFadeTex.wrapS = THREE.ClampToEdgeWrapping;
+  _beamFadeTex.wrapT = THREE.ClampToEdgeWrapping;
+  return _beamFadeTex;
+}
+
+/**
+ * Longueur RÉALISTE d'un faisceau : raycast depuis la lentille jusqu'au sol
+ * touché (plateau de scène, sinon plancher 0) — le cône s'arrête SUR le sol
+ * au lieu de flotter. Pointe vers le ciel → longueur max avec fondu.
+ */
+function beamHitLength(
+  originY: number, dir: THREE.Vector3, floorY: number,
+): number {
+  if (dir.y < -0.02) {
+    const t = (originY - floorY) / (-dir.y);
+    if (t > 0.3) return Math.min(t, 12);
+  }
+  return BEAM_SKY_LENGTH;
+}
 
 // Horizontal spacing between two instances of the same kind (fraction of stage).
 const MUSICIAN_SPREAD = 0.16;
@@ -2128,6 +2172,7 @@ export const Stage3D: React.FC<{
           side: THREE.DoubleSide,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
+          map: getBeamFadeTexture(), // fondu le long du faisceau (réalisme)
         });
         const cone = new THREE.Mesh(coneGeo, coneMat);
         cone.raycast = () => {}; // beam is visual only — never a pick target
@@ -2932,11 +2977,37 @@ export const Stage3D: React.FC<{
       // Opacité 0.75 (au lieu de 0.35) : à DMX 255 le faisceau doit sembler
       // plein, pas « à peine à moitié » — AdditiveBlending + 0.35 plafonnait
       // trop bas sur fond sombre.
+      // RÉALISME : longueur dynamique — le cône s'arrête SUR le sol touché
+      // (plateau/plancher) au lieu d'un cercle flottant en plein air, et la
+      // texture de fondu (map) éteint le faisceau progressivement.
+      const fixFloorY = (() => {
+        const posNow = fixturePositions[pf.id];
+        try { return Math.max(0, deckTopAt(stageDecksRef.current, posNow?.x ?? 0.5, posNow?.y ?? 0.5)); }
+        catch { return 0; }
+      })();
+      const applyBeamLength = (cone: THREE.Mesh): void => {
+        const q = cone.getWorldQuaternion(new THREE.Quaternion());
+        const dir = new THREE.Vector3(0, -1, 0).applyQuaternion(q).normalize();
+        const origin = cone.getWorldPosition(new THREE.Vector3());
+        const len = beamHitLength(origin.y, dir, fixFloorY);
+        const k = len / BEAM_LENGTH;
+        cone.scale.set(k, k, k);           // angle du cône préservé
+        cone.position.y = -len / 2;        // sommet (lentille) reste à l'exit
+      };
       if (f3d.beamCone) {
         const mat = f3d.beamCone.material as THREE.MeshBasicMaterial;
         mat.color.copy(color);
         mat.opacity = visIntensity * 0.75;
         f3d.beamCone.visible = showBeams && visIntensity > 0.005;
+        applyBeamLength(f3d.beamCone);
+      }
+
+      // Têtes extra + pixels LED bar : même longueur réaliste
+      for (const eh of f3d.extraHeads ?? []) {
+        if (eh.beamCone) applyBeamLength(eh.beamCone);
+      }
+      for (const px of f3d.ledBarPixels ?? []) {
+        applyBeamLength(px.cone);
       }
 
       // --- Floor spot disabled: only beam cones from lens are shown ---

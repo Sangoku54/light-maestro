@@ -32,6 +32,47 @@ export function collectActiveMatrixIds(
 
 export interface MatrixTrackLike { entries: MatrixTrackEntryLike[] }
 
+export interface IncompatibleFixture {
+  id: string;
+  name: string;
+  reason: string;
+}
+
+/**
+ * Fixtures d'un groupe INCAPABLES de rendre une matrice RGB : ni canal RGB,
+ * ni roue couleur exploitable (ex. dimmer seul, spot sans couleur). Ces
+ * fixtures resteront noires dans la matrice — il faut le signaler très
+ * visuellement dans l'onglet Matrice ET dans les scènes pré-enregistrées.
+ * Une def non résolue n'est PAS signalée (ne pas crier au loup pendant le
+ * chargement).
+ */
+export function findIncompatibleFixtures(
+  groupFixtures: Array<{ id: string; name?: string; fixtureDefId: string }>,
+  defOf: (id: string) => unknown | undefined,
+): IncompatibleFixture[] {
+  const out: IncompatibleFixture[] = [];
+  for (const f of groupFixtures) {
+    const def = defOf(f.fixtureDefId);
+    if (!def) continue;
+    let fa: ReturnType<typeof analyzeChannels>;
+    try {
+      fa = analyzeChannels(f as never, def as never);
+    } catch { continue; }
+    const hasRgb = (fa.rgbOffsets?.length ?? 0) > 0 || (fa.rgbSegments?.length ?? 0) > 0;
+    const hasWheel = !fa.isLaser
+      && fa.wheelOffset !== null && fa.wheelOffset !== undefined && fa.wheelOffset >= 0
+      && (fa.wheelCaps?.length ?? 0) > 0;
+    if (!hasRgb && !hasWheel) {
+      out.push({
+        id: f.id,
+        name: f.name || f.id,
+        reason: 'pas de canal RGB ni de roue couleur',
+      });
+    }
+  }
+  return out;
+}
+
 export interface MatrixTrackColorResult {
   /** fixtureId → couleur hex du motif de la matrice (chevauche la couleur autoscript). */
   colors: Map<string, string>;

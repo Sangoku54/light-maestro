@@ -16,6 +16,7 @@ import { TrackAnalysis, TrackSection, SECTION_COLORS, keyToPalette, SectionAnaly
 import type { GenreProfile } from '../hooks/audio-analysis';
 import { computeFixtureTrackOverrides, computeEfxOverrides, type FixtureTrack } from '../hooks/fixture-tracks';
 import { loadFixtureDefinitions, clearFixtureDefCache, type DmxCue, type DmxFixtureDefinition } from '../hooks/dmx-cues';
+import { findIncompatibleFixtures } from '../hooks/rgb-matrix-playback';
 import { useDmxPlayback, computeDmxForCue, computeColorTrackColors, type ColorTrackRef, type DimmerTrackRef, computeDimmerTrackOverrides, computeStrobeTrackOverrides, computeChaserTrackOverrides, type ChaserTrackRef, computeSceneTrackOverrides, computeShowTrackOverrides } from '../hooks/dmx-playback';
 import { analyzeChannels } from '../engine/fixture-analyzer';
 import { dmxBridge } from '../utils/dmx-bridge';
@@ -1815,6 +1816,30 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [tapBpm, setTapBpm] = useState(0);
   const tapRef = useRef<number[]>([]);
   const [fixtureDefs, setFixtureDefs] = useState<Map<string, DmxFixtureDefinition>>(new Map());
+
+  // ── Alerte compatibilité matrice RGB (scènes pré-enregistrées) ──
+  // Fixtures des groupes visés par les pistes matrix SANS canal RGB ni roue
+  // couleur : elles resteront noires → bannière rouge très visible.
+  const matrixTrackWarnings = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of matrixTracks) {
+      for (const e of t.entries ?? []) if (e.matrixId) ids.add(e.matrixId);
+    }
+    const names: string[] = [];
+    const seen = new Set<string>();
+    const byId = new Map(patchedFixtures.map(f => [f.id, f]));
+    for (const mid of ids) {
+      const mx = matrixEntities.find((m: any) => m.id === mid);
+      if (!mx) continue;
+      const grp = fixtureGroups.find(g => g.id === mx.groupId);
+      if (!grp) continue;
+      const groupFixtures = grp.fixtureIds.map(id => byId.get(id)).filter(Boolean);
+      for (const inc of findIncompatibleFixtures(groupFixtures as never[], (id) => fixtureDefs.get(id))) {
+        if (!seen.has(inc.id)) { seen.add(inc.id); names.push(inc.name); }
+      }
+    }
+    return names;
+  }, [matrixTracks, matrixEntities, fixtureGroups, patchedFixtures, fixtureDefs]);
 
   // Moving-head fixtures (those with pan/tilt channels) — for per-head limit overrides
   const movingHeads = useMemo(() => {
@@ -4511,6 +4536,16 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               {t.name}
             </span>
           ))}
+        </div>
+      )}
+      {matrixTrackWarnings.length > 0 && (
+        <div className="rounded border-2 border-red-500/60 bg-red-950/50 px-2 py-1.5 w-full animate-pulse">
+          <p className="text-[10px] font-bold text-red-300">
+            ⚠️ Matrice RGB : {matrixTrackWarnings.length} fixture{matrixTrackWarnings.length > 1 ? 's' : ''} incompatible{matrixTrackWarnings.length > 1 ? 's' : ''}
+          </p>
+          <p className="text-[9px] text-red-200/80">
+            {matrixTrackWarnings.join(' · ')} — resteront NOIRES (ni RGB ni roue couleur)
+          </p>
         </div>
       )}
       {sections.length > 0 && (

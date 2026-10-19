@@ -16,6 +16,7 @@ import { auditFixtureCoverage, formatCoverageWarning } from '../engine/fixture-c
 import { AUTO_LOOP_FOLDER } from '../engine/auto-loops';
 import { groupByTier, TIER_KEYS } from '../engine/tier-utils';
 import { getPatternColor } from '../engine/rgb-matrix-patterns';
+import { findIncompatibleFixtures } from '../hooks/rgb-matrix-playback';
 import { sendChannelsToHardware, sendToUniverse, sendFixtureOn, sendFixtureOff, sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { outputArbiter } from '../engine/output-arbiter';
@@ -3394,6 +3395,29 @@ const RGBMatrixEditor: React.FC = () => {
 
   const active = matrices.find(m => m.id === activeMatrixId);
 
+  // ── Compatibilité des fixtures du groupe (alerte très visuelle) ──
+  // Une fixture sans canal RGB ni roue couleur ne rendra JAMAIS la matrice.
+  const [groupDefs, setGroupDefs] = useState<Map<string, unknown>>(new Map());
+  useEffect(() => {
+    if (!active) return;
+    const grp = fixtureGroups.find(g => g.id === active.groupId);
+    if (!grp) { setGroupDefs(new Map()); return; }
+    const ids = [...new Set(
+      patchedFixtures.filter(f => grp.fixtureIds.includes(f.id)).map(f => f.fixtureDefId),
+    )];
+    if (ids.length === 0) { setGroupDefs(new Map()); return; }
+    loadFixtureDefinitions(ids).then(m => setGroupDefs(new Map(m))).catch(() => {});
+  }, [active?.id, active?.groupId, patchedFixtures, fixtureGroups]);
+
+  const incompatibleFixtures = useMemo(() => {
+    if (!active) return [];
+    const grp = fixtureGroups.find(g => g.id === active.groupId);
+    if (!grp) return [];
+    const byId = new Map(patchedFixtures.map(f => [f.id, f]));
+    const groupFixtures = grp.fixtureIds.map(id => byId.get(id)).filter(Boolean) as any[];
+    return findIncompatibleFixtures(groupFixtures, (id) => groupDefs.get(id));
+  }, [active?.id, active?.groupId, patchedFixtures, fixtureGroups, groupDefs]);
+
   // Live preview animation
   useEffect(() => {
     if (!active?.enabled) return;
@@ -3419,6 +3443,27 @@ const RGBMatrixEditor: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      {incompatibleFixtures.length > 0 && (
+        <div className="rounded-lg border-2 border-red-500/60 bg-red-950/50 px-3 py-2.5 shadow-lg shadow-red-900/40 animate-pulse">
+          <div className="flex items-start gap-2">
+            <span className="text-lg leading-none">⚠️</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-red-300">
+                {incompatibleFixtures.length === 1
+                  ? 'Fixture incompatible avec la matrice RGB'
+                  : `${incompatibleFixtures.length} fixtures incompatibles avec la matrice RGB`}
+              </p>
+              <p className="text-[10px] text-red-200/90 mt-0.5">
+                {incompatibleFixtures.map(f => f.name).join(' · ')}
+              </p>
+              <p className="text-[10px] text-red-200/70 mt-0.5">
+                Ces fixtures resteront NOIRES : elles n'ont ni canal RGB ni roue couleur.
+                Remplace-les par des fixtures RGB / à roue dans ce groupe.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       <input type="text" value={active.name}
         onChange={e => updateMatrix(active.id, { name: e.target.value })}
         className="bg-transparent text-xl font-bold text-white outline-none block w-full" />

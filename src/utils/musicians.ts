@@ -9,7 +9,8 @@ export type MusicianKind =
   | 'bassiste'
   | 'clavier'
   | 'batteur'
-  | 'cuivre';
+  | 'cuivre'
+  | 'dj';
 
 export type MusicianRoster = Partial<Record<MusicianKind, number>>;
 
@@ -22,6 +23,7 @@ export const MUSICIAN_KINDS: MusicianKind[] = [
   'clavier',
   'batteur',
   'cuivre',
+  'dj',
 ];
 
 export const MUSICIAN_LABELS: Record<MusicianKind, string> = {
@@ -32,10 +34,11 @@ export const MUSICIAN_LABELS: Record<MusicianKind, string> = {
   clavier: 'Clavier',
   batteur: 'Batteur',
   cuivre: 'Cuivre',
+  dj: 'DJ',
 };
 
 // Default stage position per kind. x: 0..1 left→right, z: 0..1 front→back.
-// Vocals front, rhythm mid, drums/keys/brass back.
+// Vocals front, rhythm mid, drums/keys/brass back. DJ sur le côté (cabine).
 export const DEFAULT_POSITIONS: Record<MusicianKind, { x: number; z: number }> = {
   chanteur: { x: 0.50, z: 0.10 },
   chanteuse: { x: 0.62, z: 0.12 },
@@ -44,6 +47,7 @@ export const DEFAULT_POSITIONS: Record<MusicianKind, { x: number; z: number }> =
   clavier: { x: 0.16, z: 0.70 },
   batteur: { x: 0.50, z: 0.85 },
   cuivre: { x: 0.84, z: 0.62 },
+  dj: { x: 0.92, z: 0.55 },
 };
 
 // Used as the uncontrolled Stage3D fallback (PerformanceView / QuickShowView)
