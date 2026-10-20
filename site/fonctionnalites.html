@@ -35,7 +35,7 @@
         <p>Multi-univers (1 en Standard, illimités en Complète), sortie simultanée USB / ArtNet / sACN E1.31. Merge HTP/LTP, Grand Master, Blackout, 30 fps. Journal DMX et statut live dans la Status Bar (fps, latence, erreurs).</p>
         <table class="table" style="margin-top:12px">
           <tr><th>Sortie</th><th>Détail</th></tr>
-          <tr><td><b>USB DMX</b></td><td>Enttec Open/Pro, DMXKing, FTDI — sélection de port, test trame</td></tr>
+          <tr><td><b>USB DMX</b></td><td>Enttec Open/Pro, DMXKing, FTDI — <b>plug & play</b> : le dongle est détecté automatiquement au lancement, port assigné et sortie démarrée sans configuration</td></tr>
           <tr><td><b>ArtNet</b></td><td>ArtNet 1-4, subnet/univers, broadcast/unicast</td></tr>
           <tr><td><b>sACN E1.31</b></td><td>Univers & priorités, merge externe, multi-sources</td></tr>
           <tr><td><b>Merge</b></td><td>HTP/LTP par canal, priorités, multi-sources gérées</td></tr>
@@ -45,7 +45,7 @@
       <div class="card">
         <span class="ico cyan">🎚️</span>
         <h2 class="h3" style="margin-top:12px; font-size:20px">Audio Intelligence — Show auto</h2>
-        <p>Onset detection + BPM adaptatif, analyse fréquentielle (low/mid/high), détection de sections (intro/verse/chorus/drop/outro), 8 effets audio-réactifs. La musique écrit la conduite — vous affinez.</p>
+        <p>Onset detection + BPM adaptatif, analyse fréquentielle (low/mid/high), détection de sections (intro/verse/chorus/drop/outro), 8 effets audio-réactifs. La musique écrit la conduite — vous affinez. <b>Harmonie garantie</b> : les têtes identiques exécutent le même geste, déphasé sur le rig (vague, rotation, expansion) — jamais de patterns aléatoires décalés.</p>
         <div class="grid grid-2" style="margin-top:12px">
           <div style="background: rgba(255,255,255,.04); border:1px solid #1f1f2e; border-radius:12px; padding:12px"><div class="badge violet" style="font-size:10px">Effets</div><div style="font-weight:800; margin-top:8px; font-size:13px">Color Wave • Strobe Blast • Chase • Dimmer Pulse</div><div style="color:#9ca3af; font-size:12px; margin-top:4px">Pan Sweep • Build Up • Breakdown • Peak Drop</div></div>
           <div style="background: rgba(255,255,255,.04); border:1px solid #1f1f2e; border-radius:12px; padding:12px"><div class="badge cyan" style="font-size:10px">Contrôles</div><div style="font-weight:800; margin-top:8px; font-size:13px">Intensité • Palettes • Mouvement • Beat Division • Section-aware</div><div style="color:#9ca3af; font-size:12px; margin-top:4px">Safety limiter strobe • Blackout rapide</div></div>
@@ -63,13 +63,15 @@
           <li>Chauvet, ADJ, BeamZ, Eurolite, Stairville… + customs</li>
           <li>Fixture editor (canaux, modes, têtes)</li>
           <li>Validation d'adressage, détection de conflits</li>
+          <li>Fixtures sans canal dimmer supportées (badge NO DIM, intensité fixe)</li>
+          <li>Exploitation max auditée : chaque canal utile détecté et piloté</li>
         </ul>
       </div>
       <div class="card">
         <span class="ico">🎨</span>
         <h2 class="h3" style="margin-top:12px; font-size:20px">Show Programming — complet</h2>
-        <p>Scènes (fade in/out), Chasers (loop/ping-pong/single + tap tempo), Cue Lists théâtre (GO, follow), RGB Matrix (line/circle/diamond/square/triangle + audio-réactif), EFX paramétrique (cercle/8/carré/triangle).</p>
-        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px"><span class="badge">Scenes</span><span class="badge cyan">Chasers</span><span class="badge violet">Cue Lists</span><span class="badge">RGB Matrix</span><span class="badge">EFX</span></div>
+        <p>Scènes (fade in/out), Chasers (loop/ping-pong/single + tap tempo), Cue Lists théâtre (GO, follow), RGB Matrix (line/circle/diamond/square/triangle + audio-réactif — direction, décalage de cellules, cellules éteintes réellement éteintes, alerte fixtures incompatibles), EFX paramétrique, <b>Palettes de couleur réutilisables</b> (application live + « Remplacer partout » propage une couleur à toutes les scènes).</p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px"><span class="badge">Scenes</span><span class="badge cyan">Chasers</span><span class="badge violet">Cue Lists</span><span class="badge">RGB Matrix</span><span class="badge">EFX</span><span class="badge violet">Palettes</span></div>
       </div>
     </div>
 
@@ -77,9 +79,11 @@
       <div class="card">
         <span class="ico cyan">🕹️</span>
         <h2 class="h3" style="margin-top:12px; font-size:20px">Perform — Virtual Console & contrôle</h2>
-        <p>Console virtuelle custom : boutons, sliders, frames — drag & drop, pages & frames. MIDI Learn + feedback LED, OSC (TouchOSC/Lemur), MTC timecode, Web Remote LAN (HTTP + push d'état).</p>
+        <p>Console virtuelle custom : boutons, sliders, <b>Masters de Groupe</b> (fader submaster par groupe — plafonne le dimmer, le contenu reste dynamique), frames — drag & drop, pages & frames. MIDI Learn + feedback LED, <b>MIDI Clock IN</b> (le BPM suit Ableton/Triton, 24 PPQ, rend la main à l'arrêt), OSC (TouchOSC/Lemur), MTC timecode, Web Remote LAN (HTTP + push d'état).</p>
         <ul style="margin:12px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
           <li>MIDI mapping total — toute action est mappable</li>
+          <li>MIDI Clock IN : sync tempo Ableton / DAW sans config</li>
+          <li>Submasters par groupe : le look descend, la dynamique reste</li>
           <li>Web Remote : contrôle depuis téléphone/tablette sur le même LAN</li>
           <li>Master Clock, latence audio→DMX temps réel</li>
         </ul>
@@ -87,8 +91,8 @@
       <div class="card">
         <span class="ico ivory">🧱</span>
         <h2 class="h3" style="margin-top:12px; font-size:20px">3D Stage & Timeline</h2>
-        <p>Prévisualisation WebGL/Three.js : placez vos fixtures, voyez faisceaux, strobes et mouvements avant le montage. Timeline-based editor pour affiner chaque piste (Color/Strobe/Dimmer/EFX/Fixture) au beat.</p>
-        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px"><span class="badge violet">Three.js</span><span class="badge cyan">WebGL</span><span class="badge">Timeline</span><span class="badge">Preview temps réel</span></div>
+        <p>Prévisualisation WebGL/Three.js fidèle au plateau : placez vos fixtures, voyez des <b>faisceaux réalistes</b> — fondu le long du faisceau, arrêt exact au sol touché, <b>gobos projetés</b> dans le faisceau, <b>plages mécaniques réelles</b> (pan 540°/360°… par fixture), zones de balayage (jamais derrière, tilt au sol bloqué), silhouettes musiciens & DJ. Timeline-based editor pour affiner chaque piste (Color/Strobe/Dimmer/EFX/Fixture) au beat.</p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px"><span class="badge violet">Three.js</span><span class="badge cyan">WebGL</span><span class="badge">Gobos projetés</span><span class="badge">Plages réelles</span><span class="badge">Timeline</span></div>
       </div>
     </div>
 
@@ -102,8 +106,8 @@
     </div>
 
     <div class="grid grid-3" style="margin-top:16px">
-      <div class="card"><h3 class="h3">Roadmap v1.1 — Intégrations</h3><p>Serato / VirtualDJ, Ableton Link, Philips Hue, OSC control étendu.</p></div>
-      <div class="card"><h3 class="h3">Roadmap v1.2 — Advanced</h3><p>3D Stage étendu, Timeline editor complet, fixture editor, ArtNet input, Web remote avancé.</p></div>
+      <div class="card"><h3 class="h3">Roadmap v1.1 — Intégrations</h3><p>Serato / VirtualDJ, Ableton Link (network), Philips Hue, OSC control étendu.</p><p class="mono" style="font-size:11px; color:#6b7280">✅ Déjà livré : sync tempo DAW via MIDI Clock IN.</p></div>
+      <div class="card"><h3 class="h3">Roadmap v1.2 — Advanced</h3><p>Timeline editor visuel complet, ArtNet input, Web remote avancé.</p><p class="mono" style="font-size:11px; color:#6b7280">✅ Déjà livré : 3D réaliste (gobos, plages mécaniques), fixture editor, masters de groupe.</p></div>
       <div class="card"><h3 class="h3">Roadmap v2.0 — Pro</h3><p>Video/pixel mapping, scripting Lua/Python, multi-user réseau, cloud fixture sync.</p></div>
     </div>
 
