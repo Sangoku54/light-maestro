@@ -10,45 +10,7 @@
 </head>
 <body>
 <header class="nav">
-  <div class="card" style="margin-top:16px">
-      <h3 class="h3">Release notes — v1.0.38</h3>
-      <div class="grid grid-2" style="margin-top:10px">
-        <div>
-          <div class="badge violet">New</div>
-          <ul style="margin:8px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
-            <li><b style="color:white">Group Masters</b>: per-group submaster fader in the virtual console — caps the group dimmer while the show stays alive</li>
-            <li><b style="color:white">Reusable Color Palettes</b>: one-click live apply + "Replace everywhere" propagates a color to every scene (RGB or wheel)</li>
-            <li><b style="color:white">MIDI Clock IN</b>: BPM follows Ableton/Triton (24 PPQ) — hands back to analyzed BPM on stop</li>
-            <li><b style="color:white">Projected gobos in 3D</b>: per-slot textures, real DMX reading, disc inside the beam</li>
-            <li><b style="color:white">Movement harmony</b>: identical heads execute the same move, phased across the rig (wave, rotation, expansion)</li>
-            <li><b style="color:white">Realistic 3D beams</b>: fade along the beam, exact ground cutoff, real mechanical ranges (540°/360°… pan per fixture)</li>
-            <li><b style="color:white">Sweep zones</b>: pan never behind (engine clamp), ground tilt never below horizon — deliberate aims via Aim still allowed</li>
-            <li><b style="color:white">RGB Matrix hardened</b>: cell direction/offset, order = group order, off cells truly off, warning for incompatible fixtures</li>
-            <li><b style="color:white">USB DMX plug & play</b>: dongle auto-detected at launch, output started with zero configuration</li>
-            <li><b style="color:white">DJ silhouette</b> + 38 realistic fixture icons (wall washer, spider, follow spot, fresnel, derby…)</li>
-          </ul>
-          <div class="badge cyan" style="margin-top:10px">Fixes</div>
-          <ul style="margin:8px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
-            <li>Fixtures without a dimmer channel (ACCU UFO…): supported and flagged (NO DIM badge)</li>
-            <li>Programmer: values survive closing the modal</li>
-            <li>Multi-head LED: every head receives intensity (no more silent heads)</li>
-            <li>Wheel without white slot: correct neutral color instead of red</li>
-            <li>3D scene empty by default (no stray trusses)</li>
-            <li>DMX engine at 60 fps: smooth pan/tilt in the 3D view</li>
-          </ul>
-        </div>
-        <div>
-          <div class="badge violet">Previous — v1.0.37</div>
-          <ul style="margin:8px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
-            <li>Virtual console: Grand Master and DMX channel buttons, shared UI/MIDI/remote runtime</li>
-            <li>MIDI LED feedback: controller pads follow tile state</li>
-            <li>Safety: strobe ceiling + photosensitivity warning</li>
-            <li>Stopping pre-programmed scenes: real fixture blackout</li>
-          </ul>
-          <p style="margin-top:10px; font-size:11px; color:#6b7280">Full history lives in the app (Help → Release notes).</p>
-        </div>
-      </div>
-    </div>
+  
   <div data-menu-panel style="display:none; border-top:1px solid #1f1f2e; background: rgba(6,6,10,.88)"><div class="wrap" style="padding:12px 20px; display:flex; flex-wrap:wrap; gap:10px"><a href="./fonctionnalites-en.html">Features</a><a href="./tutoriels-en.html">Tutorials</a><a href="./aide-en.html">Help</a><a href="./tarifs-en.html">Pricing</a><a href="./telecharger-en.html">Download</a><a href="./support-en.html">Support</a></div></div>
 </header>
 
@@ -117,24 +79,36 @@
         <div>
           <div class="badge violet">New</div>
           <ul style="margin:8px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
-            <li>Virtual Console: <b style="color:white">Grand Master</b> and <b style="color:white">DMX channel</b> buttons, shared UI/MIDI/remote runtime</li>
-            <li><b style="color:white">MIDI LED</b> feedback: controller pads follow tile states</li>
-            <li>Safety: strobe ceiling + photosensitivity warning</li>
+            <li><b style="color:white">Group Masters</b>: per-group submaster fader in the virtual console — caps the group dimmer while the show stays alive</li>
+            <li><b style="color:white">Reusable Color Palettes</b>: one-click live apply + "Replace everywhere" propagates a color to every scene (RGB or wheel)</li>
+            <li><b style="color:white">MIDI Clock IN</b>: BPM follows Ableton/Triton (24 PPQ) — hands back to analyzed BPM on stop</li>
+            <li><b style="color:white">Projected gobos in 3D</b>: per-slot textures, real DMX reading, disc inside the beam</li>
+            <li><b style="color:white">Movement harmony</b>: identical heads execute the same move, phased across the rig (wave, rotation, expansion)</li>
+            <li><b style="color:white">Realistic 3D beams</b>: fade along the beam, exact ground cutoff, real mechanical ranges (540°/360°… pan per fixture)</li>
+            <li><b style="color:white">Sweep zones</b>: pan never behind (engine clamp), ground tilt never below horizon — deliberate aims via Aim still allowed</li>
+            <li><b style="color:white">RGB Matrix hardened</b>: cell direction/offset, order = group order, off cells truly off, warning for incompatible fixtures</li>
+            <li><b style="color:white">USB DMX plug & play</b>: dongle auto-detected at launch, output started with zero configuration</li>
+            <li><b style="color:white">DJ silhouette</b> + 38 realistic fixture icons (wall washer, spider, follow spot, fresnel, derby…)</li>
           </ul>
           <div class="badge cyan" style="margin-top:10px">Fixes</div>
           <ul style="margin:8px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
-            <li>Stopping Pre-programmed scenes: fixtures actually go dark</li>
-            <li>Tile drag: stays under the mouse</li>
-            <li>Fixture maintenance: Open Fixture Library URLs fixed</li>
+            <li>Fixtures without a dimmer channel (ACCU UFO…): supported and flagged (NO DIM badge)</li>
+            <li>Programmer: values survive closing the modal</li>
+            <li>Multi-head LED: every head receives intensity (no more silent heads)</li>
+            <li>Wheel without white slot: correct neutral color instead of red</li>
+            <li>3D scene empty by default (no stray trusses)</li>
+            <li>DMX engine at 60 fps: smooth pan/tilt in the 3D view</li>
           </ul>
         </div>
         <div>
-          <div class="badge">Previously</div>
+          <div class="badge violet">Previous — v1.0.37</div>
           <ul style="margin:8px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
-            <li>v1.0.29: Three.js 3D Stage, Timeline, preset/show reliability</li>
-            <li>v1.0.25–27: audio rework, embedded custom fixtures</li>
-            <li>v1.0.14–24: DMX foundations (ArtNet/sACN/USB), Virtual Console</li>
+            <li>Virtual console: Grand Master and DMX channel buttons, shared UI/MIDI/remote runtime</li>
+            <li>MIDI LED feedback: controller pads follow tile state</li>
+            <li>Safety: strobe ceiling + photosensitivity warning</li>
+            <li>Stopping pre-programmed scenes: real fixture blackout</li>
           </ul>
+          <p style="margin-top:10px; font-size:11px; color:#6b7280">Full history lives in the app (Help → Release notes).</p>
         </div>
       </div>
     </div>
