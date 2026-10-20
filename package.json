@@ -1,6 +1,6 @@
 {
   "name": "light-maestro",
-  "version": "1.0.37",
+  "version": "1.0.38",
   "description": "DMX lighting control + audio-reactive automation",
   "author": "Light Maestro",
   "main": "dist/electron/main.js",

@@ -3,24 +3,58 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Télécharger — Light Maestro v1.0.37 | Windows</title>
-<meta name="description" content="Téléchargez Light Maestro v1.0.37 pour Windows 10/11. Version portable et installeur NSIS. Notes de version, configuration requise, vérification SHA."/>
+<title>Télécharger — Light Maestro v1.0.38 | Windows</title>
+<meta name="description" content="Téléchargez Light Maestro v1.0.38 pour Windows 10/11. Version portable et installeur NSIS. Notes de version, configuration requise, vérification SHA."/>
 <link rel="icon" type="image/png" href="./assets/favicon-32.png"/>
 <link rel="stylesheet" href="./assets/site.css"/>
 </head>
 <body>
 <header class="nav">
-  <div class="nav-inner">
-    <a class="brand" href="./index.html"><img src="./assets/logo.svg" alt="Light Maestro" style="width:34px;height:34px;border-radius:10px;box-shadow:0 8px 24px rgba(168,85,247,.35)"/><span class="brand-word">LIGHT <span>MAESTRO</span></span></a>
-    <nav class="nav-links"><a href="./index.html">Accueil</a><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a><a href="./tarifs.html">Tarifs</a><a class="active" href="./telecharger.html">Télécharger</a><a href="./support.html">Support</a></nav>
-    <div style="display:flex; gap:10px; align-items:center"><a class="nav-cta" href="#dl">⬇ Télécharger</a><a href="./telecharger-en.html" style="font-size:12px; font-weight:700; color:#9ca3af; text-decoration:none" title="English version">🇬🇧 EN</a><button class="hamburger" data-menu>≡</button></div>
-  </div>
+  <div class="card" style="margin-top:16px">
+      <h3 class="h3">Notes de version — v1.0.38</h3>
+      <div class="grid grid-2" style="margin-top:10px">
+        <div>
+          <div class="badge violet">Nouveau</div>
+          <ul style="margin:8px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li><b style="color:white">Masters de Groupe</b> : fader submaster par groupe dans la console — plafonne le dimmer, la dynamique du show reste vivante</li>
+            <li><b style="color:white">Palettes de couleur</b> réutilisables : application live en un clic + « Remplacer partout » propage une couleur à toutes les scènes (RGB ou roue)</li>
+            <li><b style="color:white">MIDI Clock IN</b> : le BPM suit Ableton/Triton (24 PPQ) — rend la main au BPM analysé à l'arrêt</li>
+            <li><b style="color:white">Gobos projetés en 3D</b> : textures par slot, lecture DMX réelle, disque dans le faisceau</li>
+            <li><b style="color:white">Harmonie de mouvement</b> : les têtes identiques exécutent le même geste, déphasé sur le rig (vague, rotation, expansion)</li>
+            <li><b style="color:white">Faisceaux 3D réalistes</b> : fondu le long du faisceau, arrêt exact au sol touché, plages mécaniques réelles (pan 540°/360°… par fixture)</li>
+            <li><b style="color:white">Zones de balayage</b> : pan jamais derrière (clamp moteur), tilt au sol jamais sous l'horizon — visées délibérées via Aim préservées</li>
+            <li><b style="color:white">Matrice RGB fiabilisée</b> : direction/décalage de cellules, ordre = ordre du groupe, cellules éteintes réellement éteintes, alerte fixtures incompatibles</li>
+            <li><b style="color:white">USB DMX plug & play</b> : dongle détecté automatiquement au lancement, sortie démarrée sans configuration</li>
+            <li><b style="color:white">Silhouette DJ</b> + 38 icônes de fixtures réalistes (wall washer, spider, follow spot, fresnel, derby…)</li>
+          </ul>
+          <div class="badge cyan" style="margin-top:10px">Corrections</div>
+          <ul style="margin:8px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li>Fixtures sans canal dimmer (ACCU UFO…) : supportées et signalées (badge NO DIM)</li>
+            <li>Programmeur : les valeurs survivent à la fermeture de la modale</li>
+            <li>Multi-têtes LED : toutes les têtes reçoivent l'intensité (fini les têtes muettes)</li>
+            <li>Roue sans slot blanc : couleur neutre correcte au lieu de rouge</li>
+            <li>Scène 3D vide par défaut (plus de ponts intempestifs)</li>
+            <li>Moteur DMX à 60 fps : pan/tilt fluides dans la 3D</li>
+          </ul>
+        </div>
+        <div>
+          <div class="badge violet">Précédent — v1.0.37</div>
+          <ul style="margin:8px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
+            <li>Console virtuelle : boutons Grand Master et canal DMX, runtime partagé UI/MIDI/remote</li>
+            <li>Feedback LED MIDI : les pads du contrôleur suivent l'état des tuiles</li>
+            <li>Sécurité : plafond strobe + avertissement photosensibilité</li>
+            <li>Arrêt des scènes pré-programmées : extinction réelle des fixtures</li>
+          </ul>
+          <p style="margin-top:10px; font-size:11px; color:#6b7280">L'historique complet est dans l'app (Aide → Notes de version).</p>
+        </div>
+      </div>
+    </div>
   <div data-menu-panel style="display:none; border-top:1px solid #1f1f2e; background: rgba(6,6,10,.88)"><div class="wrap" style="padding:12px 20px; display:flex; flex-wrap:wrap; gap:10px"><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a><a href="./support.html">Support</a></div></div>
 </header>
 
 <section class="hero" style="padding:28px 0 18px">
   <div class="wrap">
-    <span class="kicker">v1.0.37 • Electron 30.5.1</span>
+    <span class="kicker">v1.0.38 • Electron 30.5.1</span>
     <h1 class="h1">Télécharger Light Maestro pour Windows.</h1>
     <p class="lead">Deux options, même app : portable (recommandé — clé USB, pas d'install) ou installeur pour poste fixe. Vérifiez l'empreinte SHA après téléchargement.</p>
   </div>
@@ -51,10 +85,10 @@
         <h2 class="h3" style="margin-top:12px; font-size:22px">Version portable</h2>
         <p>Un seul .exe, pas d'installation, pas de droits admin. Idéal pour clé USB, régie partagée, test rapide, tournée — gardez l'ancienne version à côté pour rollback immédiat.</p>
         <div style="background: rgba(255,255,255,.04); border:1px solid #1f1f2e; border-radius:12px; padding:12px; margin-top:12px">
-          <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro 1.0.37.exe • 92.8 MB</div>
-          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : F1EC56F318DF10BE69250CEE847E28F9D4F969F9C4BDD94DBC4852FC4CD88591</div>
+          <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro 1.0.38.exe • 92.8 MB</div>
+          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 7312D42AA4530EDAD3FCB45C1F13C002E418B5CE90C8567F7882A76F82ED9345</div>
         </div>
-        <a id="dl-btn-portable" class="btn btn-primary btn-wide disabled" style="margin-top:14px; opacity:.45; pointer-events:none" aria-disabled="true" href="./downloads/Light%20Maestro%201.0.37.exe" download>⬇ Télécharger — Portable</a>
+        <a id="dl-btn-portable" class="btn btn-primary btn-wide disabled" style="margin-top:14px; opacity:.45; pointer-events:none" aria-disabled="true" href="./downloads/Light%20Maestro%201.0.38.exe" download>⬇ Télécharger — Portable</a>
         <div class="meta" style="margin-top:10px">Liens actifs après connexion ci-dessus. Vérifie l'empreinte SHA après téléchargement.</div>
         <div class="meta" style="margin-top:10px">Double-clic → lance. Vos projets restent dans <span class="mono">%APPDATA%/Light Maestro</span></div>
       </div>
@@ -63,10 +97,10 @@
         <h2 class="h3" style="margin-top:12px; font-size:22px">Installeur Windows</h2>
         <p>Installation en 30s, raccourcis bureau & menu démarrer. Pour votre machine principale et les postes fixes.</p>
         <div style="background: rgba(255,255,255,.04); border:1px solid #1f1f2e; border-radius:12px; padding:12px; margin-top:12px">
-          <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro Setup 1.0.37.exe • 93 MB</div>
-          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 05FDA164F0A489E21C271716E494DF3FEB5061EDF568A0740FB2C51281E44D22</div>
+          <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro Setup 1.0.38.exe • 93 MB</div>
+          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 9C05F9EFAD4C173ED34D91CDD4019C8EED5F4FDF8FC2011AF344B2915079CD11</div>
         </div>
-        <a id="dl-btn-setup" class="btn btn-ghost btn-wide disabled" style="margin-top:14px; opacity:.45; pointer-events:none" aria-disabled="true" href="./downloads/Light%20Maestro%20Setup%201.0.37.exe" download>⬇ Télécharger — Installeur</a>
+        <a id="dl-btn-setup" class="btn btn-ghost btn-wide disabled" style="margin-top:14px; opacity:.45; pointer-events:none" aria-disabled="true" href="./downloads/Light%20Maestro%20Setup%201.0.38.exe" download>⬇ Télécharger — Installeur</a>
         <div class="meta" style="margin-top:10px">Windows 10/11 64-bit • 4 Go RAM mini • 500 Mo disque • USB / ArtNet / sACN</div>
       </div>
     </div>
@@ -78,7 +112,7 @@
     </div>
 
     <div class="card" style="margin-top:16px">
-      <h3 class="h3">Notes de version — v1.0.37</h3>
+      <h3 class="h3">Notes de version — v1.0.38</h3>
       <div class="grid grid-2" style="margin-top:10px">
         <div>
           <div class="badge violet">Nouveau</div>
