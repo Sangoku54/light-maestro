@@ -17,6 +17,7 @@ import { AUTO_LOOP_FOLDER } from '../engine/auto-loops';
 import { groupByTier, TIER_KEYS } from '../engine/tier-utils';
 import { getPatternColor } from '../engine/rgb-matrix-patterns';
 import { findIncompatibleFixtures } from '../hooks/rgb-matrix-playback';
+import { applyPalette, replaceColorEverywhere } from '../utils/color-palettes';
 import { sendChannelsToHardware, sendToUniverse, sendFixtureOn, sendFixtureOff, sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { outputArbiter } from '../engine/output-arbiter';
@@ -418,6 +419,114 @@ function analyzeFixtureChannels(
 
   return result;
 }
+
+// ─── Palette Bar (palettes de couleur réutilisables) ─────────
+
+const PaletteBar: React.FC = () => {
+  const { t } = useTranslation();
+  const palettes = useShowStore((s) => s.colorPalettes);
+  const addColorPalette = useShowStore((s) => s.addColorPalette);
+  const removeColorPalette = useShowStore((s) => s.removeColorPalette);
+  const updateColorPalette = useShowStore((s) => s.updateColorPalette);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newHex, setNewHex] = useState('#ff0000');
+  const [busy, setBusy] = useState(false);
+
+  const sel = palettes.find((p) => p.id === selected) || null;
+
+  const handleAdd = (): void => {
+    if (!/^#[0-9a-fA-F]{6}$/.test(newHex)) return;
+    const id = addColorPalette(newName.trim() || 'Palette', newHex);
+    setSelected(id);
+    setAdding(false);
+    setNewName('');
+  };
+
+  const handleApply = (): void => {
+    if (!sel || busy) return;
+    setBusy(true);
+    try {
+      applyPalette(sel.hex, sel.groupIds ?? []);
+      try { (window as any).__lm_toast?.(t('design.paletteApplied', { name: sel.name }), 'ok'); } catch {}
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleReplace = (): void => {
+    if (!sel || busy) return;
+    const old = window.prompt(t('design.paletteReplaceOldPrompt'), sel.hex);
+    if (!old || !/^#[0-9a-fA-F]{6}$/.test(old)) return;
+    setBusy(true);
+    try {
+      const n = replaceColorEverywhere(old, sel.hex, sel.groupIds ?? []);
+      try { (window as any).__lm_toast?.(t('design.paletteReplaced', { n }), n > 0 ? 'ok' : 'info'); } catch {}
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-gray-800/50 bg-[#0d0d14]/60 p-2.5 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">{t('design.palettes')}</span>
+        <div className="flex-1" />
+        <button onClick={() => setAdding((v) => !v)} className="px-2 py-0.5 rounded text-[10px] bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 border border-purple-500/30">
+          + {t('design.paletteAdd')}
+        </button>
+      </div>
+
+      {adding && (
+        <div className="flex items-center gap-1.5">
+          <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={t('design.paletteName')}
+            className="w-28 bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-[10px] text-gray-200 outline-none focus:border-purple-500/50" />
+          <input type="color" value={newHex} onChange={(e) => setNewHex(e.target.value)}
+            className="w-8 h-7 rounded cursor-pointer bg-transparent border border-gray-700" />
+          <button onClick={handleAdd} className="px-2 py-1 rounded text-[10px] bg-purple-600 text-white hover:bg-purple-500">{t('common.ok')}</button>
+        </div>
+      )}
+
+      {palettes.length === 0 && !adding && (
+        <p className="text-[10px] text-gray-600">{t('design.paletteEmpty')}</p>
+      )}
+
+      {palettes.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {palettes.map((p) => (
+            <div key={p.id} className={`group relative flex items-center gap-1 pl-1 pr-1.5 py-1 rounded border cursor-pointer transition-all ${
+              selected === p.id ? 'border-purple-400/70 bg-purple-600/10' : 'border-gray-700/40 hover:border-gray-600'
+            }`} onClick={() => setSelected(p.id)}>
+              <span className="w-4 h-4 rounded-full border border-white/20 shrink-0" style={{ backgroundColor: p.hex }} />
+              <span className="text-[10px] text-gray-300 max-w-[90px] truncate">{p.name}</span>
+              <button onClick={(e) => { e.stopPropagation(); removeColorPalette(p.id); if (selected === p.id) setSelected(null); }}
+                className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 text-[9px] px-0.5" title={t('common.delete')}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {sel && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button onClick={handleApply} disabled={busy}
+            className="px-2 py-1 rounded text-[10px] bg-purple-600/30 text-purple-200 hover:bg-purple-600/50 border border-purple-500/30 disabled:opacity-40">
+            ▶ {t('design.paletteApply')}
+          </button>
+          <input type="color" value={sel.hex} onChange={(e) => updateColorPalette(sel.id, { hex: e.target.value })}
+            className="w-8 h-7 rounded cursor-pointer bg-transparent border border-gray-700" title={t('design.paletteChangeColor')} />
+          <input type="text" value={sel.name} onChange={(e) => updateColorPalette(sel.id, { name: e.target.value })}
+            className="w-28 bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-[10px] text-gray-200 outline-none focus:border-purple-500/50" />
+          <button onClick={handleReplace} disabled={busy}
+            className="px-2 py-1 rounded text-[10px] bg-amber-600/20 text-amber-300 hover:bg-amber-600/40 border border-amber-500/30 disabled:opacity-40"
+            title={t('design.paletteReplaceTitle')}>
+            ↻ {t('design.paletteReplace')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const SceneList: React.FC = () => {
   const { t } = useTranslation();
@@ -1703,6 +1812,9 @@ const SceneEditor: React.FC = () => {
         <ParamField label="Duration" value={editDuration} unit="ms" onChange={(v) => { setEditDuration(v); if (scene) updateScene(scene.id, { duration: v }); }} />
       </div>
       <p className="text-[9px] text-gray-500 -mt-3">{t('design.durationHint')}</p>
+
+      {/* ── Palettes de couleur réutilisables ── */}
+      <PaletteBar />
 
       {/* Action buttons */}
       <div className="flex gap-2">

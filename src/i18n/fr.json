@@ -533,6 +533,16 @@
       "dropUncategorized": "Non classé"
     },
     "durationHint": "Duration = fenêtre totale (fades inclus). 0 = maintien infini.",
+    "palettes": "Palettes couleur",
+    "paletteAdd": "Ajouter",
+    "paletteName": "Nom de la palette",
+    "paletteEmpty": "Aucune palette — ajoute tes couleurs réutilisables (ex. « Rouge show », « Ambre chaud »).",
+    "paletteApply": "Appliquer (live)",
+    "paletteChangeColor": "Modifier la couleur",
+    "paletteReplace": "Remplacer partout",
+    "paletteReplaceTitle": "Remplace l'ancienne couleur par celle-ci dans toutes les scènes",
+    "paletteApplied": "Palette « {{name}} » appliquée",
+    "paletteReplaced": "{{n}} scène(s) mise(s) à jour",
     "realtimeHint": "(120 = temps réel)",
     "fixturesInSceneTitle": "Fixtures incluses dans cette scène",
     "matrixEngines": "{{resolved}}/{{total}} fixtures écrites en DMX",
@@ -740,7 +750,10 @@
         "actions": "Actions"
       },
       "targets": {
-        "grandMaster": "Grand Master",
+      "grandMaster": "Grand Master",
+      "groupMaster": "Master de Groupe",
+      "targetGroup": "Groupe ciblé",
+      "groupMasterHint": "Plafonne le dimmer du groupe (100 % = neutre). Le contenu reste dynamique sous le plafond.",
         "chaseSpeed": "Vitesse Chase",
         "blackout": "Blackout",
         "washIntensity": "Intensité Wash L",

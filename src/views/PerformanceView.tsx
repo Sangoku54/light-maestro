@@ -6,7 +6,7 @@ import {
   Plus, MousePointer2, ToggleLeft, GripHorizontal, Columns, Trash2,
   Copy, Maximize2, Minimize2, Square, Keyboard, Eye, EyeOff,
   ChevronUp, ChevronDown, Hash, Download, Upload, RotateCcw, Loader, Wifi,
-  Timer as TimerIcon, Radio, Pencil
+  Timer as TimerIcon, Radio, Pencil, Gauge
 } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { useShowStore, type SavedCueList, type CueListCue, type SongPreset, findBestSongPreset, presetHasAudio } from '../stores/showStore';
@@ -138,6 +138,7 @@ const VirtualConsolePanel: React.FC = () => {
   const vcSetGridSnap = usePerformStore((s) => s.vcSetGridSnap);
   const vcSetAddingWidget = usePerformStore((s) => s.vcSetAddingWidget);
   const vcAddAkaiSurfacePage = usePerformStore((s) => s.vcAddAkaiSurfacePage);
+  const fixtureGroups = useShowStore((s) => s.fixtureGroups);
 
   const [showPalette, setShowPalette] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; widgetId: string } | null>(null);
@@ -601,6 +602,11 @@ const VirtualConsolePanel: React.FC = () => {
         height: 150,
         config: { title: 'Group', collapsed: false },
       },
+      'group-master': {
+        width: 44,
+        height: 160,
+        config: { groupId: fixtureGroups[0]?.id ?? '', color: '#22d3ee' } as ConsoleWidgetConfig,
+      },
     };
 
     const d = defaults[addingWidget];
@@ -647,6 +653,9 @@ const VirtualConsolePanel: React.FC = () => {
               </button>
               <button onClick={() => handleAddWidget('frame')} className="w-full flex items-center gap-2 px-3 py-2 rounded hover:bg-purple-600/20 text-xs text-gray-300">
                 <Columns size={14} className="text-blue-400" /> {t('perform.vc.frame')}
+              </button>
+              <button onClick={() => handleAddWidget('group-master')} className="w-full flex items-center gap-2 px-3 py-2 rounded hover:bg-purple-600/20 text-xs text-gray-300">
+                <Gauge size={14} className="text-cyan-400" /> {t('perform.vc.groupMaster')}
               </button>
             </div>
           )}
@@ -1025,6 +1034,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
   const songPresets = useShowStore((s) => s.songPresets);
   const storeShows = useShowStore((s) => s.shows);
   const universes = useShowStore((s) => s.universes);
+  const fixtureGroups = useShowStore((s) => s.fixtureGroups);
 
   const [config, setConfig] = useState({ ...widget.config });
   const [title, setTitle] = useState(widget.config.title || widget.type);
@@ -1412,6 +1422,21 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
             </>
           )}
 
+          {/* Group Master config */}
+          {widget.type === 'group-master' && (
+            <div>
+              <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('perform.vc.targetGroup')}</label>
+              <select value={config.groupId ?? ''} onChange={(e) => setConfig({ ...config, groupId: e.target.value })}
+                className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-300">
+                {fixtureGroups.length === 0 && <option value="">—</option>}
+                {fixtureGroups.map((g) => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </select>
+              <p className="text-[9px] text-gray-600 mt-1">{t('perform.vc.groupMasterHint')}</p>
+            </div>
+          )}
+
           {/* Frame config */}
           {widget.type === 'frame' && (
             <div>
@@ -1709,6 +1734,8 @@ const VCWidgetRenderer: React.FC<{
       return <VCButtonWidget widget={widget} onDragStart={handleDragStart} onResizeStart={handleResizeStart} onContextMenu={onContextMenu} onShow3D={onShow3D} />;
     case 'slider':
       return <VCSliderWidget widget={widget} onDragStart={handleDragStart} onResizeStart={handleResizeStart} onContextMenu={onContextMenu} />;
+    case 'group-master':
+      return <VCGroupMasterWidget widget={widget} onDragStart={handleDragStart} onResizeStart={handleResizeStart} onContextMenu={onContextMenu} />;
     case 'frame':
       return <VCFrameWidget widget={widget} onDragStart={handleDragStart} onResizeStart={handleResizeStart} onContextMenu={onContextMenu} />;
     default:
@@ -2387,8 +2414,88 @@ const VCSliderWidget: React.FC<{
   );
 };
 
-// ─── Frame Widget ──────────────────────────────────────────
+// ─── Group Master Widget (fader plafonnant le dimmer d'un groupe) ──────────
 
+const VCGroupMasterWidget: React.FC<{
+  widget: ConsoleWidget;
+  onDragStart: (e: React.MouseEvent) => void;
+  onResizeStart: (e: React.MouseEvent) => void;
+  onContextMenu: (x: number, y: number) => void;
+}> = ({ widget, onDragStart, onResizeStart, onContextMenu }) => {
+  const vcSetWidgetValue = usePerformStore((s) => s.vcSetWidgetValue);
+  const value = usePerformStore((s) => s.vcWidgetValues[widget.id] ?? 255);
+  const fixtureGroups = useShowStore((s) => s.fixtureGroups);
+  const config = widget.config;
+  const groupName = fixtureGroups.find((g) => g.id === config.groupId)?.name ?? '?';
+
+  const handleChange = (newVal: number) => {
+    const clamped = Math.max(0, Math.min(255, Math.round(newVal)));
+    vcSetWidgetValue(widget.id, clamped);
+    applyWidgetSliderEffect(config, clamped, 'vc');
+  };
+
+  return (
+    <div
+      className="absolute flex flex-col items-center group"
+      style={{ left: widget.x, top: widget.y, width: widget.width, height: widget.height }}
+      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e.clientX, e.clientY); }}
+    >
+      <div
+        className="w-full h-3 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity z-10 flex items-center justify-center shrink-0"
+        onMouseDown={onDragStart}
+      >
+        <GripHorizontal size={10} className="text-gray-600" />
+      </div>
+
+      <div className="flex-1 relative w-8 min-h-[60px] cursor-pointer rounded-full bg-gray-800/50 border border-cyan-700/40 overflow-hidden"
+        onClick={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          handleChange((1 - (e.clientY - rect.top) / rect.height) * 255);
+        }}
+        onMouseDown={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const onMove = (ev: MouseEvent) => {
+            handleChange((1 - (ev.clientY - rect.top) / rect.height) * 255);
+          };
+          const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+          };
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+        }}
+      >
+        <div
+          className="absolute bottom-0 left-0 right-0 rounded-full transition-all"
+          style={{ height: `${(value / 255) * 100}%`, backgroundColor: '#22d3ee', opacity: 0.6 }}
+        />
+        <div
+          className="absolute left-1/2 -translate-x-1/2 w-5 h-5 rounded-full border-2 border-cyan-300 bg-cyan-600 shadow-lg transition-all"
+          style={{ bottom: `calc(${(value / 255) * 100}% - 10px)` }}
+        />
+        {value < 255 && (
+          <div className="absolute top-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-cyan-300 animate-pulse" title="Plafond actif" />
+        )}
+      </div>
+
+      <span className="text-[10px] text-cyan-300/90 font-mono mt-1 shrink-0">
+        {value >= 255 ? '100%' : `${Math.round((value / 255) * 100)}%`}
+      </span>
+      <span className="text-[9px] text-gray-500 truncate max-w-full shrink-0" title={groupName}>
+        {groupName}
+      </span>
+
+      <div
+        className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize opacity-0 group-hover:opacity-100 transition-opacity z-10"
+        onMouseDown={onResizeStart}
+      >
+        <div className="w-2 h-2 border-r-2 border-b-2 border-gray-600 absolute bottom-0.5 right-0.5" />
+      </div>
+    </div>
+  );
+};
+
+// ─── Frame Widget ──────────────────────────────────────────
 const VCFrameWidget: React.FC<{
   widget: ConsoleWidget;
   onDragStart: (e: React.MouseEvent) => void;

@@ -383,6 +383,12 @@ interface ShowState {
   getGroupsByUniverse: (universeId: string) => FixtureGroup[];
   setFixtureGroups: (groups: FixtureGroup[]) => void;
 
+  // Color palettes (réutilisables : appliquer + remplacer partout)
+  colorPalettes: Array<{ id: string; name: string; hex: string; groupIds: string[] }>;
+  addColorPalette: (name: string, hex: string, groupIds?: string[]) => string;
+  updateColorPalette: (id: string, updates: { name?: string; hex?: string; groupIds?: string[] }) => void;
+  removeColorPalette: (id: string) => void;
+
   // Scenes
   scenes: SavedScene[];
   /** Explicit user-created folder names (entities). Scenes reference them via
@@ -895,6 +901,27 @@ export const useShowStore = create<ShowState>((set, get) => ({
         g.id === groupId ? { ...g, fixtureIds } : g
       ),
     }));
+    useAppStore.getState().markDirty();
+  },
+
+  // ── Color palettes ──
+  colorPalettes: [],
+  addColorPalette: (name, hex, groupIds = []) => {
+    const id = `pal-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    set((state) => ({
+      colorPalettes: [...state.colorPalettes, { id, name, hex, groupIds }],
+    }));
+    useAppStore.getState().markDirty();
+    return id;
+  },
+  updateColorPalette: (id, updates) => {
+    set((state) => ({
+      colorPalettes: state.colorPalettes.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+    }));
+    useAppStore.getState().markDirty();
+  },
+  removeColorPalette: (id) => {
+    set((state) => ({ colorPalettes: state.colorPalettes.filter((p) => p.id !== id) }));
     useAppStore.getState().markDirty();
   },
 

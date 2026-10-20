@@ -19,6 +19,7 @@ import { MasterClockBar } from './components/MasterClockBar';
 import { AudioCaptureProvider } from './hooks/useAudioCapture';
 import { useAudioFileLoader } from './hooks/useAudioFileLoader';
 import { useRgbMatrixPlayback } from './hooks/rgb-matrix-playback';
+import { useGroupMasters } from './hooks/use-group-masters';
 import { useMidiTriggers } from './hooks/midi-trigger';
 import { useLoopLocale } from './hooks/use-loop-locale';
 import { useMidiFeedback } from './hooks/use-midi-feedback';
@@ -252,6 +253,7 @@ const App: React.FC = () => {
 
   // RGB Matrix playback engine — runs globally, writes DMX directly
   useRgbMatrixPlayback();
+  useGroupMasters();
 
   // MIDI triggers — global (scènes/chasers/cuelists/autoscript/widgets)
   useMidiTriggers();

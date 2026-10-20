@@ -522,7 +522,7 @@ import type { RgbSegment } from '../engine/dmx-color';
 import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, findBestWheelCap, wheelDegeneratePosition } from '../engine/dmx-color';
 import type { ChannelAnalysis } from '../engine/fixture-analyzer';
 import { analyzeChannels, capMid, pickLaserModeCap, laserGateValue, mapIntensityVal, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
-import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSmartMovement, spatialPhaseFor, zeroDmxOffset } from '../engine/dmx-movement';
+import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSectionMovement, spatialPhaseFor, zeroDmxOffset } from '../engine/dmx-movement';
 import { computeGoboValue } from '../engine/gobo-engine';
 import { useAppStore } from '../stores/appStore';
 import { useProgrammerStore } from '../stores/programmerStore';
@@ -1666,48 +1666,25 @@ if (fa.isLaser) {
                   : pf.tier === 'primary' ? 90 : pf.tier === 'secondary' ? 70 : 40;
                 const movPattern = (() => {
                   if (trackMovement) return trackMovement.pattern;
-                  // Section name → getSmartMovement distributes per-fixture (multi-fixture choreography)
+                  // Section name → getSectionMovement : le PATTERN est identique
+                  // pour toutes les têtes mobiles (harmonie de look) — la
+                  // géométrie vient du spatialPhaseFor (déphasage sur le rig).
                   // Explicit pattern names pass through directly
                   const cueMov = active.movement;
                   if (cueMov) {
                     const explicitPatterns = new Set(['sweep','circle','bounce','wave','figure8','zigzag','diamond','spiral','heartbeat','randomWalk','panOnly','tiltOnly','static','pulse']);
                     if (!explicitPatterns.has(cueMov)) {
-                      // Section name → smart distribution
-                      let mobileIdx = -1, totalMobile = 0;
-                      for (const ffa of fixtures) {
-                        if (ffa.panOffsets.length > 0 || ffa.tiltOffsets.length > 0) {
-                          if (ffa.fixture.id === pf.id) mobileIdx = totalMobile;
-                          totalMobile++;
-                        }
-                      }
-                      if (mobileIdx >= 0) return getSmartMovement(mobileIdx, totalMobile, cueMov, ct);
-                      return cueMov;
+                      // Section name → smart distribution (par section, pas par tête)
+                      return getSectionMovement(cueMov, ct);
                     }
                     // Explicit pattern — distribue pour les tiers non-primaires pour éviter le mur uni
                     if (pf.tier !== 'primary') {
-                      let mobileIdx = -1, totalMobile = 0;
-                      for (const ffa of fixtures) {
-                        if (ffa.panOffsets.length > 0 || ffa.tiltOffsets.length > 0) {
-                          if (ffa.fixture.id === pf.id) mobileIdx = totalMobile;
-                          totalMobile++;
-                        }
-                      }
-                      if (mobileIdx >= 0) return getSmartMovement(mobileIdx, totalMobile, cueMov, ct);
+                      return getSectionMovement(cueMov, ct);
                     }
                     return cueMov; // explicit pattern
                   }
-                  // Fallback: smart distribution based on section
-                  let mobileIdx = -1, totalMobile = 0;
-                  for (const ffa of fixtures) {
-                    if (ffa.panOffsets.length > 0 || ffa.tiltOffsets.length > 0) {
-                      if (ffa.fixture.id === pf.id) mobileIdx = totalMobile;
-                      totalMobile++;
-                    }
-                  }
-                  if (mobileIdx >= 0) {
-                    return getSmartMovement(mobileIdx, totalMobile, sec, ct);
-                  }
-                  return sec;
+                  // Fallback: smart distribution based on section (par section)
+                  return getSectionMovement(sec, ct);
                 })();
               // Une fixture « capturée » doit continuer à bouger autour de sa
               // target même pendant les sections calmes (intro/outro/bridge) :
@@ -2340,34 +2317,19 @@ export function computeDmxForCue(
             : 0;
           for (let m = 0; m < motorCount; m++) {
             const motorPhase = m * (Math.PI * 2 / motorCount);
-            const movSec = (() => {
+          const movSec = (() => {
               if (trackMovement) return trackMovement.pattern;
-              // Section name → getSmartMovement distributes per-fixture (multi-fixture choreography)
+              // Section name → getSectionMovement : PATTERN identique pour
+              // toutes les têtes (harmonie), déphasage via spatialPhaseFor.
               const cueMov = (cue as any).movement;
               if (cueMov) {
                 const explicitPatterns = new Set(['sweep','circle','bounce','wave','figure8','zigzag','diamond','spiral','heartbeat','randomWalk','panOnly','tiltOnly','static','pulse']);
                 if (!explicitPatterns.has(cueMov)) {
-                  let mobileIdx = -1, totalMobile = 0;
-                  for (const a of analyses) {
-                    if (a.panOffsets.length > 0 || a.tiltOffsets.length > 0) {
-                      if (a.fixture.id === pf.id) mobileIdx = totalMobile;
-                      totalMobile++;
-                    }
-                  }
-                  if (mobileIdx >= 0) return getSmartMovement(mobileIdx, totalMobile, cueMov, cue.time);
-                  return cueMov;
+                  return getSectionMovement(cueMov, cue.time);
                 }
                 return cueMov;
               }
-              let mobileIdx = -1, totalMobile = 0;
-              for (const a of analyses) {
-                if (a.panOffsets.length > 0 || a.tiltOffsets.length > 0) {
-                  if (a.fixture.id === pf.id) mobileIdx = totalMobile;
-                  totalMobile++;
-                }
-              }
-              if (mobileIdx >= 0) return getSmartMovement(mobileIdx, totalMobile, sec, cue.time);
-              return sec;
+              return getSectionMovement(sec, cue.time);
             })();
             let px = 0, py = 0;
             switch (movSec) {

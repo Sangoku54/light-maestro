@@ -164,6 +164,80 @@ function beamHitLength(
   return BEAM_SKY_LENGTH;
 }
 
+/**
+ * Textures gobo procédurales (cache par slot). Blanc sur noir : en blending
+ * additif, le noir n'ajoute rien → le motif « découpe » le faisceau.
+ * Classification par mots-clés du nom de cap (dot/line/star/tunnel/heart…).
+ */
+const _goboTexCache = new Map<string, THREE.CanvasTexture>();
+function getGoboTexture(slotName: string): THREE.CanvasTexture {
+  const key = slotName.toLowerCase().trim();
+  const cached = _goboTexCache.get(key);
+  if (cached) return cached;
+  const S = 128;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, S, S);
+  ctx.fillStyle = '#fff';
+  const n = key;
+  if (/open|clear|white|blank|no gobo/.test(n)) {
+    ctx.fillRect(0, 0, S, S); // plein (disque masqué de toute façon)
+  } else if (/dot|point|ball|circle/.test(n)) {
+    for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) {
+      ctx.beginPath(); ctx.arc(18 + i * 23, 18 + j * 23, 7, 0, Math.PI * 2); ctx.fill();
+    }
+  } else if (/line|stripe|bar|slot/.test(n)) {
+    for (let i = 0; i < 6; i++) ctx.fillRect(0, 8 + i * 20, S, 9);
+  } else if (/star|étoile/.test(n)) {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 === 0 ? 56 : 22;
+      const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+      const x = S / 2 + Math.cos(a) * r, y = S / 2 + Math.sin(a) * r;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.closePath(); ctx.fill();
+  } else if (/triangle/.test(n)) {
+    ctx.beginPath(); ctx.moveTo(S / 2, 14); ctx.lineTo(S - 16, S - 16); ctx.lineTo(16, S - 16); ctx.closePath(); ctx.fill();
+  } else if (/tunnel|ring|cercle/.test(n)) {
+    for (let r = 10; r <= 56; r += 15) {
+      ctx.beginPath(); ctx.arc(S / 2, S / 2, r, 0, Math.PI * 2); ctx.lineWidth = 9; ctx.strokeStyle = '#fff'; ctx.stroke();
+    }
+  } else if (/heart|cœur|coeur/.test(n)) {
+    ctx.beginPath();
+    ctx.arc(S / 2 - 18, S / 2 - 12, 22, 0, Math.PI * 2);
+    ctx.arc(S / 2 + 18, S / 2 - 12, 22, 0, Math.PI * 2);
+    ctx.moveTo(S / 2 - 40, S / 2 - 4);
+    ctx.lineTo(S / 2, S - 20); ctx.lineTo(S / 2 + 40, S / 2 - 4);
+    ctx.closePath(); ctx.fill();
+  } else if (/sunburst|ray|burst|fan/.test(n)) {
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(S / 2, S / 2);
+      ctx.arc(S / 2, S / 2, 60, a, a + Math.PI / 14);
+      ctx.closePath(); ctx.fill();
+    }
+  } else if (/break|wave|water/.test(n)) {
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      for (let x = 0; x <= S; x += 4) ctx.lineTo(x, 14 + i * 26 + Math.sin(x / 16) * 8);
+      ctx.lineWidth = 8; ctx.strokeStyle = '#fff'; ctx.stroke();
+    }
+  } else {
+    // Fallback : quatre quartiers découpés (motif générique reconnaissable)
+    ctx.fillRect(S / 4, 8, S / 2 - 16, S - 16);
+    ctx.fillRect(8, S / 4, S - 16, S / 2 - 16);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  _goboTexCache.set(key, tex);
+  return tex;
+}
+
 // Horizontal spacing between two instances of the same kind (fraction of stage).
 const MUSICIAN_SPREAD = 0.16;
 
@@ -365,6 +439,7 @@ interface Fixture3D {
   extraHeads?: ExtraHead3D[];   // Additional tilt heads (multi-arm fixtures)
   floorSpot?: THREE.Mesh;       // Light spot on the floor
   floorGlow?: THREE.Mesh;       // Soft outer glow on floor
+  goboDisc?: THREE.Mesh;        // Disque de projection gobo (dans le faisceau)
   ledBarPixels?: { light: THREE.PointLight; cone: THREE.Mesh; seg: THREE.Mesh }[]; // per-pixel lights for LED bars
   // Movement pattern trail
   trailLine?: THREE.Line;
@@ -2185,6 +2260,29 @@ export const Stage3D: React.FC<{
         f3d.lightTarget.add(cone);
         f3d.beamCone = cone;
 
+        // ── Gobo disc : disque de projection dans le faisceau ──
+        // Positionné près de la lentille, texture procédurale par slot gobo.
+        // Orienté face au faisceau (normal -Y locale, comme le cône).
+        if (channelMap.goboOffset !== null && channelMap.goboOffset !== undefined && (channelMap.goboCaps?.length ?? 0) > 0) {
+          const goboGeo = new THREE.CircleGeometry(0.30, 28);
+          const goboMat = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            map: getGoboTexture('open'),
+            transparent: true,
+            opacity: 0,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+          });
+          const goboDisc = new THREE.Mesh(goboGeo, goboMat);
+          goboDisc.raycast = () => {};
+          goboDisc.rotation.x = -Math.PI / 2; // face alignée au faisceau (-Y)
+          goboDisc.position.y = -0.55;        // ~12 % le long du cône
+          goboDisc.visible = false;
+          f3d.lightTarget.add(goboDisc);
+          f3d.goboDisc = goboDisc;
+        }
+
         // Extra heads: one point light + beam cone per arm (tilt-based) or per RGB segment
         for (const eh of f3d.extraHeads ?? []) {
           const ehLight = new THREE.PointLight(0xffffff, 0, 8, 2);
@@ -2796,10 +2894,15 @@ export const Stage3D: React.FC<{
       // source DMX (tick setInterval non synchronisé avec le rendu → aliasing
       // = micro-saccades visibles, critique en capture vidéo).
       const settleK = Math.min(1, dt * 25);
+      // Plages RÉELLES de la fixture (QXF <Physical> PanMax/TiltMax) — le
+      // mapping 3D suit la mécanique vraie (540° pan ACCU ≠ 360° d'un autre).
+      // Défauts = convention historique de l'app : 540° pan / 180° tilt.
+      const panRangeRad = ((cm.panMaxDeg ?? 540) * Math.PI) / 180;
+      const tiltRangeRad = ((cm.tiltMaxDeg ?? 180) * Math.PI) / 180;
       if (f3d.armGroup) {
         // Zéro VISUEL (rendu) : décalage persistant du faisceau (tare à DMX=128).
         // Zone PAN : ±90° autour de la direction par défaut (jamais derrière).
-        const panTarget = clampPanZone(((panVal / 255) - 0.5) * Math.PI * 3 + (f3d._zeroPanDeg * Math.PI) / 180);
+        const panTarget = clampPanZone(((panVal / 255) - 0.5) * panRangeRad + (f3d._zeroPanDeg * Math.PI) / 180);
         let panDelta = panTarget - f3d.armGroup.rotation.y;
         while (panDelta > Math.PI) panDelta -= 2 * Math.PI;
         while (panDelta < -Math.PI) panDelta += 2 * Math.PI;
@@ -2811,7 +2914,7 @@ export const Stage3D: React.FC<{
       if (f3d.headGroup) {
         // Zone TILT : élévation ∈ [-90°, +90°] ; au sol, jamais sous l'horizon.
         // head = _mountTilt + élévation (invariant validé pour les 3 modes).
-        const dmxTilt = ((tiltVal / 255) - 0.5) * Math.PI;
+        const dmxTilt = ((tiltVal / 255) - 0.5) * tiltRangeRad;
         const elevation = clampTiltZone(dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180, f3d.mountMode);
         const tiltTarget = f3d._mountTilt + elevation;
         const tiltDelta = tiltTarget - f3d.headGroup.rotation.x;
@@ -3008,6 +3111,28 @@ export const Stage3D: React.FC<{
       }
       for (const px of f3d.ledBarPixels ?? []) {
         applyBeamLength(px.cone);
+      }
+
+      // ── Gobo : slot actif depuis le buffer (jamais écrit → open) ──
+      if (f3d.goboDisc && cm.goboOffset !== null && cm.goboOffset !== undefined) {
+        const gIdx = baseAddr + cm.goboOffset;
+        const gSp = sparseUni ? (sparseUni as Record<string, number>)[String(gIdx + 1)] : undefined;
+        const gVal = gSp === undefined || gSp === 0 ? null : (data[gIdx] ?? 0);
+        let slotName = 'open';
+        if (gVal !== null) {
+          const cap = (cm.goboCaps ?? []).find((gc: any) => gVal >= gc.min && gVal <= gc.max);
+          if (cap) slotName = cap.name ?? 'open';
+        }
+        const isOpen = /open|clear|white|blank|no gobo/i.test(slotName);
+        const mat = f3d.goboDisc.material as THREE.MeshBasicMaterial;
+        if (!isOpen) {
+          mat.map = getGoboTexture(slotName);
+          mat.needsUpdate = true;
+          mat.opacity = visIntensity * 0.95;
+          f3d.goboDisc.visible = showBeams && visIntensity > 0.02;
+        } else {
+          f3d.goboDisc.visible = false;
+        }
       }
 
       // --- Floor spot disabled: only beam cones from lens are shown ---

@@ -190,6 +190,10 @@ export interface FixtureChannelAnalysis {
   // Méta
   channelCount: number;
   universeIndex: number;
+  /** Plages mécaniques réelles (QXF <Physical> PanMax/TiltMax, degrés).
+   *  Absentes → convention 540/180 (décodage 3D historique). */
+  panMaxDeg: number;
+  tiltMaxDeg: number;
 }
 
 // ─── Type alias pour compatibilité ─────────────────────────────
@@ -341,6 +345,9 @@ export function analyzeFixtureChannels(
     blankOffset: null,
     channelCount: channels.length,
     universeIndex: 0,
+    // Plages mécaniques : QXF <Physical> (per-mode sinon global), défauts 540/180
+    panMaxDeg: (def?.modes[pf.modeIndex]?.physical?.panMax ?? def?.physical?.panMax ?? 540),
+    tiltMaxDeg: (def?.modes[pf.modeIndex]?.physical?.tiltMax ?? def?.physical?.tiltMax ?? 180),
   };
 
   const colourChannels: Array<{ offset: number; name: string; caps?: DmxFixtureCapability[] }> = [];

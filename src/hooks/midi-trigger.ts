@@ -23,6 +23,7 @@
 
 import { useEffect } from 'react';
 import type { MidiTriggerEvent } from '../engine/midi-actions';
+import { useClockStore, clockFromMidiClock } from '../stores/clockStore';
 import {
   midiAutoscript,
   midiChaserNext,
@@ -128,6 +129,15 @@ export function useMidiTriggers(): void {
     if (midi.onClock) {
       const clockHandler = (clock: { bpm: number; running: boolean }): void => {
         midiSetClock(clock.bpm, clock.running);
+        // Master clock : le BPM reçu (Ableton/Triton/…) devient la source
+        // pendant le transport. À l'arrêt (running=false) on rende la main :
+        // la priorité Link > MIDI > Tap > Audio > Manual est rétablie.
+        clockFromMidiClock(clock.bpm, clock.running);
+        if (!clock.running && useClockStore.getState().source === 'midi') {
+          // Retour explicite à 'manual' : tant que source === 'midi', le BPM
+          // clock continuerait d'écraser l'analysé (QuickShowView :2232).
+          useClockStore.setState({ source: 'manual' });
+        }
       };
       const clockRet = midi.onClock(clockHandler) as unknown;
       const unsubscribeClock = typeof clockRet === 'function' ? (clockRet as () => void) : undefined;

@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { MtcState } from '@electron/midi/mtc';
 import { dmxBridge } from '../utils/dmx-bridge';
+import { useGroupMastersStore } from './groupMastersStore';
 import type { LoopRecipe } from '../engine/auto-loops';
 import { useAppStore } from './appStore';
 import { useShowStore } from './showStore';
@@ -26,6 +27,13 @@ export function applyWidgetSliderEffect(
   sourceId = 'vc',
 ): void {
   try {
+    // Master de groupe : plafonne le dimmer du groupe (submaster) via
+    // groupMastersStore — la source LTP 'group-masters' matérialise le plafond
+    // (matériel + 3D). value = 0..255, 255 = neutre.
+    if ((config as any).type === 'group-master' && config.groupId) {
+      useGroupMastersStore.getState().setMaster(config.groupId, value);
+      return;
+    }
     if (config.sliderFunction === 'grandMaster') {
       if (typeof window !== 'undefined') {
         (window as any)?.lightMaestro?.dmx?.applyGrandMaster(value / 255);
@@ -59,7 +67,7 @@ function resolveUniverseIndex(sdUniverseId: string): number {
 
 // ─── Types ─────────────────────────────────────────────────
 
-export type WidgetType = 'button' | 'slider' | 'frame';
+export type WidgetType = 'button' | 'slider' | 'frame' | 'group-master';
 
 export type ButtonActionType =
   | 'scene'
@@ -117,6 +125,8 @@ export interface ConsoleWidgetConfig {
   min?: number;
   max?: number;
   step?: number;
+  // Master de groupe (group-master) : groupe dont le dimmer est plafonné
+  groupId?: string;
   // Frame
   title?: string;
   collapsed?: boolean;

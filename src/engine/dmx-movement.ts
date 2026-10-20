@@ -59,6 +59,26 @@ export function getSmartMovement(
   return patterns[idx];
 }
 
+/**
+ * Pattern de mouvement PAR SECTION — identique pour TOUTES les fixtures
+ * mobiles (harmonie de look). L'ancienne répartition par hash incluait
+ * `fixtureIndex` : 3 têtes identiques recevaient 3 patterns sans rapport
+ * (sweep / figure8 / randomWalk) → mouvement hérétique, jamais synchrone.
+ * La variété vient du TEMPS (timeIdx) et la géométrie du `spatialPhaseFor`
+ * (vague/rond/expand sur les positions réelles du rig) — pas du hasard par
+ * tête. Les fixtures identiques bougent ENSEMBLE, déphasées sur l'espace.
+ */
+export function getSectionMovement(
+  section: string,
+  timeOffset?: number,
+): string {
+  const patterns = SMART_MOVEMENTS[section] || DEFAULT_SMART_MOVEMENTS;
+  let hash = 0;
+  for (let i = 0; i < section.length; i++) hash = ((hash << 5) - hash) + section.charCodeAt(i);
+  const timeIdx = timeOffset ? Math.floor(timeOffset / 8) : 0;
+  return patterns[(timeIdx + Math.abs(hash % 97)) % patterns.length];
+}
+
 // ---- Spatial choreography -------------------------------------------------
 // Per-fixture phase offsets derived from real stage positions (x,y normalized 0..1).
 // Turns a uniform movement pattern into a wave/circle/expand across the whole rig.

@@ -41,6 +41,9 @@ export const DEFAULT_SOURCES: Record<string, ArbiterSourceSpec> = {
   'design-efx': { mode: 'ltp', priority: 70 },
   'design-test': { mode: 'ltp', priority: 60 },
   'fixture-onoff': { mode: 'ltp', priority: 60 },
+  // Masters de groupe (plafond dimmer par groupe, submaster) : au-dessus du
+  // contenu (rgb-matrix 55, engine HTP) mais sous les outils opérateur.
+  'group-masters': { mode: 'ltp', priority: 58 },
   'default': { mode: 'ltp', priority: 50 },
   // Light (HTP) — content sources that blend together
   'song-preset': { mode: 'htp', priority: 45 },
