@@ -33,6 +33,7 @@ try {
 
     $userId = (int)db()->lastInsertId();
     send_confirmation_email(strtolower($email), $displayName ?: null);
+    notify_admin('Nouvelle inscription', 'Compte créé : ' . strtolower($email) . ' (édition Gratuite)' . ($displayName ? ' — ' . $displayName : ''));
     respond([
         'token' => sign_token($userId),
         'edition' => 'free',

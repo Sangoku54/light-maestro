@@ -139,7 +139,9 @@
   var API='https://light-maestro.com/api', K='lm-dl-session';
   function $(id){return document.getElementById(id);}
   function setMsg(t,err){var m=$('dl-msg');if(!m)return;m.textContent=t||'';m.style.color=err?'#f87171':'';}
+  var session=null;
   function unlock(sess){
+    session=sess;
     $('dl-form').style.display='none';$('dl-ok').style.display='block';
     $('dl-email-shown').textContent=sess.email||'';
     $('dl-edition').textContent=sess.edition==='full'?'Complète':sess.edition==='standard'?'Standard':'Gratuite';
@@ -150,8 +152,12 @@
     });
     try{sessionStorage.setItem(K,JSON.stringify(sess));}catch(e){}
   }
-  async function call(path,body){
-    var r=await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  function trackDownload(file){
+    if(!session||!session.token)return;
+    try{fetch(API+'/track.php',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.token},body:JSON.stringify({file:file})});}catch(e){}
+  }
+  async function call(path,body,token){
+    var r=await fetch(API+path,{method:'POST',headers:Object.assign({'Content-Type':'application/json'},token?{'Authorization':'Bearer '+token}:{}),body:JSON.stringify(body)});
     var d={};try{d=await r.json();}catch(e){}
     if(!r.ok)throw new Error(d.message||d.error||('HTTP '+r.status));
     return d;
@@ -162,12 +168,14 @@
     setMsg(mode==='register'?'Création du compte…':'Connexion…');
     try{
       var d=await call(mode==='register'?'/auth/register':'/auth/login',{email:email,password:pass});
-      unlock({email:d.email||email,edition:d.edition||'free'});
+      unlock({email:d.email||email,edition:d.edition||'free',token:d.token||''});
       setMsg('');
     }catch(e){setMsg('Échec : '+e.message+'. Serveur de licence en cours d’activation ? → Support & FAQ.',true);}
   }
   $('dl-login').addEventListener('click',function(){go('login');});
   $('dl-register').addEventListener('click',function(){go('register');});
+  $('dl-btn-portable').addEventListener('click',function(){trackDownload('portable');});
+  $('dl-btn-setup').addEventListener('click',function(){trackDownload('setup');});
   try{var s=JSON.parse(sessionStorage.getItem(K)||'null');if(s&&s.email)unlock(s);}catch(e){}
 })();
 </script>

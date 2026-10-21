@@ -26,3 +26,13 @@ CREATE TABLE IF NOT EXISTS payments (
   UNIQUE KEY uq_payment_intent (stripe_payment_intent),
   KEY idx_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Table de tracking des téléchargements (log + alerte admin).
+CREATE TABLE IF NOT EXISTS downloads (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  file ENUM('portable','setup') NOT NULL,
+  ip VARCHAR(45) DEFAULT NULL,
+  downloaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

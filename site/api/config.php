@@ -39,6 +39,10 @@ define('JWT_TTL', 60 * 60 * 24 * 30);
 // restreindre au(x) domaine(s) du site.
 define('CORS_ORIGIN', '*');
 
+// ── Alerte admin ─────────────────────────────────────────────────────
+// Reçoit un mail à chaque inscription et téléchargement.
+define('ADMIN_EMAIL', 'admintrack@light-maestro.com');
+
 /**
  * Retourne une connexion PDO unique.
  */

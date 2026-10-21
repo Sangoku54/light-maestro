@@ -101,3 +101,28 @@ function send_confirmation_email(string $email, ?string $displayName): void {
         error_log('[license] envoi email confirmation impossible : ' . $e->getMessage());
     }
 }
+
+/**
+ * Alerte admin : notifie ADMIN_EMAIL (config.php) à chaque événement notable
+ * (inscription, téléchargement). Échec silencieux — ne jamais bloquer la
+ * requête utilisateur à cause du mail d'alerte.
+ */
+function notify_admin(string $event, string $detail): void {
+    if (!defined('ADMIN_EMAIL') || !ADMIN_EMAIL) return;
+    $subject = '[Light Maestro] ' . $event;
+    $body = '<!doctype html><html lang="fr"><body style="margin:0;background:#0a0a0f;color:#ede8dc;font-family:Arial,sans-serif;">'
+        . '<div style="max-width:560px;margin:0 auto;padding:32px 24px;">'
+        . '<div style="font-weight:900;letter-spacing:.18em;font-size:13px;"><span style="display:inline-block;background:#8b5cf6;color:#fff;border-radius:8px;padding:4px 8px;margin-right:8px;">LM</span>LIGHT MAESTRO — Alerte</div>'
+        . '<h2 style="margin:24px 0 8px;font-size:18px;">' . htmlspecialchars($event, ENT_QUOTES, 'UTF-8') . '</h2>'
+        . '<p style="color:#9ca3af;line-height:1.7;">' . htmlspecialchars($detail, ENT_QUOTES, 'UTF-8') . '</p>'
+        . '<p style="margin-top:16px;font-size:12px;color:#6b7280;">' . date('d/m/Y H:i:s') . ' — IP : ' . ($_SERVER['REMOTE_ADDR'] ?? '?') . '</p>'
+        . '</div></body></html>';
+    $headers = "MIME-Version: 1.0\r\n"
+        . "Content-Type: text/html; charset=UTF-8\r\n"
+        . "From: Light Maestro <contact@light-maestro.com>\r\n";
+    try {
+        @mail(ADMIN_EMAIL, $subject, $body, $headers);
+    } catch (Throwable $e) {
+        error_log('[license] alerte admin impossible : ' . $e->getMessage());
+    }
+}
