@@ -1,7 +1,7 @@
 <?php
 /**
  * POST /auth/login.php
- * Connexion compte → retourne l'édition de licence active.
+ * Connexion compte — retourne l'édition de licence active.
  *
  * body : { email, password }
  * 200 : { token, edition, email, displayName }
@@ -21,6 +21,9 @@ $user = $stmt->fetch();
 if (!$user || !password_verify($password, $user['password_hash'])) {
     respond(['error' => 'invalid_credentials', 'message' => 'Identifiants invalides'], 401);
 }
+
+// Alerte admin : quelqu'un s'est connecté.
+notify_admin('Connexion', 'Utilisateur connecté : ' . $user['email'] . ' (édition ' . $user['edition'] . ')');
 
 // Le client attend aussi `stripe_customer_id` (optionnel) pour relancer un checkout.
 respond([

@@ -170,7 +170,13 @@
       var d=await call(mode==='register'?'/auth/register':'/auth/login',{email:email,password:pass});
       unlock({email:d.email||email,edition:d.edition||'free',token:d.token||''});
       setMsg('');
-    }catch(e){setMsg('Échec : '+e.message+'. Serveur de licence en cours d’activation ? → Support & FAQ.',true);}
+    }catch(e){
+      if(e.message.indexOf('existe déjà')>=0||e.message.indexOf('existe d\u00e9j\u00e0')>=0){
+        setMsg('Un compte existe déjà avec cet email — clique « Se connecter ».',true);
+      }else{
+        setMsg('Échec ('+(mode==='register'?'inscription':'connexion')+') : '+e.message,true);
+      }
+    }
   }
   $('dl-login').addEventListener('click',function(){go('login');});
   $('dl-register').addEventListener('click',function(){go('register');});
