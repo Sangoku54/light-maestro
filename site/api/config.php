@@ -1,14 +1,20 @@
 <?php
 /**
- * Light Maestro — Licence backend : configuration.
+ * ⚠️⚠️⚠️ NE JAMAIS UPLOADER CE FICHIER DEPUIS GIT VERS LE SERVEUR ⚠️⚠️⚠️
+ *
+ * Ce fichier contient les identifiants MySQL, Stripe et JWT du SERVEUR.
+ * La version git a des valeurs VIDES (sécurité — jamais de secrets dans le code).
+ * Le config.php qui fonctionne vit UNIQUEMENT sur ton hébergeur.
+ *
+ * Si tu l'écrases par accident : ré-édite ce fichier sur le serveur et
+ * remplis DB_HOST, DB_NAME, DB_USER, DB_PASS, STRIPE_SECRET_KEY, JWT_SECRET.
+ *
+ * ── Light Maestro — Licence backend : configuration. ──
  *
  * À personnaliser pour l'hébergement LWS :
  *   - les identifiants MySQL (fournis par LWS)
  *   - les clés d'API Stripe (tableau de bord Stripe → Développeurs → Clés d'API)
  *   - le secret du webhook (Stripe → Webhooks → votre endpoint → "Secret de signature")
- *
- * ⚠️ Ne jamais committer ce fichier avec de vraies valeurs secrètes.
- *    Fournir ici des valeurs par défaut vides et les renseigner sur le serveur.
  */
 
 // ── Base de données ────────────────────────────────────────────────
