@@ -33,7 +33,9 @@ try {
 
     $userId = (int)db()->lastInsertId();
     send_confirmation_email(strtolower($email), $displayName ?: null);
-    notify_admin('Nouvelle inscription', 'Compte créé : ' . strtolower($email) . ' (édition Gratuite)' . ($displayName ? ' — ' . $displayName : ''));
+    if (function_exists('notify_admin')) {
+        notify_admin('Nouvelle inscription', 'Compte créé : ' . strtolower($email) . ' (édition Gratuite)' . ($displayName ? ' — ' . $displayName : ''));
+    }
     respond([
         'token' => sign_token($userId),
         'edition' => 'free',
@@ -41,5 +43,6 @@ try {
         'displayName' => $displayName ?: null,
     ]);
 } catch (Throwable $e) {
-    respond(['error' => 'server', 'message' => 'Erreur serveur'], 500);
+    error_log('[register] ' . $e->getMessage() . ' — ' . $e->getFile() . ':' . $e->getLine());
+    respond(['error' => 'server', 'message' => 'Erreur serveur — ' . $e->getMessage()], 500);
 }

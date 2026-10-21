@@ -23,7 +23,9 @@ if (!$user || !password_verify($password, $user['password_hash'])) {
 }
 
 // Alerte admin : quelqu'un s'est connecté.
-notify_admin('Connexion', 'Utilisateur connecté : ' . $user['email'] . ' (édition ' . $user['edition'] . ')');
+if (function_exists('notify_admin')) {
+    notify_admin('Connexion', 'Utilisateur connecté : ' . $user['email'] . ' (édition ' . $user['edition'] . ')');
+}
 
 // Le client attend aussi `stripe_customer_id` (optionnel) pour relancer un checkout.
 respond([
