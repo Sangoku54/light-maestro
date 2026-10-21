@@ -43,6 +43,7 @@
       <div id="dl-ok" style="display:none">
         <h3 class="h3">✅ Téléchargement débloqué</h3>
         <p style="margin-top:8px">Connecté : <b id="dl-email-shown" style="color:white"></b> — édition <b id="dl-edition" style="color:#c084fc"></b>. Les liens ci-dessous sont actifs.</p>
+        <button id="dl-logout" class="btn btn-ghost" style="margin-top:10px; padding:6px 14px; font-size:11px">Se déconnecter</button>
       </div>
     </div>
     <div class="grid grid-2">
@@ -182,6 +183,12 @@
   $('dl-register').addEventListener('click',function(){go('register');});
   $('dl-btn-portable').addEventListener('click',function(){trackDownload('portable');});
   $('dl-btn-setup').addEventListener('click',function(){trackDownload('setup');});
+  $('dl-logout').addEventListener('click',function(){
+    try{sessionStorage.removeItem(K);}catch(e){}
+    session=null;
+    $('dl-ok').style.display='none';$('dl-form').style.display='block';
+    $('dl-email').value='';$('dl-pass').value='';setMsg('');
+  });
   try{var s=JSON.parse(sessionStorage.getItem(K)||'null');if(s&&s.email)unlock(s);}catch(e){}
 })();
 </script>
