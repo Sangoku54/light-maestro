@@ -49,7 +49,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
   const [showHelp, setShowHelp] = useState(false);
 
   return (
-    <header className="h-10 bg-[var(--bg-2)] border-b border-[var(--border)] grid grid-cols-[1fr_auto_1fr] items-center pl-3 pr-[150px] gap-2 select-none drag-region min-w-0 overflow-hidden">
+    <header className="h-10 bg-[var(--bg-2)] border-b border-[var(--border)] grid grid-cols-[minmax(0,1fr)_auto_auto] items-center pl-3 pr-[150px] gap-2 select-none drag-region min-w-0">
       {/* Left zone: logo + project/preset/audio context */}
       <div className="flex items-center gap-2 no-drag min-w-0 overflow-hidden">
         <div className="flex items-center gap-2">
@@ -112,7 +112,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
       {/* Right zone: actions */}
       {/* Right zone: actions — scroll horizontal sur écrans étroits (tablette),
           jamais de chevauchement : chaque contrôle reste cliquable. */}
-      <div className="flex items-center justify-end gap-2 no-drag min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>button]:shrink-0 [&>button]:min-h-[28px] [&>div]:shrink-0">
+      <div className="flex items-center justify-end gap-2 no-drag shrink-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>button]:shrink-0 [&>button]:min-h-[28px] [&>div]:shrink-0">
       {/* Open/Save */}
       <button
         onClick={() => (window as any).__lm_new?.()}

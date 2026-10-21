@@ -26,6 +26,7 @@
  */
 
 import type { LicenseEdition } from './types';
+import { net } from 'electron';
 
 /** URL du serveur de licence (backend PHP hébergé sur LWS). */
 export const LICENSE_API_URL = 'https://light-maestro.com/api';
@@ -35,6 +36,9 @@ export const LICENSE_OFFLINE_MODE = false;
 
 /** Édition simulée en mode hors-ligne (voir LICENSE_OFFLINE_MODE). */
 const OFFLINE_EDITION: LicenseEdition = 'full';
+
+/** Timeout des appels API (10 s) — sans ça, un firewall qui drop les paquets fait hanguer l'app indéfiniment. */
+const FETCH_TIMEOUT_MS = 10_000;
 
 export interface LicenseLoginResult {
   token: string | null;
@@ -59,10 +63,14 @@ async function postJson(
 ): Promise<any> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${LICENSE_API_URL}${path}`, {
+  // net.fetch = pile réseau Chromium (même gestion SSL que le navigateur)
+  // au lieu de fetch() Node.js/undici qui peut rejeter le certificat SSL
+  // de l'hébergeur alors qu'un navigateur l'accepte.
+  const res = await net.fetch(`${LICENSE_API_URL}${path}`, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
