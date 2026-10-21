@@ -25,10 +25,22 @@ if (!$priceId) {
     respond(['error' => 'invalid_edition', 'message' => "Édition inconnue: $edition"], 400);
 }
 
-$stmt = db()->prepare('SELECT email, stripe_customer_id FROM users WHERE id = ?');
+// Anti-double-paiement : un user Standard qui achète Full paierait 99 €
+// alors qu'il ne devrait payer que la différence (upgrade.php).
+$stmt = db()->prepare('SELECT edition, stripe_customer_id, email FROM users WHERE id = ?');
 $stmt->execute([$userId]);
 $user = $stmt->fetch();
 if (!$user) respond(['error' => 'invalid_token', 'message' => 'Utilisateur introuvable'], 401);
+if ($edition === 'standard' && $user['edition'] === 'standard') {
+    respond(['error' => 'already_owned', 'message' => 'Vous avez déjà la version Standard'], 400);
+}
+if ($edition === 'full' && $user['edition'] === 'full') {
+    respond(['error' => 'already_owned', 'message' => 'Vous avez déjà la version Complète'], 400);
+}
+if ($edition === 'full' && $user['edition'] === 'standard') {
+    // Redirige vers l'upgrade (différentiel 30 €)
+    respond(['error' => 'use_upgrade', 'message' => 'Vous avez la version Standard — utilisez l\'upgrade (30 € de différence)', 'upgrade_url' => '/api/stripe/upgrade.php'], 409);
+}
 
 $stripe = new StripeClient(STRIPE_SECRET_KEY);
 

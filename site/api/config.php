@@ -27,6 +27,9 @@ define('STRIPE_WEBHOOK_SECRET', '');
 // price_standard = 69 €, price_full = 99 € (one-shot).
 define('STRIPE_PRICE_STANDARD', '');
 define('STRIPE_PRICE_FULL', '');
+// Prix « Upgrade Standard → Full » (différentiel, ~30 €). À créer dans le
+// dashboard Stripe : produit "Upgrade" + prix one-shot 30 €.
+define('STRIPE_PRICE_UPGRADE', '');
 
 // ── JWT ─────────────────────────────────────────────────────────────
 // Secret servant à signer les jetons d'accès de l'app. Chaîne aléatoire longue.
