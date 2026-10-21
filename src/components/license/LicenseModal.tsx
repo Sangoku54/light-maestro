@@ -21,6 +21,7 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   // Vrai après l'ouverture du checkout Stripe : propose la vérification
@@ -199,14 +200,32 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
               </div>
               <div>
                 <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('license.password')}</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') doSubmit(); }}
-                  placeholder="••••••••"
-                  className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-200 focus:outline-none focus:border-purple-500/50"
-                />
+                <div className="relative w-full mt-1">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') doSubmit(); }}
+                    placeholder={showPassword ? '' : '••••••••'}
+                    className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-200 focus:outline-none focus:border-purple-500/50"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-purple-400 focus:outline-none"
+                    aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                  >
+                    <svg
+                      className={`inline w-4 h-4 ${showPassword ? 'text-purple-400' : 'text-gray-400'}`}
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path
+                        d="M1.5 4.5c0-.83.67-1.5 1.5-1.5h15c.83 0 1.5.67 1.5 1.5v9c0 .83-.67 1.5-1.5 1.5h-15c-.83 0-1.5-.67-1.5-1.5v-9zM7 9.5c0-.83.67-1.5 1.5-1.5h4c.83 0 1.5.67 1.5 1.5v4c0 .83-.67 1.5-1.5 1.5h-4c-.83 0-1.5-.67-1.5-1.5v-4zM7 16.5c0-.83.67-1.5 1.5-1.5h4c.83 0 1.5.67 1.5 1.5v4c0 .83-.67 1.5-1.5 1.5h-4c-.83 0-1.5-.67-1.5-1.5v-4zM3.5 12c0-.83.67-1.5 1.5-1.5h13c.83 0 1.5.67 1.5 1.5v4c0 .83-.67 1.5-1.5 1.5h-13c-.83 0-1.5-.67-1.5-1.5v-4zM20.5 12c0-.83.67-1.5 1.5-1.5h4c.83 0 1.5.67 1.5 1.5v4c0 .83-.67 1.5-1.5 1.5h-4c-.83 0-1.5-.67-1.5-1.5v-4z"
+                      />
+                    </svg>
+                  </button>
+                </div>
               </div>
 
               {state.loginError && (
