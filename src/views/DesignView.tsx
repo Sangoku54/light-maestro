@@ -221,11 +221,15 @@ const ShowWith3D: React.FC = () => {
     const id = (window as any).__lm_selectedShowId;
     if (id) updateShowStore(id, { musicians: nr } as any);
   }, [updateShowStore]);
-  const handleShowStageSceneChange = useCallback((cfg: StageScene) => {
+const handleShowStageSceneChange = useCallback((cfg: StageScene) => {
     setShowStageScene(cfg);
+    // ⚠️ NE PAS réinitialiser musicians ici — les musiciens du roster
+    // appartiennent au show en cours et doivent persister d'une page à l'autre,
+    // tout comme les positions de fixtures. La valeur actuelle du roster
+    // sera conservée par le store et réinjectée au prochain rendu.
     const id = (window as any).__lm_selectedShowId;
     if (id) updateShowStore(id, { stageScene: cfg } as any);
-  }, [updateShowStore]);
+}, [updateShowStore]);
   const float3DDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
   const float3DResizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
   const handleFloat3DDragStart = useCallback((e: React.MouseEvent) => {
