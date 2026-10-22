@@ -1988,21 +1988,33 @@ export const Stage3D: React.FC<{
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const ro = new ResizeObserver(() => {
-      const el = containerRef.current;
-      const camera = cameraRef.current;
-      const renderer = rendererRef.current;
-      if (!el || !camera || !renderer) return;
-      const W = el.clientWidth;
-      const H = el.clientHeight;
-      if (W === 0 || H === 0) return;
-      camera.aspect = W / H;
-      camera.updateProjectionMatrix();
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.setSize(W, H);
-    });
+    // Utilisation d'un flag et de requestAnimationFrame pour éviter la boucle
+    // ResizeObserver "loop completed with undelivered notifications" qui survient
+    // quand le redimensionnement du conteneur déclenche à nouveau le observateur.
+    let rafId = null;
+    const callBack = (entries) => {
+      if (rafId) return; // évite les appels en boucle
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const el = containerRef.current;
+        const camera = cameraRef.current;
+        const renderer = rendererRef.current;
+        if (!el || !camera || !renderer) return;
+        const W = el.clientWidth;
+        const H = el.clientHeight;
+        if (W === 0 || H === 0) return;
+        camera.aspect = W / H;
+        camera.updateProjectionMatrix();
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(W, H);
+      });
+    };
+    const ro = new ResizeObserver(callBack);
     ro.observe(container);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      if (rafId) cancelAnimationFrame(rafId);
+    };
   }, []);
 
   // ── Show/hide smoke ────────────────────────────────
