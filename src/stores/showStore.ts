@@ -1,5 +1,5 @@
-/**
- * Show Store — DMX fixture patch state management
+﻿/**
+ * Show Store â€” DMX fixture patch state management
  *
  * Holds the current show's patched fixtures and universe configuration.
  * Validates against address overlaps and universe boundaries.
@@ -16,7 +16,7 @@ import { defaultStageRigs, makeRig, migrateStageRigs, sanitizeRigUpdates, type R
 import { useAppStore } from './appStore';
 import { getLicenseLimits } from './licenseStore';
 
-// ─── Types ─────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export type FixtureTier = 'primary' | 'secondary' | 'tertiary' | 'other';
 
@@ -58,10 +58,10 @@ export interface FixtureGroup {
   color?: string;
 }
 
-// ─── Scene Types ───────────────────────────────────────────
+// â”€â”€â”€ Scene Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// ─── Stage 3D configuration (persisted per scene, shared with Stage3D) ───
-// @deprecated — replaced by `musicians` (free-form roster). Kept only so scenes
+// â”€â”€â”€ Stage 3D configuration (persisted per scene, shared with Stage3D) â”€â”€â”€
+// @deprecated â€” replaced by `musicians` (free-form roster). Kept only so scenes
 // saved before the roster feature can still be read and migrated.
 export type BandConfig = 'none' | 'solo' | 'solo-chanteuse' | 'duo' | 'trio' | 'quartet' | 'quintet' | 'sextet';
 export type StageScene = 'rear' | 'rear-front' | 'full' | 'empty';
@@ -69,7 +69,7 @@ export type StageScene = 'rear' | 'rear-front' | 'full' | 'empty';
 export interface SavedScene {
   id: string;
   name: string;
-  channels: Record<number, number>; // DMX address → value (0-255)
+  channels: Record<number, number>; // DMX address â†’ value (0-255)
   fadeIn: number;   // ms
   fadeOut: number;  // ms
   duration: number; // ms (0 = infinite/hold)
@@ -78,17 +78,17 @@ export interface SavedScene {
    *  Free string, normalized (trim + collapsed spaces) on write.
    *  Old files without this field load as "uncategorized". */
   folder?: string;
-  /** @deprecated — old fixed band preset, superseded by `musicians`. */
+  /** @deprecated â€” old fixed band preset, superseded by `musicians`. */
   bandConfig?: BandConfig;
-  /** Free-form musician roster (kind → count) shown on the 3D stage. */
+  /** Free-form musician roster (kind â†’ count) shown on the 3D stage. */
   musicians?: MusicianRoster;
   /** Truss layout. */
   stageScene?: StageScene;
-  /** EFX lié — si présent, la scène rejoue l'EFX en continu pendant sa durée (au lieu d'un snapshot statique). */
+  /** EFX liÃ© â€” si prÃ©sent, la scÃ¨ne rejoue l'EFX en continu pendant sa durÃ©e (au lieu d'un snapshot statique). */
   efxId?: string;
 }
 
-// ─── Show Manager Types ──────────────────────────────────
+// â”€â”€â”€ Show Manager Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface ShowTrackItem {
   id: string;
@@ -99,7 +99,7 @@ export interface ShowTrackItem {
   fadeOut: number;
   name: string;
   audioFileBase64?: string; // base64 data URL for audio tracks
-  audioRef?: string; // blob externalisé (userData/audio-<hash>.json) — sinon audio absent
+  audioRef?: string; // blob externalisÃ© (userData/audio-<hash>.json) â€” sinon audio absent
 }
 
 export interface ShowTrack {
@@ -117,14 +117,14 @@ export interface ShowData {
   duration: number;
   tracks: ShowTrack[];
   audioFileBase64?: string;
-  audioRef?: string; // blob audio externalisé (userData/audio-<hash>.json)
+  audioRef?: string; // blob audio externalisÃ© (userData/audio-<hash>.json)
   audioFileName?: string;
-  /** Vue 3D associée au show (pont + musiciens). */
+  /** Vue 3D associÃ©e au show (pont + musiciens). */
   musicians?: MusicianRoster;
   stageScene?: StageScene;
 }
 
-// ─── Chaser Types ──────────────────────────────────────────
+// â”€â”€â”€ Chaser Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface ChaserStep {
   sceneId: string;
@@ -141,7 +141,7 @@ export interface SavedChaser {
   speed: number; // BPM
 }
 
-// ─── EFX Types ───────────────────────────────────────────
+// â”€â”€â”€ EFX Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export type EfxPattern = 'Circle' | 'Line' | 'Eight' | 'Square' | 'Triangle' | 'Infinity' | 'Zigzag' | 'Spiral' | 'DoubleCircle' | 'Heart' | 'Wave' | 'Bounce' | 'Cross';
 
@@ -155,14 +155,14 @@ export interface SavedEffect {
   speed: number;
   xOffset: number;
   yOffset: number;
-  /** Décalage de phase entre fixtures (0..1 = fraction d'un cycle répartie
-   *  sur tout le groupe : 0 = synchronisées, 1 = vague complète sur un cycle). */
+  /** DÃ©calage de phase entre fixtures (0..1 = fraction d'un cycle rÃ©partie
+   *  sur tout le groupe : 0 = synchronisÃ©es, 1 = vague complÃ¨te sur un cycle). */
   spread?: number;
   fixtureIds: string[];
   createdAt: string;
 }
 
-// ─── Cue List Types (Theater-style sequential playback) ────
+// â”€â”€â”€ Cue List Types (Theater-style sequential playback) â”€â”€â”€â”€
 
 export interface CueListCue {
   id: string;
@@ -181,31 +181,31 @@ export interface FixturePos {
   h: number; // height multiplier (0-1, maps to 0-5m range)
   heading: number; // rotation in degrees (0-360), 0=front (toward audience)
   tilt?: number; // static tilt in degrees (-90 to +90)
-  zeroPan?: number; // point zéro pan (degrés) : décalage VISUEL du faisceau dans la 3D (comme une tare) ; le fader le déplace en permanence
-  zeroTilt?: number; // point zéro tilt (degrés) : décalage VISUEL du faisceau dans la 3D
-  centerPan?: number; // centre du mouvement autoscript pan (degrés), set par « Capturer » : direction du byte actuel
-  centerTilt?: number; // centre du mouvement autoscript tilt (degrés), set par « Capturer »
+  zeroPan?: number; // point zÃ©ro pan (degrÃ©s) : dÃ©calage VISUEL du faisceau dans la 3D (comme une tare) ; le fader le dÃ©place en permanence
+  zeroTilt?: number; // point zÃ©ro tilt (degrÃ©s) : dÃ©calage VISUEL du faisceau dans la 3D
+  centerPan?: number; // centre du mouvement autoscript pan (degrÃ©s), set par Â« Capturer Â» : direction du byte actuel
+  centerTilt?: number; // centre du mouvement autoscript tilt (degrÃ©s), set par Â« Capturer Â»
   beamAngle?: number; // beam opening angle in radians (0.02-0.8)
   thumbnailScale?: number; // sprite scale multiplier (0.2-2.0, default 0.75)
   mountMode?: 'top' | 'ground' | 'rear' | 'hanging'; // beam direction: top=down, ground=up, rear=forward, hanging=horizontal vers le public
-  /** Support physique visible en 3D (pont/totem/trépied/sol). Absent = 'truss'
-   *  (rendu historique : rien de dessiné, projets existants inchangés). */
+  /** Support physique visible en 3D (pont/totem/trÃ©pied/sol). Absent = 'truss'
+   *  (rendu historique : rien de dessinÃ©, projets existants inchangÃ©s). */
   support?: FixtureSupport;
-  /** Longueur de barre (mètres, 1-12) pour frontBar/backBar. Longueur LIBRE,
-   *  jamais dérivée de la taille des plateaux. Absent = 4 m. */
+  /** Longueur de barre (mÃ¨tres, 1-12) pour frontBar/backBar. Longueur LIBRE,
+   *  jamais dÃ©rivÃ©e de la taille des plateaux. Absent = 4 m. */
   barSpan?: number;
-  /** Barre suspendue par câbles (true, défaut) vs posée sur pieds (false). */
+  /** Barre suspendue par cÃ¢bles (true, dÃ©faut) vs posÃ©e sur pieds (false). */
   barHung?: boolean;
 }
 
 /**
  * Per-preset 3D view state. Captures everything the user can configure in the
- * floating Stage3D panel so it round-trips through .lmpreset (save → export →
- * re-import → load) and stays in sync when the same preset is loaded twice.
+ * floating Stage3D panel so it round-trips through .lmpreset (save â†’ export â†’
+ * re-import â†’ load) and stays in sync when the same preset is loaded twice.
  *
- * - cameraPosition / cameraTarget — OrbitControls free-flight state (drag, zoom).
- *   Absent → Stage3D falls back to the hardcoded "audience" preset.
- * - showBeams / showSmoke / showLabels / directMode — toolbar toggles.
+ * - cameraPosition / cameraTarget â€” OrbitControls free-flight state (drag, zoom).
+ *   Absent â†’ Stage3D falls back to the hardcoded "audience" preset.
+ * - showBeams / showSmoke / showLabels / directMode â€” toolbar toggles.
  *
  * Optional fields are backward-compatible with presets saved before this type
  * existed (they just load as defaults).
@@ -222,10 +222,10 @@ export interface View3DState {
 export interface SongPreset {
   id: string;
   name: string;
-  /** Audio complet en base64. Absent si le blob est externalisé (audioRef) —
+  /** Audio complet en base64. Absent si le blob est externalisÃ© (audioRef) â€”
    *  le playback DMX passe sur horloge virtuelle sans audio. */
   audioFileBase64?: string;
-  audioRef?: string; // blob audio externalisé (userData/audio-<hash>.json)
+  audioRef?: string; // blob audio externalisÃ© (userData/audio-<hash>.json)
   audioFileName: string;
   dmxCues: DmxCue[];
   quickShow: any;
@@ -239,10 +239,10 @@ export interface SongPreset {
   dimmerTracks?: any[];
   chaserTracks?: any[];
   disabledFixtures?: string[];
-  /** Vue 3D associée au preset (pont + musiciens). */
+  /** Vue 3D associÃ©e au preset (pont + musiciens). */
   musicians?: MusicianRoster;
   stageScene?: StageScene;
-  /** Configuration de la vue 3D (caméra, options d'affichage) associée au preset. */
+  /** Configuration de la vue 3D (camÃ©ra, options d'affichage) associÃ©e au preset. */
   view3D?: View3DState;
   createdAt: string;
 }
@@ -254,17 +254,17 @@ export interface SavedCueList {
   currentCueIndex: number;
 }
 
-// ─── Helpers ───────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/** Un preset a de l'audio si base64 direct ou référence de blob externalisé. */
+/** Un preset a de l'audio si base64 direct ou rÃ©fÃ©rence de blob externalisÃ©. */
 export function presetHasAudio(p: any): boolean {
   return !!(p?.audioFileBase64 || (p as any)?.audioDataBase64 || p?.audioRef);
 }
 
 /** Choisit le meilleur preset parmi les correspondances id/nom : celui qui a
  *  de l'audio d'abord. Le store peut contenir des doublons homonymes dont
- *  certains sans son (import d'un .lmpreset sans audio embarqué ayant écrasé
- *  l'entrée) — le widget ne doit jamais jouer le doublon muet. */
+ *  certains sans son (import d'un .lmpreset sans audio embarquÃ© ayant Ã©crasÃ©
+ *  l'entrÃ©e) â€” le widget ne doit jamais jouer le doublon muet. */
 export function findBestSongPreset(
   presets: SongPreset[], songId?: string, songName?: string,
 ): SongPreset | undefined {
@@ -351,24 +351,24 @@ interface ShowState {
   fixturePositions: Record<string, FixturePos>;
   stageDims: { width: number; depth: number };
   setStageDims: (dims: { width: number; depth: number }) => void;
-  /** Plateaux multi-rects (podium, runway en T…). Repère normalisé 0-1
-   *  (même repère que FixturePos), hauteurs en mètres. Défaut = plateau
-   *  unique identique à l'ancien rectangle (rendu inchangé). */
+  /** Plateaux multi-rects (podium, runway en Tâ€¦). RepÃ¨re normalisÃ© 0-1
+   *  (mÃªme repÃ¨re que FixturePos), hauteurs en mÃ¨tres. DÃ©faut = plateau
+   *  unique identique Ã  l'ancien rectangle (rendu inchangÃ©). */
   stageDecks: StageDeck[];
   setStageDecks: (decks: StageDeck[]) => void;
   addStageDeck: (deck?: Partial<StageDeck>) => string;
   updateStageDeck: (id: string, updates: Partial<StageDeck>) => void;
   removeStageDeck: (id: string) => void;
-  /** Retour à la configuration initiale (plateau unique historique). */
+  /** Retour Ã  la configuration initiale (plateau unique historique). */
   resetStageDecks: () => void;
-  /** Structures libres placées dans le décor (ponts, barres, totems, T),
-   *  indépendantes des fixtures — avec ou sans projecteur dessus. */
+  /** Structures libres placÃ©es dans le dÃ©cor (ponts, barres, totems, T),
+   *  indÃ©pendantes des fixtures â€” avec ou sans projecteur dessus. */
   stageRigs: StageRig[];
   setStageRigs: (rigs: StageRig[]) => void;
   addStageRig: (kind: RigKind) => string;
   updateStageRig: (id: string, updates: Partial<StageRig>) => void;
    removeStageRig: (id: string) => void;
-   /** Retour à la configuration initiale (aucune structure). */
+   /** Retour Ã  la configuration initiale (aucune structure). */
    resetStageRigs: () => void;
    setFixturePosition: (id: string, pos: Partial<FixturePos>) => void;
   setFixturePositions: (positions: Record<string, FixturePos>) => void;
@@ -383,7 +383,7 @@ interface ShowState {
   getGroupsByUniverse: (universeId: string) => FixtureGroup[];
   setFixtureGroups: (groups: FixtureGroup[]) => void;
 
-  // Color palettes (réutilisables : appliquer + remplacer partout)
+  // Color palettes (rÃ©utilisables : appliquer + remplacer partout)
   colorPalettes: Array<{ id: string; name: string; hex: string; groupIds: string[] }>;
   addColorPalette: (name: string, hex: string, groupIds?: string[]) => string;
   updateColorPalette: (id: string, updates: { name?: string; hex?: string; groupIds?: string[] }) => void;
@@ -398,14 +398,14 @@ interface ShowState {
   createScene: (name: string) => string;
   updateScene: (id: string, updates: Partial<Pick<SavedScene, 'name' | 'channels' | 'fadeIn' | 'fadeOut' | 'duration' | 'folder' | 'musicians' | 'stageScene'>>) => void;
   deleteScene: (id: string) => void;
-  /** Duplique une scène (canaux, fondus, dossier, EFX lié…) avec un nouvel id. Retourne le nouvel id ou null. */
+  /** Duplique une scÃ¨ne (canaux, fondus, dossier, EFX liÃ©â€¦) avec un nouvel id. Retourne le nouvel id ou null. */
   duplicateScene: (id: string) => string | null;
   getScene: (id: string) => SavedScene | undefined;
   setScenes: (scenes: SavedScene[]) => void;
   setSceneFolders: (folders: string[]) => void;
   getSceneCount: () => number;
 
-  // Scenes — folder classification (declared folders + derived ones)
+  // Scenes â€” folder classification (declared folders + derived ones)
   /** Create an explicit folder. Returns the normalized name or null if empty/duplicate. */
   createFolder: (name: string) => string | null;
   /** Rename a folder: updates the declared list AND every scene carrying it. */
@@ -457,7 +457,7 @@ interface ShowState {
   updateSongPreset: (id: string, updates: Partial<SongPreset>) => void;
   setSongPresets: (presets: SongPreset[]) => void;
 
-  // MTC markers (lot #15) — cues sur timecode
+  // MTC markers (lot #15) â€” cues sur timecode
   mtcMarkers: MtcMarker[];
   addMtcMarker: (marker: Omit<MtcMarker, 'id'>) => string;
   updateMtcMarker: (id: string, updates: Partial<MtcMarker>) => void;
@@ -465,7 +465,7 @@ interface ShowState {
   setMtcMarkers: (markers: MtcMarker[]) => void;
 }
 
-// ─── Store ─────────────────────────────────────────────────
+// â”€â”€â”€ Store â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const UNIVERSE_STORAGE_KEY = 'lightmaestro.universes.v1';
 
@@ -494,12 +494,12 @@ export const useShowStore = create<ShowState>((set, get) => ({
   patchFixture: (fixture) => {
     const { patchedFixtures } = get();
 
-    // ── Licence : limite de fixtures (édition gratuite = 1 fixture) ──
+    // â”€â”€ Licence : limite de fixtures (Ã©dition gratuite = 1 fixture) â”€â”€
     try {
       const limit = getLicenseLimits().maxFixtures;
       if (Number.isFinite(limit) && patchedFixtures.length >= limit) {
         return {
-          error: `Licence gratuite limitée à ${limit} fixture(s). Passez à la version standard ou complète pour en ajouter davantage.`,
+          error: `Licence gratuite limitÃ©e Ã  ${limit} fixture(s). Passez Ã  la version standard ou complÃ¨te pour en ajouter davantage.`,
         };
       }
     } catch { /* licence indisponible : pas de bridage */ }
@@ -507,14 +507,14 @@ export const useShowStore = create<ShowState>((set, get) => ({
     // Validate address boundaries
     if (fixture.startAddress < 1 || fixture.startAddress > DMX_MAX_ADDRESS) {
       return {
-        error: `Start address must be 1–${DMX_MAX_ADDRESS}, got ${fixture.startAddress}`,
+        error: `Start address must be 1â€“${DMX_MAX_ADDRESS}, got ${fixture.startAddress}`,
       };
     }
 
     const endAddress = fixture.startAddress + fixture.channelCount - 1;
     if (endAddress > DMX_MAX_ADDRESS) {
       return {
-        error: `Fixture addresses ${fixture.startAddress}–${endAddress} exceed universe boundary (max ${DMX_MAX_ADDRESS})`,
+        error: `Fixture addresses ${fixture.startAddress}â€“${endAddress} exceed universe boundary (max ${DMX_MAX_ADDRESS})`,
       };
     }
 
@@ -524,7 +524,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
       const pfEnd = pf.startAddress + pf.channelCount - 1;
       if (fixture.startAddress <= pfEnd && endAddress >= pf.startAddress) {
         return {
-          error: `Address overlap: "${pf.name}" occupies ${pf.startAddress}–${pfEnd}, conflicts with ${fixture.startAddress}–${endAddress}`,
+          error: `Address overlap: "${pf.name}" occupies ${pf.startAddress}â€“${pfEnd}, conflicts with ${fixture.startAddress}â€“${endAddress}`,
         };
       }
     }
@@ -589,7 +589,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
     if (!fixture) return { error: 'Fixture not found' };
 
     if (newAddress < 1 || newAddress > DMX_MAX_ADDRESS) {
-      return { error: `Address must be 1–${DMX_MAX_ADDRESS}` };
+      return { error: `Address must be 1â€“${DMX_MAX_ADDRESS}` };
     }
 
     const endAddress = newAddress + fixture.channelCount - 1;
@@ -602,7 +602,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
       if (pf.id === id || pf.universeId !== fixture.universeId) continue;
       const pfEnd = pf.startAddress + pf.channelCount - 1;
       if (newAddress <= pfEnd && endAddress >= pf.startAddress) {
-        return { error: `Overlap with "${pf.name}" (${pf.startAddress}–${pfEnd})` };
+        return { error: `Overlap with "${pf.name}" (${pf.startAddress}â€“${pfEnd})` };
       }
     }
 
@@ -634,12 +634,12 @@ export const useShowStore = create<ShowState>((set, get) => ({
   },
 
   addShowUniverse: (config) => {
-    // ── Licence : limite d'univers (gratuite + standard = 1 univers) ──
+    // â”€â”€ Licence : limite d'univers (gratuite + standard = 1 univers) â”€â”€
     try {
       const limit = getLicenseLimits().maxUniverses;
       if (Number.isFinite(limit) && get().universes.length >= limit) {
         return {
-          error: `Licence actuelle limitée à ${limit} univers. Passez à la version complète pour en ajouter davantage.`,
+          error: `Licence actuelle limitÃ©e Ã  ${limit} univers. Passez Ã  la version complÃ¨te pour en ajouter davantage.`,
         };
       }
     } catch { /* licence indisponible : pas de bridage */ }
@@ -730,7 +730,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
     return get().patchedFixtures.find((f) => f.id === id);
   },
 
-  // ── Fixture Positions ──
+  // â”€â”€ Fixture Positions â”€â”€
   fixturePositions: {},
   _clipboardFixtureId: null,
 
@@ -768,7 +768,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
           cy: 0.7,
           w: 0.4,
           d: 0.3,
-          // Empilé visible d'office (jamais enterré) ; l'utilisateur ajuste H ensuite.
+          // EmpilÃ© visible d'office (jamais enterrÃ©) ; l'utilisateur ajuste H ensuite.
           h: defaultNewDeckHeight(state.stageDecks),
           rot: 0,
           ...deck,
@@ -779,7 +779,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
     return id;
   },
   updateStageDeck: (id, updates) => {
-    // Champs vides/invalides ignorés (jamais de NaN/0 accidentel en store).
+    // Champs vides/invalides ignorÃ©s (jamais de NaN/0 accidentel en store).
     const clean = sanitizeDeckUpdates(updates);
     if (Object.keys(clean).length === 0) return;
     set((state) => ({
@@ -789,7 +789,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
   },
   removeStageDeck: (id) => {
     set((state) => ({
-      // Toujours ≥ 1 plateau (la scène ne disparaît jamais).
+      // Toujours â‰¥ 1 plateau (la scÃ¨ne ne disparaÃ®t jamais).
       stageDecks: state.stageDecks.length > 1 ? state.stageDecks.filter((d) => d.id !== id) : state.stageDecks,
     }));
     useAppStore.getState().markDirty();
@@ -808,7 +808,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
       const sameKind = state.stageRigs.filter((r) => r.kind === kind).length;
       const rig = makeRig(id, kind, state.stageRigs.length + 1);
       if (sameKind > 0) {
-        // Décale chaque nouveau support du même type pour ne pas l'empiler
+        // DÃ©cale chaque nouveau support du mÃªme type pour ne pas l'empiler
         // exactement sur l'existant (sinon invisible, on croit que rien ne se passe).
         rig.cx = Math.min(1.3, rig.cx + 0.07 * sameKind);
         const side = sameKind % 2 === 0 ? 1 : -1;
@@ -842,11 +842,11 @@ export const useShowStore = create<ShowState>((set, get) => ({
        const col = index % 6;
        const row = Math.floor(index / 6);
        const isOverhead = fixtureType === 'moving_head' || fixtureType === 'scanner';
-       // Auto-détection du mountMode selon la position sur la scène :
-       // - Arrière (y > 0.75) : fixture « accrochée » derrière → faisceau vers l'avant
-       // - Devant (y < 0.25) : fixture au sol devant → faisceau vers l'arrière
-       // - Côtés (x < 0.25 ou x > 0.75) : fixture latérale au sol → faisceau vers le centre
-       // - Centre : par défaut hanging (faisceau vers le public)
+       // Auto-dÃ©tection du mountMode selon la position sur la scÃ¨ne :
+       // - ArriÃ¨re (y > 0.75) : fixture Â« accrochÃ©e Â» derriÃ¨re â†’ faisceau vers l'avant
+       // - Devant (y < 0.25) : fixture au sol devant â†’ faisceau vers l'arriÃ¨re
+       // - CÃ´tÃ©s (x < 0.25 ou x > 0.75) : fixture latÃ©rale au sol â†’ faisceau vers le centre
+       // - Centre : par dÃ©faut hanging (faisceau vers le public)
        const normX = 0.1 + col * 0.16;
        const normY = 0.1 + row * 0.18;
        let mountMode: FixturePos['mountMode'] = 'hanging';
@@ -868,7 +868,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
      });
    },
 
-  // ── Fixture Groups ──
+  // â”€â”€ Fixture Groups â”€â”€
   fixtureGroups: [],
 
   addGroup: (name, fixtureIds, color) => {
@@ -904,7 +904,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
     useAppStore.getState().markDirty();
   },
 
-  // ── Color palettes ──
+  // â”€â”€ Color palettes â”€â”€
   colorPalettes: [],
   addColorPalette: (name, hex, groupIds = []) => {
     const id = `pal-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -943,7 +943,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
     useAppStore.getState().markDirty();
   },
 
-  // ── Scenes ──
+  // â”€â”€ Scenes â”€â”€
   scenes: [],
   sceneFolders: [],
 
@@ -994,7 +994,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
   },
 
   // Create an explicit folder. Returns the normalized name (or null when
-  // empty / already declared — case-sensitive, no silent case-folding).
+  // empty / already declared â€” case-sensitive, no silent case-folding).
   createFolder: (name) => {
     const n = normalizeFolderName(name);
     if (!n) return null;
@@ -1007,7 +1007,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   // Rename a folder: updates the declared list AND every scene carrying it.
   // Empty newName = clearFolder semantics (scenes become uncategorized, the
-  // declared folder entity stays — same contract as clearFolder).
+  // declared folder entity stays â€” same contract as clearFolder).
   renameFolder: (oldName, newName) => {
     const from = normalizeFolderName(oldName);
     const to = normalizeFolderName(newName);
@@ -1097,7 +1097,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   getSceneCount: () => get().scenes.length,
 
-  // ── Chasers ──
+  // â”€â”€ Chasers â”€â”€
   chasers: [],
 
   createChaser: (name) => {
@@ -1141,7 +1141,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   getChaserCount: () => get().chasers.length,
 
-  // ── Effects (EFX) ──
+  // â”€â”€ Effects (EFX) â”€â”€
   effects: [],
 
   createEffect: (name) => {
@@ -1224,7 +1224,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
     useAppStore.getState().markDirty();
   },
 
-  // ── Cue Lists (theater-style) ──
+  // â”€â”€ Cue Lists (theater-style) â”€â”€
   cueLists: [],
 
   createCueList: (name) => {
@@ -1267,7 +1267,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   getCueListCount: () => get().cueLists.length,
 
-  // ── Shows (Show Manager) ──
+  // â”€â”€ Shows (Show Manager) â”€â”€
   shows: [],
 
   createShow: (name) => {
@@ -1310,7 +1310,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   getShowCount: () => get().shows.length,
 
-  // ── Song Presets (Jukebox) ──
+  // â”€â”€ Song Presets (Jukebox) â”€â”€
   songPresets: [],
 
   addSongPreset: (preset) => {
@@ -1346,7 +1346,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
     useAppStore.getState().markDirty();
   },
 
-  // ── MTC markers (lot #15) — cues sur timecode ──
+  // â”€â”€ MTC markers (lot #15) â€” cues sur timecode â”€â”€
   mtcMarkers: [],
 
   addMtcMarker: (marker) => {
@@ -1376,7 +1376,8 @@ export const useShowStore = create<ShowState>((set, get) => ({
   },
 }));
 
-// ─── Fixture color palette ─────────────────────────────────
+// â”€â”€â”€ Fixture color palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 
 const FIXTURE_COLORS = [
   '#ff0064', '#6400ff', '#00c8ff', '#ffc800',
@@ -1390,3 +1391,4 @@ const FIXTURE_COLORS = [
 export function getFixtureColor(index: number): string {
   return FIXTURE_COLORS[index % FIXTURE_COLORS.length];
 }
+

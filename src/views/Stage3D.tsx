@@ -673,6 +673,9 @@ export const Stage3D: React.FC<{
   };
   const handleStageSceneChange = (cfg: StageScene) => {
     setStageSceneInternal(cfg);
+    // ⚠️ NE PAS réinitialiser fixturePositions ici — les positions de fixtures
+    // appartiennent au projet en cours et doivent persister d'une page à l'autre.
+    // Le nettoyage des meshes Three.js est géré séparément (useEffect ci-dessous).
     onStageSceneChange?.(cfg);
   };
 
