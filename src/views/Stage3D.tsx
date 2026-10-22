@@ -2160,14 +2160,22 @@ export const Stage3D: React.FC<{
   // ── Truss visibility by stage scene ────────────────
   useEffect(() => {
     const tr = trussBeamsRef.current;
+    // Déterminer si on est en mode "scène vide" (aucun pont implémenté)
     const isEmpty = stageScene === 'empty';
     // Back beam — hidden en scène vide
     if (tr.back) tr.back.visible = !isEmpty;
-    // Front beam: rear-front or full
-    if (tr.front) tr.front.visible = !isEmpty && stageScene !== 'rear';
-    // Side beams: full only
-    if (tr.left) tr.left.visible = !isEmpty && stageScene === 'full';
-    if (tr.right) tr.right.visible = !isEmpty && stageScene === 'full';
+    // Front beam: rear-front ou full — maisHidden en scène vide impérativement
+    if (tr.front) {
+      // S'assurer que en mode "vide", les ponts sont toujours cachés
+      tr.front.visible = !isEmpty && (stageScene === 'rear-front' || stageScene === 'full');
+    }
+    // Side beams: full only —Hidden en scène vide impérativement
+    if (tr.left) {
+      tr.left.visible = !isEmpty && stageScene === 'full';
+    }
+    if (tr.right) {
+      tr.right.visible = !isEmpty && stageScene === 'full';
+    }
     // Poles: back corners always visible sauf vide; front corners pour rear-front/full
     for (const pole of tr.poles) {
       const corner: string = pole.userData.corner || '';
