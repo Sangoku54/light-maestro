@@ -11,6 +11,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useShowStore, type SongPreset } from '../stores/showStore';
+import { useAppStore } from '../stores/appStore';
 import { loadFixtureDefinitions } from '../hooks/dmx-cues';
 import { useDmxPlayback } from '../hooks/dmx-playback';
 import { genCues } from '../views/QuickShowView';
@@ -61,6 +62,12 @@ export const SongPresetPlayer: React.FC<{
   preset: SongPreset;
   onEnded: () => void;
 }> = ({ preset, onEnded }) => {
+  const app = useAppStore();
+  // Reset audioActive to false when the song preset player mounts,
+  // preventing interference from normal scene playback (which may set
+  // audioActive = true). This ensures song presets always start with
+  // a clean audio state.
+  app.setQuickShow({ audioActive: false });
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
   const fixturePositions = useShowStore((s) => s.fixturePositions);
   const fixturePositionsRef = useRef(fixturePositions);
