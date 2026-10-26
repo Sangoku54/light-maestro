@@ -12,7 +12,8 @@ export type MusicianKind =
   | 'cuivre'
   | 'dj';
 
-export type MusicianRoster = Partial<Record<MusicianKind, number>>;
+export type MusicianPosition = { x: number; z: number };
+export type MusicianRoster = Partial<Record<MusicianKind, number>> & { positions?: Record<string, MusicianPosition> };
 
 // Display order in the UI dropdown (front line → back line).
 export const MUSICIAN_KINDS: MusicianKind[] = [
@@ -62,12 +63,12 @@ export const DEFAULT_ROSTER: MusicianRoster = {
 
 export function isRosterEmpty(roster: MusicianRoster | undefined): boolean {
   if (!roster) return true;
-  return Object.values(roster).every((n) => (n ?? 0) <= 0);
+  return MUSICIAN_KINDS.every((k) => (roster[k] ?? 0) <= 0);
 }
 
 export function rosterTotal(roster: MusicianRoster | undefined): number {
   if (!roster) return 0;
-  return Object.values(roster).reduce((sum, n) => sum + (n ?? 0), 0);
+  return MUSICIAN_KINDS.reduce((sum, k) => sum + (Math.max(0, Math.floor(roster[k] ?? 0))), 0);
 }
 
 // Clamp counts, drop kinds with 0, keep a stable key order.
@@ -78,6 +79,8 @@ export function normalizeRoster(roster: MusicianRoster | undefined): MusicianRos
     const n = Math.max(0, Math.floor(roster[k] ?? 0));
     if (n > 0) out[k] = n;
   }
+  // Preserve custom positions across normalization
+  if (roster.positions) out.positions = roster.positions;
   return out;
 }
 

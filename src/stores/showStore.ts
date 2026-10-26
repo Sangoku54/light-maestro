@@ -332,8 +332,9 @@ interface ShowState {
   moveFixture: (id: string, newAddress: number) => { error?: string };
   getFixturesByTier: (universeId: string, tier: FixtureTier) => PatchedFixture[];
   unpatchFixture: (id: string) => void;
-  copyFixtureId: (id: string) => void;
-  pasteFixture: () => { id: string } | { error: string };
+   copyFixtureId: (id: string) => void;
+   pasteFixture: () => { id: string } | { error: string };
+   duplicateFixture: (id: string) => { id: string } | { error: string };
   /** ID de la fixture en presse-papier 3D (Ctrl+C dans Stage3D). */
   _clipboardFixtureId: string | null;
   updateFixtureTier: (id: string, tier: FixtureTier) => void;
@@ -351,28 +352,39 @@ interface ShowState {
   fixturePositions: Record<string, FixturePos>;
   stageDims: { width: number; depth: number };
   setStageDims: (dims: { width: number; depth: number }) => void;
-  /** Plateaux multi-rects (podium, runway en Tâ€¦). RepÃ¨re normalisÃ© 0-1
-   *  (mÃªme repÃ¨re que FixturePos), hauteurs en mÃ¨tres. DÃ©faut = plateau
-   *  unique identique Ã  l'ancien rectangle (rendu inchangÃ©). */
+  /** Plateaux multi-rects (podium, runway en T…). Repère normalisé 0-1
+   *  (même repère que FixturePos), hauteurs en mètres. Défaut = plateau
+   *  unique identique à l'ancien rectangle (rendu inchangé). */
   stageDecks: StageDeck[];
   setStageDecks: (decks: StageDeck[]) => void;
   addStageDeck: (deck?: Partial<StageDeck>) => string;
   updateStageDeck: (id: string, updates: Partial<StageDeck>) => void;
   removeStageDeck: (id: string) => void;
-  /** Retour Ã  la configuration initiale (plateau unique historique). */
+  /** Retour à la configuration initiale (plateau unique historique). */
   resetStageDecks: () => void;
-  /** Structures libres placÃ©es dans le dÃ©cor (ponts, barres, totems, T),
-   *  indÃ©pendantes des fixtures â€” avec ou sans projecteur dessus. */
+  /** Structures libres placées dans le décor (ponts, barres, totems, T),
+   *  indépendantes des fixtures — avec ou sans projecteur dessus. */
   stageRigs: StageRig[];
   setStageRigs: (rigs: StageRig[]) => void;
   addStageRig: (kind: RigKind) => string;
   updateStageRig: (id: string, updates: Partial<StageRig>) => void;
    removeStageRig: (id: string) => void;
-   /** Retour Ã  la configuration initiale (aucune structure). */
+   /** Retour à la configuration initiale (aucune structure). */
    resetStageRigs: () => void;
    setFixturePosition: (id: string, pos: Partial<FixturePos>) => void;
   setFixturePositions: (positions: Record<string, FixturePos>) => void;
   initFixturePosition: (id: string, fixtureType: string, index: number) => void;
+
+  // Project-level 3D view config (survives page changes + project reopen)
+  /** Vocaux virtuels (silhouettes sur la scène 3D). Remplace bandConfig déprécié. */
+  musicians?: MusicianRoster;
+  setMusicians: (m: MusicianRoster) => void;
+  /** Configuration de la vue 3D (caméra, options d'affichage) associée au preset. */
+  view3D?: View3DState;
+  setView3D: (v: View3DState) => void;
+  /** Ponts/supports de la scène 3D (layout truss) au niveau projet. */
+  stageScene?: StageScene;
+  setProjectStageScene: (cfg: StageScene) => void;
 
   // Fixture groups
   fixtureGroups: FixtureGroup[];
@@ -490,6 +502,9 @@ export const useShowStore = create<ShowState>((set, get) => ({
   stageDecks: defaultStageDecks(),
   stageRigs: defaultStageRigs(),
   universes: loadUniverses(),
+  musicians: undefined,
+  view3D: undefined,
+  stageScene: undefined,
 
   patchFixture: (fixture) => {
     const { patchedFixtures } = get();
@@ -544,9 +559,14 @@ export const useShowStore = create<ShowState>((set, get) => ({
   },
 
   unpatchFixture: (id) => {
-    set((state) => ({
-      patchedFixtures: state.patchedFixtures.filter((f) => f.id !== id),
-    }));
+    set((state) => {
+      const newPositions = { ...state.fixturePositions };
+      delete newPositions[id];
+      return {
+        patchedFixtures: state.patchedFixtures.filter((f) => f.id !== id),
+        fixturePositions: newPositions,
+      };
+    });
     useAppStore.getState().markDirty();
   },
 
@@ -572,6 +592,37 @@ export const useShowStore = create<ShowState>((set, get) => ({
     }));
     useAppStore.getState().markDirty();
     return { id };
+  },
+
+  duplicateFixture: (id: string) => {
+    const { patchedFixtures } = get();
+    const src = patchedFixtures.find((f) => f.id === id);
+    if (!src) return { error: 'Fixture not found' };
+    // Try first free address immediately after the source fixture
+    const candidateAddr = src.startAddress + src.channelCount;
+    const end = candidateAddr + src.channelCount - 1;
+    const universeFixtures = patchedFixtures
+      .filter((f) => f.universeId === src.universeId && f.id !== id)
+      .sort((a, b) => a.startAddress - b.startAddress);
+    let addr = candidateAddr;
+    for (const pf of universeFixtures) {
+      if (addr + src.channelCount - 1 < pf.startAddress) break;
+      if (addr + src.channelCount - 1 >= pf.startAddress) {
+        addr = pf.startAddress + pf.channelCount;
+      }
+    }
+    if (addr + src.channelCount - 1 > DMX_MAX_ADDRESS) return { error: 'No free address available' };
+    const newId = generateId();
+    const cloned: PatchedFixture = { ...src, id: newId, name: `${src.name} (copie)`, startAddress: addr };
+    set((state) => ({
+      patchedFixtures: [...state.patchedFixtures, cloned],
+      fixturePositions: {
+        ...state.fixturePositions,
+        [newId]: { ...state.fixturePositions[id], x: Math.min(1.3, (state.fixturePositions[id]?.x ?? 0.5) + 0.05) },
+      },
+    }));
+    useAppStore.getState().markDirty();
+    return { id: newId };
   },
 
   setFixtureName: (id, name) => {
@@ -940,6 +991,20 @@ export const useShowStore = create<ShowState>((set, get) => ({
 
   setFixtureGroups: (groups) => {
     set({ fixtureGroups: groups });
+    useAppStore.getState().markDirty();
+  },
+
+  // ── Project-level 3D view config ──
+  setMusicians: (musicians) => {
+    set({ musicians });
+    useAppStore.getState().markDirty();
+  },
+  setView3D: (view3D) => {
+    set({ view3D });
+    useAppStore.getState().markDirty();
+  },
+  setProjectStageScene: (stageScene) => {
+    set({ stageScene });
     useAppStore.getState().markDirty();
   },
 

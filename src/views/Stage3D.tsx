@@ -247,6 +247,7 @@ function clamp01(v: number): number {
 
 // Build per-instance positions (id `${kind}-${i}`) from a roster, spreading
 // multiple members of the same kind horizontally around the default x.
+// Custom positions stored in roster.positions are preserved; new instances get defaults.
 function buildRosterPositions(roster: MusicianRoster): Record<string, { x: number; z: number }> {
   const map: Record<string, { x: number; z: number }> = {};
   for (const kind of MUSICIAN_KINDS) {
@@ -254,8 +255,14 @@ function buildRosterPositions(roster: MusicianRoster): Record<string, { x: numbe
     if (count <= 0) continue;
     const base = DEFAULT_POSITIONS[kind];
     for (let i = 0; i < count; i++) {
-      const offset = (i - (count - 1) / 2) * MUSICIAN_SPREAD;
-      map[`${kind}-${i}`] = { x: clamp01(base.x + offset), z: base.z };
+      const key = `${kind}-${i}`;
+      const stored = roster.positions?.[key];
+      if (stored) {
+        map[key] = stored;
+      } else {
+        const offset = (i - (count - 1) / 2) * MUSICIAN_SPREAD;
+        map[key] = { x: clamp01(base.x + offset), z: base.z };
+      }
     }
   }
   return map;
@@ -664,12 +671,17 @@ export const Stage3D: React.FC<{
   const [stageSceneInternal, setStageSceneInternal] = useState<StageScene>('empty');
 
   // Controlled stage config (host supplies props) vs internal default
-  const musicians = musiciansProp ?? musiciansInternal;
-  const stageScene = stageSceneProp ?? stageSceneInternal;
+  // Project-level showStore values win over ephemeral internal state.
+  const projectMusicians = useShowStore((s) => s.musicians);
+  const projectStageScene = useShowStore((s) => s.stageScene);
+  const musicians = musiciansProp ?? projectMusicians ?? musiciansInternal;
+  const stageScene = stageSceneProp ?? projectStageScene ?? stageSceneInternal;
   const handleMusiciansChange = (roster: MusicianRoster) => {
     const next = normalizeRoster(roster);
     setMusiciansInternal(next);
+    // TOUJOURS persister au niveau projet (survit changement de page + réouverture)
     onMusiciansChange?.(next);
+    useShowStore.getState().setMusicians(next);
   };
   const handleStageSceneChange = (cfg: StageScene) => {
     setStageSceneInternal(cfg);
@@ -677,16 +689,18 @@ export const Stage3D: React.FC<{
     // appartiennent au projet en cours et doivent persister d'une page à l'autre.
     // Le nettoyage des meshes Three.js est géré séparément (useEffect ci-dessous).
     onStageSceneChange?.(cfg);
+    // TOUJOURS persister au niveau projet (survit changement de page + réouverture)
+    useShowStore.getState().setProjectStageScene(cfg);
   };
 
   // ── Controlled 3D view state (camera + toolbar) ──
-  // Same pattern as musicians/stageScene: prop wins when supplied, otherwise
-  // we fall back to internal defaults (legacy behavior — panel detaches and the
-  // toggles revert to local state).
+  // Project-level showStore values win over ephemeral internal state.
+  const projectView3D = useShowStore((s) => s.view3D);
+  const effectiveView3D = view3DProp ?? projectView3D;
   const view3DToggles: Required<Pick<View3DState, 'showBeams' | 'showSmoke' | 'showLabels'>> = {
-    showBeams: view3DProp?.showBeams ?? showBeamsInternal,
-    showSmoke: view3DProp?.showSmoke ?? showSmokeInternal,
-    showLabels: view3DProp?.showLabels ?? showLabelsInternal,
+    showBeams: effectiveView3D?.showBeams ?? showBeamsInternal,
+    showSmoke: effectiveView3D?.showSmoke ?? showSmokeInternal,
+    showLabels: effectiveView3D?.showLabels ?? showLabelsInternal,
   };
   const showBeams = view3DToggles.showBeams;
   const showSmoke = view3DToggles.showSmoke;
@@ -696,19 +710,25 @@ export const Stage3D: React.FC<{
     const cur = view3DToggles.showBeams;
     const next = typeof v === 'function' ? (v as (p: boolean) => boolean)(cur) : v;
     setShowBeamsInternal(next);
-    if (view3DProp !== undefined) onView3DChange?.({ ...view3DProp, showBeams: next });
+    const sv = effectiveView3D ? { ...effectiveView3D, showBeams: next } : { showBeams: next };
+    if (onView3DChange) onView3DChange(sv);
+    useShowStore.getState().setView3D(sv); // TOUJOURS persister au projet
   };
   const setShowSmoke = (v: boolean | ((prev: boolean) => boolean)) => {
     const cur = view3DToggles.showSmoke;
     const next = typeof v === 'function' ? (v as (p: boolean) => boolean)(cur) : v;
     setShowSmokeInternal(next);
-    if (view3DProp !== undefined) onView3DChange?.({ ...view3DProp, showSmoke: next });
+    const sv = effectiveView3D ? { ...effectiveView3D, showSmoke: next } : { showSmoke: next };
+    if (onView3DChange) onView3DChange(sv);
+    useShowStore.getState().setView3D(sv); // TOUJOURS persister au projet
   };
   const setShowLabels = (v: boolean | ((prev: boolean) => boolean)) => {
     const cur = view3DToggles.showLabels;
     const next = typeof v === 'function' ? (v as (p: boolean) => boolean)(cur) : v;
     setShowLabelsInternal(next);
-    if (view3DProp !== undefined) onView3DChange?.({ ...view3DProp, showLabels: next });
+    const sv = effectiveView3D ? { ...effectiveView3D, showLabels: next } : { showLabels: next };
+    if (onView3DChange) onView3DChange(sv);
+    useShowStore.getState().setView3D(sv); // TOUJOURS persister au projet
   };
 
   // Capture current OrbitControls state and forward it to the parent so it
@@ -716,17 +736,16 @@ export const Stage3D: React.FC<{
   // gesture (which fires dozens of `change` ticks) emits exactly one update.
   const emitView3DCameraRef = useRef<() => void>(() => {});
   emitView3DCameraRef.current = () => {
-    if (view3DProp === undefined || !onView3DChange) return;
     const camera = cameraRef.current;
     const controls = controlsRef.current;
     if (!camera || !controls) return;
     const cp = camera.position;
     const ct = controls.target;
-    onView3DChange({
-      ...view3DProp,
-      cameraPosition: [cp.x, cp.y, cp.z],
-      cameraTarget: [ct.x, ct.y, ct.z],
-    });
+    const sv: View3DState = effectiveView3D
+      ? { ...effectiveView3D, cameraPosition: [cp.x, cp.y, cp.z], cameraTarget: [ct.x, ct.y, ct.z] }
+      : { cameraPosition: [cp.x, cp.y, cp.z], cameraTarget: [ct.x, ct.y, ct.z] };
+    if (onView3DChange) onView3DChange(sv);
+    useShowStore.getState().setView3D(sv); // TOUJOURS persister au projet
   };
   const emitPendingRef = useRef(false);
   const emitView3DCameraCoalesced = useCallback(() => {
@@ -740,9 +759,11 @@ export const Stage3D: React.FC<{
     });
   }, []);
 
-  // Reset musician positions whenever the roster changes (manual or via prop)
+  // Preserve custom positions across roster/page changes — only fill in defaults
+  // for new roster entries, never overwrite already-placed musicians.
   useEffect(() => {
-    musicianPositionsRef.current = buildRosterPositions(musicians);
+    const defaults = buildRosterPositions(musicians);
+    musicianPositionsRef.current = { ...musicianPositionsRef.current, ...defaults };
   }, [musicians]);
 
   // Clear any stale test state when the 3D view opens so fixtures start dark
@@ -792,6 +813,15 @@ export const Stage3D: React.FC<{
     selectedFixtureIdRef.current = fid;
     multiSelectedIdsRef.current = new Set([fid]);
     setMultiSelectedIds(new Set([fid]));
+    setSelectedFixtureId(fid);
+  }, []);
+
+  const addToMultiSelection = useCallback((fid: string) => {
+    const next = new Set(multiSelectedIdsRef.current);
+    if (next.has(fid)) next.delete(fid); else next.add(fid);
+    multiSelectedIdsRef.current = next;
+    setMultiSelectedIds(new Set(next));
+    selectedFixtureIdRef.current = fid;
     setSelectedFixtureId(fid);
   }, []);
 
@@ -931,6 +961,7 @@ export const Stage3D: React.FC<{
   const updateStageDeck = useShowStore((s) => s.updateStageDeck);
   const removeStageDeck = useShowStore((s) => s.removeStageDeck);
   const resetStageDecks = useShowStore((s) => s.resetStageDecks);
+  const unpatchFixture = useShowStore((s) => s.unpatchFixture);
   const stageDecksRef = useRef(stageDecks);
   stageDecksRef.current = stageDecks;
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
@@ -1003,12 +1034,14 @@ export const Stage3D: React.FC<{
   const dragRotateRef = useRef<{ startX: number; startY: number; fixtureId: string } | null>(null);
   const [hoveredFixtureId, setHoveredFixtureId] = useState<string | null>(null);
   const [directModeInternal, setDirectModeInternal] = useState(false);
-  const directMode = view3DProp?.directMode ?? directModeInternal;
+  const directMode = effectiveView3D?.directMode ?? directModeInternal;
   const setDirectMode = (v: boolean | ((prev: boolean) => boolean)) => {
-    const cur = view3DProp?.directMode ?? directModeInternal;
+    const cur = effectiveView3D?.directMode ?? directModeInternal;
     const next = typeof v === 'function' ? (v as (p: boolean) => boolean)(cur) : v;
     setDirectModeInternal(next);
-    if (view3DProp !== undefined) onView3DChange?.({ ...view3DProp, directMode: next });
+    const sv = effectiveView3D ? { ...effectiveView3D, directMode: next } : { directMode: next };
+    if (onView3DChange) onView3DChange(sv);
+    useShowStore.getState().setView3D(sv); // TOUJOURS persister au projet
   };
   // Keep draft dims in sync when stageDims changes from store (preset load, external)
   useEffect(() => {
@@ -1951,8 +1984,9 @@ export const Stage3D: React.FC<{
     const camera = cameraRef.current;
     const controls = controlsRef.current;
     if (!camera || !controls) return;
-    const cp = view3DProp?.cameraPosition;
-    const ct = view3DProp?.cameraTarget;
+    // effectiveView3D = prop preset OU store projet (persistant entre pages + sessions)
+    const cp = effectiveView3D?.cameraPosition;
+    const ct = effectiveView3D?.cameraTarget;
     if (!cp || !ct) return;
     const same = (a: [number, number, number], b: [number, number, number]) =>
       Math.abs(a[0]-b[0]) < 1e-4 && Math.abs(a[1]-b[1]) < 1e-4 && Math.abs(a[2]-b[2]) < 1e-4;
@@ -1964,7 +1998,7 @@ export const Stage3D: React.FC<{
     camera.position.set(cp[0], cp[1], cp[2]);
     controls.target.set(ct[0], ct[1], ct[2]);
     controls.update();
-  }, [view3DProp?.cameraPosition, view3DProp?.cameraTarget]);
+  }, [effectiveView3D?.cameraPosition, effectiveView3D?.cameraTarget]);
 
   // ── Handle resize ───────────────────────────────────
   useEffect(() => {
@@ -2141,6 +2175,9 @@ export const Stage3D: React.FC<{
       const nx = THREE.MathUtils.clamp((p.x + dims.width / 2) / dims.width, 0.03, 0.97);
       const nz = THREE.MathUtils.clamp((p.z + dims.depth / 2) / dims.depth, 0.03, 0.97);
       musicianPositionsRef.current[id] = { x: nx, z: nz };
+      // Persist custom position to the roster so it survives page switches
+      const customPos = { ...(musicians.positions ?? {}), [id]: { x: nx, z: nz } };
+      handleMusiciansChange({ ...musicians, positions: customPos });
       const m = musiciansRef.current.find((mm) => mm.sprite.userData.musicianId === id);
       if (m) {
         m.sprite.position.x = (nx - 0.5) * dims.width;
@@ -2450,8 +2487,30 @@ export const Stage3D: React.FC<{
     });
 
     return () => {
-      // Clean up all fixtures on unmount
+      // Clean up all fixtures on unmount / effect re-run
       for (const f3d of fixturesRef.current.values()) {
+        const scene = sceneRef.current;
+        if (scene) {
+          scene.remove(f3d.group);
+          if (f3d.pointLight) scene.remove(f3d.pointLight);
+          if (f3d.beamCone) scene.remove(f3d.beamCone);
+          if (f3d.floorSpot) scene.remove(f3d.floorSpot);
+          if (f3d.floorGlow) scene.remove(f3d.floorGlow);
+           if (f3d.trailLine) { scene.remove(f3d.trailLine); f3d.trailLine.geometry?.dispose(); (f3d.trailLine.material as THREE.Material)?.dispose(); }
+            if (f3d.ledBarPixels) {
+              for (const p of f3d.ledBarPixels) {
+                scene.remove(p.light);
+                scene.remove(p.cone);
+                p.cone.geometry?.dispose(); (p.cone.material as THREE.Material)?.dispose();
+                if (p.seg) { p.seg.geometry?.dispose(); (p.seg.material as THREE.Material)?.dispose(); }
+              }
+            }
+           // Cleanup extra head lights and cones
+           for (const eh of f3d.extraHeads ?? []) {
+              if (eh.pointLight) scene.remove(eh.pointLight);
+              if (eh.beamCone) { scene.remove(eh.beamCone); eh.beamCone.geometry?.dispose(); (eh.beamCone.material as THREE.Material)?.dispose(); }
+            }
+        }
         clearFixtureSupport(sceneRef.current, f3d);
         disposeFixture3D(f3d);
       }
@@ -2783,12 +2842,12 @@ export const Stage3D: React.FC<{
       // neutre) est traitée comme non-visée → 128 : pan=0 en scène statique
       // signifiait « buffer frais », pas « fond gauche volontaire ». Le DMX
       // réel continue de transmettre la valeur d'origine.
-      const panTiltRead = (off: number | null | undefined): number => {
-        if (off === null || off === undefined || off < 0) return 128;
+      const panTiltRead = (off: number | null | undefined): number | null => {
+        if (off === null || off === undefined || off < 0) return null;
         const idx = baseAddr + off;
         const spVal = sparseUni ? (sparseUni as Record<string, number>)[String(idx + 1)] : undefined;
-        if (spVal === undefined || spVal === 0) return 128;
-        return data[idx] ?? 128;
+        if (spVal === undefined || spVal === 0) return null;
+        return data[idx] ?? null;
       };
 
        // --- Intensity ---
@@ -2901,14 +2960,14 @@ export const Stage3D: React.FC<{
       // --- Pan/Tilt (QLC+ model: arm=pan/Y, head=tilt/X) — les lasers sans
       // pan/tilt typés utilisent leurs axes scan X/Y (IODA…) en équivalent. ---
       const panVal = cm.panOffset !== null ? panTiltRead(cm.panOffset)
-        : (cm.scanXOffset !== null ? panTiltRead(cm.scanXOffset) : 128);
+        : (cm.scanXOffset !== null ? panTiltRead(cm.scanXOffset) : null);
       const tiltVal = cm.tiltOffset !== null ? panTiltRead(cm.tiltOffset)
-        : (cm.scanYOffset !== null ? panTiltRead(cm.scanYOffset) : 128);
+        : (cm.scanYOffset !== null ? panTiltRead(cm.scanYOffset) : null);
       dmxLastActivityRef.current = performance.now();
       // Derniers bytes vus — pour « capturer l'orientation actuelle » (le bouton
       // lit ces valeurs depuis le panneau).
-      f3d.lastPan = panVal;
-      f3d.lastTilt = tiltVal;
+      f3d.lastPan = panVal ?? 128;
+      f3d.lastTilt = tiltVal ?? 128;
 
       // Rate-limited tracking: beam cannot turn faster than the real fixture motor
       // (maxPanTiltSpeed in °/s), so the 3D view matches the physical movement speed.
@@ -2922,29 +2981,40 @@ export const Stage3D: React.FC<{
       // Défauts = convention historique de l'app : 540° pan / 180° tilt.
       const panRangeRad = ((cm.panMaxDeg ?? 540) * Math.PI) / 180;
       const tiltRangeRad = ((cm.tiltMaxDeg ?? 180) * Math.PI) / 180;
-      if (f3d.armGroup) {
-        // Zéro VISUEL (rendu) : décalage persistant du faisceau (tare à DMX=128).
-        // Zone PAN : ±90° autour de la direction par défaut (jamais derrière).
-        const panTarget = clampPanZone(((panVal / 255) - 0.5) * panRangeRad + (f3d._zeroPanDeg * Math.PI) / 180);
-        let panDelta = panTarget - f3d.armGroup.rotation.y;
-        while (panDelta > Math.PI) panDelta -= 2 * Math.PI;
-        while (panDelta < -Math.PI) panDelta += 2 * Math.PI;
-        const panMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
-        f3d.armGroup.rotation.y += Math.abs(panDelta) > panMaxStep
-          ? Math.sign(panDelta) * panMaxStep
-          : panDelta * settleK;
-      }
-      if (f3d.headGroup) {
-        // Zone TILT : élévation ∈ [-90°, +90°] ; au sol, jamais sous l'horizon.
-        // head = _mountTilt + élévation (invariant validé pour les 3 modes).
-        const dmxTilt = ((tiltVal / 255) - 0.5) * tiltRangeRad;
-        const elevation = clampTiltZone(dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180, f3d.mountMode);
-        const tiltTarget = f3d._mountTilt + elevation;
-        const tiltDelta = tiltTarget - f3d.headGroup.rotation.x;
-        const tiltMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
-        f3d.headGroup.rotation.x += Math.abs(tiltDelta) > tiltMaxStep
-          ? Math.sign(tiltDelta) * tiltMaxStep
-          : tiltDelta * settleK;
+      // Si aucune valeur DMX n'a été lue (buffer frais), ne pas écraser le
+      // heading de zone : conserver l'orientation par défaut de la fixture.
+      if (panVal !== null && tiltVal !== null) {
+        // Mode Target : PRIORITAIRE sur tout blocage de zone — la fixture suit
+        // librement le marqueur (pleine course pan/tilt, même derrière/au sol).
+        const freeAim = targetModeRef.current && (selectedFixtureIdRef.current === f3d.id || multiSelectedIdsRef.current.has(f3d.id));
+        if (f3d.armGroup) {
+          // Zéro VISUEL (rendu) : décalage persistant du faisceau (tare à DMX=128).
+          // Zone PAN : ±90° autour de la direction par défaut (jamais derrière)
+          // — SAUF en mode Target (libre).
+          const rawPan = ((panVal / 255) - 0.5) * panRangeRad + (f3d._zeroPanDeg * Math.PI) / 180;
+          const panTarget = freeAim ? rawPan : clampPanZone(rawPan);
+          let panDelta = panTarget - f3d.armGroup.rotation.y;
+          while (panDelta > Math.PI) panDelta -= 2 * Math.PI;
+          while (panDelta < -Math.PI) panDelta += 2 * Math.PI;
+          const panMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
+          f3d.armGroup.rotation.y += Math.abs(panDelta) > panMaxStep
+            ? Math.sign(panDelta) * panMaxStep
+            : panDelta * settleK;
+        }
+        if (f3d.headGroup) {
+          // Zone TILT : élévation ∈ [-90°, +90°] ; au sol, jamais sous l'horizon
+          // — SAUF en mode Target (libre).
+          // head = _mountTilt + élévation (invariant validé pour les 3 modes).
+          const dmxTilt = ((tiltVal / 255) - 0.5) * tiltRangeRad;
+          const rawElev = dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180;
+          const elevation = freeAim ? rawElev : clampTiltZone(rawElev, f3d.mountMode);
+          const tiltTarget = f3d._mountTilt + elevation;
+          const tiltDelta = tiltTarget - f3d.headGroup.rotation.x;
+          const tiltMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
+          f3d.headGroup.rotation.x += Math.abs(tiltDelta) > tiltMaxStep
+            ? Math.sign(tiltDelta) * tiltMaxStep
+            : tiltDelta * settleK;
+        }
       }
 
       // Extra heads: per-arm tilt, per-segment color (spider/RGBW multi-head)
@@ -4679,6 +4749,9 @@ export const Stage3D: React.FC<{
           fixtureSearch={fixtureSearch}
           setFixtureSearch={setFixtureSearch}
           onSelect={(id) => { selectSingleFixture(id); focusFixture(id); }}
+          onAddToSelection={addToMultiSelection}
+          onSetMultiSelection={(ids) => { multiSelectedIdsRef.current = ids; setMultiSelectedIds(ids); }}
+          unpatchFixture={unpatchFixture}
           onCollapse={() => setLeftDockCollapsed(true)}
           onExpand={() => setLeftDockCollapsed(false)}
           leftDockCollapsed={leftDockCollapsed}
@@ -5024,9 +5097,9 @@ export const Stage3D: React.FC<{
                 </div>
               </div>
 
-              {/* Longueur + suspension : uniquement pour les barres avant/arrière.
-                  Longueur LIBRE en mètres (1-12), jamais dérivée des plateaux. */}
-              {(selectedPos.support === 'frontBar' || selectedPos.support === 'backBar') && (
+               {/* Longueur + suspension : pour tout support barre (frontBar/backBar).
+                   Longueur LIBRE en mètres (1-12), jamais dérivée des plateaux. */}
+               {isBarSupport(resolveSupportKind(selectedPos.support)) && (
                 <div className="space-y-1 rounded-lg border border-gray-800/60 bg-black/20 p-2">
                   <div className="flex justify-between text-[10px]">
                     <span className="text-gray-500">{t('stage3D.barSpan')}</span>
@@ -5775,18 +5848,15 @@ function updateFixtureSupport(
  */
 export function headingRadForPos(pos: FixturePos, _mountMode: string, _stageDims: { width: number; depth: number }, hasPanTilt = true): number {
   if (!hasPanTilt && pos.heading) return ((pos.heading ?? 0) * Math.PI) / 180;
-  const { x, y } = pos;
-  if (y <= 0.25) return Math.PI;        // devant → vers l'arrière de scène
-  if (y >= 0.75) return 0;              // arrière → vers le public
-  if (x <= 0.25) return -Math.PI / 2;   // côté -X → vers le centre (+X)
-  if (x >= 0.75) return Math.PI / 2;    // côté +X → vers le centre (-X)
-  return 0;                             // centre → vers le public
+  // Toutes les fixtures visent le CENTRE de la scene, quelque soit leur position.
+  // Heading = atan2(x - 0.5, y - 0.5) car le faisceau neutre pointe vers -Z (public).
+  return Math.atan2(pos.x - 0.5, pos.y - 0.5);
 }
-
 /** True si la fixture a au moins un canal pan/tilt DMX (fixture motorisée). */
-export function hasPanTiltChannels(cm: { panOffsets?: number[]; panOffset?: number | null; tiltOffsets?: number[]; tiltOffset?: number | null }): boolean {
+export function hasPanTiltChannels(cm: { panOffsets?: number[]; panOffset?: number | null; tiltOffsets?: number[]; tiltOffset?: number | null; scanXOffset?: number | null; scanYOffset?: number | null }): boolean {
   return (cm.panOffsets?.length ?? 0) > 0 || cm.panOffset !== null
-    || (cm.tiltOffsets?.length ?? 0) > 0 || cm.tiltOffset !== null;
+    || (cm.tiltOffsets?.length ?? 0) > 0 || cm.tiltOffset !== null
+    || cm.scanXOffset !== null || cm.scanYOffset !== null;
 }
 
 /**

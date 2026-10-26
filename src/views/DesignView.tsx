@@ -11,7 +11,7 @@ import { Stage2DEditor } from './Stage2DEditor';
 import { Stage3D } from './Stage3D';
 import { useFixtureTest } from '../hooks/useFixtureTest';
 import { loadFixtureDefinitions, type DmxFixtureDefinition, clearFixtureDefCache } from '../hooks/dmx-cues';
-import { analyzeFixtureChannels as analyzeEngine } from '../engine/fixture-analyzer';
+import { analyzeFixtureChannels as analyzeEngine, displayTypeForChannel } from '../engine/fixture-analyzer';
 import { auditFixtureCoverage, formatCoverageWarning } from '../engine/fixture-coverage';
 import { AUTO_LOOP_FOLDER } from '../engine/auto-loops';
 import { groupByTier, TIER_KEYS } from '../engine/tier-utils';
@@ -190,11 +190,14 @@ const ShowWith3D: React.FC = () => {
   const [showFloating3D, setShowFloating3D] = useState(false);
   const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
   const [float3DSize, setFloat3DSize] = useState({ w: 960, h: 540 });
-  // 3D config par show
+  // 3D config par show — fallback RÉACTIF sur le store projet (persistant entre
+  // pages + sessions) : un changement fait dans l'onglet Scène se propage ici.
   const [showMusicians, setShowMusicians] = useState<MusicianRoster>({});
   const [showStageScene, setShowStageScene] = useState<StageScene>('empty');
   const shows = useShowStore((s) => s.shows);
   const updateShowStore = useShowStore((s) => s.updateShow);
+  const storeMusicians = useShowStore((s) => s.musicians);
+  const storeStageScene = useShowStore((s) => s.stageScene);
   // Sync depuis le show sélectionné (window.__lm_selectedShowId publié par ShowManager)
   const [selectedShowIdSync, setSelectedShowIdSync] = useState<string | null>(null);
   useEffect(() => {
@@ -208,13 +211,14 @@ const ShowWith3D: React.FC = () => {
   useEffect(() => {
     const sc = shows.find((s) => s.id === selectedShowIdSync);
     if (sc) {
-      setShowMusicians(normalizeRoster((sc as any).musicians));
-      setShowStageScene((sc as any).stageScene ?? 'empty');
+      // Valeur propre du show prioritaire ; sinon store projet (réactif).
+      setShowMusicians(normalizeRoster((sc as any).musicians ?? storeMusicians ?? {}));
+      setShowStageScene((sc as any).stageScene ?? storeStageScene ?? 'empty');
     } else {
-      setShowMusicians({});
-      setShowStageScene('empty');
+      setShowMusicians(storeMusicians ?? {});
+      setShowStageScene(storeStageScene ?? 'empty');
     }
-  }, [selectedShowIdSync, shows]);
+  }, [selectedShowIdSync, shows, storeMusicians, storeStageScene]);
   const handleShowMusiciansChange = useCallback((roster: MusicianRoster) => {
     const nr = normalizeRoster(roster);
     setShowMusicians(nr);
@@ -365,6 +369,12 @@ interface AnalyzedFixtureChannels {
   colorWheelIdx?: number;
 }
 
+/**
+ * Type d'affichage d'un canal — délégué à `displayTypeForChannel` (fixture-analyzer)
+ * : les définitions laissent souvent 'Nothing' alors que le moteur exploite le
+ * canal par son NOM. Affichage SEUL : aucune influence sur le calcul DMX.
+ */
+
 function analyzeFixtureChannels(
   fixture: PatchedFixture,
   modeChannels: Array<{ name: string; type: string; defaultValue?: number; capabilities?: any[]; offset?: number }>
@@ -372,7 +382,7 @@ function analyzeFixtureChannels(
   const channels: AnalyzedChannel[] = modeChannels.map((ch, i) => ({
     index: ch.offset ?? i,
     name: ch.name || `Ch ${i + 1}`,
-    type: ch.type || 'Nothing',
+    type: displayTypeForChannel(ch),
     dmxAddress: fixture.startAddress + (ch.offset ?? i),
     defaultValue: ch.defaultValue,
     capabilities: ch.capabilities,
@@ -1287,8 +1297,12 @@ const SceneEditor: React.FC = () => {
   const [testActive, setTestActive] = useState(false);
   // Timeout de fin du test (annulable par le bouton Stop).
   const testTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [musicians, setMusicians] = useState<MusicianRoster>({});
-  const [stageScene, setStageScene] = useState<StageScene>('empty');
+  // Initialisation depuis le store projet (persiste entre pages + réouverture)
+  const storeMusicians = useShowStore((s) => s.musicians);
+  const storeView3D = useShowStore((s) => s.view3D);
+  const storeStageScene = useShowStore((s) => s.stageScene);
+  const [musicians, setMusicians] = useState<MusicianRoster>(storeMusicians ?? {});
+  const [stageScene, setStageScene] = useState<StageScene>(storeStageScene ?? 'empty');
   const [showFloating3D, setShowFloating3D] = useState(false);
   const [show3D, setShow3D] = useState(false);
   const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
@@ -1409,8 +1423,14 @@ const SceneEditor: React.FC = () => {
       setEditFadeOut(scene.fadeOut);
       setEditDuration(scene.duration);
       if (sceneChanged) {
-        setMusicians(normalizeRoster(scene.musicians ?? rosterFromBandConfig(scene.bandConfig)));
-        setStageScene(scene.stageScene ?? 'empty');
+        // Valeur propre de la scène prioritaire ; sinon fallback sur le store
+        // projet (RÉACTIF : ce qui est configuré dans un autre onglet/page
+        // de la vue 3D s'applique aussi ici) puis legacy bandConfig.
+        const ownRoster = scene.musicians
+          ? normalizeRoster(scene.musicians)
+          : (scene.bandConfig ? rosterFromBandConfig(scene.bandConfig) : undefined);
+        setMusicians(ownRoster ?? storeMusicians ?? {});
+        setStageScene(scene.stageScene ?? storeStageScene ?? 'empty');
       }
       setEditChannels({ ...scene.channels });
       // Éteint les canaux de la scène précédente qui ne sont pas dans la nouvelle (sinon scène précédente reste allumée)
@@ -2329,6 +2349,8 @@ const FixtureChannelEditor: React.FC<{
           Intensity: '🔅', Pan: '↔️', Tilt: '↕️', Colour: '🎨',
           Gobo: '❄️', Shutter: '⚡', Speed: '⏱️', Prism: '💠',
           Effect: '✨', Beam: '🔦', Maintenance: '🔧', Nothing: '⬜',
+          Strobe: '💫', Zoom: '🔍', Focus: '🎯', Iris: '👁️',
+          Frost: '🌫️', Macro: '🎛️', ColorWheel: '🎨', MultiColor: '🌈',
         };
         const icon = iconMap[ch.type] || '•';
         return (
@@ -4179,6 +4201,7 @@ const EFXEditor: React.FC = () => {
   const effects = useShowStore((s) => s.effects);
   const createEffect = useShowStore((s) => s.createEffect);
   const updateEffect = useShowStore((s) => s.updateEffect);
+  const fixtureGroups = useShowStore((s) => s.fixtureGroups);
 
   const [pattern, setPattern] = useState<EfxPattern>('Circle');
   const [width, setWidth] = useState(1.0);
@@ -4191,6 +4214,7 @@ const EFXEditor: React.FC = () => {
   const [target] = useState({ x: 0, y: 1.5, z: 0 });
   const [efxName, setEfxName] = useState('EFX 1');
   const [selectedFixtureIds, setSelectedFixtureIds] = useState<Set<string>>(new Set());
+  const [groupsMenuOpen, setGroupsMenuOpen] = useState(false);
   const [editingEffectId, setEditingEffectId] = useState<string | null>(null);
   const [stopped, setStopped] = useState(false);
   const stoppedRef = useRef(false);
@@ -4798,6 +4822,86 @@ const EFXEditor: React.FC = () => {
             <label className="block text-xs font-medium text-gray-400">
               Fixtures ({selectedFixtureIds.size} selected)
             </label>
+            {/* ── Sélection par lots : tout / rien / groupes ── */}
+            <div className="flex items-center gap-1.5 flex-wrap relative">
+              <button
+                type="button"
+                onClick={() => {
+                  // Coche toutes les fixtures visibles (filtrées par éligibilité pan/tilt)
+                  const visible = patchedFixtures.filter((pf) => !efxDefsLoaded || efxEligibleFixtureIds.has(pf.id));
+                  setSelectedFixtureIds(new Set(visible.map((f) => f.id)));
+                }}
+                className="px-2 py-0.5 rounded bg-gray-800/60 text-[10px] text-gray-300 border border-gray-700/60 hover:bg-purple-600/30 hover:text-purple-100 hover:border-purple-500/40 transition-all"
+              >
+                {t('design.efxSelectAll')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedFixtureIds(new Set())}
+                className="px-2 py-0.5 rounded bg-gray-800/60 text-[10px] text-gray-300 border border-gray-700/60 hover:bg-red-600/30 hover:text-red-100 hover:border-red-500/40 transition-all"
+              >
+                {t('design.efxSelectNone')}
+              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setGroupsMenuOpen((v) => !v)}
+                  className={`px-2 py-0.5 rounded text-[10px] border transition-all ${groupsMenuOpen ? 'bg-purple-600/40 text-purple-100 border-purple-500/50' : 'bg-gray-800/60 text-gray-300 border-gray-700/60 hover:bg-purple-600/30 hover:border-purple-500/40'}`}
+                >
+                  {t('design.efxByGroup')} ▾
+                </button>
+                {groupsMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setGroupsMenuOpen(false)} />
+                    <div className="absolute left-0 top-full mt-1 z-30 w-64 max-h-56 overflow-y-auto bg-[#12121a] border border-gray-700 rounded-lg shadow-xl p-1 space-y-0.5">
+                      {fixtureGroups.length === 0 ? (
+                        <div className="px-2 py-1.5 text-[10px] text-gray-500 italic">{t('design.efxNoGroups')}</div>
+                      ) : fixtureGroups.map((g) => {
+                        // Compte uniquement les fixtures du groupe cochables (éligibles)
+                        const eligibleCount = g.fixtureIds.filter((fid) => !efxDefsLoaded || efxEligibleFixtureIds.has(fid)).length;
+                        return (
+                          <div key={g.id} className="flex items-center gap-1 px-1.5 py-1 rounded hover:bg-gray-800/40">
+                            <span className="flex-1 truncate text-[10px]" style={{ color: g.color || '#d1d5db' }}>
+                              {g.name} <span className="text-gray-600">({eligibleCount})</span>
+                            </span>
+                            <button
+                              type="button"
+                              disabled={eligibleCount === 0}
+                              onClick={() => {
+                                // Ajoute toutes les fixtures éligibles du groupe à la sélection
+                                const next = new Set(selectedFixtureIds);
+                                for (const fid of g.fixtureIds) {
+                                  if (!efxDefsLoaded || efxEligibleFixtureIds.has(fid)) next.add(fid);
+                                }
+                                setSelectedFixtureIds(next);
+                              }}
+                              className="px-1.5 py-0.5 rounded text-[9px] bg-green-600/20 text-green-300 border border-green-500/30 hover:bg-green-600/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                              title={t('design.efxGroupSelect')}
+                            >
+                              ✓
+                            </button>
+                            <button
+                              type="button"
+                              disabled={g.fixtureIds.every((fid) => !selectedFixtureIds.has(fid))}
+                              onClick={() => {
+                                // Retire toutes les fixtures du groupe de la sélection
+                                const next = new Set(selectedFixtureIds);
+                                for (const fid of g.fixtureIds) next.delete(fid);
+                                setSelectedFixtureIds(next);
+                              }}
+                              className="px-1.5 py-0.5 rounded text-[9px] bg-red-600/20 text-red-300 border border-red-500/30 hover:bg-red-600/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                              title={t('design.efxGroupDeselect')}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
             {patchedFixtures.length === 0 ? (
               <div className="text-[10px] text-gray-600 italic py-1">
                 No fixtures patched. Switch to the Fixtures tab first.
@@ -4912,18 +5016,73 @@ interface FixtureDefResult {
   modes: Array<{ name: string; channels: Array<{ name: string; type: string }> }>;
 }
 
+// ─── Classements de la liste de patch (fabricant / type / capacités) ────────
+
+type FixtureBrowseMode = 'manufacturer' | 'type' | 'capability';
+type FixtureListGrouping = 'none' | 'type' | 'capability';
+
+/** Capacités détectables d'une définition (depuis les canaux de TOUS ses modes). */
+function fixtureCapsOf(def: FixtureDefResult): Set<string> {
+  const chTypes = new Set<string>();
+  for (const m of def.modes) for (const ch of m.channels) chTypes.add(ch.type);
+  const caps = new Set<string>();
+  if (chTypes.has('Pan') || chTypes.has('Tilt')) caps.add('moving');
+  if (chTypes.has('ColorIntensity')) caps.add('rgb');
+  if (chTypes.has('ColorWheel') || chTypes.has('MultiColor')) caps.add('wheel');
+  if (chTypes.has('Strobe')) caps.add('strobe');
+  if (chTypes.has('Gobo')) caps.add('gobo');
+  if (/laser/i.test(def.type)) caps.add('laser');
+  if (!caps.has('moving')) caps.add('static');
+  return caps;
+}
+
+/** Seaux de capacités (ordre d'affichage) avec libellés FR. */
+const FIXTURE_CAP_BUCKETS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: 'moving', label: 'Mobiles (Pan/Tilt)' },
+  { id: 'rgb', label: 'RGB (couleur additive)' },
+  { id: 'wheel', label: 'Roue couleur' },
+  { id: 'strobe', label: 'Strobe' },
+  { id: 'gobo', label: 'Gobo' },
+  { id: 'laser', label: 'Laser' },
+  { id: 'static', label: 'Statiques' },
+];
+
+/** Regroupe des définitions selon le mode demandé (retourne [['', defs]] si sans regroupement). */
+function groupFixtureDefs(
+  defs: FixtureDefResult[],
+  grouping: FixtureListGrouping,
+): Array<[string, FixtureDefResult[]]> {
+  if (grouping === 'none' || defs.length === 0) return [['', defs]];
+  const map = new Map<string, FixtureDefResult[]>();
+  for (const def of defs) {
+    const key =
+      grouping === 'type'
+        ? (def.type || 'Autre')
+        : FIXTURE_CAP_BUCKETS.filter((b) => fixtureCapsOf(def).has(b.id)).map((b) => b.label).join(' · ') || 'Statiques';
+    const arr = map.get(key);
+    if (arr) arr.push(def);
+    else map.set(key, [def]);
+  }
+  return [...map.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+}
+
+
 type PatchStep = 'idle' | 'browse' | 'manufacturer' | 'searching' | 'modeSelect' | 'addressSet';
 
 const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEditFixture }) => {
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
   const universes = useShowStore((s) => s.universes);
   const patchFixture = useShowStore((s) => s.patchFixture);
-  const unpatchFixture = useShowStore((s) => s.unpatchFixture);
-  const updateFixtureTier = useShowStore((s) => s.updateFixtureTier);
+   const unpatchFixture = useShowStore((s) => s.unpatchFixture);
+   const updateFixtureTier = useShowStore((s) => s.updateFixtureTier);
+   const duplicateFixture = useShowStore((s) => s.duplicateFixture);
   const setFixtureName = useShowStore((s) => s.setFixtureName);
   const addShowUniverse = useShowStore((s) => s.addShowUniverse);
   const getNextFreeAddress = useShowStore((s) => s.getNextFreeAddress);
   const getUniverseMap = useShowStore((s) => s.getUniverseMap);
+
+  // Multi-selection state
+  const [selectedFixtureIds, setSelectedFixtureIds] = useState<Set<string>>(new Set());
 
   // Fixtures currently lit by the test button (for visual feedback in the table)
   const [litSet, setLitSet] = useState<Set<string>>(new Set());
@@ -5299,6 +5458,74 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
     setLoadingDetail(false);
   };
 
+  // Marquee selection for fixture table
+  const containerRef = useRef<HTMLDivElement>(null);
+  const marqueeRef = useRef<{ startX: number; startY: number; currentX: number; currentY: number; active: boolean } | null>(null);
+
+  const handleTableMouseDown = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    // Don't start marquee if clicking on interactive elements
+    if (target.closest('button, input, select')) return;
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const startX = e.clientX - rect.left;
+    const startY = e.clientY - rect.top;
+    marqueeRef.current = { startX, startY, currentX: startX, currentY: startY, active: true };
+    e.preventDefault();
+  }, []);
+
+  const handleTableMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!marqueeRef.current?.active) return;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    marqueeRef.current.currentX = e.clientX - rect.left;
+    marqueeRef.current.currentY = e.clientY - rect.top;
+  }, []);
+
+  const handleTableMouseUp = useCallback(() => {
+    if (!marqueeRef.current?.active) {
+      marqueeRef.current = null;
+      return;
+    }
+
+    const m = marqueeRef.current;
+    const minX = Math.min(m.startX, m.currentX);
+    const maxX = Math.max(m.startX, m.currentX);
+    const minY = Math.min(m.startY, m.currentY);
+    const maxY = Math.max(m.startY, m.currentY);
+
+    const containerRect = containerRef.current?.getBoundingClientRect();
+    if (!containerRect) {
+      marqueeRef.current = null;
+      return;
+    }
+
+    // Check which rows are in the marquee rectangle
+    const newSelection = new Set(selectedFixtureIds);
+    const rows = containerRef.current?.querySelectorAll('tbody tr');
+    if (rows) {
+      rows.forEach((row) => {
+        const rowRect = row.getBoundingClientRect();
+        const rowCenterX = (rowRect.left + rowRect.right) / 2 - containerRect.left;
+        const rowCenterY = (rowRect.top + rowRect.bottom) / 2 - containerRect.top;
+        if (rowCenterX >= minX && rowCenterX <= maxX && rowCenterY >= minY && rowCenterY <= maxY) {
+          const fid = row.getAttribute('data-fixture-id');
+          if (fid) newSelection.add(fid);
+        }
+      });
+    }
+
+    setSelectedFixtureIds(newSelection);
+    marqueeRef.current = null;
+  }, [selectedFixtureIds]);
+
+  const handleTableMouseLeave = useCallback(() => {
+    marqueeRef.current = null;
+  }, []);
+
   // ── Render ──
   return (
     <div className="space-y-5">
@@ -5378,7 +5605,13 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
             No fixtures patched on this universe. Click "Add Fixture" to start.
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div ref={containerRef} className="overflow-x-auto relative"
+              onMouseDown={handleTableMouseDown}
+              onMouseMove={handleTableMouseMove}
+              onMouseUp={handleTableMouseUp}
+              onMouseLeave={handleTableMouseLeave}
+              style={{ cursor: marqueeRef.current?.active ? 'crosshair' : 'default' }}
+            >
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-gray-800/30 text-[10px] text-gray-500 uppercase tracking-wider">
@@ -5396,10 +5629,12 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
                 {universeFixtures.map((f) => {
                   const cIdx = fixtureColorIndex.get(f.id) ?? 0;
                   const color = getFixtureColor(cIdx);
+                  const isSelected = selectedFixtureIds.has(f.id);
                   return (
                     <tr
                       key={f.id}
-                      className="hover:bg-gray-800/20 transition-colors"
+                      data-fixture-id={f.id}
+                      className={`hover:bg-gray-800/20 transition-colors ${isSelected ? 'bg-purple-600/15' : ''}`}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         setContextMenu({ visible: true, x: e.clientX, y: e.clientY, fixtureId: f.id, fixtureName: f.name });
@@ -5487,9 +5722,47 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
                 })}
               </tbody>
             </table>
+
+            {/* Marquee selection rectangle */}
+            {marqueeRef.current?.active && (() => {
+              const m = marqueeRef.current;
+              const minX = Math.min(m.startX, m.currentX);
+              const maxX = Math.max(m.startX, m.currentX);
+              const minY = Math.min(m.startY, m.currentY);
+              const maxY = Math.max(m.startY, m.currentY);
+              return (
+                <div
+                  className="absolute pointer-events-none"
+                  style={{
+                    left: minX,
+                    top: minY,
+                    width: maxX - minX,
+                    height: maxY - minY,
+                    border: '2px dashed #a855f7',
+                    backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                  }}
+                />
+              );
+            })()}
           </div>
         )}
       </div>
+
+      {/* Unpatch selected button — appears when multiple fixtures selected */}
+      {selectedFixtureIds.size > 1 && (
+        <div className="mt-2 flex justify-end">
+          <button
+            onClick={() => {
+              selectedFixtureIds.forEach(id => unpatchFixture(id));
+              setSelectedFixtureIds(new Set());
+            }}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600/30 hover:border-red-500/50 transition-colors flex items-center gap-1.5"
+            title="Retirer les fixtures sélectionnées"
+          >
+            <Trash2 size={12} /> Unpatch {selectedFixtureIds.size} fixtures
+          </button>
+        </div>
+      )}
 
       {/* ── Add Fixture Modal ── */}
       {showAdd && (
@@ -5552,11 +5825,25 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
               setContextMenu((c) => ({ ...c, visible: false }));
             }}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-300 transition-colors flex items-center gap-2"
-          >
-            <Edit2 size={12} />
-            Renommer
-          </button>
-          <div className="my-1 border-t border-gray-800/60" />
+           >
+             <Edit2 size={12} />
+             Renommer
+           </button>
+           <button
+             type="button"
+              onClick={() => {
+                const result = duplicateFixture(contextMenu.fixtureId);
+                setContextMenu((c) => ({ ...c, visible: false }));
+                if ('id' in result) {
+                  try { (window as any).__lm_toast?.('Dupliqué', 'info'); } catch {}
+                }
+              }}
+             className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-300 transition-colors flex items-center gap-2"
+           >
+             <Copy size={12} />
+             Dupliquer
+           </button>
+           <div className="my-1 border-t border-gray-800/60" />
           <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">Groupe</div>
           {(['primary', 'secondary', 'tertiary', 'other'] as const).map((tier) => {
             const isCurrent = patchedFixtures.find((f) => f.id === contextMenu.fixtureId)?.tier === tier;
@@ -5611,6 +5898,8 @@ const CHANNEL_ICONS: Record<string, string> = {
   Intensity: '🔅', Pan: '↔️', Tilt: '↕️', Colour: '🎨',
   Gobo: '❄️', Shutter: '⚡', Speed: '⏱️', Prism: '💠',
   Effect: '✨', Beam: '🔦', Maintenance: '🔧', Nothing: '⬜',
+  Strobe: '💫', Zoom: '🔍', Focus: '🎯', Iris: '👁️',
+  Frost: '🌫️', Macro: '🎛️', ColorWheel: '🎨', MultiColor: '🌈',
 };
 
 function channelTypeLabel(type: string): string {
@@ -6110,6 +6399,36 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
   getNextFree,
 }) => {
   const { t } = useTranslation();
+  // ── Classements : mode de navigation + regroupement des listes ──
+  const [browseMode, setBrowseMode] = useState<FixtureBrowseMode>('manufacturer');
+  const [selectedKind, setSelectedKind] = useState<string | null>(null);
+  const [listGrouping, setListGrouping] = useState<FixtureListGrouping>('none');
+  // Seaux de navigation (types et capacités) calculés depuis toute la librairie
+  const typeBuckets = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const f of allFixtures) {
+      const k = f.type || 'Autre';
+      map.set(k, (map.get(k) ?? 0) + 1);
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ name, count }));
+  }, [allFixtures]);
+  const capBuckets = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const b of FIXTURE_CAP_BUCKETS) map.set(b.id, 0);
+    for (const f of allFixtures) {
+      for (const c of fixtureCapsOf(f)) map.set(c, (map.get(c) ?? 0) + 1);
+    }
+    return FIXTURE_CAP_BUCKETS
+      .map((b) => ({ id: b.id, label: b.label, count: map.get(b.id) ?? 0 }))
+      .filter((b) => b.count > 0);
+  }, [allFixtures]);
+  const kindFixtures = useMemo(() => {
+    if (browseMode === 'type') return allFixtures.filter((f) => (f.type || 'Autre') === selectedKind);
+    if (browseMode === 'capability') return allFixtures.filter((f) => fixtureCapsOf(f).has(selectedKind ?? ''));
+    return [];
+  }, [allFixtures, browseMode, selectedKind]);
   // Champs adresse / quantité effaçables (voir useErasableNumber).
   const addrField = useErasableNumber(startAddress, onSetAddress, { min: 1, max: 512, maxLen: 3 });
   const qtyField = useErasableNumber(quantity, onSetQuantity, { min: 1, max: 99, maxLen: 2 });
@@ -6177,6 +6496,28 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
               <p className="text-xs text-gray-500">
                 {manufacturers.length} manufacturers · {allFixtures.length} fixtures
               </p>
+              {/* ── Classements : Fabricants / Types / Capacités ── */}
+              <div className="flex gap-1.5">
+                {([
+                  { id: 'manufacturer', label: t('design.browseManufacturers', 'Fabricants') },
+                  { id: 'type', label: t('design.browseTypes', 'Types') },
+                  { id: 'capability', label: t('design.browseCapabilities', 'Capacités') },
+                ] as Array<{ id: FixtureBrowseMode; label: string }>).map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => { setBrowseMode(m.id); setSelectedKind(null); }}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-medium border transition-all ${
+                      browseMode === m.id
+                        ? 'bg-purple-600/40 text-white border-purple-500/60'
+                        : 'bg-gray-800/50 text-gray-400 border-gray-700/60 hover:text-gray-200'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              {browseMode === 'manufacturer' && (
               <div className="grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
                 {manufacturers.map((mfg) => {
                   const hue = (mfg.name.charCodeAt(0) * 37 + mfg.name.length * 53) % 360;
@@ -6203,6 +6544,83 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                   );
                 })}
               </div>
+              )}
+              {browseMode !== 'manufacturer' && selectedKind === null && (
+                /* Seaux de types ou de capacités */
+                <div className="grid grid-cols-2 gap-2 max-h-[300px] overflow-y-auto">
+                  {browseMode === 'type'
+                    ? typeBuckets.map((b) => {
+                        const hue = (b.name.charCodeAt(0) * 37 + b.name.length * 53) % 360;
+                        return (
+                          <button
+                            key={b.name}
+                            type="button"
+                            onClick={() => setSelectedKind(b.name)}
+                            className="text-left p-3 rounded-lg border border-gray-800/50 hover:border-purple-500/40 hover:bg-gray-800/20 transition-all group"
+                          >
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: `hsl(${hue}, 60%, 45%)` }} />
+                              <span className="text-xs text-gray-200 truncate group-hover:text-purple-200 transition-colors">{b.name}</span>
+                            </div>
+                            <div className="text-[10px] text-gray-600">{b.count} fixture{b.count !== 1 ? 's' : ''}</div>
+                          </button>
+                        );
+                      })
+                    : capBuckets.map((b) => (
+                        <button
+                          key={b.id}
+                          type="button"
+                          onClick={() => setSelectedKind(b.id)}
+                          className="text-left p-3 rounded-lg border border-gray-800/50 hover:border-purple-500/40 hover:bg-gray-800/20 transition-all group"
+                        >
+                          <div className="text-xs text-gray-200 truncate group-hover:text-purple-200 transition-colors">{b.label}</div>
+                          <div className="text-[10px] text-gray-600 mt-1.5">{b.count} fixture{b.count !== 1 ? 's' : ''}</div>
+                        </button>
+                      ))}
+                </div>
+              )}
+              {browseMode !== 'manufacturer' && selectedKind !== null && (
+                /* Liste filtrée par type / capacité */
+                <div>
+                  <button
+                    onClick={() => setSelectedKind(null)}
+                    className="text-[10px] text-purple-400 hover:text-purple-300"
+                    type="button"
+                  >
+                    ← {browseMode === 'type' ? t('design.browseTypes', 'Types') : t('design.browseCapabilities', 'Capacités')}
+                  </button>
+                  <p className="text-xs text-gray-400 mt-2">
+                    {kindFixtures.length} fixture{kindFixtures.length !== 1 ? 's' : ''} ·{' '}
+                    <span className="text-gray-200 font-medium">
+                      {browseMode === 'type'
+                        ? selectedKind
+                        : (FIXTURE_CAP_BUCKETS.find((b) => b.id === selectedKind)?.label ?? selectedKind)}
+                    </span>
+                  </p>
+                  <div className="space-y-1 max-h-60 overflow-y-auto mt-2">
+                    {kindFixtures.map((def) => (
+                      <button
+                        key={def.id}
+                        onClick={() => onSelectFromManufacturer(def)}
+                        onContextMenu={(e) => { e.preventDefault(); onShowDetail(def); }}
+                        title="Right-click for full details"
+                        className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-gray-800/40 transition-colors flex items-center justify-between group"
+                      >
+                        <div>
+                          <div className="text-sm text-gray-200">{def.model}</div>
+                          <div className="text-[10px] text-gray-500">
+                            {def.manufacturer} · {def.type}
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-gray-600">
+                          {def.modes.length} mode{def.modes.length !== 1 ? 's' : ''}
+                          <ChevronDown size={12} className="inline ml-1 -rotate-90 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               </>
               )}
             </div>
@@ -6220,26 +6638,56 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
                 {manufacturerFixtures.length} fixture{manufacturerFixtures.length !== 1 ? 's' : ''} from{' '}
                 <span className="text-gray-200 font-medium">{selectedManufacturer}</span>
               </p>
-              <div className="space-y-1 max-h-60 overflow-y-auto">
-                {manufacturerFixtures.map((def) => (
+              {/* Regroupement de la liste : aucun / type / capacités */}
+              <div className="flex gap-1.5">
+                {([
+                  { id: 'none', label: t('design.groupNone', 'Aucun') },
+                  { id: 'type', label: t('design.groupByType', 'Par type') },
+                  { id: 'capability', label: t('design.groupByCapability', 'Par capacités') },
+                ] as Array<{ id: FixtureListGrouping; label: string }>).map((g) => (
                   <button
-                    key={def.id}
-                    onClick={() => onSelectFromManufacturer(def)}
-                    onContextMenu={(e) => { e.preventDefault(); onShowDetail(def); }}
-                    title="Right-click for full details"
-                    className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-gray-800/40 transition-colors flex items-center justify-between group"
+                    key={g.id}
+                    type="button"
+                    onClick={() => setListGrouping(g.id)}
+                    className={`px-2 py-0.5 rounded text-[10px] border transition-all ${
+                      listGrouping === g.id
+                        ? 'bg-purple-600/40 text-white border-purple-500/60'
+                        : 'bg-gray-800/50 text-gray-400 border-gray-700/60 hover:text-gray-200'
+                    }`}
                   >
-                    <div>
-                      <div className="text-sm text-gray-200">{def.model}</div>
-                      <div className="text-[10px] text-gray-500">
-                        {def.type}
-                      </div>
-                    </div>
-                    <div className="text-[10px] text-gray-600">
-                      {def.modes.length} mode{def.modes.length !== 1 ? 's' : ''}
-                      <ChevronDown size={12} className="inline ml-1 -rotate-90 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
+                    {g.label}
                   </button>
+                ))}
+              </div>
+              <div className="space-y-1 max-h-60 overflow-y-auto">
+                {groupFixtureDefs(manufacturerFixtures, listGrouping).map(([groupName, defs]) => (
+                  <div key={groupName || '__all'}>
+                    {groupName && (
+                      <div className="px-2 py-1 text-[9px] uppercase tracking-wider text-gray-500 bg-gray-800/40 rounded mb-0.5">
+                        {groupName} · {defs.length}
+                      </div>
+                    )}
+                    {defs.map((def) => (
+                      <button
+                        key={def.id}
+                        onClick={() => onSelectFromManufacturer(def)}
+                        onContextMenu={(e) => { e.preventDefault(); onShowDetail(def); }}
+                        title="Right-click for full details"
+                        className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-gray-800/40 transition-colors flex items-center justify-between group"
+                      >
+                        <div>
+                          <div className="text-sm text-gray-200">{def.model}</div>
+                          <div className="text-[10px] text-gray-500">
+                            {def.type}
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-gray-600">
+                          {def.modes.length} mode{def.modes.length !== 1 ? 's' : ''}
+                          <ChevronDown size={12} className="inline ml-1 -rotate-90 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 ))}
               </div>
               <p className="text-[9px] text-gray-700 text-center mt-1">{t('design.clickToSelect')}</p>
@@ -6270,28 +6718,60 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
               )}
 
               {searchResults.length > 0 && (
-                <div className="space-y-1 max-h-60 overflow-y-auto">
-                  {searchResults.map((def) => (
+                <>
+                {/* Regroupement des résultats : aucun / type / capacités */}
+                <div className="flex gap-1.5">
+                  {([
+                    { id: 'none', label: t('design.groupNone', 'Aucun') },
+                    { id: 'type', label: t('design.groupByType', 'Par type') },
+                    { id: 'capability', label: t('design.groupByCapability', 'Par capacités') },
+                  ] as Array<{ id: FixtureListGrouping; label: string }>).map((g) => (
                     <button
-                      key={def.id}
-                      onClick={() => onSelectDef(def)}
-                      onContextMenu={(e) => { e.preventDefault(); onShowDetail(def); }}
-                      title="Right-click for full details"
-                      className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-gray-800/40 transition-colors flex items-center justify-between group"
+                      key={g.id}
+                      type="button"
+                      onClick={() => setListGrouping(g.id)}
+                      className={`px-2 py-0.5 rounded text-[10px] border transition-all ${
+                        listGrouping === g.id
+                          ? 'bg-purple-600/40 text-white border-purple-500/60'
+                          : 'bg-gray-800/50 text-gray-400 border-gray-700/60 hover:text-gray-200'
+                      }`}
                     >
-                      <div>
-                        <div className="text-sm text-gray-200">{def.model}</div>
-                        <div className="text-[10px] text-gray-500">
-                          {def.manufacturer} · {def.type}
-                        </div>
-                      </div>
-                      <div className="text-[10px] text-gray-600">
-                        {def.modes.length} mode{def.modes.length !== 1 ? 's' : ''}
-                        <ChevronDown size={12} className="inline ml-1 -rotate-90 opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </div>
+                      {g.label}
                     </button>
                   ))}
                 </div>
+                <div className="space-y-1 max-h-60 overflow-y-auto">
+                  {groupFixtureDefs(searchResults, listGrouping).map(([groupName, defs]) => (
+                    <div key={groupName || '__all'}>
+                      {groupName && (
+                        <div className="px-2 py-1 text-[9px] uppercase tracking-wider text-gray-500 bg-gray-800/40 rounded mb-0.5">
+                          {groupName} · {defs.length}
+                        </div>
+                      )}
+                      {defs.map((def) => (
+                        <button
+                          key={def.id}
+                          onClick={() => onSelectDef(def)}
+                          onContextMenu={(e) => { e.preventDefault(); onShowDetail(def); }}
+                          title="Right-click for full details"
+                          className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-gray-800/40 transition-colors flex items-center justify-between group"
+                        >
+                          <div>
+                            <div className="text-sm text-gray-200">{def.model}</div>
+                            <div className="text-[10px] text-gray-500">
+                              {def.manufacturer} · {def.type}
+                            </div>
+                          </div>
+                          <div className="text-[10px] text-gray-600">
+                            {def.modes.length} mode{def.modes.length !== 1 ? 's' : ''}
+                            <ChevronDown size={12} className="inline ml-1 -rotate-90 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                </>
               )}
               {searchResults.length > 0 && (
                 <p className="text-[9px] text-gray-700 text-center mt-1">{t('design.clickToSelect')}</p>
@@ -6542,8 +7022,9 @@ const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
 const PatchedFixtureList: React.FC = () => {
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
   const universes = useShowStore((s) => s.universes);
-  const unpatchFixture = useShowStore((s) => s.unpatchFixture);
-  const updateFixtureTier = useShowStore((s) => s.updateFixtureTier);
+   const unpatchFixture = useShowStore((s) => s.unpatchFixture);
+   const updateFixtureTier = useShowStore((s) => s.updateFixtureTier);
+   const duplicateFixture = useShowStore((s) => s.duplicateFixture);
   const setFixtureName = useShowStore((s) => s.setFixtureName);
   const { testState, startTest, stopTest } = useFixtureTest();
   const [testingFixtureId, setTestingFixtureId] = useState<string | null>(null);
@@ -6723,6 +7204,19 @@ const PatchedFixtureList: React.FC = () => {
           >
             <Edit2 size={12} />
             Rename
+          </button>
+          <button
+            onClick={() => {
+              const result = duplicateFixture(ctxMenu.fixtureId);
+              setCtxMenu((c) => ({ ...c, visible: false }));
+              if ('id' in result) {
+                try { (window as any).__lm_toast?.('Dupliqué', 'info'); } catch {}
+              }
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-300 transition-colors flex items-center gap-2"
+          >
+            <Copy size={12} />
+            Dupliquer
           </button>
           <div className="my-1 border-t border-gray-800/60" />
           <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">Groupe</div>
@@ -7591,7 +8085,7 @@ const FixtureEditorModal: React.FC<{ onClose: () => void; preloadedFixture?: any
       setEditModes((full.modes || []).map((m: any) => ({
         name: m.name || '',
         channels: (m.channels || []).map((ch: any) => ({
-          name: ch.name || '', type: ch.type || 'Nothing',
+          name: ch.name || '', type: displayTypeForChannel(ch),
           defaultValue: ch.defaultValue,
           capabilities: ch.capabilities ? [...ch.capabilities] : undefined,
         })),
