@@ -2,8 +2,9 @@
 // Extracted from dmx-playback.ts — stage-aware pan/tilt clamping + smart movement patterns
 
 export function clampPanToStage(panDmx: number, x: number): number {
-  const d = panDmx - 128;
-  return 128 + Math.max(-Math.round(x * 128), Math.min(Math.round((1 - x) * 128), d));
+   const nx = Math.max(0, Math.min(1, x)); // guard against out-of-bounds positions
+   const d = panDmx - 128;
+   return 128 + Math.max(-Math.round(nx * 128), Math.min(Math.round((1 - nx) * 128), d));
 }
 
 export function clampTiltToStage(tiltDmx: number, y: number): number {
@@ -41,10 +42,11 @@ export function zeroDmxOffset(deg: number | undefined, axis: 'pan' | 'tilt'): nu
  * (convention identique à clampPanToStage).
  */
 export function clampPanZoneDmx(panDmx: number, panMaxDeg: number, zeroPanDeg: number | undefined): number {
-  const z = Number.isFinite(zeroPanDeg) ? (zeroPanDeg as number) : 0;
-  const up = 127.5 + ((90 - z) / panMaxDeg) * 255;
-  const lo = 127.5 - ((90 + z) / panMaxDeg) * 255;
-  return Math.max(lo, Math.min(up, panDmx));
+   const z = Number.isFinite(zeroPanDeg) ? (zeroPanDeg as number) : 0;
+   const deg = Math.max(1, panMaxDeg); // avoid division by zero on malformed defs
+   const up = 127.5 + ((90 - z) / deg) * 255;
+   const lo = 127.5 - ((90 + z) / deg) * 255;
+   return Math.max(lo, Math.min(up, panDmx));
 }
 
 /**
@@ -60,9 +62,10 @@ export function clampTiltZoneDmx(
   zeroTiltDeg: number | undefined,
 ): number {
   const s = Number.isFinite(staticDeg) ? (staticDeg as number) : 0;
-  const z = Number.isFinite(zeroTiltDeg) ? (zeroTiltDeg as number) : 0;
-  // élévation (deg) = (val - 127.5) / 255 * tiltMax + s + z
-  const valOf = (elev: number): number => 127.5 + ((elev - s - z) / tiltMaxDeg) * 255;
+   const z = Number.isFinite(zeroTiltDeg) ? (zeroTiltDeg as number) : 0;
+   const deg = Math.max(1, tiltMaxDeg); // avoid division by zero on malformed defs
+   // élévation (deg) = (val - 127.5) / 255 * tiltMax + s + z
+   const valOf = (elev: number): number => 127.5 + ((elev - s - z) / deg) * 255;
   const lo = mountMode === 'ground' ? valOf(0) : valOf(-90);
   const up = valOf(90);
   return Math.max(lo, Math.min(up, tiltDmx));

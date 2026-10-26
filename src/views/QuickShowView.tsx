@@ -2812,6 +2812,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     panTiltLimitsRef,
     fixturePositionsRef,
     colorFadeMs: qs.colorFadeMs ?? 250,
+    strobeLimit: qs.strobeLimit || 10,
     frozenRef: frozenRef as React.MutableRefObject<boolean>,
     forceDropRef: forceDropRef as React.MutableRefObject<boolean>,
     onVirtualDmx: (uni, chVals) => {

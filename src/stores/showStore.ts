@@ -598,9 +598,9 @@ export const useShowStore = create<ShowState>((set, get) => ({
     const { patchedFixtures } = get();
     const src = patchedFixtures.find((f) => f.id === id);
     if (!src) return { error: 'Fixture not found' };
+    if (src.startAddress < 1) return { error: 'Invalid fixture address' };
     // Try first free address immediately after the source fixture
     const candidateAddr = src.startAddress + src.channelCount;
-    const end = candidateAddr + src.channelCount - 1;
     const universeFixtures = patchedFixtures
       .filter((f) => f.universeId === src.universeId && f.id !== id)
       .sort((a, b) => a.startAddress - b.startAddress);
@@ -608,7 +608,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
     for (const pf of universeFixtures) {
       if (addr + src.channelCount - 1 < pf.startAddress) break;
       if (addr + src.channelCount - 1 >= pf.startAddress) {
-        addr = pf.startAddress + pf.channelCount;
+        addr = Math.max(addr, pf.startAddress + pf.channelCount);
       }
     }
     if (addr + src.channelCount - 1 > DMX_MAX_ADDRESS) return { error: 'No free address available' };
@@ -1262,6 +1262,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
       createdAt: now,
     }));
     set({ effects: seeded });
+    useAppStore.getState().markDirty();
   },
 
   updateEffect: (id, updates) => {

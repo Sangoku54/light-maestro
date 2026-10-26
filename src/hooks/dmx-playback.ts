@@ -651,6 +651,12 @@ export function useDmxPlayback(options: {
   // Sécurité photosensibilité : le plafond utilisateur est lui-même plafonné
   // (vieux projet, preset ou entrée MIDI ne doivent jamais dépasser le max UI).
   const strobeLimitSafe = clampStrobeLimit(strobeLimit);
+   // Keep a ref so the live tick can read the latest value without re-declaring
+   // the const on every render (strobeLimit/colorFadeMs can change at runtime).
+   const strobeLimitSafeRef = useRef(strobeLimitSafe);
+   strobeLimitSafeRef.current = strobeLimitSafe;
+   const colorFadeMsRef = useRef(colorFadeMs);
+   colorFadeMsRef.current = colorFadeMs;
   const arbSource = arbiterSource ?? 'quickshow';
   const cuesRef=useRef(cues);cuesRef.current=cues;
   const dmxEnabledRef=useRef(dmxOutputEnabled);dmxEnabledRef.current=dmxOutputEnabled;
@@ -876,7 +882,7 @@ export function useDmxPlayback(options: {
     let lastStoreUpdate=0;
 
     // Color fade: EMA smoothing between palette changes (~250ms at 60fps)
-    const fadeState=new Map();const FADE_ALPHA=colorFadeMs>0?1-Math.exp(Math.log(0.1)/(colorFadeMs/16.67)):0.98;
+    const fadeState=new Map();
         const tick=()=>{
       if(!dmxEnabledRef.current){rafRef.current=requestAnimationFrame(tick);return;}
       // Posé chaque frame PENDANT la lecture uniquement : le hook RAF de
@@ -1090,17 +1096,17 @@ export function useDmxPlayback(options: {
                 // Scene runs last in the live tick → it wins on shared channels.
                 mergeSnapCtl(sceneSnap);
                 nextCueDmx=computeDmxForCue(
-                  nextCue,patchedFixturesRef.current,fixtureDefs,universes as any,tierMultipliers,ftoSnap,
-                  colorTrackColors,strobeOverridesEarly,dimmerOverrides,disabledFixturesRef?.current,fixturePositions,mergedSnap
-                );
+                   nextCue,patchedFixturesRef.current,fixtureDefs,universes as any,tierMultipliers,ftoSnap,
+                   colorTrackColors,strobeOverridesEarly,dimmerOverrides,disabledFixturesRef?.current,fixturePositions,mergedSnap,strobeLimitSafeRef.current
+                 );
               }
             } catch (e) { /* scene snapshot failed; keep the previous snapshot */ }
           }
           if (nextCueDmx===null) {
             nextCueDmx=computeDmxForCue(
-              nextCue,patchedFixturesRef.current,fixtureDefs,universes as any,tierMultipliers,ftoSnap,
-              colorTrackColors,strobeOverridesEarly,dimmerOverrides,disabledFixturesRef?.current,fixturePositions,mergedSnap ?? choSnap
-            );
+               nextCue,patchedFixturesRef.current,fixtureDefs,universes as any,tierMultipliers,ftoSnap,
+               colorTrackColors,strobeOverridesEarly,dimmerOverrides,disabledFixturesRef?.current,fixturePositions,mergedSnap ?? choSnap,strobeLimitSafeRef.current
+             );
           }
         }catch(e){crossfadeT=0;nextCueDmx=null;console.warn('[crossfade] computeDmxForCue failed, skipping:',e);}
       }
@@ -1449,7 +1455,7 @@ if (fa.isLaser) {
                   const wave = 0.75 + 0.25 * Math.sin((ct*2*Math.PI*0.8) + sIdx * (Math.PI*2/segCount));
                   pr = Math.round(pr * wave); pg = Math.round(pg * wave); pb = Math.round(pb * wave);
                 }
-                const key=pf.id+'_'+seg.r;let cur=fadeState.get(key);if(!cur){cur={r:pr,g:pg,b:pb};fadeState.set(key,cur);}else{cur.r=Math.round(cur.r+(pr-cur.r)*FADE_ALPHA);cur.g=Math.round(cur.g+(pg-cur.g)*FADE_ALPHA);cur.b=Math.round(cur.b+(pb-cur.b)*FADE_ALPHA);}chVals[pf.startAddress+seg.r]=cur.r;chVals[pf.startAddress+seg.g]=cur.g;if(seg.b!==null)chVals[pf.startAddress+seg.b]=cur.b;if(seg.w!==null)chVals[pf.startAddress+seg.w]=0;
+                const key=pf.id+'_'+seg.r;let cur=fadeState.get(key);if(!cur){cur={r:pr,g:pg,b:pb};fadeState.set(key,cur);}else{const _fa=colorFadeMsRef.current>0?1-Math.exp(Math.log(0.1)/(colorFadeMsRef.current/16.67)):0.98;cur.r=Math.round(cur.r+(pr-cur.r)*_fa);cur.g=Math.round(cur.g+(pg-cur.g)*_fa);cur.b=Math.round(cur.b+(pb-cur.b)*_fa);}chVals[pf.startAddress+seg.r]=cur.r;chVals[pf.startAddress+seg.g]=cur.g;if(seg.b!==null)chVals[pf.startAddress+seg.b]=cur.b;if(seg.w!==null)chVals[pf.startAddress+seg.w]=0;
                 if(seg.a!==null) chVals[pf.startAddress+seg.a]=0;
                 if(seg.uv!==null) chVals[pf.startAddress+seg.uv]=0;
               }
@@ -2183,7 +2189,8 @@ export function computeDmxForCue(
   dimmerTrackOverrides?: Map<string, { active: boolean; value: number }>,
   disabledFixtures?: Set<string>,
   fixturePositions?: Record<string, { x: number; y: number; h?: number; zeroPan?: number; zeroTilt?: number; centerPan?: number; centerTilt?: number; mountMode?: string; tilt?: number; heading?: number }>,
-  chaserTakeover?: Map<string, Record<number, number>>,
+   chaserTakeover?: Map<string, Record<number, number>>,
+   strobeLimit?: number,
 ): Array<{ universe: number; channelValues: Record<number, number> }> {
   const uniIds = universes.map(u => String(u.id));
   const analyses: ChannelAnalysis[] = [];
@@ -2349,7 +2356,7 @@ export function computeDmxForCue(
           ? trackStrobe.active
           : (cue as any).forcedStrobe !== undefined ? (cue as any).forcedStrobe : ((isDrop || isChorus) && cue.strobe && pf.tier === 'primary');
         if (useStrobe) {
-          const speed = Math.min(strobeTrackStrobe?.speed || trackStrobe?.speed || (cue as any).strobeSpeed || 10, 10);
+          const speed = Math.min(strobeTrackStrobe?.speed || trackStrobe?.speed || (cue as any).strobeSpeed || 10, clampStrobeLimit(strobeLimit ?? 10));
           // Use a value in the typical strobe capability range (16-131) instead of 180-255 (shutter open)
           chVals[sAddr] = Math.min(131, 16 + Math.floor(speed * 11));
         } else if (fa.intensityOffset === null) {
@@ -2371,7 +2378,7 @@ export function computeDmxForCue(
           ? trackStrobe2.active
           : (cue as any).forcedStrobe !== undefined ? (cue as any).forcedStrobe : ((isDrop || isChorus) && cue.strobe && pf.tier === 'primary');
         if (useStrobe2) {
-          const speed2 = Math.min(strobeTrackStrobe2?.speed || trackStrobe2?.speed || (cue as any).strobeSpeed || 10, 10);
+          const speed2 = Math.min(strobeTrackStrobe2?.speed || trackStrobe2?.speed || (cue as any).strobeSpeed || 10, clampStrobeLimit(strobeLimit ?? 10));
           chVals[stAddr2] = Math.min(250, Math.max(8, Math.round(8 + speed2 * 20)));
         } else {
           chVals[stAddr2] = 0;
