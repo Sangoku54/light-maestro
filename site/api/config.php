@@ -20,8 +20,8 @@
 // ── Base de données ────────────────────────────────────────────────
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'light2862516');
-define('DB_USER', 'light2862516');
-define('DB_PASS', 'LightMaestro88!');
+define('DB_USER', '');
+define('DB_PASS', '');
 
 // ── Clés d'API Stripe ──────────────────────────────────────────────
 // Clé secrète (serveur uniquement) — commence par "sk_live_..." ou "sk_test_..."

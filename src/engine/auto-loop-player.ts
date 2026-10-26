@@ -15,6 +15,7 @@
 
 import type { PatchedFixture } from '../stores/showStore';
 import { useShowStore } from '../stores/showStore';
+import { useAppStore } from '../stores/appStore';
 import { loadFixtureDefinitions } from '../hooks/dmx-cues';
 import { sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
@@ -92,7 +93,8 @@ export async function startAutoLoop(key: string, recipe: LoopRecipe): Promise<vo
     const dt = now - last;
     last = now;
     acc += dt;
-    const ms = 60000 / Math.max(1, loop.speedBpm);
+    const effectSpeedMul = useAppStore.getState().sceneLiveOverrides?.effectSpeedMul ?? 1.0;
+    const ms = (60000 / Math.max(1, loop.speedBpm)) / effectSpeedMul;
     while (acc >= ms) {
       acc -= ms;
       h.stepIndex = nextIndex(loop, h);

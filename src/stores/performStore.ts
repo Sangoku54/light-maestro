@@ -78,7 +78,8 @@ export type ButtonActionType =
   | 'loadShow'
   | 'playSong'
   | 'audioAutoScript'
-  | 'autoLoop';
+  | 'autoLoop'
+  | 'bankLoop';
 // NOTE : 'showSequence' | 'flashScene' | 'go' | 'audioPlayPause' ont été
 // retirés (jamais proposés au modal, jamais gérés — tuiles mortes). Les vieux
 // projets qui en contiendraient sont migrés dans `vcSetWidgets` ci-dessous.
@@ -114,6 +115,10 @@ export interface ConsoleWidgetConfig {
   autoScriptConfig?: any;
   // Auto loop (boucle du catalogue)
   autoLoopRecipe?: LoopRecipe;
+  // Banque pré-programmée (4 banques × 32 slots de la page AutoLoops)
+  bankIndex?: number;   // 0..3 (Couleurs, Effets, Matrice, Mix)
+  bankSlot?: number;    // 0..31
+  bankLabel?: string;   // libellé du slot (affiché sur la tuile)
   // Style
   color?: string;
   label?: string;

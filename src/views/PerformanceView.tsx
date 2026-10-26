@@ -11,13 +11,18 @@ import {
 import { useAppStore } from '../stores/appStore';
 import { useShowStore, type SavedCueList, type CueListCue, type SongPreset, findBestSongPreset, presetHasAudio } from '../stores/showStore';
 import { computeDmxCues, loadFixtureDefinitions, type CueInput, type DmxCue } from '../hooks/dmx-cues';
+import { displayTypeForChannel } from '../engine/fixture-analyzer';
 import { computeDmxForCue } from '../hooks/dmx-playback';
 import { SongPresetPlayer } from '../components/SongPresetPlayer';
 import { analyzeAudioBuffer, type TrackAnalysis } from '../hooks/audio-analysis';
 import { sendChannelsToHardware, sendToUniverse } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { startAutoLoop, stopAutoLoop, isAutoLoopActive, stopAllAutoLoops } from '../engine/auto-loop-player';
+import { startBankLoop, stopBankLoop } from '../engine/bank-loop-player';
 import { generateLoopLibrary, loopToRecipe, LOOP_KIND_ORDER, type AutoLoop, type LoopRecipe } from '../engine/auto-loops';
+import { toAutoloopFixtures } from '../engine/autoloop-runtime';
+import { buildThemedBanks, BANK_THEMES } from '../engine/autoloop-themes';
+import type { BankManager } from '../engine/autoloop-banks';
 import { preloadAudioUrl, decodeAudioUrl } from '../utils/audio-cache';
 import { generateEfxPanTilt } from '../hooks/fixture-tracks';
 import { resolveAudioUrl } from '../utils/project-audio';
@@ -117,6 +122,7 @@ function registerAudioPlayback(widgetId: string, stop: () => void): () => void {
     if (idx >= 0) _activeAudioRegistry.splice(idx, 1);
   };
 }
+
 
 // ═══════════════════════════════════════════════════════════
 // VIRTUAL CONSOLE PANEL
@@ -788,6 +794,8 @@ const VirtualConsolePanel: React.FC = () => {
         )}
       </div>
 
+      {/* (Live Faders retiré — non retenu comme évolution) */}
+
       {/* Context Menu */}
       {contextMenu && (
         <ContextMenuPopup
@@ -1026,6 +1034,103 @@ const AutoLoopPicker: React.FC<{ selected?: LoopRecipe; onSelect: (r: LoopRecipe
   );
 };
 
+/**
+ * Picker de slot de banque pour la config d'un widget `bankLoop`.
+ * Construit les MÊMES banques 4×32 que la page AutoLoops (thèmes Couleurs /
+ * Effets / Matrice / Mix) et permet de lier la tuile à une case précise :
+ * banque + slot. Le widget rejoue exactement cette case.
+ */
+const BankSlotPicker: React.FC<{
+  bankIndex: number;
+  bankSlot?: number;
+  onSelect: (bank: number, slot: number, label: string) => void;
+}> = ({ bankIndex, bankSlot, onSelect }) => {
+  const { t } = useTranslation();
+  const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const universes = useShowStore((s) => s.universes);
+  const fixturePositions = useShowStore((s) => s.fixturePositions);
+  const [banks, setBanks] = useState<BankManager | null>(null);
+  const [ready, setReady] = useState(false);
+  const [activeBank, setActiveBank] = useState(bankIndex);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!patchedFixtures.length) { setBanks(null); setReady(true); return; }
+    const ids = [...new Set(patchedFixtures.map((f) => f.fixtureDefId))];
+    loadFixtureDefinitions(ids)
+      .then((defs) => {
+        if (cancelled) return;
+        const fixtures = toAutoloopFixtures(patchedFixtures, defs, universes, fixturePositions);
+        setBanks(fixtures.length > 0 ? buildThemedBanks(fixtures) : null);
+        setReady(true);
+      })
+      .catch(() => { if (!cancelled) { setBanks(null); setReady(true); } });
+    return () => { cancelled = true; };
+  }, [patchedFixtures, universes, fixturePositions]);
+
+  const theme = BANK_THEMES[activeBank] ?? BANK_THEMES[0];
+  const slots: Array<{ label: string; swatch?: string }> = [];
+  if (banks) {
+    for (let s = 0; s < 32; s++) {
+      const tl = banks.get(activeBank, s);
+      slots.push({ label: tl?.label ?? `Slot ${s + 1}`, swatch: (tl as any)?.swatch });
+    }
+  }
+
+  return (
+    <div>
+      <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('perform.vc.bankWidget', 'Banque pré-programmée')}</label>
+      {/* Sélecteur de banque (4 thèmes) */}
+      <div className="grid grid-cols-4 gap-1 mt-1">
+        {BANK_THEMES.map((meta, b) => (
+          <button
+            key={meta.id}
+            type="button"
+            onClick={() => setActiveBank(b)}
+            title={meta.hint}
+            className={`px-1.5 py-1 rounded text-[10px] font-medium border transition-all ${
+              activeBank === b
+                ? 'bg-purple-600/40 text-white border-purple-500/60'
+                : 'bg-gray-800/50 text-gray-400 border-gray-700/60 hover:text-gray-200'
+            }`}
+          >
+            {meta.label}
+          </button>
+        ))}
+      </div>
+      {/* 32 slots de la banque active */}
+      {!ready ? (
+        <p className="text-[9px] text-gray-500 mt-1.5 italic">…</p>
+      ) : !banks ? (
+        <p className="text-[9px] text-amber-400 mt-1.5">{t('perform.vc.patchHint')}</p>
+      ) : (
+        <div className="mt-1.5 max-h-40 overflow-y-auto bg-gray-800/20 border border-gray-700/50 rounded-md p-1 space-y-0.5">
+          {slots.map((s, i) => {
+            const selected = activeBank === bankIndex && bankSlot === i;
+            return (
+              <button
+                key={i}
+                type="button"
+                onClick={() => onSelect(activeBank, i, s.label)}
+                className={`w-full flex items-center gap-1.5 px-1.5 py-1 rounded text-[10px] text-left transition-all ${
+                  selected ? 'bg-purple-600/40 text-white' : 'text-gray-300 hover:bg-gray-800/50'
+                }`}
+              >
+                {s.swatch && (
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0 border border-white/20" style={{ backgroundColor: s.swatch }} />
+                )}
+                <span className="flex-1 truncate">{s.label}</span>
+                <span className="text-[8px] text-gray-600 font-mono">{i + 1}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <p className="text-[9px] text-gray-600 mt-1">{theme.hint}</p>
+    </div>
+  );
+};
+
 const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }> = ({ widget, onClose }) => {
   const { t } = useTranslation();
   const vcUpdateWidget = usePerformStore((s) => s.vcUpdateWidget);
@@ -1114,6 +1219,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                   <option value="loadShow">♪ Play Show</option>
                   <option value="playSong">♪ Play Preset</option>
                   <option value="autoLoop">🎛 Scène pré-programmée</option>
+                  <option value="bankLoop">🎛 Banque pré-programmée</option>
                 </select>
               </div>
 
@@ -1329,6 +1435,14 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                 <AutoLoopPicker
                   selected={config.autoLoopRecipe}
                   onSelect={(recipe) => setConfig({ ...config, autoLoopRecipe: recipe })}
+                />
+              )}
+
+              {config.actionType === 'bankLoop' && (
+                <BankSlotPicker
+                  bankIndex={config.bankIndex ?? 0}
+                  bankSlot={config.bankSlot}
+                  onSelect={(bank, slot, label) => setConfig({ ...config, bankIndex: bank, bankSlot: slot, bankLabel: label })}
                 />
               )}
 
@@ -2125,6 +2239,12 @@ const VCButtonWidget: React.FC<{
       startAutoLoop(widget.id, config.autoLoopRecipe).then(() => {});
       return;
     }
+
+    if (config.actionType === 'bankLoop' && config.bankIndex !== undefined && config.bankSlot !== undefined) {
+      // Banque pré-programmée (4×32) : rejoue la case exacte choisie en config.
+      startBankLoop(widget.id, config.bankIndex, config.bankSlot).then(() => {});
+      return;
+    }
   };
 
   const deactivate = () => {
@@ -2155,6 +2275,10 @@ const VCButtonWidget: React.FC<{
     if (config.actionType === 'autoLoop') {
       stopAutoLoop(widget.id);
     }
+    // Stop bank loop playback (banques 4×32)
+    if (config.actionType === 'bankLoop') {
+      stopBankLoop(widget.id);
+    }
     // Stop playSong playback
     setSongPlayer(null);
     // Stop show playback (loadShow widget) — the toggle path: the 2nd
@@ -2179,7 +2303,10 @@ const VCButtonWidget: React.FC<{
 
   // Stop the auto loop if the widget is deleted or unmounted.
   useEffect(() => {
-    return () => { if (config.actionType === 'autoLoop') stopAutoLoop(widget.id); };
+    return () => {
+      if (config.actionType === 'autoLoop') stopAutoLoop(widget.id);
+      if (config.actionType === 'bankLoop') stopBankLoop(widget.id);
+    };
   }, [config.actionType, widget.id]);
 
   // Contrôleur MIDI physique (Akai…) → le VRAI composant (état visuel inclus).
@@ -2272,6 +2399,9 @@ const VCButtonWidget: React.FC<{
            config.actionType === 'dmxChannel' ? `CH ${config.dmxAddress || '–'} → ${config.dmxValue ?? 255}` :
            config.actionType === 'chaser' ? getChaserLabel() :
            config.actionType === 'autoLoop' ? (config.autoLoopRecipe?.name || '🎛 Scène pré-programmée') :
+           config.actionType === 'bankLoop' ? (config.bankLabel
+              ? `🎛 ${BANK_THEMES[config.bankIndex ?? 0]?.label ?? 'Banque'} · ${config.bankLabel}`
+              : '🎛 Banque pré-programmée') :
            scenes.find((s) => s.id === config.sceneId)?.name || 'Button'}
         </span>
       </button>
@@ -2758,7 +2888,7 @@ const SimpleDeskPanel: React.FC = () => {
                 fixtureId: pf.id,
                 fixtureName: pf.name || `${pf.manufacturer} ${pf.model}`,
                 channelName: ch.name || `Ch ${ci + 1}`,
-                channelType: ch.type || 'Nothing',
+                channelType: displayTypeForChannel(ch),
                 fixtureIndex: fi,
               });
             }

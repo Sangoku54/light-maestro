@@ -96,6 +96,34 @@ export function hasLaserColorGateCaps(ch: DmxFixtureChannel): boolean {
 // couleur et le canal n'atteint jamais son routing (Gobo/Effect/pattern/scan).
 const NON_COLOR_CAP_TYPE_RE = /^(Intensity|Pan|Tilt|Gobo|Shutter|Strobe|Speed|Prism|Zoom|Frost|Focus|Iris|Maintenance|Nothing)$/;
 
+/**
+ * Type d'affichage d'un canal : les définitions (custom/OFL/GDTF) laissent
+ * souvent `type` vide ou 'Nothing' alors que le moteur exploite le canal via
+ * son NOM (Pattern Selection → motifs, Scanning Speed → vitesse, Red Laser →
+ * couleur…). Dérive la fonction réelle pour l'affichage — même logique que
+ * l'analyse par nom ci-dessous. AFFICHAGE SEUL : aucune influence sur le DMX.
+ */
+export function displayTypeForChannel(ch: { name?: string; type?: string }): string {
+  const t = (ch.type || '').trim();
+  if (t && t !== 'Nothing') return t;
+  const n = (ch.name || '').toLowerCase();
+  if (/scan/.test(n)) return 'Speed';
+  if (/speed/.test(n)) return 'Speed';
+  if (/pattern/.test(n)) return 'Gobo';
+  if (/gobo/.test(n)) return 'Gobo';
+  if (/strobe/.test(n)) return 'Strobe';
+  if (/prism/.test(n)) return 'Prism';
+  if (/zoom/.test(n)) return 'Zoom';
+  if (/focus/.test(n)) return 'Focus';
+  if (/iris/.test(n)) return 'Iris';
+  if (/frost/.test(n)) return 'Frost';
+  if (/dim|master/.test(n)) return 'Intensity';
+  if (/shutter/.test(n)) return 'Shutter';
+  if (/colou?r|red|green|blue|amber|uv|white/.test(n)) return 'Colour';
+  if (/macro|mode|function|select/.test(n)) return 'Macro';
+  return t || 'Nothing';
+}
+
 // ─── Interface unifiée ─────────────────────────────────────────
 
 export interface FixtureChannelAnalysis {

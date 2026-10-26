@@ -522,7 +522,7 @@ import type { RgbSegment } from '../engine/dmx-color';
 import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, findBestWheelCap, wheelDegeneratePosition } from '../engine/dmx-color';
 import type { ChannelAnalysis } from '../engine/fixture-analyzer';
 import { analyzeChannels, capMid, pickLaserModeCap, laserGateValue, mapIntensityVal, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
-import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSectionMovement, spatialPhaseFor, zeroDmxOffset } from '../engine/dmx-movement';
+import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSectionMovement, spatialPhaseFor, zeroDmxOffset, clampPanZoneDmx, clampTiltZoneDmx } from '../engine/dmx-movement';
 import { computeGoboValue } from '../engine/gobo-engine';
 import { useAppStore } from '../stores/appStore';
 import { useProgrammerStore } from '../stores/programmerStore';
@@ -612,6 +612,16 @@ export function useDmxPlayback(options: {
   tierMultipliers?: { primary: number; secondary: number; tertiary: number };
   strobeLimit?: number;
   colorFadeMs?: number;
+  // Scene live overrides (faders in Performance view) — applied on top of all playback
+  sceneLiveOverridesRef?: React.MutableRefObject<{
+    masterDimmer: number;           // 0-255
+    panTiltSpeedMul: number;        // 0.1-2.0
+    effectSpeedMul: number;         // 0.1-2.0
+    strobeSpeedMul: number;         // 0.1-2.0
+    perFixtureDimmer: Record<string, number>; // 0-255 per fixture
+    /** Couleur maîtresse #rrggbb appliquée à toutes les fixtures RGB. null/absent = off. */
+    masterColor?: string | null;
+  }>;
   overrideCuesRef?: React.MutableRefObject<any[]>; // EFX + manual cues that override auto DMX
   fixtureTracksRef?: React.MutableRefObject<FixtureTrack[]>; // Fixture track overrides
   efxTracksRef?: React.MutableRefObject<EfxTrackRef[]>; // EFX track pan/tilt overrides
@@ -629,7 +639,7 @@ export function useDmxPlayback(options: {
   matrixTracksRef?: React.MutableRefObject<any[] | null>; // Matrix track lanes: couleur (+ strobe du motif) chevauchant l'autoscript
   matricesRef?: React.MutableRefObject<any[]>; // Définitions de matrices RGB sauvegardées
   disabledFixturesRef?: React.MutableRefObject<Set<string>>; // Disabled fixture IDs
-  fixturePositionsRef?: React.MutableRefObject<Record<string, { x: number; y: number; h?: number; zeroPan?: number; zeroTilt?: number; centerPan?: number; centerTilt?: number }>>; // For stage-aware pan/tilt + centre du mouvement (capture)
+  fixturePositionsRef?: React.MutableRefObject<Record<string, { x: number; y: number; h?: number; zeroPan?: number; zeroTilt?: number; centerPan?: number; centerTilt?: number; mountMode?: string; tilt?: number; heading?: number }>>; // For stage-aware pan/tilt + centre du mouvement (capture)
   panTiltLimitsRef?: React.MutableRefObject<{ pan: number; tilt: number; perFixture?: Record<string, { pan: number; tilt: number }> }>; // DMX half-amplitude limits for autoscript movement (128 = full)
   onVirtualDmx?: (universe: number, channelValues: Record<number, number>) => void; // Mirror for 3D view
   dryRunMode?: boolean; // Skip hardware DMX output, keep store/3D updates
@@ -637,7 +647,7 @@ export function useDmxPlayback(options: {
   forceDropRef?: React.MutableRefObject<boolean>; // Force next tick to use drop parameters
   arbiterSource?: string; // Output-arbiter source id this engine writes as (default 'quickshow')
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,showTracksRef,showsRef,sceneTracksRef,matrixTracksRef,matricesRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,panTiltLimitsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,showTracksRef,showsRef,sceneTracksRef,matrixTracksRef,matricesRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,panTiltLimitsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource,sceneLiveOverridesRef}=options;
   // Sécurité photosensibilité : le plafond utilisateur est lui-même plafonné
   // (vieux projet, preset ou entrée MIDI ne doivent jamais dépasser le max UI).
   const strobeLimitSafe = clampStrobeLimit(strobeLimit);
@@ -1755,6 +1765,10 @@ if (fa.isLaser) {
                   // borne que autour du centre capturé.
                   let pv = (zeroPd !== 0 && fp) ? raw : (fp ? clampPanToStage(raw, fp.x) : raw);
                   pv = Math.max(128 + zeroPd - panLimit, Math.min(128 + zeroPd + panLimit, pv));
+                  // Zone 180° (option B) : le pan ÉCRIT reste dans ±90° de la
+                  // direction par défaut → le matériel ne va jamais derrière.
+                  // Une visée délibérée (centre capturé) bypass le clamp.
+                  if (!(zeroPd !== 0 && fp)) pv = clampPanZoneDmx(pv, fa.panMaxDeg ?? 540, fp?.zeroPan);
                   chVals[pf.startAddress+fa.panOffsets[m]] = pv;
                   if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: pv, tilt: 128 }), pan: pv });
                 }
@@ -1764,7 +1778,9 @@ if (fa.isLaser) {
                   const fp = fixturePositions?.[pf.id];
                   let tv = (zeroTd !== 0 && fp) ? raw : (fp ? clampTiltToStage(raw, fp.y) : raw);
                   tv = Math.max(128 + zeroTd - tiltLimit, Math.min(128 + zeroTd + tiltLimit, tv));
-chVals[pf.startAddress+fa.tiltOffsets[m]] = tv;
+                  // Zone TILT moteur (miroir 3D) : ground jamais sous l'horizon.
+                  if (!(zeroTd !== 0 && fp)) tv = clampTiltZoneDmx(tv, fa.tiltMaxDeg ?? 180, fp?.mountMode, fp?.tilt, fp?.zeroTilt);
+                  chVals[pf.startAddress+fa.tiltOffsets[m]] = tv;
                   if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: 128, tilt: tv }), tilt: tv });
                 }}
               }else{for(const po of fa.panOffsets)chVals[pf.startAddress+po]=Math.round(Math.max(0,Math.min(255,128+zeroPd)));for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=Math.round(Math.max(0,Math.min(255,128+zeroTd)));}
@@ -1918,6 +1934,90 @@ const _FXPROF: Record<string, [number, number, number, number]> = {
                 if (!fm) { fm = new Map(); lock.set(fid, fm); }
                 if (!fm.has(addr)) fm.set(addr, chVals[addr] ?? 128);
                 chVals[addr] = fm.get(addr)!;
+              }
+            }
+          }
+        }
+
+        // Apply scene live overrides (master dimmer, per-fixture dimmer, master color)
+        // These are global multipliers applied on top of all playback sources.
+        // Lit DIRECTEMENT depuis l'appStore (le ref optionnel n'était câblé
+        // nulle part → les faders LIVE de la console virtuelle n'avaient aucun
+        // effet). getState() est peu coûteux et reste cohrent à chaque frame.
+        {
+          const overrides = sceneLiveOverridesRef?.current ?? useAppStore.getState().sceneLiveOverrides;
+          const masterDimmer = overrides?.masterDimmer ?? 255;
+          const perFixtureDimmer = overrides?.perFixtureDimmer ?? {};
+          const masterColor = overrides?.masterColor ?? null;
+          let mcr = -1, mcg = -1, mcb = -1;
+          if (masterColor && /^#[0-9a-fA-F]{6}$/.test(masterColor)) {
+            mcr = parseInt(masterColor.slice(1, 3), 16);
+            mcg = parseInt(masterColor.slice(3, 5), 16);
+            mcb = parseInt(masterColor.slice(5, 7), 16);
+          }
+
+          if (masterDimmer !== 255 || Object.keys(perFixtureDimmer).length > 0 || mcr >= 0) {
+            for (const fa of fixtures) {
+              const fid = fa.fixture.id;
+              const pfDimmer = perFixtureDimmer[fid];
+              const dimmerMul = pfDimmer !== undefined
+                ? pfDimmer / 255
+                : masterDimmer / 255;
+
+              // Scale all intensity-related channels for this fixture
+              const base = fa.fixture.startAddress;
+
+              // ── Couleur maîtresse : TOUTES les fixtures RGB prennent la
+              // couleur choisie en un clic (avant le scaling dimmer : la
+              // teinte reste stable, seule l'intensité suit les faders).
+              if (mcr >= 0) {
+                for (const seg of (fa.rgbSegments || [])) {
+                  if (seg.r !== null && seg.r !== undefined) chVals[base + seg.r] = mcr;
+                  if (seg.g !== null && seg.g !== undefined) chVals[base + seg.g] = mcg;
+                  if (seg.b !== null && seg.b !== undefined) chVals[base + seg.b] = mcb;
+                  // W coupé pour préserver la teinte (RGBW) — le blanc pur
+                  // (#ffffff) reste rendu par R+G+B à fond.
+                  if (seg.w !== null && seg.w !== undefined) chVals[base + seg.w] = 0;
+                }
+              }
+
+              // Main intensity channel
+              if (fa.intensityOffset !== null) {
+                const addr = base + fa.intensityOffset;
+                if (chVals[addr] !== undefined) {
+                  chVals[addr] = Math.round(chVals[addr] * dimmerMul);
+                }
+              }
+              // LED intensity channels (multi-head)
+              for (const li of (fa.ledIntensityOffsets || [])) {
+                const addr = base + li;
+                if (chVals[addr] !== undefined) {
+                  chVals[addr] = Math.round(chVals[addr] * dimmerMul);
+                }
+              }
+              // RGB segments (scale color values proportionally)
+              for (const seg of (fa.rgbSegments || [])) {
+                for (const ch of [seg.r, seg.g, seg.b, seg.w].filter(v => v !== null && v !== undefined)) {
+                  const addr = base + ch;
+                  if (chVals[addr] !== undefined) {
+                    chVals[addr] = Math.round(chVals[addr] * dimmerMul);
+                  }
+                }
+              }
+              // Color wheel / laser gates
+              if (fa.isLaser) {
+                if (fa.laserColorGateOffset !== null) {
+                  const addr = base + fa.laserColorGateOffset;
+                  if (chVals[addr] !== undefined) {
+                    chVals[addr] = Math.round(chVals[addr] * dimmerMul);
+                  }
+                }
+                if (fa.laserMasterOffset !== null) {
+                  const addr = base + fa.laserMasterOffset;
+                  if (chVals[addr] !== undefined) {
+                    chVals[addr] = Math.round(chVals[addr] * dimmerMul);
+                  }
+                }
               }
             }
           }
@@ -2082,7 +2182,7 @@ export function computeDmxForCue(
   strobeTrackOverrides?: Map<string, { active: boolean; speed: number }>,
   dimmerTrackOverrides?: Map<string, { active: boolean; value: number }>,
   disabledFixtures?: Set<string>,
-  fixturePositions?: Record<string, { x: number; y: number; h?: number; zeroPan?: number; zeroTilt?: number; centerPan?: number; centerTilt?: number }>,
+  fixturePositions?: Record<string, { x: number; y: number; h?: number; zeroPan?: number; zeroTilt?: number; centerPan?: number; centerTilt?: number; mountMode?: string; tilt?: number; heading?: number }>,
   chaserTakeover?: Map<string, Record<number, number>>,
 ): Array<{ universe: number; channelValues: Record<number, number> }> {
   const uniIds = universes.map(u => String(u.id));
@@ -2366,7 +2466,10 @@ export function computeDmxForCue(
               const ampPan = movementAmp(amplitude, 128 + zPd, 128);
               const raw = Math.max(0, Math.min(255, Math.round(128 + zPd + px * ampPan)));
               const fp = fixturePositions?.[pf.id];
-              chVals[pf.startAddress + fa.panOffsets[m]] = (zPd !== 0 && fp) ? raw : (fp ? clampPanToStage(raw, fp.x) : raw);
+              let pv = (zPd !== 0 && fp) ? raw : (fp ? clampPanToStage(raw, fp.x) : raw);
+              // Zone 180° moteur (option B) — bypass si centre capturé (visée délibérée)
+              if (!(zPd !== 0 && fp)) pv = clampPanZoneDmx(pv, fa.panMaxDeg ?? 540, fp?.zeroPan);
+              chVals[pf.startAddress + fa.panOffsets[m]] = pv;
             }
             if (m < tiltCount) {
               const rp = fixturePositions?.[pf.id];
@@ -2374,7 +2477,10 @@ export function computeDmxForCue(
               const ampTilt = movementAmp(amplitude, 128 + zTd, 128);
               const raw = Math.max(0, Math.min(255, Math.round(128 + zTd + py * ampTilt)));
               const fp = fixturePositions?.[pf.id];
-              chVals[pf.startAddress + fa.tiltOffsets[m]] = (zTd !== 0 && fp) ? raw : (fp ? clampTiltToStage(raw, fp.y) : raw);
+              let tv = (zTd !== 0 && fp) ? raw : (fp ? clampTiltToStage(raw, fp.y) : raw);
+              // Zone TILT moteur (miroir 3D) — bypass si centre capturé
+              if (!(zTd !== 0 && fp)) tv = clampTiltZoneDmx(tv, fa.tiltMaxDeg ?? 180, fp?.mountMode, fp?.tilt, fp?.zeroTilt);
+              chVals[pf.startAddress + fa.tiltOffsets[m]] = tv;
             }
           }
         } else {

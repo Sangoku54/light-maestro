@@ -79,6 +79,24 @@ export interface QuickShowState {
   scenesAutoscriptWeight: number; // 0-100
 }
 
+// Live scene overrides (faders in Performance view) — applied on top of scene playback
+export interface SceneLiveOverrides {
+  masterDimmer: number;           // 0-255, global dimmer multiplier
+  panTiltSpeedMul: number;        // 0.1-2.0, multiplies pan/tilt movement speed
+  effectSpeedMul: number;         // 0.1-2.0, multiplies effect/chase speeds
+  strobeSpeedMul: number;         // 0.1-2.0, multiplies strobe speeds
+  perFixtureDimmer: Record<string, number>; // 0-255 per fixture
+  /** Couleur maîtresse (#rrggbb) appliquée à TOUTES les fixtures RGB en un clic. null = désactivé. */
+  masterColor: string | null;
+  // Widget persistence
+  savedWidgets: Array<{
+    id: string;
+    name: string;
+    overrides: SceneLiveOverrides;
+    createdAt: number;
+  }>;
+}
+
 interface DMXState {
   running: boolean;
   blackout: boolean;
@@ -139,6 +157,9 @@ interface AppState {
   show: ShowState;
   audio: AudioState;
 
+  // Scene live overrides (faders in Performance view)
+  sceneLiveOverrides: SceneLiveOverrides;
+
   // Unsaved changes tracking (NOT persisted - resets on reload)
   isDirty: boolean;
   dirtyAt: number;
@@ -173,6 +194,12 @@ interface AppState {
   setPanTiltMaxSpeed: (value: number) => void;
   setChannelValue: (universe: number, channel: number, value: number) => void;
   setUniverseData: (universe: number, values: Record<number, number>) => void;
+  // Scene live overrides (faders)
+  setSceneLiveOverrides: (partial: Partial<SceneLiveOverrides>) => void;
+  resetSceneLiveOverrides: () => void;
+  saveSceneOverridesWidget: (name: string) => void;
+  loadSceneOverridesWidget: (widgetId: string) => void;
+  deleteSceneOverridesWidget: (widgetId: string) => void;
   setAudioAnalysis: (analysis: any) => void;
   setAudioRunning: (running: boolean) => void;
 }
@@ -238,6 +265,17 @@ export const useAppStore = create<AppState>()(
         ],
         channelData: {},
       },
+
+      // Live scene overrides (faders in Performance view) — applied on top of scene playback
+      sceneLiveOverrides: {
+        masterDimmer: 255,
+        panTiltSpeedMul: 1.0,
+        effectSpeedMul: 1.0,
+        strobeSpeedMul: 1.0,
+        perFixtureDimmer: {},
+        masterColor: null,
+        savedWidgets: [],
+      } as SceneLiveOverrides,
 
       fixtures: {
         library: [],
@@ -455,6 +493,64 @@ export const useAppStore = create<AppState>()(
         }
         set({ dmx: { ...dmx, channelData: { ...(raw as any), [universe]: data } } });
       },
+
+      // Scene live overrides (faders) — applied on top of scene/efx playback
+      setSceneLiveOverrides: (partial: Partial<SceneLiveOverrides>) =>
+        set((state) => ({
+          sceneLiveOverrides: { ...state.sceneLiveOverrides, ...partial },
+        })),
+
+      resetSceneLiveOverrides: () =>
+        set({
+          sceneLiveOverrides: {
+            masterDimmer: 255,
+            panTiltSpeedMul: 1.0,
+            effectSpeedMul: 1.0,
+            strobeSpeedMul: 1.0,
+            perFixtureDimmer: {},
+            masterColor: null,
+            savedWidgets: [],
+          } as SceneLiveOverrides,
+        }),
+
+      saveSceneOverridesWidget: (name: string) =>
+        set((state) => {
+          const widget = {
+            id: `widget-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name,
+            overrides: { ...state.sceneLiveOverrides },
+            createdAt: Date.now(),
+          };
+          // Remove the widget from savedWidgets before adding (to avoid duplication of the whole state)
+          const { savedWidgets, ...overridesToSave } = state.sceneLiveOverrides;
+          return {
+            sceneLiveOverrides: {
+              ...overridesToSave,
+              savedWidgets: [...savedWidgets, widget],
+            },
+          };
+        }),
+
+      loadSceneOverridesWidget: (widgetId: string) =>
+        set((state) => {
+          const widget = state.sceneLiveOverrides.savedWidgets.find(w => w.id === widgetId);
+          if (!widget) return state;
+          const { savedWidgets, ...overrides } = widget.overrides;
+          return {
+            sceneLiveOverrides: {
+              ...overrides,
+              savedWidgets: state.sceneLiveOverrides.savedWidgets,
+            },
+          };
+        }),
+
+      deleteSceneOverridesWidget: (widgetId: string) =>
+        set((state) => ({
+          sceneLiveOverrides: {
+            ...state.sceneLiveOverrides,
+            savedWidgets: state.sceneLiveOverrides.savedWidgets.filter(w => w.id !== widgetId),
+          },
+        })),
 
       setAudioAnalysis: (analysis) =>
         set((state) => ({

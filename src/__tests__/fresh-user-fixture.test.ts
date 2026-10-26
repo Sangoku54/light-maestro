@@ -88,8 +88,8 @@ describe('nouvel utilisateur — AFX Spot 60 à l\'arrière, première utilisati
     expect(Math.abs(tiltByte - 128)).toBeLessThanOrEqual(30);
   });
 
-  it('décodage 3D : faisceau horizontal vers le public (parallèle au sol)', () => {
-    // Règle de zone : arrière (y=0.9) → φ=0 ; motorisée → heading ignoré même pollué
+  it('décodage 3D : faisceau horizontal vers l’arriere de scene (parallèle au sol)', () => {
+    // Regle centre : arriere (y=0.9, x=0.5) → φ=0 ; motorisée → heading ignoré même pollué
     const phi = headingRadForPos({ x: 0.5, y: 0.9, heading: 260 } as any, 'ground', DIMS, true);
     expect(pie(phi)).toBeCloseTo(0, 9);
     // mountMode ground → mountTilt π/2 → faisceau horizontal au neutre

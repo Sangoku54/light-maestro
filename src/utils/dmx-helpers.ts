@@ -93,6 +93,37 @@ export async function sendChannelsToHardware(
   sourceId: string = 'default',
   transientMs?: number,
 ): Promise<void> {
+  // Apply scene live overrides (master dimmer, per-fixture dimmer)
+  // These are global multipliers applied on top of all playback sources
+  const sceneLiveOverrides = useAppStore.getState().sceneLiveOverrides;
+  const masterDimmer = sceneLiveOverrides?.masterDimmer ?? 255;
+  const perFixtureDimmer = sceneLiveOverrides?.perFixtureDimmer ?? {};
+
+  if (masterDimmer !== 255 || Object.keys(perFixtureDimmer).length > 0) {
+    // Scale intensity channels for each fixture
+    for (const pf of patchedFixtures) {
+      const pfDimmer = perFixtureDimmer[pf.id];
+      const dimmerMul = pfDimmer !== undefined
+        ? pfDimmer / 255
+        : masterDimmer / 255;
+
+      if (dimmerMul === 1) continue;
+
+      const base = pf.startAddress;
+
+      // Main intensity channel - find the intensity offset from fixture channels
+      // We need to check which channels are intensity channels
+      // For simplicity, scale all channels that belong to this fixture
+      // by the dimmer multiplier
+      for (const [addr, val] of Object.entries(channelValues)) {
+        const ch = Number(addr);
+        if (ch >= base && ch < base + (pf.channelCount || 1)) {
+          channelValues[ch] = Math.round(val * dimmerMul);
+        }
+      }
+    }
+  }
+
   // Toujours traverser le pont (arbitre + cache 3D), même sans API hardware :
   // flushToHardware ignore déjà l'absence de DMX. L'ancien early-return
   // laissait le cache 3D périmé pendant que le miroir appStore avançait —

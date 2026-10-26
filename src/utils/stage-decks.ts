@@ -69,10 +69,11 @@ export function migrateStageDecks(saved: unknown): StageDeck[] {
 
 /** Le point normalisé (x, y) est-il sur le plateau (repère pivoté) ? */
 export function deckContains(deck: StageDeck, x: number, y: number): boolean {
-  const a = ((deck.rot ?? 0) * Math.PI) / 180;
+  // Le plateau est rendu avec rotation.y = -rot (horaire pour rot > 0).
+  // Pour tester l'appartenance, il faut appliquer la rotation inverse : +rot.
+  const a = -((deck.rot ?? 0) * Math.PI) / 180;
   const c = Math.cos(a);
   const s = Math.sin(a);
-  // Monde → repère du plateau (rotation inverse de celle du rendu).
   const dx = x - deck.cx;
   const dy = y - deck.cy;
   const lx = dx * c + dy * s;
@@ -89,13 +90,37 @@ export function deckTopAt(decks: StageDeck[], x: number, y: number): number {
   if (decks.length === 0) return LEGACY_STAGE_HEIGHT;
   let top = 0;
   let found = false;
+  // First pass: exact containment (x,y within deck bounds)
   for (const deck of decks) {
     if (deckContains(deck, x, y)) {
       found = true;
       if (deck.h > top) top = deck.h;
     }
   }
-  return found ? top : 0;
+  if (found) return top;
+  // Fallback: no deck contains the exact point.
+  // Only for axis-aligned decks (rot ≈ 0) that represent stage extensions:
+  // if the point's y is within the deck's y-range but x is just outside,
+  // the fixture is on the side of the deck and should get the deck's height.
+  let fallbackTop = 0;
+  for (const deck of decks) {
+    const rot = deck.rot ?? 0;
+    if (Math.abs(rot) > 5) continue; // only for nearly axis-aligned decks
+    const a = -(rot * Math.PI) / 180;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    // Check if y is within deck's y-range (with small tolerance)
+    const dy = y - deck.cy;
+    const dx = x - deck.cx;
+    const ly = -dx * s + dy * c; // local y
+    if (Math.abs(ly) > deck.d / 2 + 0.05) continue; // y outside deck's range (+5cm tolerance)
+    // x is outside but within x-span (with small tolerance)
+    const lx = dx * c + dy * s;
+    if (Math.abs(lx) <= deck.w / 2 + 0.05) {
+      if (deck.h > fallbackTop) fallbackTop = deck.h;
+    }
+  }
+  return fallbackTop;
 }
 
 /** Rectangle du plateau en mètres, centré sur le cadre (pour Three.js / canvas). */

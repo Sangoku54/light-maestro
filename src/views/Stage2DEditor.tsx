@@ -53,6 +53,7 @@ export const Stage2DEditor: React.FC = () => {
   const [showBeams, setShowBeams] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [selectedFixtureIds, setSelectedFixtureIds] = useState<Set<string>>(new Set());
+  const marqueeRef = useRef<{ startX: number; startY: number; currentX: number; currentY: number; active: boolean } | null>(null);
 
   // Floating 3D companion view (same pill pattern as the other Design tabs)
   const [showFloating3D, setShowFloating3D] = useState(false);
@@ -399,6 +400,26 @@ export const Stage2DEditor: React.FC = () => {
         }
       }
 
+      // Draw marquee selection rectangle
+      if (marqueeRef.current?.active) {
+        const m = marqueeRef.current;
+        const minX = Math.min(m.startX, m.currentX);
+        const maxX = Math.max(m.startX, m.currentX);
+        const minY = Math.min(m.startY, m.currentY);
+        const maxY = Math.max(m.startY, m.currentY);
+        const rMinX = padX + minX * sw;
+        const rMaxX = padX + maxX * sw;
+        const rMinY = padY + minY * sh;
+        const rMaxY = padY + maxY * sh;
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.strokeRect(rMinX, rMinY, rMaxX - rMinX, rMaxY - rMinY);
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(168, 85, 247, 0.1)';
+        ctx.fillRect(rMinX, rMinY, rMaxX - rMinX, rMaxY - rMinY);
+      }
+
       // Empty state
       if (patchedFixtures.length === 0) {
         ctx.fillStyle = '#4b5563';
@@ -454,7 +475,7 @@ export const Stage2DEditor: React.FC = () => {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // Right-click: cycle height preset
+    // Right-click: cycle height preset on fixture, clear selection on empty space
     if (e.button === 2) {
       const hitId = hitTestFixture(x, y);
       if (hitId) {
@@ -469,6 +490,11 @@ export const Stage2DEditor: React.FC = () => {
           for (const tid of targets) {
             setFixturePosition(tid, { h: heights[nextIdx] });
           }
+        }
+      } else {
+        // Right-click on empty space: clear selection
+        if (selectedFixtureIds.size > 0) {
+          setSelectedFixtureIds(new Set());
         }
       }
       return;
@@ -514,15 +540,26 @@ export const Stage2DEditor: React.FC = () => {
       }
       dragRef.current = { ids: dragIds, offsets, startMouse: { fx: mfx, fy: mfy } };
     } else {
-      // Click on empty space: clear selection unless shift
+      // Click on empty space: start marquee selection (unless shift for multi-select)
       if (!shift) {
-        setSelectedFixtureIds(new Set());
+        marqueeRef.current = { startX: mfx, startY: mfy, currentX: mfx, currentY: mfy, active: true };
+      } else {
+        // Shift + click empty: keep existing selection, no marquee
+        marqueeRef.current = null;
       }
       dragRef.current = null;
     }
   }, [patchedFixtures, fixturePositions, getCanvasCoords, hitTestFixture, selectedFixtureIds, setFixturePosition]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    // Update marquee if active
+    if (marqueeRef.current?.active) {
+      const { fx, fy } = getCanvasCoords(e);
+      marqueeRef.current.currentX = fx;
+      marqueeRef.current.currentY = fy;
+      return;
+    }
+
     if (!dragRef.current) return;
     const { fx, fy } = getCanvasCoords(e);
     for (const [id, offset] of dragRef.current.offsets) {
@@ -534,8 +571,29 @@ export const Stage2DEditor: React.FC = () => {
   }, [getCanvasCoords, setFixturePosition]);
 
   const handleMouseUp = useCallback(() => {
+    // Finalize marquee selection
+    if (marqueeRef.current?.active) {
+      const m = marqueeRef.current;
+      const minX = Math.min(m.startX, m.currentX);
+      const maxX = Math.max(m.startX, m.currentX);
+      const minY = Math.min(m.startY, m.currentY);
+      const maxY = Math.max(m.startY, m.currentY);
+
+      const newSelection = new Set(selectedFixtureIds);
+      for (const pf of patchedFixtures) {
+        const pos = fixturePositions[pf.id] || { x: 0.5, y: 0.3 };
+        if (pos.x >= minX && pos.x <= maxX && pos.y >= minY && pos.y <= maxY) {
+          newSelection.add(pf.id);
+        }
+      }
+      setSelectedFixtureIds(newSelection);
+      marqueeRef.current = null;
+      return;
+    }
+
     dragRef.current = null;
-  }, []);
+    marqueeRef.current = null;
+  }, [patchedFixtures, fixturePositions, selectedFixtureIds]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     const rect = canvasRef.current?.getBoundingClientRect();

@@ -146,6 +146,9 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
         universes: showState.universes,
         fixturePositions: showState.fixturePositions,
         fixtureGroups: showState.fixtureGroups,
+        musicians: showState.musicians,
+        view3D: showState.view3D,
+        stageScene: showState.stageScene,
         scenes: showState.scenes,
         sceneFolders: showState.sceneFolders,
         chasers: showState.chasers,
@@ -461,6 +464,12 @@ const App: React.FC = () => {
           if (data.showStore.universes) { ss.setShowUniverses(data.showStore.universes); syncUniversesToEngine(data.showStore.universes); }
           if (data.showStore.fixturePositions) ss.setFixturePositions(data.showStore.fixturePositions);
           if (data.showStore.fixtureGroups) ss.setFixtureGroups(data.showStore.fixtureGroups);
+          // Project-level 3D config : musiciens + camera/toggles + ponts.
+          // INCONDITIONNEL (anti-héritage) : un projet sans ces champs repart
+          // de zéro, sans hériter de la config du projet précédent.
+          ss.setMusicians(data.showStore.musicians ?? {});
+          ss.setView3D(data.showStore.view3D ?? undefined);
+          ss.setProjectStageScene(data.showStore.stageScene ?? 'empty');
           if (data.showStore.scenes) ss.setScenes(data.showStore.scenes);
           // Unconditional: a project without the field must not leak folders
           // from a previously opened project (sceneFolders is a plain list).

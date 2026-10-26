@@ -13,6 +13,7 @@
 
 import type { DmxCue } from './dmx-cues';
 import type { PatchedFixture, SavedEffect, EfxPattern } from '../stores/showStore';
+import { useAppStore } from '../stores/appStore';
 
 // ═══════════════════════════════════════════════════════════
 // Types
@@ -400,7 +401,9 @@ export function computeEfxOverrides(
     const effect = effectMap.get(activeEntry.effectId);
     if (!effect) continue;
 
-    const speed = effect.speed || 0.5;
+    // Apply live effect speed multiplier from scene live overrides (Performance faders)
+    const effectSpeedMul = useAppStore.getState().sceneLiveOverrides?.effectSpeedMul ?? 1.0;
+    const speed = (effect.speed || 0.5) * effectSpeedMul;
     // Base de temps CONTINUE sur l'horloge absolue du show — identique à
     // l'aperçu live de l'éditeur et à ShowManager (phase = t·speed·2 rad, soit
     // speed/π Hz, l'unité affichée dans l'éditeur). L'ancienne formule

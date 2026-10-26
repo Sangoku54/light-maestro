@@ -31,6 +31,43 @@ export function zeroDmxOffset(deg: number | undefined, axis: 'pan' | 'tilt'): nu
     return Math.round((deg / scale) * 255);
   }
 
+/**
+ * Zone 180° côté MOTEUR (option B) — miroir EXACT du clamp 3D
+ * (`clampPanZone` + tare zeroPan) appliqué aux valeurs de pan ÉCRITES :
+ * le matériel ne peut physiquement pas dépasser ±90° de la direction
+ * par défaut de la fixture. Bornes asymétriques quand la tare (zeroPan)
+ * décale le centre — même formule que le rendu 3D.
+ * Contournement : une visée délibérée (centre capturé) BYPASSE ce clamp
+ * (convention identique à clampPanToStage).
+ */
+export function clampPanZoneDmx(panDmx: number, panMaxDeg: number, zeroPanDeg: number | undefined): number {
+  const z = Number.isFinite(zeroPanDeg) ? (zeroPanDeg as number) : 0;
+  const up = 127.5 + ((90 - z) / panMaxDeg) * 255;
+  const lo = 127.5 - ((90 + z) / panMaxDeg) * 255;
+  return Math.max(lo, Math.min(up, panDmx));
+}
+
+/**
+ * Zone TILT côté MOTEUR — miroir de `clampTiltZone` : élévation ∈ [-90°, +90°]
+ * (verticale basse → haute) ; au SOL ('ground') jamais sous l'horizon.
+ * staticDeg = pos.tilt (tare statique panneau), zeroTiltDeg = pos.zeroTilt.
+ */
+export function clampTiltZoneDmx(
+  tiltDmx: number,
+  tiltMaxDeg: number,
+  mountMode: string | undefined,
+  staticDeg: number | undefined,
+  zeroTiltDeg: number | undefined,
+): number {
+  const s = Number.isFinite(staticDeg) ? (staticDeg as number) : 0;
+  const z = Number.isFinite(zeroTiltDeg) ? (zeroTiltDeg as number) : 0;
+  // élévation (deg) = (val - 127.5) / 255 * tiltMax + s + z
+  const valOf = (elev: number): number => 127.5 + ((elev - s - z) / tiltMaxDeg) * 255;
+  const lo = mountMode === 'ground' ? valOf(0) : valOf(-90);
+  const up = valOf(90);
+  return Math.max(lo, Math.min(up, tiltDmx));
+}
+
 // Mapping: section → best suited movement patterns per fixture (ordered by energy)
 export const SMART_MOVEMENTS: Record<string, string[]> = {
   intro:   ['static', 'panOnly', 'tiltOnly', 'sweep', 'wave'],

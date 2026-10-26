@@ -33,7 +33,7 @@ try {
     $stmt->execute([$userId, $file, $_SERVER['REMOTE_ADDR'] ?? '']);
 
     $label = $file === 'portable' ? 'Version portable' : 'Installeur Windows';
-    notify_admin('Nouveau téléchargement', $email . ' a téléchargé : ' . $label . ' (v1.0.38)');
+    notify_admin('Nouveau téléchargement', $email . ' a téléchargé : ' . $label . ' (v1.0.39)');
 
     respond(['ok' => true]);
 } catch (Throwable $e) {
