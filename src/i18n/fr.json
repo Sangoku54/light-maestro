@@ -1257,6 +1257,13 @@
     "ofl": "Définitions de projecteurs : Open Fixture Library (licence MIT) — open-fixture-library.org",
     "appLine": "Light Maestro — logiciel de pilotage lumière DMX"
   },
+  "disclaimer": {
+    "title": "⚠️ Avertissement — vue 3D et responsabilité",
+    "p1": "La vue 3D est une <b>simulation visuelle</b> destinée à la préprogrammation. Elle ne remplace en aucun cas un essai sur site avec les vrais projecteurs. Les rendu de faisceaux, couleurs et mouvements sont approximatifs et dépendent de la configuration graphique de votre machine.",
+    "p2": "<b>Vous êtes seul responsable de la validation technique</b> de votre show avant toute utilisation publique. Vérifiez toujours le résultat réel sur le matériel installé, en condition de spectacle.",
+    "p3": "Light Maestro est fourni « en l'état ». L'éditeur ne saurait être tenu responsable de tout bug, crash, dysfonctionnement ou résultat imprévu survenant pendant un show, qu'il provienne du logiciel, de l'interface DMX, ou de toute autre cause.",
+    "accept": "J'ai compris, ne plus afficher"
+  },
   "toasts": {
     "saving": "Sauvegarde déjà en cours…",
     "saveApi": "API de sauvegarde indisponible (preload ?)",

@@ -13,6 +13,7 @@ import { Sidebar } from './components/layout/Sidebar';
 import { QuickShowView } from './views/QuickShowView';
 import { ToastHost, toast } from './components/Toast';
 import { SafetyModal } from './components/SafetyModal';
+import { DisclaimerModal } from './components/DisclaimerModal';
 import { DesignView } from './views/DesignView';
 import { PerformanceView } from './views/PerformanceView';
 import { MasterClockBar } from './components/MasterClockBar';
@@ -237,6 +238,7 @@ const App: React.FC = () => {
   const mode = useAppStore((s) => s.mode);
   const setMode = useAppStore((s) => s.setMode);
   const safetyAccepted = useAppStore((s) => s.safetyAccepted);
+  const disclaimerAccepted = useAppStore((s) => s.disclaimerAccepted);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // ─── Licence : charger l'état au démarrage (édition + limites) ────
@@ -676,6 +678,8 @@ const App: React.FC = () => {
 
         {/* Avertissement photosensibilité : une fois, persisté (safetyAccepted) */}
         {!safetyAccepted && <SafetyModal />}
+        {/* Avertissement vue 3D / responsabilité : une fois, persisté (disclaimerAccepted) */}
+        {!disclaimerAccepted && <DisclaimerModal />}
 
         {/* ─── Close Guard Modal ──────────────────────────── */}
         {showCloseModal && (

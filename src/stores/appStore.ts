@@ -170,6 +170,10 @@ interface AppState {
   safetyAccepted: boolean;
   acceptSafety: () => void;
 
+  // Vue 3D : avertissement responsabilité accepté (persisté — affiché une fois)
+  disclaimerAccepted: boolean;
+  acceptDisclaimer: () => void;
+
   // Project identity (NOT persisted - session-only)
   projectName: string;
   setProjectName: (name: string) => void;
@@ -305,6 +309,9 @@ export const useAppStore = create<AppState>()(
 
       safetyAccepted: false,
       acceptSafety: () => set({ safetyAccepted: true }),
+
+      disclaimerAccepted: false,
+      acceptDisclaimer: () => set({ disclaimerAccepted: true }),
 
       projectName: '',
       setProjectName: (name) => set({ projectName: name }),
@@ -575,6 +582,7 @@ export const useAppStore = create<AppState>()(
         designSidebarTab: state.designSidebarTab,
         performSidebarTab: state.performSidebarTab,
         safetyAccepted: state.safetyAccepted,
+        disclaimerAccepted: state.disclaimerAccepted,
         dmx: {
           universes: state.dmx.universes,
           grandMaster: state.dmx.grandMaster,

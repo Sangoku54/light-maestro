@@ -1257,6 +1257,13 @@
     "ofl": "Fixture definitions: Open Fixture Library (MIT license) — open-fixture-library.org",
     "appLine": "Light Maestro — DMX lighting control software"
   },
+  "disclaimer": {
+    "title": "⚠️ Disclaimer — 3D view and liability",
+    "p1": "The 3D view is a <b>visual simulation</b> for pre-programming. It does not replace an on-site test with real fixtures. Beam, color and movement renders are approximate and depend on your machine's graphics configuration.",
+    "p2": "<b>You are solely responsible for technical validation</b> of your show before any public use. Always verify the real result on installed equipment under show conditions.",
+    "p3": "Light Maestro is provided \"as is\". The developer cannot be held liable for any bug, crash, malfunction or unexpected result occurring during a show, whether caused by the software, the DMX interface, or any other cause.",
+    "accept": "Understood, don't show again"
+  },
   "toasts": {
     "saving": "Save already in progress…",
     "saveApi": "Save API unavailable (preload?)",
