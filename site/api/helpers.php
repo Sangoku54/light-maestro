@@ -103,6 +103,34 @@ function send_confirmation_email(string $email, ?string $displayName): void {
 }
 
 /**
+ * Envoie un email de réinitialisation de mot de passe.
+ */
+function send_reset_email(string $email, string $displayName, string $resetUrl): void {
+    $nameSafe = htmlspecialchars($displayName, ENT_QUOTES, 'UTF-8');
+    $urlSafe = htmlspecialchars($resetUrl, ENT_QUOTES, 'UTF-8');
+    $subject = 'Réinitialisation de ton mot de passe — Light Maestro';
+    $body = '<!doctype html><html lang="fr"><body style="margin:0;background:#0a0a0f;color:#ede8dc;font-family:Arial,sans-serif;">'
+        . '<div style="max-width:560px;margin:0 auto;padding:32px 24px;">'
+        . '<div style="font-weight:900;letter-spacing:.18em;font-size:13px;"><span style="display:inline-block;background:#8b5cf6;color:#fff;border-radius:8px;padding:4px 8px;margin-right:8px;">LM</span>LIGHT MAESTRO</div>'
+        . '<h1 style="margin:24px 0 8px;font-size:22px;">Réinitialiser le mot de passe</h1>'
+        . '<p style="color:#9ca3af;line-height:1.7;">Salut ' . $nameSafe . ',</p>'
+        . '<p style="color:#9ca3af;line-height:1.7;">Tu as demandé la réinitialisation de ton mot de passe. Clique sur le bouton ci-dessous pour en créer un nouveau.</p>'
+        . '<div style="margin:24px 0;"><a href="' . $urlSafe . '" style="display:inline-block;background:#8b5cf6;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700;">Réinitialiser mon mot de passe</a></div>'
+        . '<p style="color:#6b7280;font-size:12px;line-height:1.6;">Ce lien expire dans 1 heure. Si tu n\'as pas fait cette demande, ignore cet email.</p>'
+        . '<p style="margin-top:24px;font-size:12px;color:#6b7280;">Light Maestro — <a href="https://light-maestro.com" style="color:#8b5cf6;">light-maestro.com</a></p>'
+        . '</div></body></html>';
+    $headers = "MIME-Version: 1.0\r\n"
+        . "Content-Type: text/html; charset=UTF-8\r\n"
+        . "From: Light Maestro <contact@light-maestro.com>\r\n"
+        . "Reply-To: contact@light-maestro.com\r\n";
+    try {
+        @mail($email, $subject, $body, $headers);
+    } catch (Throwable $e) {
+        error_log('[forgot-password] envoi email impossible : ' . $e->getMessage());
+    }
+}
+
+/**
  * Alerte admin : notifie ADMIN_EMAIL (config.php) à chaque événement notable
  * (inscription, téléchargement). Échec silencieux — ne jamais bloquer la
  * requête utilisateur à cause du mail d'alerte.

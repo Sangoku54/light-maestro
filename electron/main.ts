@@ -166,6 +166,48 @@ const remoteServer = new RemoteServer();
 const oscServer = new OscServer();
 const licenseStore = new LicenseStore();
 
+// ─── Auto-upload custom fixtures to shared library ────────────
+const FIXTURES_API_URL = 'https://light-maestro.com/api';
+
+async function tryUploadCustomFixture(def: any): Promise<void> {
+  try {
+    // Only upload if user is logged in (has a token)
+    const token = licenseStore.getToken?.() ?? null;
+    if (!token) return;
+
+    const body: any = {
+      defId: def.id,
+      manufacturer: def.manufacturer || 'Unknown',
+      model: def.model || 'Unknown',
+      type: def.type || 'Other',
+      channels: (def.modes?.[0]?.channels?.length ?? 0),
+      modes: def.modes,
+    };
+
+    // Flatten definition for storage
+    try {
+      const { default: JSON5 } = await import('json5');
+      body.definition = JSON5.stringify(def);
+    } catch {
+      body.definition = JSON.stringify(def);
+    }
+
+    const resp = await fetch(FIXTURES_API_URL + '/fixtures/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!resp.ok && resp.status !== 409) {
+      console.warn('[fixtures] upload failed:', resp.status, await resp.text().catch(() => ''));
+    }
+  } catch (e) {
+    // Silently fail — user may be offline or not logged in
+    console.debug('[fixtures] upload skipped:', (e as Error).message);
+  }
+}
+
 // ─── Splash screen (animated loading window) ────────────────
 function createSplashWindow() {
   splashShownAt = Date.now();
@@ -625,7 +667,12 @@ function startWatchdogTimer(): void {
 ipcMain.handle('fixtures:loadLibrary', async () => fixtureLibrary.load());
 ipcMain.handle('fixtures:search', async (_, query: string) => fixtureLibrary.search(query));
 ipcMain.handle('fixtures:getDefinition', async (_, id: string) => fixtureLibrary.get(id));
-ipcMain.handle('fixtures:addCustom', async (_, def: any) => fixtureLibrary.addCustom(def));
+ipcMain.handle('fixtures:addCustom', async (_, def: any) => {
+   const result = fixtureLibrary.addCustom(def);
+   // Auto-upload custom fixtures to the shared library (non-blocking)
+   tryUploadCustomFixture(def).catch(() => {});
+   return result;
+ });
 ipcMain.handle('fixtures:importQLC', async (_, filePath: string) => fixtureLibrary.importQLC(filePath));
 ipcMain.handle('fixtures:importGDTF', async (_, filePath: string) => fixtureLibrary.importGDTF(filePath));
 ipcMain.handle('fixtures:getAll', async () => fixtureLibrary.getAll());

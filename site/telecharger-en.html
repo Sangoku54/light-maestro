@@ -38,7 +38,25 @@
           <button id="dl-login" class="btn btn-primary">Sign in</button>
           <button id="dl-register" class="btn btn-ghost">Create account</button>
         </div>
+        <div style="margin-top:8px">
+          <a href="#" id="dl-forgot-link" style="font-size:11px; color:#8b5cf6; text-decoration:none">Forgot password?</a>
+        </div>
         <div class="meta" id="dl-msg" style="margin-top:10px"></div>
+      </div>
+      <div id="dl-reset-form" style="display:none">
+        <h3 class="h3">Reset your password</h3>
+        <p style="margin-top:8px">Enter your email and we'll send you a link to create a new password.</p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px">
+          <input id="dl-reset-email" type="email" placeholder="you@example.com" style="flex:1; min-width:200px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/>
+          <button id="dl-reset-send" class="btn btn-primary">Send link</button>
+        </div>
+        <div class="meta" id="dl-reset-msg" style="margin-top:10px"></div>
+        <button id="dl-reset-back" class="btn btn-ghost" style="margin-top:10px; padding:6px 14px; font-size:11px">← Back</button>
+      </div>
+      <div id="dl-reset-ok" style="display:none">
+        <h3 class="h3">Link sent</h3>
+        <p style="margin-top:8px">An email has been sent to <b id="dl-reset-email-shown"></b>. Check your inbox (and spam folder).</p>
+        <button id="dl-reset-done" class="btn btn-ghost" style="margin-top:10px; padding:6px 14px; font-size:11px">Back to sign in</button>
       </div>
       <div id="dl-ok" style="display:none">
         <h3 class="h3">✅ Download unlocked</h3>
@@ -196,6 +214,19 @@
   }
   $('dl-login').addEventListener('click',function(){go('login');});
   $('dl-register').addEventListener('click',function(){go('register');});
+  $('dl-forgot-link').addEventListener('click',function(e){e.preventDefault();$('dl-form').style.display='none';$('dl-reset-form').style.display='block';$('dl-reset-email').value='';setResetMsg('');});
+  $('dl-reset-back').addEventListener('click',function(){$('dl-reset-form').style.display='none';$('dl-form').style.display='block';});
+  $('dl-reset-done').addEventListener('click',function(){$('dl-reset-ok').style.display='none';$('dl-form').style.display='block';});
+  $('dl-reset-send').addEventListener('click',function(){
+    var email=$('dl-reset-email').value.trim();
+    if(!email){setResetMsg('Enter your email.',true);return;}
+    setResetMsg('Sending…');
+    call('/auth/forgot-password',{email:email}).then(function(){
+      $('dl-reset-email-shown').textContent=email;
+      $('dl-reset-form').style.display='none';$('dl-reset-ok').style.display='block';
+      setResetMsg('');
+    }).catch(function(e){setResetMsg('Error: '+e.message,true);});
+  });
   $('dl-btn-portable').addEventListener('click',function(){trackDownload('portable');});
   $('dl-btn-setup').addEventListener('click',function(){trackDownload('setup');});
   $('dl-logout').addEventListener('click',function(){
@@ -205,6 +236,7 @@
     $('dl-email').value='';$('dl-pass').value='';setMsg('');
   });
   try{var s=JSON.parse(sessionStorage.getItem(K)||'null');if(s&&s.email)unlock(s);}catch(e){}
+  function setResetMsg(t,err){var m=$('dl-reset-msg');if(!m)return;m.textContent=t||'';m.style.color=err?'#f87171':'';}
 })();
 </script>
 <script src="./assets/site.js"></script>

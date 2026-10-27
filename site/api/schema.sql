@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
   display_name VARCHAR(255) DEFAULT NULL,
   edition ENUM('free','standard','full') NOT NULL DEFAULT 'free',
   stripe_customer_id VARCHAR(255) DEFAULT NULL,
+  password_reset_token VARCHAR(64) DEFAULT NULL,
+  password_reset_expires DATETIME DEFAULT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_email (email)
@@ -35,4 +37,27 @@ CREATE TABLE IF NOT EXISTS downloads (
   ip VARCHAR(45) DEFAULT NULL,
   downloaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   KEY idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Table des fixtures custom partagées (uploadées par les utilisateurs).
+CREATE TABLE IF NOT EXISTS custom_fixtures (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  def_id VARCHAR(255) NOT NULL,
+  manufacturer VARCHAR(255) NOT NULL,
+  model VARCHAR(255) NOT NULL,
+  type VARCHAR(100) DEFAULT 'Other',
+  channels INT NOT NULL,
+  modes JSON DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_def_id (def_id),
+  KEY idx_user (user_id),
+  KEY idx_manufacturer_model (manufacturer(100), model(100))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Table de stockage des définitions complètes (JSON).
+CREATE TABLE IF NOT EXISTS custom_fixture_defs (
+  fixture_id INT PRIMARY KEY,
+  definition LONGTEXT DEFAULT NULL,
+  FOREIGN KEY (fixture_id) REFERENCES custom_fixtures(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
