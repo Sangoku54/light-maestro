@@ -1,11 +1,8 @@
 version: 1.0.39
 files:
   - url: Light Maestro Setup 1.0.39.exe
-    sha512: okdFF5LReqyszyGDwEe3OQqdAcP4cz9ANIkf+ggqMPq8XGsMt/GtE8oZzRpdA7kWymiPFtNws0rWbgqThaad2A==
-    size: 97557935
-  - url: Light Maestro 1.0.39.exe
-    sha512: vAu9DYSy5L6fIMELK/jf4M56zhvgPcYZsv9f2hR0qteWvGPSb7SW5aj3Uv/x2oVLO3gEmUqvorqNcrvHacZA8g==
-    size: 97324503
+    sha512: jMnblyA7ufFDOcnXxvpRwY2WPOBLA6yQwzWx35dxY6i8HxgK7BhJodsjofsrVZv+oq3JuYBXqE0Hr4tid8h5cg==
+    size: 97559095
 path: Light Maestro Setup 1.0.39.exe
-sha512: okdFF5LReqyszyGDwEe3OQqdAcP4cz9ANIkf+ggqMPq8XGsMt/GtE8oZzRpdA7kWymiPFtNws0rWbgqThaad2A==
-releaseDate: '2026-10-26T19:19:21.301Z'
+sha512: jMnblyA7ufFDOcnXxvpRwY2WPOBLA6yQwzWx35dxY6i8HxgK7BhJodsjofsrVZv+oq3JuYBXqE0Hr4tid8h5cg==
+releaseDate: '2026-10-27T08:34:36.049Z'
