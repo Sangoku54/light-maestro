@@ -4,66 +4,8 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Télécharger — Light Maestro v1.0.39 | Windows</title>
-<meta name="description" content="Téléchargez Light Maestro v1.0.39 pour Windows 10/11. Version portable et installeur NSIS. Notes de version, configuration requise, vérification SHA."/>
-<link rel="icon" type="image/png" href="./assets/favicon-32.png"/>
-<link rel="stylesheet" href="./assets/site.css"/>
-</head>
-<body>
-<header class="nav">
-  <div class="nav-inner">
-    <a class="brand" href="./index.html"><img src="./assets/logo.svg" alt="Light Maestro" style="width:34px;height:34px;border-radius:10px;box-shadow:0 8px 24px rgba(168,85,247,.35)"/><span class="brand-word">LIGHT <span>MAESTRO</span></span></a>
-    <nav class="nav-links"><a href="./index.html">Accueil</a><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a><a href="./tarifs.html">Tarifs</a><a class="active" href="./telecharger.html">Télécharger</a><a href="./support.html">Support</a></nav>
-    <div style="display:flex; gap:10px; align-items:center"><a class="nav-cta" href="#dl">⬇ Télécharger</a><a href="./telecharger-en.html" style="font-size:12px; font-weight:700; color:#9ca3af; text-decoration:none" title="English version">🇬🇧 EN</a><button class="hamburger" data-menu>≡</button></div>
-  </div>
-  <div data-menu-panel style="display:none; border-top:1px solid #1f1f2e; background: rgba(6,6,10,.88)"><div class="wrap" style="padding:12px 20px; display:flex; flex-wrap:wrap; gap:10px"><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a><a href="./support.html">Support</a></div></div>
-</header>
-
-<section class="hero" style="padding:28px 0 18px">
-  <div class="wrap">
-    <span class="kicker">v1.0.39 • Electron 30.5.1</span>
-    <h1 class="h1">Télécharger Light Maestro pour Windows.</h1>
-    <p class="lead">Deux options, même app : portable (recommandé — clé USB, pas d'install) ou installeur pour poste fixe. Vérifiez l'empreinte SHA après téléchargement.</p>
-  </div>
-</section>
-
-<section id="dl" class="section">
-  <div class="wrap">
-    <div class="card" id="dl-gate" style="margin-bottom:16px; border-color:#7c3aed">
-      <div id="dl-form">
-        <h3 class="h3">🔑 Connecte-toi pour télécharger</h3>
-        <p style="margin-top:8px">Ton compte, c'est ta licence (Gratuite, Standard ou Complète). L'app applique ton édition quand tu t'y connectes.</p>
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px">
-          <input id="dl-email" type="email" placeholder="vous@exemple.com" style="flex:1; min-width:200px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/>
-          <input id="dl-pass" type="password" placeholder="Mot de passe" style="flex:1; min-width:160px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/>
-          <button id="dl-login" class="btn btn-primary">Se connecter</button>
-          <button id="dl-register" class="btn btn-ghost">Créer un compte</button>
-        </div>
-        <div style="margin-top:8px">
-          <a href="#" id="dl-forgot-link" style="font-size:11px; color:#8b5cf6; text-decoration:none">Mot de passe oublié ?</a>
-        </div>
-        <div class="meta" id="dl-msg" style="margin-top:10px"></div>
-      </div>
-      <div id="dl-reset-form" style="display:none">
-        <h3 class="h3">Réinitialiser le mot de passe</h3>
-        <p style="margin-top:8px">Entre ton email et on t'enverra un lien pour créer un nouveau mot de passe.</p>
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px">
-          <input id="dl-reset-email" type="email" placeholder="vous@exemple.com" style="flex:1; min-width:200px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/>
-          <button id="dl-reset-send" class="btn btn-primary">Envoyer le lien</button>
-        </div>
-        <div class="meta" id="dl-reset-msg" style="margin-top:10px"></div>
-        <button id="dl-reset-back" class="btn btn-ghost" style="margin-top:10px; padding:6px 14px; font-size:11px">← Retour</button>
-      </div>
-      <div id="dl-reset-ok" style="display:none">
-        <h3 class="h3">Lien envoyé</h3>
-        <p style="margin-top:8px">Un email a été envoyé à <b id="dl-reset-email-shown"></b>. Vérifie ta boîte de réception (et les spams).</p>
-        <button id="dl-reset-done" class="btn btn-ghost" style="margin-top:10px; padding:6px 14px; font-size:11px">Retour à la connexion</button>
-      </div>
-      <div id="dl-ok" style="display:none">
-        <h3 class="h3">✅ Téléchargement débloqué</h3>
-        <p style="margin-top:8px">Connecté : <b id="dl-email-shown" style="color:white"></b> — édition <b id="dl-edition" style="color:#c084fc"></b>. Les liens ci-dessous sont actifs.</p>
-        <button id="dl-logout" class="btn btn-ghost" style="margin-top:10px; padding:6px 14px; font-size:11px">Se déconnecter</button>
-      </div>
-    </div>
+          <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro 1.0.39.exe • 92.8 MB</div>
+          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 6FB0F754D1DBCD06B9EB90F5EFA5FA23D94F3681AE58AA51482FE5395FB68066</div>
     <div class="grid grid-2">
       <div class="card">
         <div style="display:flex; gap:10px; align-items:center"><span class="badge violet">Recommandé</span><span class="badge cyan">Portable • x64</span></div>
@@ -80,16 +22,8 @@
       <div class="card">
         <div style="display:flex; gap:10px; align-items:center"><span class="badge">NSIS • x64</span></div>
         <h2 class="h3" style="margin-top:12px; font-size:22px">Installeur Windows</h2>
-        <p>Installation en 30s, raccourcis bureau & menu démarrer. Pour votre machine principale et les postes fixes.</p>
-        <div style="background: rgba(255,255,255,.04); border:1px solid #1f1f2e; border-radius:12px; padding:12px; margin-top:12px">
-          <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro Setup 1.0.39.exe • 93 MB</div>
-          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 9A4C8B239563BB074CA589251C3E7AF0E793E0D40BE70121EAA48EBD52F41C9B</div>
-        </div>
-        <a id="dl-btn-setup" class="btn btn-ghost btn-wide disabled" style="margin-top:14px; opacity:.45; pointer-events:none" aria-disabled="true" href="./downloads/Light%20Maestro%20Setup%201.0.39.exe" download>⬇ Télécharger — Installeur</a>
-        <div class="meta" style="margin-top:10px">Windows 10/11 64-bit • 4 Go RAM mini • 500 Mo disque • USB / ArtNet / sACN</div>
-      </div>
-    </div>
-
+          <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro Setup 1.0.39.exe • 93.0 MB</div>
+          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : F4A7C3EBAF05F9DE0BF4F11D75273187DAEA538D03693E54055231EB4D107167</div>
     <div class="grid grid-3" style="margin-top:16px">
       <div class="card"><h3 class="h3">Configuration requise</h3><p>Windows 10 22H2 / 11, 4 Go RAM (8 Go recommandé), GPU avec WebGL2 pour la 3D Stage, port USB ou réseau pour ArtNet/sACN.</p></div>
       <div class="card"><h3 class="h3">Installation en 3 étapes</h3><p>1) Téléchargez 2) Lancez (autorisez le SmartScreen si besoin : “Informations complémentaires → Exécuter”) 3) Branchez votre interface DMX → testez avec Blackout.</p></div>
