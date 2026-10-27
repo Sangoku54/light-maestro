@@ -2175,9 +2175,6 @@ export const Stage3D: React.FC<{
       const nx = THREE.MathUtils.clamp((p.x + dims.width / 2) / dims.width, 0.03, 0.97);
       const nz = THREE.MathUtils.clamp((p.z + dims.depth / 2) / dims.depth, 0.03, 0.97);
       musicianPositionsRef.current[id] = { x: nx, z: nz };
-      // Persist custom position to the roster so it survives page switches
-      const customPos = { ...(musicians.positions ?? {}), [id]: { x: nx, z: nz } };
-      handleMusiciansChange({ ...musicians, positions: customPos });
       const m = musiciansRef.current.find((mm) => mm.sprite.userData.musicianId === id);
       if (m) {
         m.sprite.position.x = (nx - 0.5) * dims.width;
@@ -2190,6 +2187,13 @@ export const Stage3D: React.FC<{
 
     const onUp = () => {
       if (dragMusicianRef.current) {
+        // Persist custom position to roster on drag end
+        const id = dragMusicianRef.current;
+        const pos = musicianPositionsRef.current[id];
+        if (pos) {
+          const customPos = { ...(musicians.positions ?? {}), [id]: pos };
+          handleMusiciansChange({ ...musicians, positions: customPos });
+        }
         const controls = controlsRef.current;
         if (controls) controls.enabled = true;
         dragMusicianRef.current = null;
@@ -5847,10 +5851,10 @@ function updateFixtureSupport(
  * reste le seul outil d'aim → respecté si ≠ 0.
  */
 export function headingRadForPos(pos: FixturePos, _mountMode: string, _stageDims: { width: number; depth: number }, hasPanTilt = true): number {
-  if (!hasPanTilt && pos.heading) return ((pos.heading ?? 0) * Math.PI) / 180;
-  // Toutes les fixtures visent le CENTRE de la scene, quelque soit leur position.
-  // Heading = atan2(x - 0.5, y - 0.5) car le faisceau neutre pointe vers -Z (public).
-  return Math.atan2(pos.x - 0.5, pos.y - 0.5);
+   if (!hasPanTilt && pos.heading) return ((pos.heading ?? 0) * Math.PI) / 180;
+   // Toutes les fixtures visent le CENTRE de la scène, quelque soit leur position.
+   // Heading = atan2(x - 0.5, y - 0.5) car le faisceau neutre pointe vers -Z (public).
+   return Math.atan2(pos.x - 0.5, pos.y - 0.5);
 }
 /** True si la fixture a au moins un canal pan/tilt DMX (fixture motorisée). */
 export function hasPanTiltChannels(cm: { panOffsets?: number[]; panOffset?: number | null; tiltOffsets?: number[]; tiltOffset?: number | null; scanXOffset?: number | null; scanYOffset?: number | null }): boolean {
