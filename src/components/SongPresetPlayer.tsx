@@ -67,7 +67,10 @@ export const SongPresetPlayer: React.FC<{
   // preventing interference from normal scene playback (which may set
   // audioActive = true). This ensures song presets always start with
   // a clean audio state.
-  app.setQuickShow({ audioActive: false });
+  // Note: must use useEffect to avoid calling setState during render.
+  useEffect(() => {
+    app.setQuickShow({ audioActive: false });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const patchedFixtures = useShowStore((s) => s.patchedFixtures);
   const fixturePositions = useShowStore((s) => s.fixturePositions);
   const fixturePositionsRef = useRef(fixturePositions);
