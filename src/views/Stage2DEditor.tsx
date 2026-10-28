@@ -564,8 +564,8 @@ export const Stage2DEditor: React.FC = () => {
     const { fx, fy } = getCanvasCoords(e);
     for (const [id, offset] of dragRef.current.offsets) {
       setFixturePosition(id, {
-        x: Math.max(0, Math.min(1, fx + offset.sx)),
-        y: Math.max(0, Math.min(1, fy + offset.sy)),
+        x: fx + offset.sx,
+        y: fy + offset.sy,
       });
     }
   }, [getCanvasCoords, setFixturePosition]);
