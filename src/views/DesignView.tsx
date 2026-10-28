@@ -1101,8 +1101,9 @@ const SceneList: React.FC = () => {
       {/* Context menu */}
       {ctxMenu.visible && (
         <div
-          className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[190px] max-h-[80vh] overflow-y-auto"
-          style={{ ...clampRect(ctxMenu.x, ctxMenu.y, 240, 240, window.innerWidth, window.innerHeight) }}
+          className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px] max-h-[80vh] overflow-y-auto"
+          data-context-menu="fixture-test"
+          style={{ ...clampRect(ctxMenu.x, ctxMenu.y, 240, 320, window.innerWidth, window.innerHeight) }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider truncate">
@@ -5142,16 +5143,16 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
     fixtureName: string;
   }>({ visible: false, x: 0, y: 0, fixtureId: '', fixtureName: '' });
 
-  // Dismiss context menu on any click / right-click outside
+  // Dismiss context menu on any click outside
   useEffect(() => {
     if (!contextMenu.visible) return;
-    const dismiss = () => setContextMenu((c) => ({ ...c, visible: false }));
-    window.addEventListener('mousedown', dismiss);
-    window.addEventListener('contextmenu', dismiss);
-    return () => {
-      window.removeEventListener('mousedown', dismiss);
-      window.removeEventListener('contextmenu', dismiss);
+    const dismiss = (e: MouseEvent) => {
+      const menuEl = document.querySelector('[data-context-menu="fixture"]') as HTMLElement | null;
+      if (menuEl && menuEl.contains(e.target as Node)) return;
+      setContextMenu((c) => ({ ...c, visible: false }));
     };
+    window.addEventListener('mousedown', dismiss);
+    return () => window.removeEventListener('mousedown', dismiss);
   }, [contextMenu.visible]);
 
   // Auto-create default universe
@@ -5807,8 +5808,9 @@ const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEdit
       {/* Right-click context menu — rétabli : Rename + Unpatch + Tier, ne se ferme pas au clic dedans */}
       {contextMenu.visible && (
         <div
-          className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
-          style={{ ...clampRect(contextMenu.x, contextMenu.y, 240, 240, window.innerWidth, window.innerHeight) }}
+          className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px] max-h-[80vh] overflow-y-auto"
+          data-context-menu="fixture"
+          style={{ ...clampRect(contextMenu.x, contextMenu.y, 240, 320, window.innerWidth, window.innerHeight) }}
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
