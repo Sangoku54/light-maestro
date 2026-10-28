@@ -2058,52 +2058,124 @@ export const Stage3D: React.FC<{
     }
   }, [showSmoke]);
 
-  // ── Virtual musicians: build sprites for the selected config ──
+  // ── Virtual musicians: build/update sprites for the selected config ──
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
 
-    // Dispose previous group
-    const prev = musiciansGroupRef.current;
-    if (prev) {
-      if (prev.parent) prev.parent.remove(prev);
-      prev.traverse((o) => {
+    const group = musiciansGroupRef.current;
+    const dims = stageDimsRef.current;
+
+    // First time or roster emptied: create fresh group
+    if (!group) {
+      if (isRosterEmpty(musicians)) return;
+      const newGroup = new THREE.Group();
+      newGroup.name = 'musicians';
+      musiciansGroupRef.current = newGroup;
+      scene.add(newGroup);
+      musiciansRef.current = [];
+      buildMusicianSprites(newGroup, musicians, scene, dims);
+      return;
+    }
+
+    // Roster emptied: remove group
+    if (isRosterEmpty(musicians)) {
+      if (group.parent) group.parent.remove(group);
+      group.traverse((o) => {
         if (o instanceof THREE.Sprite) {
           const m = (o as THREE.Sprite).material as THREE.SpriteMaterial;
           m.map?.dispose();
           m.dispose();
         }
       });
+      musiciansRef.current = [];
+      musiciansGroupRef.current = null;
+      return;
     }
-    musiciansRef.current = [];
-    musiciansGroupRef.current = null;
 
-    if (isRosterEmpty(musicians)) return;
+    // Update existing sprites' positions (do NOT destroy/recreate)
+    // Remove sprites for removed musicians
+    const currentIds = new Set(musiciansRef.current.map((m) => m.sprite.userData.musicianId));
+    const wantedIds = new Set<string>();
+    for (const kind of MUSICIAN_KINDS) {
+      const count = musicians[kind] ?? 0;
+      for (let j = 0; j < count; j++) wantedIds.add(`${kind}-${j}`);
+    }
+    for (const m of musiciansRef.current) {
+      if (!wantedIds.has(m.sprite.userData.musicianId)) {
+        if (m.sprite.parent) m.sprite.parent.remove(m.sprite);
+        (m.sprite.material as THREE.SpriteMaterial).map?.dispose();
+        m.sprite.material.dispose();
+      }
+    }
+    musiciansRef.current = musiciansRef.current.filter((m) =>
+      wantedIds.has(m.sprite.userData.musicianId)
+    );
 
-    const group = new THREE.Group();
-    group.name = 'musicians';
-    musiciansGroupRef.current = group;
-
-    const dims = stageDimsRef.current;
-    const refs: { sprite: THREE.Sprite; phase: number; baseY: number }[] = [];
-
+    // Update/add sprites for each musician
     let i = 0;
     for (const kind of MUSICIAN_KINDS) {
       const count = musicians[kind] ?? 0;
       for (let j = 0; j < count; j++) {
         const id = `${kind}-${j}`;
+        const existing = musiciansRef.current.find((m) => m.sprite.userData.musicianId === id);
+        if (existing) {
+          // Update position of existing sprite
+          const pos = musicianPositionsRef.current[id] ?? DEFAULT_POSITIONS[kind];
+          const baseY = deckTopAt(stageDecksRef.current, pos.x, pos.z) + existing.sprite.scale.y / 2;
+          existing.sprite.position.set((pos.x - 0.5) * dims.width, baseY, (pos.z - 0.5) * dims.depth);
+          existing.baseY = baseY;
+        } else {
+          // Create new sprite
+          const mat = new THREE.SpriteMaterial({ transparent: true, depthWrite: true, depthTest: true });
+          mat.visible = false;
+          const sprite = new THREE.Sprite(mat);
+          sprite.userData.musicianId = id;
+          const personH = MUSICIAN_HEIGHTS[kind];
+          sprite.scale.set(personH, personH, 1);
+          const pos = musicianPositionsRef.current[id] ?? DEFAULT_POSITIONS[kind];
+          const baseY = deckTopAt(stageDecksRef.current, pos.x, pos.z) + personH / 2;
+          sprite.position.set((pos.x - 0.5) * dims.width, baseY, (pos.z - 0.5) * dims.depth);
+          group.add(sprite);
+          musiciansRef.current.push({ sprite, phase: i * 1.3, baseY });
+          loadMusicianTexture(kind)
+            .then(tex => {
+              mat.map = tex;
+              mat.needsUpdate = true;
+              mat.visible = true;
+              const img = tex.image as HTMLCanvasElement;
+              const aspect = img.height / img.width;
+              sprite.scale.set(personH / aspect, personH, 1);
+            })
+            .catch(() => {});
+          i++;
+        }
+      }
+    }
+  }, [musicians]);
+
+  function buildMusicianSprites(
+    group: THREE.Group,
+    roster: MusicianRoster,
+    scene: THREE.Scene,
+    dims: { width: number; depth: number },
+  ): void {
+    let i = 0;
+    for (const kind of MUSICIAN_KINDS) {
+      const count = roster[kind] ?? 0;
+      for (let j = 0; j < count; j++) {
+        const id = `${kind}-${j}`;
         const mat = new THREE.SpriteMaterial({ transparent: true, depthWrite: true, depthTest: true });
-        mat.visible = false; // hidden until the image texture loads
+        mat.visible = false;
         const sprite = new THREE.Sprite(mat);
         sprite.userData.musicianId = id;
         const personH = MUSICIAN_HEIGHTS[kind];
-        sprite.scale.set(personH, personH, 1); // placeholder; aspect set on load
+        sprite.scale.set(personH, personH, 1);
         const pos = musicianPositionsRef.current[id] ?? DEFAULT_POSITIONS[kind];
         const baseY = deckTopAt(stageDecksRef.current, pos.x, pos.z) + personH / 2;
         sprite.position.set((pos.x - 0.5) * dims.width, baseY, (pos.z - 0.5) * dims.depth);
         group.add(sprite);
-        refs.push({ sprite, phase: i * 1.3, baseY });
-
+        musiciansRef.current.push({ sprite, phase: i * 1.3, baseY });
         loadMusicianTexture(kind)
           .then(tex => {
             mat.map = tex;
@@ -2117,10 +2189,7 @@ export const Stage3D: React.FC<{
         i++;
       }
     }
-
-    musiciansRef.current = refs;
-    scene.add(group);
-  }, [musicians, stageDims, deckGeoKey]);
+  }
 
   // ── Virtual musicians: drag to reposition on stage ──
   useEffect(() => {
