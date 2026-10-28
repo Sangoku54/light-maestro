@@ -192,8 +192,9 @@ export const Stage2DEditor: React.FC = () => {
     const W = rect.width;
     const H = rect.height;
     // Base aux mêmes dimensions que la vue 3D : rectangle proportionnel à stageDims (mètres), centré, même aspect que Stage3D
-    const availW = Math.max(80, W - 96);
-    const availH = Math.max(80, H - 96);
+    // PAS de soustraction arbitraire : le stage occupe tout l'espace disponible comme en 3D.
+    const availW = Math.max(80, rect.width);
+    const availH = Math.max(80, rect.height);
     const aspect = Math.max(0.2, Math.min(5, stageDims.width / Math.max(0.1, stageDims.depth)));
     let sw: number, sh: number;
     if (availW / availH > aspect) {
@@ -203,9 +204,8 @@ export const Stage2DEditor: React.FC = () => {
       sw = availW;
       sh = sw / aspect;
     }
-    const padX = (W - sw) / 2;
-    const padY = (H - sh) / 2;
-    const pad = 48; // gardé pour compatibilité hitTest (sera recalculé via padX/padY)
+    const padX = (rect.width - sw) / 2;
+    const padY = (rect.height - sh) / 2;
 
     const render = () => {
       ctx.clearRect(0, 0, W, H);
@@ -440,8 +440,9 @@ export const Stage2DEditor: React.FC = () => {
     if (!rect) return { fx: 0, fy: 0 };
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const availW = Math.max(80, rect.width - 96);
-    const availH = Math.max(80, rect.height - 96);
+    // Same calculation as the render loop — no arbitrary padding subtraction.
+    const availW = Math.max(80, rect.width);
+    const availH = Math.max(80, rect.height);
     const aspect = Math.max(0.2, Math.min(5, stageDims.width / Math.max(0.1, stageDims.depth)));
     let sw: number, sh: number;
     if (availW / availH > aspect) { sh = availH; sw = sh * aspect; } else { sw = availW; sh = sw / aspect; }
