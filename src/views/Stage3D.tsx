@@ -3770,9 +3770,9 @@ export const Stage3D: React.FC<{
         const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -deck.h);
         const pt = new THREE.Vector3();
         if (!raycasterRef.current.ray.intersectPlane(plane, pt)) return;
-        const cx = Math.min(1.3, Math.max(-0.3, pt.x / dims.width + 0.5));
-        const cy = Math.min(1.3, Math.max(-0.3, pt.z / dims.depth + 0.5));
-        st.updateStageDeck(id, { cx, cy });
+        const cx = pt.x / dims.width + 0.5;
+         const cy = pt.z / dims.depth + 0.5;
+         st.updateStageDeck(id, { cx, cy });
         if (controlsRef.current) controlsRef.current.enabled = false;
         return;
       }
@@ -3793,9 +3793,9 @@ export const Stage3D: React.FC<{
         const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -rig.h);
         const pt = new THREE.Vector3();
         if (!raycasterRef.current.ray.intersectPlane(plane, pt)) return;
-        const cx = Math.min(1.3, Math.max(-0.3, pt.x / dims.width + 0.5));
-        const cy = Math.min(1.3, Math.max(-0.3, pt.z / dims.depth + 0.5));
-        st.updateStageRig(id, { cx, cy });
+        const cx = pt.x / dims.width + 0.5;
+         const cy = pt.z / dims.depth + 0.5;
+         st.updateStageRig(id, { cx, cy });
         if (controlsRef.current) controlsRef.current.enabled = false;
         return;
       }
@@ -3824,8 +3824,6 @@ export const Stage3D: React.FC<{
           nx = snapToGrid(pt.x, GRID_SIZE) / dims.width + 0.5;
           ny = snapToGrid(pt.z, GRID_SIZE) / dims.depth + 0.5;
         }
-        nx = Math.min(1.3, Math.max(-0.3, nx));
-        ny = Math.min(1.3, Math.max(-0.3, ny));
         st.setFixturePosition(fid, { x: nx, y: ny });
         if (controlsRef.current) controlsRef.current.enabled = false;
         return;
