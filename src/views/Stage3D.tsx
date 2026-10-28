@@ -3811,10 +3811,10 @@ export const Stage3D: React.FC<{
         const rect = container.getBoundingClientRect();
         mouseRef.current.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
         mouseRef.current.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
-        raycasterRef.current.setFromCamera(mouseRef.current, camera);
-         // Use STAGE_HEIGHT (ground plane) so fixtures can be dragged across ALL decks,
-         // not just the plane of their current height.
-         const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -STAGE_HEIGHT);
+         raycasterRef.current.setFromCamera(mouseRef.current, camera);
+         // Raycast on ground plane (y=0) so fixtures can be dragged across ALL decks.
+         // The deck height is applied later by the position sync effect via deckTopAt().
+         const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
         const pt = new THREE.Vector3();
         if (!raycasterRef.current.ray.intersectPlane(plane, pt)) return;
         const dims = stageDimsRef.current;
