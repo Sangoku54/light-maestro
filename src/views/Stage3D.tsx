@@ -5028,20 +5028,20 @@ export const Stage3D: React.FC<{
                   <span className="text-gray-400 font-mono">{(selectedPos.y * stageDims.depth).toFixed(1)}m</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button onClick={() => setFixturePosition(selectedFixture.id, { y: Math.max(0, Math.min(1, (selectedPos.y - 0.01))) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={selectedPos.y}
-                    onChange={(e) => setFixturePosition(selectedFixture.id, { y: parseFloat(e.target.value) })}
-                    className="flex-1 h-1 accent-purple-500 cursor-pointer"
-                  />
-                  <button onClick={() => setFixturePosition(selectedFixture.id, { y: Math.max(0, Math.min(1, (selectedPos.y + 0.01))) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
-                </div>
-                <div className="flex justify-between text-[8px] text-gray-700">
-                  <span>0m</span><span>{stageDims.depth}m</span>
+                   <button onClick={() => setFixturePosition(selectedFixture.id, { y: selectedPos.y - 0.01 })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                   <input
+                     type="range"
+                     min={-5}
+                     max={6}
+                     step={0.01}
+                     value={selectedPos.y}
+                     onChange={(e) => setFixturePosition(selectedFixture.id, { y: parseFloat(e.target.value) })}
+                     className="flex-1 h-1 accent-purple-500 cursor-pointer"
+                   />
+                   <button onClick={() => setFixturePosition(selectedFixture.id, { y: selectedPos.y + 0.01 })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+                 </div>
+                 <div className="flex justify-between text-[8px] text-gray-700">
+                   <span>-{Math.abs(-5 * stageDims.depth).toFixed(0)}m</span><span>{(6 * stageDims.depth).toFixed(0)}m</span>
                 </div>
               </div>
 
