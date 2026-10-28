@@ -454,8 +454,9 @@ export const Stage2DEditor: React.FC = () => {
   const hitTestFixture = useCallback((cx: number, cy: number): string | null => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return null;
-    const availW = Math.max(80, rect.width - 96);
-    const availH = Math.max(80, rect.height - 96);
+    // Same calculation as render loop — no arbitrary padding.
+    const availW = Math.max(80, rect.width);
+    const availH = Math.max(80, rect.height);
     const aspect = Math.max(0.2, Math.min(5, stageDims.width / Math.max(0.1, stageDims.depth)));
     let sw: number, sh: number;
     if (availW / availH > aspect) { sh = availH; sw = sh * aspect; } else { sw = availW; sh = sw / aspect; }
@@ -503,9 +504,12 @@ export const Stage2DEditor: React.FC = () => {
 
     // Left-click
     const shift = e.shiftKey;
-    const pad = 48;
-    const sw = rect.width - 96;
-    const sh = rect.height - 96;
+    // Match getCanvasCoords / hitTestFixture — no arbitrary padding.
+    const availW = Math.max(80, rect.width);
+    const availH = Math.max(80, rect.height);
+    const aspect = Math.max(0.2, Math.min(5, stageDims.width / Math.max(0.1, stageDims.depth)));
+    let sw: number, sh: number;
+    if (availW / availH > aspect) { sh = availH; sw = sh * aspect; } else { sw = availW; sh = sw / aspect; }
 
     const hitId = hitTestFixture(x, y);
     const { fx: mfx, fy: mfy } = getCanvasCoords(e);
