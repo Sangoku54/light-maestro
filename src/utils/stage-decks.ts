@@ -159,9 +159,10 @@ export function deckFromMeters(
 ): { cx: number; cy: number; w: number; d: number; h: number } {
   const w = Math.min(2, Math.max(0.05, m.w / stageDims.width));
   const d = Math.min(2, Math.max(0.05, m.d / stageDims.depth));
+  // No clamp on cx/cy — decks can be placed freely anywhere, even outside the main stage.
   return {
-    cx: Math.min(1, Math.max(0, (m.x + m.w / 2 - stageDims.width / 2) / stageDims.width + 0.5)),
-    cy: Math.min(1, Math.max(0, (m.y + m.d / 2 - stageDims.depth / 2) / stageDims.depth + 0.5)),
+    cx: (m.x + m.w / 2 - stageDims.width / 2) / stageDims.width + 0.5,
+    cy: (m.y + m.d / 2 - stageDims.depth / 2) / stageDims.depth + 0.5,
     w,
     d,
     h: Math.min(10, Math.max(0, m.h)),
