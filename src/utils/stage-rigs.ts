@@ -137,10 +137,13 @@ export function rigRectMeters(
   return {
     x: (rig.cx - 0.5) * stageDims.width,
     z: (rig.cy - 0.5) * stageDims.depth,
-    w: rig.span * stageDims.width,
-    d: rig.span * stageDims.depth,
+    w: rig.span,
+    d: RIG_FOOTPRINT_D,
   };
 }
+
+/** Empreinte profondeur des supports en mètres (barre Ø + câbles ≈ 0.8 m). */
+export const RIG_FOOTPRINT_D = 0.8;
 
 /** Conversion champ UI (mètres, origine coin) ↔ modèle (normalisé, origine centre). */
 export function rigToMeters(
@@ -149,10 +152,14 @@ export function rigToMeters(
 ): { name: string; x: number; y: number; w: number; d: number; h: number; r: number } {
   return {
     name: rig.name,
-    x: Math.round((rig.cx - rig.span / 2) * stageDims.width * 10) / 10,
-    y: Math.round((rig.cy - rig.span / 2) * stageDims.depth * 10) / 10,
-    w: Math.round(rig.span * stageDims.width * 10) / 10,
-    d: Math.round(rig.span * stageDims.depth * 10) / 10,
+    // Arête gauche en mètres depuis le bord gauche : centre × W − longueur/2.
+    // Arrondi à 2 décimales (1 décimale détruisait le round-trip des petites valeurs).
+    x: Math.round((rig.cx * stageDims.width - rig.span / 2) * 100) / 100,
+    // Arête avant en mètres depuis le nez de scène.
+    y: Math.round((rig.cy * stageDims.depth - RIG_FOOTPRINT_D / 2) * 100) / 100,
+    // span = longueur de barre en MÈTRES (le rendu 3D l'utilise tel quel).
+    w: Math.round(rig.span * 100) / 100,
+    d: RIG_FOOTPRINT_D,
     h: rig.h,
     r: Math.round((rig.rot ?? 0) * 10) / 10,
   };
@@ -163,9 +170,9 @@ export function rigFromMeters(
   m: { x: number; y: number; w: number; d: number; h: number; r: number },
   stageDims: { width: number; depth: number },
 ): Partial<StageRig> {
-  const cx = (m.x + m.w / 2 - stageDims.width / 2) / stageDims.width + 0.5;
-  const cy = (m.y + m.d / 2 - stageDims.depth / 2) / stageDims.depth + 0.5;
-  const span = m.w > 0 ? Math.max(0.1, m.w / stageDims.width) : 0;
+  const cx = (m.x + m.w / 2) / stageDims.width;
+  const cy = (m.y + m.d / 2) / stageDims.depth;
+  const span = m.w > 0 ? Math.max(0.1, m.w) : 0;
   const h = Math.min(12, Math.max(0, m.h));
   const rot = ((m.r % 360) + 360) % 360;
   return { cx, cy, span, h, rot };
