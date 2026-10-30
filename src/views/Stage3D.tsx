@@ -4513,27 +4513,25 @@ export const Stage3D: React.FC<{
               const rigFader = (field: 'x' | 'y' | 'h', label: string, tip: string, min: number, max: number) => {
                 const cur = Number(dr[field] as number);
                 return (
-                  <div key={field} className="flex flex-col items-center gap-0.5" onClick={(e) => e.stopPropagation()} title={tip}>
-                    <span className="text-[8px] text-gray-400 font-medium">{label} <span className="text-gray-600">(m)</span></span>
-                    <div className="flex items-center gap-0.5">
-                      <button
-                        type="button"
-                        onClick={() => { const v = Math.max(min, cur - 0.5); setF(field, String(v)); }}
-                        className="w-5 h-5 rounded bg-gray-800 text-gray-400 hover:text-purple-300 text-[10px] flex items-center justify-center shrink-0"
-                      >−</button>
-                      <input
-                        type="range" min={min} max={max} step={0.5} value={cur}
-                        onChange={(e) => setF(field, e.target.value)}
-                        onBlur={() => commitF(field)}
-                        className="flex-1 h-1 accent-purple-500 cursor-pointer"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => { const v = Math.min(max, cur + 0.5); setF(field, String(v)); }}
-                        className="w-5 h-5 rounded bg-gray-800 text-gray-400 hover:text-purple-300 text-[10px] flex items-center justify-center shrink-0"
-                      >+</button>
-                    </div>
-                    <span className="text-[8px] text-gray-500 font-mono">{cur.toFixed(1)}</span>
+                  <div key={field} className="flex items-center gap-1" onClick={(e) => e.stopPropagation()} title={tip}>
+                    <span className="text-[8px] text-gray-400 font-medium w-20 shrink-0">{label}</span>
+                    <button
+                      type="button"
+                      onClick={() => { const v = Math.max(min, cur - 0.5); setF(field, String(v)); }}
+                      className="w-5 h-5 rounded bg-gray-800 text-gray-400 hover:text-purple-300 text-[10px] flex items-center justify-center shrink-0"
+                    >−</button>
+                    <input
+                      type="range" min={min} max={max} step={0.5} value={cur}
+                      onChange={(e) => setF(field, e.target.value)}
+                      onBlur={() => commitF(field)}
+                      className="flex-1 h-1 accent-purple-500 cursor-pointer"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => { const v = Math.min(max, cur + 0.5); setF(field, String(v)); }}
+                      className="w-5 h-5 rounded bg-gray-800 text-gray-400 hover:text-purple-300 text-[10px] flex items-center justify-center shrink-0"
+                    >+</button>
+                    <span className="text-[8px] text-gray-500 font-mono w-10 text-right shrink-0">{cur.toFixed(1)}m</span>
                   </div>
                 );
               };
@@ -4568,7 +4566,7 @@ export const Stage3D: React.FC<{
                     )}
                   </div>
                   {/* Position faders : déplacement latéral, en profondeur, hauteur */}
-                  <div className="grid grid-cols-3 gap-1 mt-1">
+                  <div className="space-y-1 mt-1">
                     {rigFader('x', 'Latéral', t('stage3D.rigPosLeftTip'), -10, 15)}
                     {rigFader('y', 'Profondeur', t('stage3D.rigPosFrontTip'), -10, 15)}
                     {rigFader('h', 'Hauteur', 'Hauteur du rig en mètres', 0.5, 12)}
