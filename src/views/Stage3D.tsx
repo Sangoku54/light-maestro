@@ -4443,13 +4443,10 @@ export const Stage3D: React.FC<{
                 if (field === 'name') {
                   updateStageRig(rig.id, { name: String(cur.name).trim() || rig.name });
                 } else if (field === 'w') {
-                  // Keep rig center fixed when span changes: adjust x accordingly.
                   const newW = Number(cur.w) > 0 ? Number(cur.w) : 0;
-                  const oldW = rig.span * stageDims.width;
                   const newCx = cur.x !== undefined && cur.y !== undefined
                     ? ((Number(cur.x) + newW / 2 - stageDims.width / 2) / stageDims.width + 0.5)
                     : rig.cx;
-                  const newLeft = newCx * stageDims.width - stageDims.width / 2 - newW / 2;
                   updateStageRig(rig.id, {
                     cx: newCx,
                     cy: Number(cur.y) !== undefined ? ((Number(cur.y) + Number(cur.d) / 2 - stageDims.depth / 2) / stageDims.depth + 0.5) : rig.cy,
@@ -4460,7 +4457,6 @@ export const Stage3D: React.FC<{
                 } else if (field === 'd') {
                   const newD = Number(cur.d) > 0 ? Number(cur.d) : 0;
                   const newCy = ((Number(cur.y) + newD / 2 - stageDims.depth / 2) / stageDims.depth + 0.5);
-                  const newFront = newCy * stageDims.depth - stageDims.depth / 2 - newD / 2;
                   updateStageRig(rig.id, {
                     cx: rig.cx,
                     cy: newCy,
@@ -4469,17 +4465,9 @@ export const Stage3D: React.FC<{
                     span: Math.max(0.1, (Number(cur.w) > 0 ? Number(cur.w) : rig.span * stageDims.width) / stageDims.width),
                   });
                 } else if (field === 'h') {
-                  updateStageRig(rig.id, {
-                    h: Math.min(12, Math.max(0, Number(cur.h))),
-                  });
+                  updateStageRig(rig.id, { h: Math.min(12, Math.max(0, Number(cur.h))) });
                 } else if (field === 'r') {
-                  updateStageRig(rig.id, {
-                    cx: rig.cx,
-                    cy: rig.cy,
-                    h: rig.h,
-                    rot: ((Number(cur.r || 0) % 360) + 360) % 360,
-                    span: rig.span,
-                  });
+                  updateStageRig(rig.id, { rot: ((Number(cur.r || 0) % 360) + 360) % 360 });
                 } else if (field === 'x') {
                   updateStageRig(rig.id, {
                     cx: (Number(cur.x) + Number(cur.w) / 2 - stageDims.width / 2) / stageDims.width + 0.5,
@@ -4498,6 +4486,8 @@ export const Stage3D: React.FC<{
                   });
                 }
               };
+              // Auto-commit on change for faders (real-time update), on blur for number inputs.
+              const commitOnChange = (field: string) => () => commitF(field);
               const num = (field: 'x' | 'y' | 'w' | 'd' | 'h' | 'r', label: string) => (
                 <label key={field} className="flex flex-col items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                   <span className="text-[8px] text-gray-600">{label}</span>
@@ -4517,18 +4507,17 @@ export const Stage3D: React.FC<{
                     <span className="text-[8px] text-gray-400 font-medium w-20 shrink-0">{label}</span>
                     <button
                       type="button"
-                      onClick={() => { const v = Math.max(min, cur - 0.5); setF(field, String(v)); }}
+                      onClick={() => { const v = Math.max(min, cur - 0.5); setF(field, String(v)); commitF(field); }}
                       className="w-5 h-5 rounded bg-gray-800 text-gray-400 hover:text-purple-300 text-[10px] flex items-center justify-center shrink-0"
                     >−</button>
                     <input
                       type="range" min={min} max={max} step={0.5} value={cur}
-                      onChange={(e) => setF(field, e.target.value)}
-                      onBlur={() => commitF(field)}
+                      onChange={(e) => { setF(field, e.target.value); commitF(field); }}
                       className="flex-1 h-1 accent-purple-500 cursor-pointer"
                     />
                     <button
                       type="button"
-                      onClick={() => { const v = Math.min(max, cur + 0.5); setF(field, String(v)); }}
+                      onClick={() => { const v = Math.min(max, cur + 0.5); setF(field, String(v)); commitF(field); }}
                       className="w-5 h-5 rounded bg-gray-800 text-gray-400 hover:text-purple-300 text-[10px] flex items-center justify-center shrink-0"
                     >+</button>
                     <span className="text-[8px] text-gray-500 font-mono w-10 text-right shrink-0">{cur.toFixed(1)}m</span>
