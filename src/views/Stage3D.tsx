@@ -4388,7 +4388,7 @@ export const Stage3D: React.FC<{
           plusieurs supports pour des groupes différents. */}
       {supportsMenuOpen && (() => {
         return (
-        <div className="fixed right-3 top-16 w-96 z-40 flex flex-col rounded-lg border border-gray-700/60 bg-[#0d0d14]/95 shadow-xl shadow-black/60 p-2 max-h-[80vh] overflow-y-auto">
+        <div className="fixed right-3 top-16 w-[520px] z-40 flex flex-col rounded-lg border border-gray-700/60 bg-[#0d0d14]/95 shadow-xl shadow-black/60 p-2 max-h-[80vh] overflow-y-auto">
           <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
             <span className="text-[10px] font-medium text-gray-300">{t('stage3D.supportsTitle')} ({stageRigs.length})</span>
             <div className="flex items-center gap-1">
@@ -4442,10 +4442,60 @@ export const Stage3D: React.FC<{
                 const cur = rigDrafts[rig.id] ?? rigToMeters(rig, stageDims);
                 if (field === 'name') {
                   updateStageRig(rig.id, { name: String(cur.name).trim() || rig.name });
-                } else {
-                  updateStageRig(rig.id, rigFromMeters({
-                    x: Number(cur.x), y: Number(cur.y), w: Number(cur.w), d: Number(cur.d), h: Number(cur.h), r: Number(cur.r || 0),
-                  }, stageDims));
+                } else if (field === 'w') {
+                  // Keep rig center fixed when span changes: adjust x accordingly.
+                  const newW = Number(cur.w) > 0 ? Number(cur.w) : 0;
+                  const oldW = rig.span * stageDims.width;
+                  const newCx = cur.x !== undefined && cur.y !== undefined
+                    ? ((Number(cur.x) + newW / 2 - stageDims.width / 2) / stageDims.width + 0.5)
+                    : rig.cx;
+                  const newLeft = newCx * stageDims.width - stageDims.width / 2 - newW / 2;
+                  updateStageRig(rig.id, {
+                    cx: newCx,
+                    cy: Number(cur.y) !== undefined ? ((Number(cur.y) + Number(cur.d) / 2 - stageDims.depth / 2) / stageDims.depth + 0.5) : rig.cy,
+                    h: Number(cur.h) > 0 ? Number(cur.h) : rig.h,
+                    rot: ((Number(cur.r || 0) % 360) + 360) % 360,
+                    span: Math.max(0.1, newW / stageDims.width),
+                  });
+                } else if (field === 'd') {
+                  const newD = Number(cur.d) > 0 ? Number(cur.d) : 0;
+                  const newCy = ((Number(cur.y) + newD / 2 - stageDims.depth / 2) / stageDims.depth + 0.5);
+                  const newFront = newCy * stageDims.depth - stageDims.depth / 2 - newD / 2;
+                  updateStageRig(rig.id, {
+                    cx: rig.cx,
+                    cy: newCy,
+                    h: Number(cur.h) > 0 ? Number(cur.h) : rig.h,
+                    rot: ((Number(cur.r || 0) % 360) + 360) % 360,
+                    span: Math.max(0.1, (Number(cur.w) > 0 ? Number(cur.w) : rig.span * stageDims.width) / stageDims.width),
+                  });
+                } else if (field === 'h') {
+                  updateStageRig(rig.id, {
+                    h: Math.min(12, Math.max(0, Number(cur.h))),
+                  });
+                } else if (field === 'r') {
+                  updateStageRig(rig.id, {
+                    cx: rig.cx,
+                    cy: rig.cy,
+                    h: rig.h,
+                    rot: ((Number(cur.r || 0) % 360) + 360) % 360,
+                    span: rig.span,
+                  });
+                } else if (field === 'x') {
+                  updateStageRig(rig.id, {
+                    cx: (Number(cur.x) + Number(cur.w) / 2 - stageDims.width / 2) / stageDims.width + 0.5,
+                    cy: rig.cy,
+                    h: rig.h,
+                    rot: rig.rot ?? 0,
+                    span: rig.span,
+                  });
+                } else if (field === 'y') {
+                  updateStageRig(rig.id, {
+                    cx: rig.cx,
+                    cy: (Number(cur.y) + Number(cur.d) / 2 - stageDims.depth / 2) / stageDims.depth + 0.5,
+                    h: rig.h,
+                    rot: rig.rot ?? 0,
+                    span: rig.span,
+                  });
                 }
               };
               const num = (field: 'x' | 'y' | 'w' | 'd' | 'h' | 'r', label: string) => (
@@ -4517,17 +4567,17 @@ export const Stage3D: React.FC<{
                       </button>
                     )}
                   </div>
-                  {/* Position faders : X (gauche/droite), Y (avant/arrière), H (hauteur) */}
+                  {/* Position faders : déplacement latéral, en profondeur, hauteur */}
                   <div className="grid grid-cols-3 gap-1 mt-1">
-                    {rigFader('x', 'X', t('stage3D.rigPosLeftTip'), -10, 15)}
-                    {rigFader('y', 'Y', t('stage3D.rigPosFrontTip'), -10, 15)}
-                    {rigFader('h', 'H', 'Hauteur du rig en mètres', 0.5, 12)}
+                    {rigFader('x', 'Latéral', t('stage3D.rigPosLeftTip'), -10, 15)}
+                    {rigFader('y', 'Profondeur', t('stage3D.rigPosFrontTip'), -10, 15)}
+                    {rigFader('h', 'Hauteur', 'Hauteur du rig en mètres', 0.5, 12)}
                   </div>
-                  {/* Rotation */}
+                  {/* Rotation + longueur de barre */}
                   <div className="grid grid-cols-2 gap-1 mt-1">
                     {num('r', 'R°')}
                     <label className="flex flex-col items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-                      <span className="text-[8px] text-gray-600">Ø m</span>
+                      <span className="text-[8px] text-gray-600">Longueur (m)</span>
                       <input
                         type="number" step={0.5} min={0} value={dr.w as number | string}
                         onChange={(e) => setF('w', e.target.value)}
