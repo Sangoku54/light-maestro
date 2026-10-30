@@ -35,11 +35,13 @@ describe('stage-decks — plateaux multi-rects', () => {
     expect(migrateStageDecks(null)).toEqual(defaultStageDecks());
     expect(migrateStageDecks([])).toEqual(defaultStageDecks());
     expect(migrateStageDecks([{ nope: true }]).length).toBe(1);
-    // Valeurs aberrantes bornées.
+    // Placement LIBRE : cx/cy non bornés (hors scène autorisé), valeurs finies conservées.
+    // Seules gardes : taille ≥ 0.05 (plateau invisible sinon), hauteur ≥ 0.
     const [deck] = migrateStageDecks([{ cx: 9, cy: -3, w: 0, d: 99, h: -2 }]);
-    expect(deck.cx).toBe(1);
-    expect(deck.cy).toBe(0);
+    expect(deck.cx).toBe(9);
+    expect(deck.cy).toBe(-3);
     expect(deck.w).toBe(0.05);
+    expect(deck.d).toBe(99);
     expect(deck.h).toBe(0);
   });
 

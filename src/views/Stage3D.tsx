@@ -4455,7 +4455,7 @@ export const Stage3D: React.FC<{
                     span: Math.max(0.1, newW),
                   });
                 } else if (field === 'h') {
-                  updateStageRig(rig.id, { h: Math.min(12, Math.max(0, Number(cur.h))) });
+                  updateStageRig(rig.id, { h: Math.max(0, Number(cur.h)) });
                 } else if (field === 'r') {
                   updateStageRig(rig.id, { rot: ((Number(cur.r || 0) % 360) + 360) % 360 });
                 } else if (field === 'x') {
@@ -4489,7 +4489,7 @@ export const Stage3D: React.FC<{
                 } else if (field === 'y') {
                   updateStageRig(rig.id, { cy: (v + Number(cur.d) / 2) / stageDims.depth });
                 } else if (field === 'h') {
-                  updateStageRig(rig.id, { h: Math.min(12, Math.max(0, v)) });
+                  updateStageRig(rig.id, { h: Math.max(0, v) });
                 }
               };
               const rigFader = (field: 'x' | 'y' | 'h', label: string, tip: string, min: number, max: number) => {
@@ -4548,9 +4548,9 @@ export const Stage3D: React.FC<{
                   </div>
                   {/* Position faders : déplacement latéral, en profondeur, hauteur */}
                   <div className="space-y-1 mt-1">
-                    {rigFader('x', 'Latéral', t('stage3D.rigPosLeftTip'), -10, 15)}
-                    {rigFader('y', 'Profondeur', t('stage3D.rigPosFrontTip'), -10, 15)}
-                    {rigFader('h', 'Hauteur', 'Hauteur du rig en mètres', 0.5, 12)}
+                    {rigFader('x', 'Latéral', t('stage3D.rigPosLeftTip'), -20, 40)}
+                    {rigFader('y', 'Profondeur', t('stage3D.rigPosFrontTip'), -20, 40)}
+                    {rigFader('h', 'Hauteur', 'Hauteur du rig en mètres', 0.5, 20)}
                   </div>
                   {/* Rotation + longueur de barre */}
                   <div className="grid grid-cols-2 gap-1 mt-1">
@@ -5224,8 +5224,8 @@ export const Stage3D: React.FC<{
                   </div>
                   <input
                     type="range"
-                    min={1}
-                    max={12}
+                    min={0.5}
+                    max={30}
                     step={0.5}
                     value={selectedPos.barSpan ?? DEFAULT_BAR_SPAN}
                     onChange={(e) => setFixturePosition(selectedFixture.id, { barSpan: parseFloat(e.target.value) })}
@@ -5751,7 +5751,7 @@ function buildSupportVisual(
   if (isBarSupport(kind)) {
     // Barre avant/arrière : la fixture pend SOUS une barre horizontale
     // (axe X), de longueur LIBRE (jamais dérivée des plateaux).
-    const span = Math.min(12, Math.max(1, opts?.span ?? DEFAULT_BAR_SPAN));
+    const span = Math.max(0.5, opts?.span ?? DEFAULT_BAR_SPAN);
     const hung = opts?.hung ?? BAR_HUNG_DEFAULT;
     const barY = height + BAR_DROP;
     const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, span, 12), barMetalMat);

@@ -103,9 +103,11 @@ export function migrateStageRigs(saved: unknown): StageRig[] {
       id: typeof r.id === 'string' && r.id ? r.id : `rig-${i}`,
       name: typeof r.name === 'string' && r.name ? r.name : `${RIG_LABELS[kind]} ${i + 1}`,
       kind,
-      cx: Math.min(1.3, Math.max(-0.3, num(r.cx, 0.5))),
-      cy: Math.min(1.3, Math.max(-0.3, num(r.cy, 0.5))),
-      h: Math.min(12, Math.max(0, num(r.h, DEFAULT_RIG_HEIGHTS[kind]))),
+      // Placement LIBRE : cx/cy non bornés (hors scène autorisé). Seule garde :
+      // valeur finie sinon fallback. h ≥ 0 sans plafond, span libre.
+      cx: num(r.cx, 0.5),
+      cy: num(r.cy, 0.5),
+      h: Math.max(0, num(r.h, DEFAULT_RIG_HEIGHTS[kind])),
       rot: ((num(r.rot, 0) % 360) + 360) % 360,
       span: num(r.span, DEFAULT_RIG_SPANS[kind]),
       hung: r.hung === undefined ? true : !!r.hung,

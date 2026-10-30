@@ -39,7 +39,8 @@ describe('stage-rigs — structures libres', () => {
     expect(migrateStageRigs('nope')).toEqual([]);
     const [rig] = migrateStageRigs([{ kind: 'tBar', cx: 9, h: -5, span: 999, rot: 450, hung: false }]);
     expect(rig.kind).toBe('tBar');
-    expect(rig.cx).toBe(1.3);
+    // Placement LIBRE : cx non borné (9 conservé), seule la valeur NON FINIE retombe au défaut.
+    expect(rig.cx).toBe(9);
     expect(rig.h).toBe(0);
     expect(rig.span).toBe(999);
     expect(rig.rot).toBe(90);

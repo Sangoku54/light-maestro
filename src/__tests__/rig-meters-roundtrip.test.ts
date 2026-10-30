@@ -7,7 +7,8 @@
  * pont centré). Ces tests verrouillent la convention : span = mètres partout.
  */
 import { describe, it, expect } from 'vitest';
-import { rigToMeters, rigFromMeters, makeRig, DEFAULT_RIG_SPANS } from '../utils/stage-rigs';
+import { rigToMeters, rigFromMeters, makeRig, migrateStageRigs, DEFAULT_RIG_SPANS } from '../utils/stage-rigs';
+import { migrateStageDecks } from '../utils/stage-decks';
 import type { StageRig } from '../utils/stage-rigs';
 
 const DIMS = { width: 10, depth: 8 };
@@ -79,5 +80,24 @@ describe('rig meters ↔ store round-trip (span en mètres)', () => {
     const groupX = (cxFromDrag - 0.5) * DIMS.width;
     // Position 3D = centre depuis bord gauche − W/2 (scène 3D centrée à l'origine)
     expect(groupX).toBeCloseTo(r.x + r.w / 2 - DIMS.width / 2, 9);
+  });
+
+  it('support hors scène (12 m de profondeur, 5 m à gauche) SURVIT au chargement', () => {
+    // Régression : migrateStageRigs bridait cx/cy à [-0.3, 1.3] → un support
+    // placé au-delà revenait en arrière après save/reload.
+    const saved = [{ kind: 'truss', cx: -0.5, cy: 1.5, h: 6, span: 8, rot: 0, hung: true }];
+    const [rig] = migrateStageRigs(saved);
+    expect(rig.cx).toBe(-0.5);
+    expect(rig.cy).toBe(1.5);
+    expect(rig.h).toBe(6);
+    expect(rig.span).toBe(8);
+  });
+
+  it('plateau hors scène SURVIT au chargement (migrateStageDecks sans bornes)', () => {
+    const saved = [{ id: 'd1', name: 'Runway', cx: 1.8, cy: -0.7, w: 0.5, d: 0.3, h: 12, rot: 0 }];
+    const [deck] = migrateStageDecks(saved);
+    expect(deck.cx).toBe(1.8);
+    expect(deck.cy).toBe(-0.7);
+    expect(deck.h).toBe(12);
   });
 });

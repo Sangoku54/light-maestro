@@ -56,11 +56,14 @@ export function migrateStageDecks(saved: unknown): StageDeck[] {
     decks.push({
       id: typeof r.id === 'string' && r.id ? r.id : `deck-${i}`,
       name: typeof r.name === 'string' && r.name ? r.name : `Plateau ${i + 1}`,
-      cx: Math.min(1, Math.max(0, num(r.cx, 0.5))),
-      cy: Math.min(1, Math.max(0, num(r.cy, 0.5))),
-      w: Math.min(2, Math.max(0.05, num(r.w, 0.4))),
-      d: Math.min(2, Math.max(0.05, num(r.d, 0.3))),
-      h: Math.min(10, Math.max(0, num(r.h, 0.4))),
+      // Placement LIBRE : cx/cy non bornés (hors scène autorisé). Seule garde :
+      // valeur finie sinon fallback. Taille ≥ 0.05 (un plateau de taille nulle
+      // est invisible), hauteur ≥ 0 sans plafond.
+      cx: num(r.cx, 0.5),
+      cy: num(r.cy, 0.5),
+      w: Math.max(0.05, num(r.w, 0.4)),
+      d: Math.max(0.05, num(r.d, 0.3)),
+      h: Math.max(0, num(r.h, 0.4)),
       rot: normAngle(num(r.rot, 0)),
     });
   }
@@ -165,7 +168,7 @@ export function deckFromMeters(
     cy: (m.y + m.d / 2 - stageDims.depth / 2) / stageDims.depth + 0.5,
     w,
     d,
-    h: Math.min(10, Math.max(0, m.h)),
+    h: Math.max(0, m.h),
   };
 }
 
