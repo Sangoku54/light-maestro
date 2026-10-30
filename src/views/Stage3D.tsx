@@ -4388,7 +4388,7 @@ export const Stage3D: React.FC<{
           plusieurs supports pour des groupes différents. */}
       {supportsMenuOpen && (() => {
         return (
-        <div className="fixed right-3 top-16 w-80 z-40 flex flex-col rounded-lg border border-gray-700/60 bg-[#0d0d14]/95 shadow-xl shadow-black/60 p-2 max-h-[80vh] overflow-y-auto">
+        <div className="fixed right-3 top-16 w-96 z-40 flex flex-col rounded-lg border border-gray-700/60 bg-[#0d0d14]/95 shadow-xl shadow-black/60 p-2 max-h-[80vh] overflow-y-auto">
           <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
             <span className="text-[10px] font-medium text-gray-300">{t('stage3D.supportsTitle')} ({stageRigs.length})</span>
             <div className="flex items-center gap-1">
@@ -4517,30 +4517,26 @@ export const Stage3D: React.FC<{
                       </button>
                     )}
                   </div>
-                  {/* Position faders : gauche/droite, avant/arrière, hauteur */}
+                  {/* Position faders : X (gauche/droite), Y (avant/arrière), H (hauteur) */}
                   <div className="grid grid-cols-3 gap-1 mt-1">
                     {rigFader('x', 'X', t('stage3D.rigPosLeftTip'), -10, 15)}
                     {rigFader('y', 'Y', t('stage3D.rigPosFrontTip'), -10, 15)}
                     {rigFader('h', 'H', 'Hauteur du rig en mètres', 0.5, 12)}
                   </div>
-                  <div className="grid grid-cols-4 gap-1 mt-1">
-                    {num('w', 'L')}{num('d', 'P')}{num('h', 'H')}{num('r', 'R°')}
-                  </div>
-                  {showSpan && (
-                    <div className="space-y-1 mt-1 pt-1 border-t border-gray-800">
-                      <div className="flex justify-between text-[10px]">
-                        <span className="text-gray-500">{t('stage3D.barSpan')}</span>
-                        <span className="text-gray-400 font-mono">{(Number(dr.w) || 0).toFixed(1)}m</span>
-                      </div>
+                  {/* Rotation */}
+                  <div className="grid grid-cols-2 gap-1 mt-1">
+                    {num('r', 'R°')}
+                    <label className="flex flex-col items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                      <span className="text-[8px] text-gray-600">Ø m</span>
                       <input
-                        type="number" step={0.5} value={dr.w}
+                        type="number" step={0.5} min={0} value={dr.w as number | string}
                         onChange={(e) => setF('w', e.target.value)}
                         onBlur={() => commitF('w')}
                         onKeyDown={(e) => { if (e.key === 'Enter') commitF('w'); }}
-                        className="w-full h-1 accent-purple-500 cursor-pointer"
+                        className="w-full bg-black/30 border border-gray-800 rounded px-1 py-0.5 text-[10px] text-gray-200 text-center focus:outline-none focus:border-purple-500/50"
                       />
-                    </div>
-                  )}
+                    </label>
+                  </div>
                    {showBarHung && (
                      <div className="grid grid-cols-2 gap-1 pt-1">
                        <button
