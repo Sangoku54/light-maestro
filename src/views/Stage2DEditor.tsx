@@ -11,7 +11,8 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next';
 import { useShowStore, getFixtureColor, type PatchedFixture } from '../stores/showStore';
 import { deckRectMeters } from '../utils/stage-decks';
-import { Eye, Maximize2, AlignStartVertical, AlignStartHorizontal, AlignLeft, AlignRight, ArrowLeftRight, ArrowUpDown } from 'lucide-react';
+import { Eye, Maximize2, AlignStartVertical, AlignStartHorizontal, AlignLeft, AlignRight, ArrowLeftRight, ArrowUpDown, Edit2, Copy, Trash2, Check } from 'lucide-react';
+import { clampRect } from '../components/clampedpopup';
 import { generateAllThumbnails, getVariantsForCategory } from '../utils/fixtureThumbnails';
 import { Stage3D } from './Stage3D';
 
@@ -24,6 +25,9 @@ export const Stage2DEditor: React.FC = () => {
   const stageDecks = useShowStore((s) => s.stageDecks);
   const setFixturePosition = useShowStore((s) => s.setFixturePosition);
   const initFixturePosition = useShowStore((s) => s.initFixturePosition);
+  const unpatchFixture = useShowStore((s) => s.unpatchFixture);
+  const duplicateFixture = useShowStore((s) => s.duplicateFixture);
+  const updateFixtureTier = useShowStore((s) => s.updateFixtureTier);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
@@ -53,6 +57,23 @@ export const Stage2DEditor: React.FC = () => {
   const [showBeams, setShowBeams] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [selectedFixtureIds, setSelectedFixtureIds] = useState<Set<string>>(new Set());
+
+  // Right-click context menu
+  const [ctxMenu, setCtxMenu] = useState<{ visible: boolean; x: number; y: number; fixtureId: string; fixtureName: string }>({
+    visible: false, x: 0, y: 0, fixtureId: '', fixtureName: ''
+  });
+
+  // Dismiss context menu on any click outside
+  useEffect(() => {
+    if (!ctxMenu.visible) return;
+    const dismiss = (e: MouseEvent) => {
+      const menuEl = document.querySelector('[data-context-menu="2d-editor"]') as HTMLElement | null;
+      if (menuEl && menuEl.contains(e.target as Node)) return;
+      setCtxMenu((c) => ({ ...c, visible: false }));
+    };
+    window.addEventListener('mousedown', dismiss);
+    return () => window.removeEventListener('mousedown', dismiss);
+  }, [ctxMenu.visible]);
   const marqueeRef = useRef<{ startX: number; startY: number; currentX: number; currentY: number; active: boolean } | null>(null);
 
   // Floating 3D companion view (same pill pattern as the other Design tabs)
@@ -605,10 +626,13 @@ export const Stage2DEditor: React.FC = () => {
     if (!rect) return;
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    if (hitTestFixture(x, y)) {
+    const hitId = hitTestFixture(x, y);
+    if (hitId) {
       e.preventDefault();
+      const pf = patchedFixtures.find(f => f.id === hitId);
+      setCtxMenu({ visible: true, x: e.clientX, y: e.clientY, fixtureId: hitId, fixtureName: pf?.name || hitId });
     }
-  }, [hitTestFixture]);
+  }, [hitTestFixture, patchedFixtures]);
 
   return (
     <div className="h-full flex flex-col bg-[#08080e] min-h-0 min-w-0 overflow-hidden">
@@ -685,6 +709,106 @@ export const Stage2DEditor: React.FC = () => {
           style={{ cursor: dragRef.current ? 'grabbing' : 'crosshair' }}
         />
       </div>
+
+      {/* Right-click context menu */}
+      {ctxMenu.visible && (
+        <div
+          className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px] max-h-[80vh] overflow-y-auto"
+          data-context-menu="2d-editor"
+          style={{ ...clampRect(ctxMenu.x, ctxMenu.y, 240, 320, window.innerWidth, window.innerHeight) }}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider truncate">
+            {ctxMenu.fixtureName}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              // Highlight in 3D / jump to fixture panel — toggle selection
+              const next = new Set(selectedFixtureIds);
+              if (next.has(ctxMenu.fixtureId)) next.delete(ctxMenu.fixtureId);
+              else next.add(ctxMenu.fixtureId);
+              setSelectedFixtureIds(next);
+              setCtxMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-300 transition-colors flex items-center gap-2"
+          >
+            <Check size={12} />
+            {selectedFixtureIds.has(ctxMenu.fixtureId) ? 'Désélectionner' : 'Sélectionner'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const result = duplicateFixture(ctxMenu.fixtureId);
+              setCtxMenu((c) => ({ ...c, visible: false }));
+              if ('id' in result) {
+                try { (window as any).__lm_toast?.('Dupliqué', 'info'); } catch {}
+              }
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-300 transition-colors flex items-center gap-2"
+          >
+            <Copy size={12} />
+            Dupliquer
+          </button>
+          <div className="my-1 border-t border-gray-800/60" />
+          <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">Groupe</div>
+          {(['primary', 'secondary', 'tertiary', 'other'] as const).map((tier) => {
+            const isCurrent = patchedFixtures.find((f) => f.id === ctxMenu.fixtureId)?.tier === tier;
+            return (
+              <button
+                key={tier}
+                onClick={() => {
+                  updateFixtureTier(ctxMenu.fixtureId, tier);
+                  setCtxMenu((c) => ({ ...c, visible: false }));
+                }}
+                className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                  isCurrent ? 'text-purple-300' : 'text-gray-300 hover:bg-purple-600/20 hover:text-purple-300'
+                }`}
+              >
+                <span className={`w-2.5 h-2.5 rounded-full ${
+                  tier === 'primary' ? 'bg-purple-400' : tier === 'secondary' ? 'bg-blue-400' : tier === 'other' ? 'bg-cyan-400' : 'bg-gray-400'
+                }`} />
+                {tier.charAt(0).toUpperCase() + tier.slice(1)}
+                {isCurrent && <Check size={10} className="ml-auto" />}
+              </button>
+            );
+          })}
+          <div className="my-1 border-t border-gray-800/60" />
+          <button
+            type="button"
+            onClick={() => {
+              unpatchFixture(ctxMenu.fixtureId);
+              setSelectedFixtureIds(prev => { const n = new Set(prev); n.delete(ctxMenu.fixtureId); return n; });
+              setCtxMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-red-300 hover:bg-red-600/20 hover:text-red-200 transition-colors flex items-center gap-2"
+          >
+            <Trash2 size={12} />
+            Retirer
+          </button>
+          {selectedFixtureIds.size > 1 && (
+            <>
+              <div className="my-1 border-t border-gray-800/60" />
+              <button
+                type="button"
+                onClick={() => {
+                  for (const id of selectedFixtureIds) {
+                    unpatchFixture(id);
+                  }
+                  setSelectedFixtureIds(new Set());
+                  setCtxMenu((c) => ({ ...c, visible: false }));
+                }}
+                className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-600/20 transition-colors flex items-center gap-2"
+              >
+                <Trash2 size={12} />
+                Supprimer la sélection ({selectedFixtureIds.size})
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Floating 3D companion view */}
       {showFloating3D && (
