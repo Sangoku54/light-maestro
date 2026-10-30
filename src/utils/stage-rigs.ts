@@ -107,7 +107,7 @@ export function migrateStageRigs(saved: unknown): StageRig[] {
       cy: Math.min(1.3, Math.max(-0.3, num(r.cy, 0.5))),
       h: Math.min(12, Math.max(0, num(r.h, DEFAULT_RIG_HEIGHTS[kind]))),
       rot: ((num(r.rot, 0) % 360) + 360) % 360,
-      span: Math.min(20, Math.max(0, num(r.span, DEFAULT_RIG_SPANS[kind]))),
+      span: num(r.span, DEFAULT_RIG_SPANS[kind]),
       hung: r.hung === undefined ? true : !!r.hung,
     });
   }

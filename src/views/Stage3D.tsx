@@ -4460,18 +4460,33 @@ export const Stage3D: React.FC<{
                   />
                 </label>
               );
-              const numPos = (field: 'x' | 'y', label: string, tip: string) => (
-                <label key={field} className="flex flex-col items-center gap-0.5" onClick={(e) => e.stopPropagation()} title={tip}>
-                  <span className="text-[8px] text-gray-400 font-medium">{label} <span className="text-gray-600">(m)</span></span>
-                  <input
-                    type="number" step={0.5} value={dr[field] as number | string}
-                    onChange={(e) => setF(field, e.target.value)}
-                    onBlur={() => commitF(field)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') commitF(field); }}
-                    className="w-full bg-black/30 border border-purple-500/30 rounded px-1 py-0.5 text-[10px] text-gray-200 text-center focus:outline-none focus:border-purple-500/50"
-                  />
-                </label>
-              );
+              const rigFader = (field: 'x' | 'y' | 'h', label: string, tip: string, min: number, max: number) => {
+                const cur = Number(dr[field] as number);
+                return (
+                  <div key={field} className="flex flex-col items-center gap-0.5" onClick={(e) => e.stopPropagation()} title={tip}>
+                    <span className="text-[8px] text-gray-400 font-medium">{label} <span className="text-gray-600">(m)</span></span>
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => { const v = Math.max(min, cur - 0.5); setF(field, String(v)); }}
+                        className="w-5 h-5 rounded bg-gray-800 text-gray-400 hover:text-purple-300 text-[10px] flex items-center justify-center shrink-0"
+                      >−</button>
+                      <input
+                        type="range" min={min} max={max} step={0.5} value={cur}
+                        onChange={(e) => setF(field, e.target.value)}
+                        onBlur={() => commitF(field)}
+                        className="flex-1 h-1 accent-purple-500 cursor-pointer"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => { const v = Math.min(max, cur + 0.5); setF(field, String(v)); }}
+                        className="w-5 h-5 rounded bg-gray-800 text-gray-400 hover:text-purple-300 text-[10px] flex items-center justify-center shrink-0"
+                      >+</button>
+                    </div>
+                    <span className="text-[8px] text-gray-500 font-mono">{cur.toFixed(1)}</span>
+                  </div>
+                );
+              };
               const showSpan = rig.kind === 'truss' || rig.kind === 'frontBar' || rig.kind === 'backBar';
               const showHung = rig.kind === 'frontBar' || rig.kind === 'backBar';
               const showBarHung = rig.kind === 'frontBar' || rig.kind === 'backBar';
@@ -4502,9 +4517,11 @@ export const Stage3D: React.FC<{
                       </button>
                     )}
                   </div>
-                  {/* Position vue public : distances depuis bord gauche et nez de scène */}
-                  <div className="grid grid-cols-2 gap-1 mt-1">
-                    {numPos('x', t('stage3D.rigPosLeft'), t('stage3D.rigPosLeftTip'))}{numPos('y', t('stage3D.rigPosFront'), t('stage3D.rigPosFrontTip'))}
+                  {/* Position faders : gauche/droite, avant/arrière, hauteur */}
+                  <div className="grid grid-cols-3 gap-1 mt-1">
+                    {rigFader('x', 'X', t('stage3D.rigPosLeftTip'), -10, 15)}
+                    {rigFader('y', 'Y', t('stage3D.rigPosFrontTip'), -10, 15)}
+                    {rigFader('h', 'H', 'Hauteur du rig en mètres', 0.5, 12)}
                   </div>
                   <div className="grid grid-cols-4 gap-1 mt-1">
                     {num('w', 'L')}{num('d', 'P')}{num('h', 'H')}{num('r', 'R°')}
@@ -4516,7 +4533,7 @@ export const Stage3D: React.FC<{
                         <span className="text-gray-400 font-mono">{(Number(dr.w) || 0).toFixed(1)}m</span>
                       </div>
                       <input
-                        type="number" step={0.5} min={1} max={12} value={dr.w}
+                        type="number" step={0.5} value={dr.w}
                         onChange={(e) => setF('w', e.target.value)}
                         onBlur={() => commitF('w')}
                         onKeyDown={(e) => { if (e.key === 'Enter') commitF('w'); }}

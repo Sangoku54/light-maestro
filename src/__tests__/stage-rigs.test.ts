@@ -41,7 +41,7 @@ describe('stage-rigs — structures libres', () => {
     expect(rig.kind).toBe('tBar');
     expect(rig.cx).toBe(1.3);
     expect(rig.h).toBe(0);
-    expect(rig.span).toBe(20);
+    expect(rig.span).toBe(999);
     expect(rig.rot).toBe(90);
     expect(rig.hung).toBe(false);
     // Type inconnu → pont, valeurs par défaut.
