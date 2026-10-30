@@ -587,7 +587,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
       patchedFixtures: [...state.patchedFixtures, cloned],
       fixturePositions: {
         ...state.fixturePositions,
-        [id]: { ...state.fixturePositions[clipId], x: Math.min(1.3, (state.fixturePositions[clipId]?.x ?? 0.5) + 0.05) },
+        [id]: { ...state.fixturePositions[clipId], x: (state.fixturePositions[clipId]?.x ?? 0.5) + 0.05 },
       },
     }));
     useAppStore.getState().markDirty();
@@ -618,7 +618,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
       patchedFixtures: [...state.patchedFixtures, cloned],
       fixturePositions: {
         ...state.fixturePositions,
-        [newId]: { ...state.fixturePositions[id], x: Math.min(1.3, (state.fixturePositions[id]?.x ?? 0.5) + 0.05) },
+        [newId]: { ...state.fixturePositions[id], x: (state.fixturePositions[id]?.x ?? 0.5) + 0.05 },
       },
     }));
     useAppStore.getState().markDirty();
@@ -861,9 +861,9 @@ export const useShowStore = create<ShowState>((set, get) => ({
       if (sameKind > 0) {
         // DÃ©cale chaque nouveau support du mÃªme type pour ne pas l'empiler
         // exactement sur l'existant (sinon invisible, on croit que rien ne se passe).
-        rig.cx = Math.min(1.3, rig.cx + 0.07 * sameKind);
+        rig.cx = rig.cx + 0.07 * sameKind;
         const side = sameKind % 2 === 0 ? 1 : -1;
-        rig.cy = Math.min(1.3, Math.max(-0.3, rig.cy + side * 0.05 * Math.ceil(sameKind / 2)));
+        rig.cy = rig.cy + side * 0.05 * Math.ceil(sameKind / 2);
       }
       return { stageRigs: [...state.stageRigs, rig] };
     });

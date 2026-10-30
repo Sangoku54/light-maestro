@@ -4464,7 +4464,7 @@ export const Stage3D: React.FC<{
                 <label key={field} className="flex flex-col items-center gap-0.5" onClick={(e) => e.stopPropagation()} title={tip}>
                   <span className="text-[8px] text-gray-400 font-medium">{label} <span className="text-gray-600">(m)</span></span>
                   <input
-                    type="number" step={0.5} min={0} value={dr[field] as number | string}
+                    type="number" step={0.5} value={dr[field] as number | string}
                     onChange={(e) => setF(field, e.target.value)}
                     onBlur={() => commitF(field)}
                     onKeyDown={(e) => { if (e.key === 'Enter') commitF(field); }}

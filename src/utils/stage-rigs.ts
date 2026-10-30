@@ -163,8 +163,8 @@ export function rigFromMeters(
   m: { x: number; y: number; w: number; d: number; h: number; r: number },
   stageDims: { width: number; depth: number },
 ): Partial<StageRig> {
-  const cx = Math.min(1.3, Math.max(-0.3, (m.x + m.w / 2 - stageDims.width / 2) / stageDims.width + 0.5));
-  const cy = Math.min(1.3, Math.max(-0.3, (m.y + m.d / 2 - stageDims.depth / 2) / stageDims.depth + 0.5));
+  const cx = (m.x + m.w / 2 - stageDims.width / 2) / stageDims.width + 0.5;
+  const cy = (m.y + m.d / 2 - stageDims.depth / 2) / stageDims.depth + 0.5;
   const h = Math.min(12, Math.max(0, m.h));
   const rot = ((m.r % 360) + 360) % 360;
   return { cx, cy, h, rot };
