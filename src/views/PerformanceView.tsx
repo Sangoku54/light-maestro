@@ -9,7 +9,8 @@ import {
   Timer as TimerIcon, Radio, Pencil, Gauge
 } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
-import { useShowStore, type SavedCueList, type CueListCue, type SongPreset, findBestSongPreset, presetHasAudio } from '../stores/showStore';
+import { useShowStore, type SavedCueList, type CueListCue, type SongPreset, findBestSongPreset, presetHasAudio, type FixturePos } from '../stores/showStore';
+import { loadFixturePositionsMeters } from '../utils/fixture-height';
 import { computeDmxCues, loadFixtureDefinitions, type CueInput, type DmxCue } from '../hooks/dmx-cues';
 import { displayTypeForChannel } from '../engine/fixture-analyzer';
 import { computeDmxForCue } from '../hooks/dmx-playback';
@@ -2084,7 +2085,7 @@ const VCButtonWidget: React.FC<{
             s.setPatchedFixtures(patched);
           }
           // Also restore .lmproject format fields (backward compat)
-          if (p.fixturePositions) s.setFixturePositions(p.fixturePositions);
+          if (p.fixturePositions) s.setFixturePositions(loadFixturePositionsMeters<FixturePos>(p) ?? {});
           if (p.songPresets) s.setSongPresets(p.songPresets);
           // Restore QuickShow data from .lmproject format
           if (p.quickShow) (window as any).__lm_setQuickShow?.(p.quickShow);

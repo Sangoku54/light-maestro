@@ -363,7 +363,7 @@ export const Stage2DEditor: React.FC = () => {
         }
 
         // Height indicator (small bar on side)
-        const hBarH = Math.max(2, pos.h * 16);
+        const hBarH = Math.max(2, (pos.h ?? 0) * 3.2); // 16px pour 5 m (échelle historique)
         ctx.fillStyle = '#ffffff33';
         ctx.fillRect(fx + drawR + 3, fy - hBarH / 2, 3, hBarH);
 
@@ -384,7 +384,7 @@ export const Stage2DEditor: React.FC = () => {
           // Height text
           ctx.fillStyle = '#5a5a7e';
           ctx.font = '7px Inter, sans-serif';
-          ctx.fillText(`${(pos.h * 5.0).toFixed(1)}m`, fx, fy - drawR - 16);
+          ctx.fillText(`${(pos.h ?? 0).toFixed(1)}m`, fx, fy - drawR - 16);
 
           // Heading arrow (points forward direction)
           if (pos.heading !== undefined) {
@@ -482,7 +482,8 @@ export const Stage2DEditor: React.FC = () => {
         e.preventDefault();
         const pos = fixturePositions[hitId];
         if (pos) {
-          const heights = [0.1, 0.3, 0.5, 0.6, 0.8, 1.0];
+          // Presets de hauteur en MÈTRES (h est libre depuis la migration mètres)
+          const heights = [0.5, 1, 2, 3, 5, 8];
           const currentIdx = heights.findIndex(h => Math.abs(h - pos.h) < 0.02);
           const nextIdx = (currentIdx + 1) % heights.length;
           // Apply to all selected if this fixture is selected

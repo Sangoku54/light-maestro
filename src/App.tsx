@@ -5,7 +5,8 @@ import i18next from 'i18next';
 // Traduction hors composant (saveProject) : instance i18next directe.
 const t0 = (k: string, o?: Record<string, unknown>) => i18next.t(k, o);
 import { useAppStore, AppMode } from './stores/appStore';
-import { useShowStore } from './stores/showStore';
+import { useShowStore, type FixturePos } from './stores/showStore';
+import { loadFixturePositionsMeters } from './utils/fixture-height';
 import { useLicenseStore } from './stores/licenseStore';
 import { usePerformStore } from './stores/performStore';
 import { TopBar } from './components/layout/TopBar';
@@ -146,6 +147,7 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
         stageRigs: showState.stageRigs,
         universes: showState.universes,
         fixturePositions: showState.fixturePositions,
+        fixtureHeightUnit: 'm',
         fixtureGroups: showState.fixtureGroups,
         musicians: showState.musicians,
         view3D: showState.view3D,
@@ -464,7 +466,9 @@ const App: React.FC = () => {
           // liste vide, sans hériter du projet précédent.
           ss.setStageRigs(data.showStore.stageRigs);
           if (data.showStore.universes) { ss.setShowUniverses(data.showStore.universes); syncUniversesToEngine(data.showStore.universes); }
-          if (data.showStore.fixturePositions) ss.setFixturePositions(data.showStore.fixturePositions);
+          // Hauteurs : projets anciens = h normalisé 0..1 (×5 m) → migration mètres.
+          const migratedPositions = loadFixturePositionsMeters<FixturePos>(data.showStore);
+          if (migratedPositions) ss.setFixturePositions(migratedPositions);
           if (data.showStore.fixtureGroups) ss.setFixtureGroups(data.showStore.fixtureGroups);
           // Project-level 3D config : musiciens + camera/toggles + ponts.
           // INCONDITIONNEL (anti-héritage) : un projet sans ces champs repart

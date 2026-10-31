@@ -910,7 +910,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
            [id]: {
              x: normX,
              y: normY,
-             h: isOverhead ? 0.6 : 0.3,
+              h: isOverhead ? 3 : 1.5,
              heading: 0,
              mountMode,
            },

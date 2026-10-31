@@ -7,7 +7,8 @@ import {
   SkipBack, Save, Edit2, FolderOpen, Crosshair,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useShowStore, type ShowData, type ShowTrack, type ShowTrackItem } from '../stores/showStore';
+import { useShowStore, type ShowData, type ShowTrack, type ShowTrackItem, type FixturePos } from '../stores/showStore';
+import { loadFixturePositionsMeters } from '../utils/fixture-height';
 import { useRgbMatrixStore } from '../stores/rgbmatrixStore';
 import { syncMatrixEnabled, restoreMatrixEnabled } from '../hooks/rgb-matrix-playback';
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from '../hooks/dmx-cues';
@@ -1081,6 +1082,7 @@ export const ShowManager: React.FC = () => {
                   universes: useShowStore.getState().universes,
                   fixtureGroups: useShowStore.getState().fixtureGroups,
                   fixturePositions: useShowStore.getState().fixturePositions,
+                  fixtureHeightUnit: 'm',
                   customFixtures,
                   format: 'lightmaestro/show',
                 };
@@ -1128,7 +1130,7 @@ export const ShowManager: React.FC = () => {
               if (Array.isArray(show.patchedFixtures)) state.setPatchedFixtures(show.patchedFixtures);
               if (Array.isArray(show.universes)) state.setShowUniverses(show.universes);
               if (Array.isArray(show.fixtureGroups) || Array.isArray(show.groups)) state.setFixtureGroups(show.fixtureGroups || show.groups);
-              if (show.fixturePositions) state.setFixturePositions(show.fixturePositions);
+              if (show.fixturePositions) state.setFixturePositions(loadFixturePositionsMeters<FixturePos>(show) ?? {});
               setSelectedShowId(show.id);
             }}
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-gray-800/30 text-gray-400 hover:bg-gray-700/40 transition-colors"
