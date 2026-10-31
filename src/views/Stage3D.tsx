@@ -53,6 +53,7 @@ import { captureFixtureLook, ensureFixtureLook, setFixtureChannelMaps, type Look
 import { fixtureTestState } from '../utils/fixture-test-state';
 import { generateAllThumbnails, getVariantsForCategory } from '../utils/fixtureThumbnails';
 import { useProgrammerStore } from '../stores/programmerStore';
+import { applyTrussVisibility } from '../utils/stage-truss-visibility';
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -1838,6 +1839,10 @@ export const Stage3D: React.FC<{
       scene.add(pole);
       trussBeamsRef.current.poles.push(pole);
     }
+    // Poutres nées avec la BONNE visibilité : le rebuild de scène (dims/plateaux)
+    // recrée les beams en visible=true en dur ; sans ceci, les ponts avant/arrière
+    // « réapparaissent » tant que stageScene ne change pas.
+    applyTrussVisibility(trussBeamsRef.current, stageScene);
 
     // ── Smoke/Haze particles ───────────────────────
     const particleCount = 300;
@@ -2280,36 +2285,12 @@ export const Stage3D: React.FC<{
   }, [stageDims, stageDecks]);
 
   // ── Truss visibility by stage scene ────────────────
+  // deps élargies (stageDims, deckGeoKey) : le rebuild de scène recrée les
+  // beams en visible=true en dur → re-synchroniser après CHAQUE reconstruction,
+  // pas seulement quand stageScene change.
   useEffect(() => {
-    const tr = trussBeamsRef.current;
-    // Déterminer si on est en mode "scène vide" (aucun pont implémenté)
-    const isEmpty = stageScene === 'empty';
-    // Back beam — hidden en scène vide
-    if (tr.back) tr.back.visible = !isEmpty;
-    // Front beam: rear-front ou full — maisHidden en scène vide impérativement
-    if (tr.front) {
-      // S'assurer que en mode "vide", les ponts sont toujours cachés
-      tr.front.visible = !isEmpty && (stageScene === 'rear-front' || stageScene === 'full');
-    }
-    // Side beams: full only —Hidden en scène vide impérativement
-    if (tr.left) {
-      tr.left.visible = !isEmpty && stageScene === 'full';
-    }
-    if (tr.right) {
-      tr.right.visible = !isEmpty && stageScene === 'full';
-    }
-    // Poles: back corners always visible sauf vide; front corners pour rear-front/full
-    for (const pole of tr.poles) {
-      const corner: string = pole.userData.corner || '';
-      if (isEmpty) {
-        pole.visible = false;
-      } else if (corner.includes('back')) {
-        pole.visible = true;
-      } else {
-        pole.visible = stageScene !== 'rear';
-      }
-    }
-  }, [stageScene]);
+    applyTrussVisibility(trussBeamsRef.current, stageScene);
+  }, [stageScene, stageDims, deckGeoKey]);
 
   // ── Sync fixtures when definitions ready ────────────
   useEffect(() => {
