@@ -11,6 +11,7 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next';
 import { useShowStore, getFixtureColor, type PatchedFixture } from '../stores/showStore';
 import { deckRectMeters } from '../utils/stage-decks';
+import { computeStageFrame } from '../utils/stage-frame';
 import { Eye, Maximize2, AlignStartVertical, AlignStartHorizontal, AlignLeft, AlignRight, ArrowLeftRight, ArrowUpDown, Edit2, Copy, Trash2, Check } from 'lucide-react';
 import { clampRect } from '../components/clampedpopup';
 import { generateAllThumbnails, getVariantsForCategory } from '../utils/fixtureThumbnails';
@@ -212,21 +213,9 @@ export const Stage2DEditor: React.FC = () => {
 
     const W = rect.width;
     const H = rect.height;
-    // Base aux mêmes dimensions que la vue 3D : rectangle proportionnel à stageDims (mètres), centré, même aspect que Stage3D
-    // PAS de soustraction arbitraire : le stage occupe tout l'espace disponible comme en 3D.
-    const availW = Math.max(80, rect.width);
-    const availH = Math.max(80, rect.height);
-    const aspect = Math.max(0.2, Math.min(5, stageDims.width / Math.max(0.1, stageDims.depth)));
-    let sw: number, sh: number;
-    if (availW / availH > aspect) {
-      sh = availH;
-      sw = sh * aspect;
-    } else {
-      sw = availW;
-      sh = sw / aspect;
-    }
-    const padX = (rect.width - sw) / 2;
-    const padY = (rect.height - sh) / 2;
+    // Cadre scène : proportions EXACTES de stageDims (aspect vrai, aucun clamp)
+    // + échelle px/m uniforme → rotations des plateaux fidèles à la vue 3D.
+    const { sw, sh, padX, padY } = computeStageFrame(rect.width, rect.height, stageDims);
 
     const render = () => {
       ctx.clearRect(0, 0, W, H);
@@ -461,28 +450,16 @@ export const Stage2DEditor: React.FC = () => {
     if (!rect) return { fx: 0, fy: 0 };
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    // Same calculation as the render loop — no arbitrary padding subtraction.
-    const availW = Math.max(80, rect.width);
-    const availH = Math.max(80, rect.height);
-    const aspect = Math.max(0.2, Math.min(5, stageDims.width / Math.max(0.1, stageDims.depth)));
-    let sw: number, sh: number;
-    if (availW / availH > aspect) { sh = availH; sw = sh * aspect; } else { sw = availW; sh = sw / aspect; }
-    const padX = (rect.width - sw) / 2;
-    const padY = (rect.height - sh) / 2;
+    // Same calculation as the render loop (computeStageFrame — aspect vrai).
+    const { sw, sh, padX, padY } = computeStageFrame(rect.width, rect.height, stageDims);
     return { fx: (x - padX) / sw, fy: (y - padY) / sh };
   }, [stageDims]);
 
   const hitTestFixture = useCallback((cx: number, cy: number): string | null => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return null;
-    // Same calculation as render loop — no arbitrary padding.
-    const availW = Math.max(80, rect.width);
-    const availH = Math.max(80, rect.height);
-    const aspect = Math.max(0.2, Math.min(5, stageDims.width / Math.max(0.1, stageDims.depth)));
-    let sw: number, sh: number;
-    if (availW / availH > aspect) { sh = availH; sw = sh * aspect; } else { sw = availW; sh = sw / aspect; }
-    const padX = (rect.width - sw) / 2;
-    const padY = (rect.height - sh) / 2;
+    // Same calculation as render loop (computeStageFrame — aspect vrai).
+    const { sw, sh, padX, padY } = computeStageFrame(rect.width, rect.height, stageDims);
     for (const pf of patchedFixtures) {
       const pos = fixturePositions[pf.id] || { x: 0.5, y: 0.3, h: 0.5, heading: 0 };
       const fx = padX + pos.x * sw;
@@ -525,12 +502,8 @@ export const Stage2DEditor: React.FC = () => {
 
     // Left-click
     const shift = e.shiftKey;
-    // Match getCanvasCoords / hitTestFixture — no arbitrary padding.
-    const availW = Math.max(80, rect.width);
-    const availH = Math.max(80, rect.height);
-    const aspect = Math.max(0.2, Math.min(5, stageDims.width / Math.max(0.1, stageDims.depth)));
-    let sw: number, sh: number;
-    if (availW / availH > aspect) { sh = availH; sw = sh * aspect; } else { sw = availW; sh = sw / aspect; }
+    // Match getCanvasCoords / hitTestFixture (computeStageFrame — aspect vrai).
+    const { sw, sh } = computeStageFrame(rect.width, rect.height, stageDims);
 
     const hitId = hitTestFixture(x, y);
     const { fx: mfx, fy: mfy } = getCanvasCoords(e);
