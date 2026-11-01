@@ -50,15 +50,19 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
   };
 
   const doCheckout = async (edition: 'standard' | 'full') => {
+    console.log('[modal] doCheckout', edition, 'busy=', busy, 'email=', state.email);
     setBusy(true);
     setCheckoutError(null);
     const url = await state.checkout(edition);
+    console.log('[modal] checkout retourne url?', url !== null);
     setBusy(false);
     if (url) {
       setCheckoutPending(true);
     } else {
+      // Afficher l'erreur même si loginError n'est pas défini
       const err = state.loginError;
-      if (err) setCheckoutError(err === 'network' ? 'Erreur réseau — vérifiez votre connexion.' : err);
+      console.log('[modal] checkoutError possible:', err);
+      if (err) setCheckoutError(err === 'network' ? 'Erreur réseau — vérifiez votre connexion et réessayez.' : err);
     }
   };
 

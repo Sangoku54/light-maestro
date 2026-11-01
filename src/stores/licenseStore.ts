@@ -130,27 +130,46 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
 
   checkout: async (edition) => {
     const a = api();
-    if (!a) { console.error('[license] API non dispo pour checkout'); set({ loginError: 'unavailable' }); return null; }
-    try {
-      console.log('[license] checkout', edition);
-      const r = await a.checkout(edition);
-      console.log('[license] checkout result', r);
-      if (r.ok && r.url) {
-        const opened = await a.openUrl(r.url).catch((e: any) => { console.error('[license] openUrl failed', e); return false; });
-        if (!opened) {
-          // Fallback: essayer window.open, sinon stocker l'URL pour affichage
-          try { window.open(r.url, '_blank'); } catch {}
-          // Retourner l'URL quand même pour que le modal affiche le bouton de vérif
-        }
-        return r.url;
-      }
-      const errMsg = (r as any)?.message || (r as any)?.error || 'checkoutFailed';
-      console.error('[license] checkout failed', r);
-      set({ loginError: errMsg });
+    if (!a) {
+      console.error('[license] API non dispo pour checkout');
+      set({ loginError: 'unavailable' });
       return null;
+    }
+    try {
+      console.log('[license] checkout edition=', edition);
+      const r = await a.checkout(edition);
+      console.log('[license] checkout response', JSON.stringify(r));
+      if (!r.ok) {
+        const err = (r as any)?.message || (r as any)?.error || 'checkoutFailed';
+        console.error('[license] checkout non-ok', err);
+        set({ loginError: err });
+        return null;
+      }
+      const url = (r as any).url;
+      if (!url) {
+        console.error('[license] checkout sans url', r);
+        set({ loginError: 'checkoutNoUrl' });
+        return null;
+      }
+      // Essayer openUrl (main process → shell.openExternal)
+      let opened = await a.openUrl(url).catch((e: any) => {
+        console.error('[license] openUrl erreur', e);
+        return null;
+      });
+      if (opened?.ok) {
+        console.log('[license] openUrl ok', url);
+      } else {
+        // Fallback robuste : ouvrir dans le navigateur par défaut
+        console.warn('[license] openUrl failed, using default browser');
+        window.open(url, '_blank');
+      }
+      return url;
     } catch (e: any) {
       console.error('[license] checkout exception', e);
-      set({ loginError: e?.message || 'network' });
+      const msg = e?.message || String(e);
+      set({ loginError: 'network' });
+      // Fallback même en cas d'erreur réseau : essayer d'ouvrir quand même
+      try { window.open(`https://light-maestro.com/tarifs.html`, '_blank'); } catch {}
       return null;
     }
   },

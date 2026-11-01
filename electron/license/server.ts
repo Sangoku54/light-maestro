@@ -177,9 +177,16 @@ export async function startCheckout(
 ): Promise<string | null> {
   if (LICENSE_OFFLINE_MODE) return null;
   try {
+    console.log('[license:startCheckout] appel /stripe/checkout.php edition=', edition);
     const data = await postJson('/stripe/checkout.php', { edition }, token);
-    return typeof data.url === 'string' ? data.url : null;
-  } catch {
+    console.log('[license:startCheckout] repondu', JSON.stringify(data));
+    const url = typeof data.url === 'string' ? data.url : null;
+    if (!url) {
+      console.warn('[license:startCheckout] pas d\'URL dans la reponse', data);
+    }
+    return url;
+  } catch (e: any) {
+    console.error('[license:startCheckout] erreur', e?.message || e);
     return null;
   }
 }

@@ -832,13 +832,23 @@ ipcMain.handle('license:register', async (_event, email: string, password: strin
 });
 ipcMain.handle('license:checkout', async (_event, edition: string) => {
   const token = licenseStore.getToken();
-  if (!token) return { ok: false, code: 'invalid_token', message: 'Non connecté' };
+  console.log('[ipc:checkout] edition=', edition, 'token present=', !!token);
+  if (!token) {
+    console.warn('[ipc:checkout] no token — user not logged in');
+    return { ok: false, code: 'invalid_token', message: 'Non connecté' };
+  }
   if (edition !== 'standard' && edition !== 'full') {
     return { ok: false, code: 'invalid_edition', message: 'Édition inconnue' };
   }
-  const url = await startCheckout(token, edition);
-  if (!url) return { ok: false, code: 'network', message: 'Checkout indisponible' };
-  return { ok: true, url };
+  try {
+    const url = await startCheckout(token, edition);
+    console.log('[ipc:checkout] url=', url ? 'ok' : 'null');
+    if (!url) return { ok: false, code: 'network', message: 'Checkout indisponible' };
+    return { ok: true, url };
+  } catch (e: any) {
+    console.error('[ipc:checkout] exception', e?.message || e);
+    return { ok: false, code: 'network', message: (e as Error)?.message || 'Checkout indisponible' };
+  }
 });
 ipcMain.handle('license:refresh', async () => {
   // Revalidation serveur (ex. après un achat Stripe) : sans elle, l'app
