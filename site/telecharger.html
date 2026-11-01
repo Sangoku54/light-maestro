@@ -1,8 +1,120 @@
-          <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro Setup 1.0.39.exe • 93.0 MB</div>
-          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 80913CC5730DD9F18722B6C83A4337BB053E71D1821625D0545BBAAFB3D782B8</div>
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Télécharger Light Maestro v1.0.39 | Windows</title>
+<meta name="description" content="Téléchargez Light Maestro v1.0.39 pour Windows 10/11. Version portable ou installateur."/>
+<link rel="icon" type="image/png" href="./assets/favicon-32.png"/>
+<link rel="stylesheet" href="./assets/site.css"/>
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="./index.html"><img src="./assets/logo.svg" alt="Light Maestro" style="width:34px;height:34px;border-radius:10px;box-shadow:0 8px 24px rgba(168,85,247,.35)"/><span class="brand-word">LIGHT <span>MAESTRO</span></span></a>
+    <nav class="nav-links"><a href="./index.html">Accueil</a><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a><a href="./tarifs.html">Tarifs</a><a class="active" href="./telecharger.html">Télécharger</a><a href="./support.html">Support</a></nav>
+    <div style="display:flex; gap:10px; align-items:center"><a class="nav-cta" href="#dl">Télécharger</a><a href="./telecharger-en.html" style="font-size:12px; font-weight:700; color:#9ca3af; text-decoration:none" title="Version anglaise">EN</a><button class="hamburger" data-menu>≡</button></div>
+  </div>
+  <div data-menu-panel style="display:none; border-top:1px solid #1f1f2e; background: rgba(6,6,10,.88)"><div class="wrap" style="padding:12px 20px; display:flex; flex-wrap:wrap; gap:10px"><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a><a href="./support.html">Support</a></div></div>
+</header>
 
+<section class="hero" style="padding:28px 0 18px">
+  <div class="wrap">
+    <span class="kicker">v1.0.39 • Electron 30.5.1</span>
+    <h1 class="h1">Télécharger GRATUITEMENT Light Maestro pour Windows.</h1>
+    <p class="lead">Deux options, même application : portable (recommandé — clé USB, sans installation) ou installateur pour poste fixe. Vérifiez l'empreinte SHA après téléchargement.</p>
+  </div>
+</section>
+
+<section id="dl" class="section">
+  <div class="wrap">
+    <div class="card" id="dl-gate" style="margin-bottom:16px; border-color:#7c3aed">
+      <div id="dl-form">
+        <h3 class="h3">Se connecter</h3>
+        <p style="margin-top:8px">Votre compte est votre licence (Gratuit, Standard ou Complète). L'application applique votre édition à la connexion.</p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px">
+          <input id="dl-email" type="email" placeholder="vous@exemple.com" style="flex:1; min-width:200px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/>
+          <div style="position:relative; flex:1; min-width:160px"><input id="dl-pass" type="password" placeholder="Mot de passe" style="flex:1; min-width:160px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/><button type="button" id="dl-toggle-pass" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#9ca3af;cursor:pointer;font-size:16px;padding:4px">👁️</button></div>
+          <button id="dl-login" class="btn btn-primary">Se connecter</button>
+          <button id="dl-register" class="btn btn-ghost">Créer un compte</button>
+        </div>
+        <div style="margin-top:8px">
+          <a href="#" id="dl-forgot-link" style="font-size:11px; color:#8b5cf6; text-decoration:none">Mot de passe oublié ?</a>
+        </div>
+        <div class="meta" id="dl-msg" style="margin-top:10px"></div>
+      </div>
+      <div id="dl-reset-form" style="display:none">
+        <h3 class="h3">Réinitialiser le mot de passe</h3>
+        <p style="margin-top:8px">Entrez votre email et nous vous enverrons un lien pour créer un nouveau mot de passe.</p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px">
+          <input id="dl-reset-email" type="email" placeholder="vous@exemple.com" style="flex:1; min-width:200px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/>
+          <button id="dl-reset-send" class="btn btn-primary">Envoyer le lien</button>
+        </div>
+        <div class="meta" id="dl-reset-msg" style="margin-top:10px"></div>
+        <button id="dl-reset-back" class="btn btn-ghost" style="margin-top:10px; padding:6px 14px; font-size:11px">Retour</button>
+      </div>
+      <div id="dl-reset-ok" style="display:none">
+        <h3 class="h3">Lien envoyé</h3>
+        <p style="margin-top:8px">Un email a été envoyé à <b id="dl-reset-email-shown"></b>. Consultez votre boîte de réception (et les spams).</p>
+        <button id="dl-reset-done" class="btn btn-ghost" style="margin-top:10px; padding:6px 14px; font-size:11px">Retour</button>
+      </div>
+      <div id="dl-ok" style="display:none">
+        <div class="flex gap-8" style="align-items:center; flex-wrap:wrap">
+          <div class="fi" style="min-width:200px">
+            <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro 1.0.39.exe (portable)</div>
+            <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 33CF0A116CBD43BBC3E051D4A708CB41CB5887A71B3C3AB57C9DB27F8476BEE9</div>
+          </div>
+          <div class="flex gap-2" style="min-width:260px">
+            <a id="dl-btn-portable" class="btn btn-primary" style="flex:1">Télécharger (portable)</a>
+            <a id="dl-btn-setup" class="btn btn-primary" style="flex:1">Télécharger (installateur)</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="card">
+      <h3 class="h3">Configuration requise</h3>
+      <p>Windows 10 22H2 / 11, 4 Go RAM (8 Go recommandé), GPU WebGL2 pour la vue 3D, port USB ou réseau pour ArtNet/sACN.</p>
+    </div>
+    <div class="card">
+      <h3 class="h3">Installation en 3 étapes</h3>
+      <p>1) Télécharger 2) Lancer (autoriser SmartScreen si besoin : "Plus d'infos → Exécuter quand même") 3) Brancher votre interface DMX → tester avec Blackout.</p>
+    </div>
+    <div class="card">
+      <h3 class="h3">Mises à jour</h3>
+      <p>L'application vérifie les nouvelles versions au démarrage et propose la mise à jour. Conservez l'ancien .exe à côté jusqu'à ce que vous ayez validé le nouveau.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="card">
+      <h3 class="h3">Notes de version — v1.0.39</h3>
+      <ul style="margin-top:8px; color:#d1d5db; font-size:13px; line-height:1.7; padding-left:18px">
+        <li><b style="color:white">Copie de fixture</b> : clic droit → Dupliquer — place automatiquement la copie à la première adresse DMX libre après la source</li>
+        <li><b style="color:white">Barre de span</b> : longueur de barre réglable (1–12 m) désormais valable pour tous les supports barre</li>
+        <li><b style="color:white">Positions de musiciens persistantes</b> : glisser un musicien sur la scène 3D garde sa position entre les pages et les rechargements de projet</li>
+        <li><b style="color:white">Sans fantômes :</b> nettoyage complet des groupes/sprites sur dépatchage et démontage</li>
+        <li><b style="color:white">unpatchFixture :</b> supprime correctement l'entrée fixturePositions</li>
+        <li><b style="color:white">headingRadForPos :</b> formule atan2 corrigée pour l'orientation par défaut du faisceau vers le centre de la scène</li>
+        <li><b style="color:white">panTilt null :</b> les zones ne sont plus réinitialisées si aucun DMX n'a été écrit</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 class="h3">Précédente — v1.0.38</h3>
+      <ul style="margin-top:8px; color:#d1d5db; font-size:13px; line-height:1.7; padding-left:18px">
+        <li><b style="color:white">Group Masters</b> : sous-fader par groupe dans la console virtuelle — bride le dimmer du groupe tout en laissant le show en cours</li>
+        <li><b style="color:white">Palettes de couleurs réutilisables</b> : application en un clic + "Remplacer partout" propage une couleur à toutes les scènes</li>
+        <li><b style="color:white">MIDI Clock IN</b> : le BPM suit Ableton/Triton (24 PPQ) — revient au BPM analysé à l'arrêt</li>
+      </ul>
+    </div>
     <div class="notice" style="margin-top:16px">
-      <b>Windows SmartScreen ?</b> L'app n'est pas encore signée : cliquez “Informations complémentaires → Exécuter quand même”. La signature arrivera, financée par les ventes.
+      <b>Windows SmartScreen ?</b> L'app n'est pas encore signée : cliquez "Informations complémentaires → Exécuter quand même". La signature arrivera, financée par les ventes.
       Besoin d'aide ? → <a href="./support.html" style="color:#c084fc; font-weight:800">Support & FAQ</a>
     </div>
   </div>
@@ -28,11 +140,11 @@
     session=sess;
     $('dl-form').style.display='none';$('dl-ok').style.display='block';
     $('dl-email-shown').textContent=sess.email||'';
-    $('dl-edition').textContent=sess.edition==='full'?'Complète':sess.edition==='standard'?'Standard':'Gratuite';
     ['dl-btn-portable','dl-btn-setup'].forEach(function(id){
       var a=$(id);if(!a)return;
       a.style.opacity='1';a.style.pointerEvents='auto';
       a.removeAttribute('aria-disabled');a.classList.remove('disabled');
+      a.href = (id==='dl-btn-portable' ? './downloads/Light Maestro 1.0.39.exe' : './downloads/Light Maestro Setup 1.0.39.exe');
     });
     try{sessionStorage.setItem(K,JSON.stringify(sess));}catch(e){}
   }
@@ -48,7 +160,7 @@
   }
   async function go(mode){
     var email=$('dl-email').value.trim(),pass=$('dl-pass').value;
-    if(!email||!pass){setMsg('Indique ton email et ton mot de passe.',true);return;}
+    if(!email||!pass){setMsg('Indiquez votre email et votre mot de passe.',true);return;}
     setMsg(mode==='register'?'Création du compte…':'Connexion…');
     try{
       var d=await call(mode==='register'?'/auth/register':'/auth/login',{email:email,password:pass});
@@ -56,7 +168,7 @@
       setMsg('');
     }catch(e){
       if(e.message.indexOf('existe déjà')>=0||e.message.indexOf('existe d\u00e9j\u00e0')>=0){
-        setMsg('Un compte existe déjà avec cet email — clique « Se connecter ».',true);
+        setMsg('Un compte existe déjà avec cet email — cliquez "Se connecter".',true);
       }else{
         setMsg('Échec ('+(mode==='register'?'inscription':'connexion')+') : '+e.message,true);
       }
@@ -64,12 +176,16 @@
   }
   $('dl-login').addEventListener('click',function(){go('login');});
   $('dl-register').addEventListener('click',function(){go('register');});
+  $('dl-toggle-pass').addEventListener('click',function(){
+    var p=$('dl-pass');
+    if(p.type==='password'){p.type='text';this.textContent='🙈';}else{p.type='password';this.textContent='👁️';}
+  });
   $('dl-forgot-link').addEventListener('click',function(e){e.preventDefault();$('dl-form').style.display='none';$('dl-reset-form').style.display='block';$('dl-reset-email').value='';setResetMsg('');});
   $('dl-reset-back').addEventListener('click',function(){$('dl-reset-form').style.display='none';$('dl-form').style.display='block';});
   $('dl-reset-done').addEventListener('click',function(){$('dl-reset-ok').style.display='none';$('dl-form').style.display='block';});
   $('dl-reset-send').addEventListener('click',function(){
     var email=$('dl-reset-email').value.trim();
-    if(!email){setResetMsg('Indique ton email.',true);return;}
+    if(!email){setResetMsg('Indiquez votre email.',true);return;}
     setResetMsg('Envoi en cours…');
     call('/auth/forgot-password',{email:email}).then(function(){
       $('dl-reset-email-shown').textContent=email;
@@ -77,8 +193,14 @@
       setResetMsg('');
     }).catch(function(e){setResetMsg('Erreur : '+e.message,true);});
   });
-  $('dl-btn-portable').addEventListener('click',function(){trackDownload('portable');});
-  $('dl-btn-setup').addEventListener('click',function(){trackDownload('setup');});
+  $('dl-btn-portable').addEventListener('click',function(e){
+    if(!session||!session.token){e.preventDefault();setMsg('Veuillez vous connecter pour télécharger.',true);return;}
+    trackDownload('portable');
+  });
+  $('dl-btn-setup').addEventListener('click',function(e){
+    if(!session||!session.token){e.preventDefault();setMsg('Veuillez vous connecter pour télécharger.',true);return;}
+    trackDownload('setup');
+  });
   $('dl-logout').addEventListener('click',function(){
     try{sessionStorage.removeItem(K);}catch(e){}
     session=null;
@@ -89,6 +211,5 @@
   function setResetMsg(t,err){var m=$('dl-reset-msg');if(!m)return;m.textContent=t||'';m.style.color=err?'#f87171':'';}
 })();
 </script>
-<script src="./assets/site.js"></script>
-</body>
+<style>.dl-float{position:fixed;bottom:24px;right:24px;z-index:9999}.dl-float a{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;background:linear-gradient(135deg,#a855f7,#7c3aed);color:#fff;text-decoration:none;border-radius:12px;font-weight:700;font-size:14px;box-shadow:0 4px 14px rgba(168,85,247,.4);transition:transform .2s,box-shadow .2s}.dl-float a:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(168,85,247,.5)}</style><div class="dl-float"><a href="./telecharger.html">Télécharger gratuitement</a></div></body>
 </html>
