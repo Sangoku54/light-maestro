@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Download — Light Maestro v1.0.39 | Windows</title>
-<meta name="description" content="Download Light Maestro v1.0.39 for Windows 10/11. Portable version and NSIS installer. Release notes, system requirements, SHA verification."/>
+<title>Download Light Maestro v1.0.39 | Windows</title>
+<meta name="description" content="Download Light Maestro v1.0.39 for Windows 10/11. Portable version or NSIS installer. Verify SHA fingerprint after downloading."/>
 <link rel="icon" type="image/png" href="./assets/favicon-32.png"/>
 <link rel="stylesheet" href="./assets/site.css"/>
 </head>
@@ -13,7 +13,7 @@
   <div class="nav-inner">
     <a class="brand" href="./index-en.html"><img src="./assets/logo.svg" alt="Light Maestro" style="width:34px;height:34px;border-radius:10px;box-shadow:0 8px 24px rgba(168,85,247,.35)"/><span class="brand-word">LIGHT <span>MAESTRO</span></span></a>
     <nav class="nav-links"><a href="./index-en.html">Home</a><a href="./fonctionnalites-en.html">Features</a><a href="./tutoriels-en.html">Tutorials</a><a href="./aide-en.html">Help</a><a href="./tarifs-en.html">Pricing</a><a class="active" href="./telecharger-en.html">Download</a><a href="./support-en.html">Support</a></nav>
-    <div style="display:flex; gap:10px; align-items:center"><a class="nav-cta" href="#dl">⬇ Download</a><a href="./telecharger.html" style="font-size:12px; font-weight:700; color:#9ca3af; text-decoration:none" title="Version française">🇫🇷 FR</a><button class="hamburger" data-menu>≡</button></div>
+    <div style="display:flex; gap:10px; align-items:center"><a class="nav-cta" href="#dl">⬇ Download</a><a href="./telecharger.html" style="font-size:12px; font-weight:700; color:#9ca3af; text-decoration:none" title="Version française">🇬🇧 EN</a><button class="hamburger" data-menu>≡</button></div>
   </div>
   <div data-menu-panel style="display:none; border-top:1px solid #1f1f2e; background: rgba(6,6,10,.88)"><div class="wrap" style="padding:12px 20px; display:flex; flex-wrap:wrap; gap:10px"><a href="./fonctionnalites-en.html">Features</a><a href="./tutoriels-en.html">Tutorials</a><a href="./aide-en.html">Help</a><a href="./tarifs-en.html">Pricing</a><a href="./telecharger-en.html">Download</a><a href="./support-en.html">Support</a></div></div>
 </header>
@@ -30,7 +30,7 @@
   <div class="wrap">
     <div class="card" id="dl-gate" style="margin-bottom:16px; border-color:#7c3aed">
       <div id="dl-form">
-        <h3 class="h3">🔑 Sign in to download</h3>
+        <h3 class="h3">🔑 Sign in</h3>
         <p style="margin-top:8px">Your account is your license (Free, Standard or Full). The app applies your edition when you sign in.</p>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px">
           <input id="dl-email" type="email" placeholder="you@example.com" style="flex:1; min-width:200px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/>
@@ -59,69 +59,60 @@
         <button id="dl-reset-done" class="btn btn-ghost" style="margin-top:10px; padding:6px 14px; font-size:11px">Back to sign in</button>
       </div>
       <div id="dl-ok" style="display:none">
-          <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro Setup 1.0.39.exe • 93.0 MB</div>
-          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : F4A7C3EBAF05F9DE0BF4F11D75273187DAEA538D03693E54055231EB4D107167</div>
-    <div class="grid grid-3" style="margin-top:16px">
-      <div class="card"><h3 class="h3">System requirements</h3><p>Windows 10 22H2 / 11, 4 GB RAM (8 GB recommended), WebGL2-capable GPU for the 3D Stage, USB port or network for ArtNet/sACN.</p></div>
-      <div class="card"><h3 class="h3">Install in 3 steps</h3><p>1) Download 2) Launch (allow SmartScreen if needed: “More info → Run anyway”) 3) Plug in your DMX interface → test with Blackout.</p></div>
-      <div class="card"><h3 class="h3">Updates</h3><p>The app checks for new versions on startup and offers to update. Keep the old .exe alongside until you have validated the new one.</p></div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <h3 class="h3">Release notes — v1.0.39</h3>
-      <div class="grid grid-2" style="margin-top:10px">
-        <div>
-          <div class="badge violet">New</div>
-          <ul style="margin:8px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
-            <li><b style="color:white">Duplicate fixture</b>: right-click → Duplicate — auto-places copy at the first free DMX slot after the source (fixture list + DMX map)</li>
-            <li><b style="color:white">Bar span control</b>: adjustable support width (1–12 m) now defaults to all bar supports, not just frontBar/backBar raw matches</li>
-            <li><b style="color:white">Persistent musician positions</b>: dragging a musician on the 3D stage keeps the custom position across page switches and project reopen (stored in roster.positions)</li>
-          </ul>
-          <div class="badge cyan" style="margin-top:10px">Fixes</div>
-          <ul style="margin:8px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
-            <li>Ghost thumbnails: full cleanup of fixture groups/sprites on unpatch and unmount (no more orphaned Three.js meshes)</li>
-            <li>unpatchFixture: correctly removes associated fixturePositions entry</li>
-            <li>headingRadForPos: atan2 formula fixed for correct default beam orientation (stage center)</li>
-            <li>panTiltRead null: zone positions no longer overwritten when no DMX has been written</li>
-          </ul>
-        </div>
-        <div>
-          <div class="badge violet">Previous — v1.0.38</div>
-          <ul style="margin:8px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
-            <li><b style="color:white">Group Masters</b>: per-group submaster fader in the virtual console — caps the group dimmer while the show stays alive</li>
-            <li><b style="color:white">Reusable Color Palettes</b>: one-click live apply + "Replace everywhere" propagates a color to every scene (RGB or wheel)</li>
-            <li><b style="color:white">MIDI Clock IN</b>: BPM follows Ableton/Triton (24 PPQ) — hands back to analyzed BPM on stop</li>
-            <li><b style="color:white">Projected gobos in 3D</b>: per-slot textures, real DMX reading, disc inside the beam</li>
-            <li><b style="color:white">Movement harmony</b>: identical heads execute the same move, phased across the rig (wave, rotation, expansion)</li>
-            <li><b style="color:white">Realistic 3D beams</b>: fade along the beam, exact ground cutoff, real mechanical ranges (540°/360°… pan per fixture)</li>
-            <li><b style="color:white">Sweep zones</b>: pan never behind (engine clamp), ground tilt never below horizon — deliberate aims via Aim still allowed</li>
-            <li><b style="color:white">RGB Matrix hardened</b>: cell direction/offset, order = group order, off cells truly off, warning for incompatible fixtures</li>
-            <li><b style="color:white">USB DMX plug & play</b>: dongle auto-detected at launch, output started with zero configuration</li>
-            <li><b style="color:white">DJ silhouette</b> + 38 realistic fixture icons (wall washer, spider, follow spot, fresnel, derby…)</li>
-          </ul>
-          <div class="badge cyan" style="margin-top:10px">Fixes</div>
-          <ul style="margin:8px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
-            <li>Fixtures without a dimmer channel (ACCU UFO…): supported and flagged (NO DIM badge)</li>
-            <li>Programmer: values survive closing the modal</li>
-            <li>Multi-head LED: every head receives intensity (no more silent heads)</li>
-            <li>Wheel without white slot: correct neutral color instead of red</li>
-            <li>3D scene empty by default (no stray trusses)</li>
-            <li>DMX engine at 60 fps: smooth pan/tilt in the 3D view</li>
-          </ul>
-        </div>
-        <div>
-          <div class="badge violet">Previous — v1.0.38</div>
-          <ul style="margin:8px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
-            <li>Virtual console: Grand Master and DMX channel buttons, shared UI/MIDI/remote runtime</li>
-            <li>MIDI LED feedback: controller pads follow tile state</li>
-            <li>Safety: strobe ceiling + photosensitivity warning</li>
-            <li>Stopping pre-programmed scenes: real fixture blackout</li>
-          </ul>
-          <p style="margin-top:10px; font-size:11px; color:#6b7280">Full history lives in the app (Help → Release notes).</p>
+        <div class="flex gap-8" style="align-items:center; flex-wrap:wrap">
+          <div class="fi" style="min-width:200px">
+            <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro 1.0.39.exe (portable)</div>
+            <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 33CF0A116CBD43BBC3E051D4A708CB41CB5887A71B3C3AB57C9DB27F8476BEE9</div>
+          </div>
+          <div class="flex gap-2" style="min-width:260px">
+            <a id="dl-btn-portable" class="btn btn-primary" style="flex:1">Download (portable)</a>
+            <a id="dl-btn-setup" class="btn btn-primary" style="flex:1">Download (installer)</a>
+          </div>
         </div>
       </div>
     </div>
+  </div>
+</section>
 
+<section class="section">
+  <div class="wrap">
+    <div class="card">
+      <h3 class="h3">System requirements</h3>
+      <p>Windows 10 22H2 / 11, 4 GB RAM (8 GB recommended), WebGL2-capable GPU for the 3D Stage, USB port or network for ArtNet/sACN.</p>
+    </div>
+    <div class="card">
+      <h3 class="h3">Install in 3 steps</h3>
+      <p>1) Download 2) Launch (allow SmartScreen if needed: “More info → Run anyway”) 3) Plug in your DMX interface → test with Blackout.</p>
+    </div>
+    <div class="card">
+      <h3 class="h3">Updates</h3>
+      <p>The app checks for new versions on startup and offers to update. Keep the old .exe alongside until you have validated the new one.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="card">
+      <h3 class="h3">Release notes — v1.0.39</h3>
+      <ul style="margin-top:8px; color:#d1d5db; font-size:13px; line-height:1.7; padding-left:18px">
+        <li><b style="color:white">Duplicate fixture</b>: right-click → Duplicate — auto-places copy at the first free DMX slot after the source (fixture list + DMX map)</li>
+        <li><b style="color:white">Bar span control</b>: adjustable support width (1–12 m) now defaults to all bar supports, not just frontBar/backBar raw matches</li>
+        <li><b style="color:white">Persistent musician positions</b>: dragging a musician on the 3D stage keeps the custom position across page switches and project reopen (stored in roster.positions)</li>
+        <li><b style="color:white">No ghost thumbnails: full cleanup of fixture groups/sprites on unpatch and unmount</li>
+        <li><b style="color:white">unpatchFixture: correctly removes associated fixturePositions entry</li>
+        <li><b style="color:white">headingRadForPos: atan2 formula fixed for correct default beam orientation (stage center)</li>
+        <li><b style="color:white">panTiltRead null: zone positions no longer overwritten when no DMX has been written</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 class="h3">Previous — v1.0.38</h3>
+      <ul style="margin-top:8px; color:#d1d5db; font-size:13px; line-height:1.7; padding-left:18px">
+        <li><b style="color:white">Group Masters</b>: per-group submaster fader in the virtual console — caps the group dimmer while the show stays alive</li>
+        <li><b style="color:white">Reusable Color Palettes</b>: one-click live apply + "Replace everywhere" propagates a color to every scene</li>
+        <li><b style="color:white">MIDI Clock IN</b>: BPM follows Ableton/Triton (24 PPQ)</li>
+      </ul>
+    </div>
     <div class="notice" style="margin-top:16px">
       <b>Windows SmartScreen?</b> The app is not signed yet: click “More info → Run anyway”. Signing is coming, funded by sales.
       Need help? → <a href="./support-en.html" style="color:#c084fc; font-weight:800">Support & FAQ</a>
@@ -154,6 +145,7 @@
       var a=$(id);if(!a)return;
       a.style.opacity='1';a.style.pointerEvents='auto';
       a.removeAttribute('aria-disabled');a.classList.remove('disabled');
+      a.href = (id==='dl-btn-portable' ? './downloads/Light Maestro 1.0.39.exe' : './downloads/Light Maestro Setup 1.0.39.exe');
     });
     try{sessionStorage.setItem(K,JSON.stringify(sess));}catch(e){}
   }
