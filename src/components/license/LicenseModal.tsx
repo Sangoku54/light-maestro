@@ -117,7 +117,7 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                   disabled={busy}
                   className="w-full px-3 py-2 rounded-md bg-purple-600 text-white text-xs font-semibold hover:bg-purple-500 disabled:opacity-40"
                 >
-                  {t('license.checkoutFull')}
+                  {t('license.checkoutUpgrade')}
                 </button>
               )}
               {checkoutPending && (

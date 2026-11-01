@@ -1485,6 +1485,7 @@
     "edFullLabel": "Full",
     "edFullDesc": "Unlimited fixtures and universes",
     "checkoutFull": "Upgrade to Full — €99",
+    "checkoutUpgrade": "Upgrade to Full — €30 (Standard → Full upgrade)",
     "logout": "Log out",
     "confirmLogout": "Confirm logout? (offline = free edition)",
     "confirmLogoutShort": "Confirm logout?",

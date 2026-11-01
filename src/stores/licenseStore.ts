@@ -152,7 +152,7 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
         return null;
       }
       // Convertir les chemins relatifs en URL absolue pour window.open
-      const BASE = 'https://light-maestro.com/api';
+      const BASE = 'https://light-maestro.com';
       const fullUrl = /^https?:\/\//i.test(url) ? url : `${BASE}${url}`;
       // Essayer openUrl (main process → shell.openExternal)
       let opened = await a.openUrl(fullUrl).catch((e: any) => {

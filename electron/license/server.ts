@@ -26,7 +26,6 @@
  */
 
 import type { LicenseEdition } from './types';
-import { net } from 'electron';
 
 /** URL du serveur de licence (backend PHP hébergé sur LWS). */
 export const LICENSE_API_URL = 'https://light-maestro.com/api';
@@ -66,7 +65,7 @@ async function postJson(
   // net.fetch = pile réseau Chromium (même gestion SSL que le navigateur)
   // au lieu de fetch() Node.js/undici qui peut rejeter le certificat SSL
   // de l'hébergeur alors qu'un navigateur l'accepte.
-  const res = await net.fetch(`${LICENSE_API_URL}${path}`, {
+  const res = await fetch(`${LICENSE_API_URL}${path}`, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
@@ -85,7 +84,7 @@ async function postJson(
     if (res.status === 409) {
       throw new LicenseError('email_taken', data?.message || 'Un compte existe déjà avec cet email');
     }
-    throw new LicenseError('server', data?.message || data?.error || `Erreur serveur (${res.status})`);
+    throw new LicenseError('server', data?.message || data?.error || `Erreur serveur (${res.status}) sur ${path} token=${!!token ? 'present' : 'absent'}`);
   }
   return data;
 }
@@ -185,10 +184,15 @@ export async function startCheckout(
     console.log('[license:startCheckout] appel /stripe/checkout.php edition=', edition);
     const data = await postJson('/stripe/checkout.php', { edition }, token);
     console.log('[license:startCheckout] repondu', JSON.stringify(data));
-    // Cas use_upgrade : redirect vers l'upgrade (Standard → Full à 30 €)
+    // Cas use_upgrade : l'user a Standard, on appelle directement upgrade.php
+    // (upgrade_url déjà préfixé par /api → on utilise le chemin /stripe/upgrade.php
+    //  pour éviter le double préfixe avec LICENSE_API_URL)
     if (data && typeof data.upgrade_url === 'string') {
-      console.log('[license:startCheckout] use_upgrade →', data.upgrade_url);
-      return data.upgrade_url;
+      console.log('[license:startCheckout] use_upgrade → appel /stripe/upgrade.php');
+      const upgradeData = await postJson('/stripe/upgrade.php', { edition: 'full' }, token);
+      console.log('[license:startCheckout] upgrade repondu', JSON.stringify(upgradeData));
+      const url = typeof upgradeData?.url === 'string' ? upgradeData.url : null;
+      return url;
     }
     const url = typeof data.url === 'string' ? data.url : null;
     if (!url) {
@@ -202,6 +206,6 @@ export async function startCheckout(
       code: e?.code,
       stack: e?.stack,
     });
-    return null;
+    throw e;
   }
 }

@@ -1485,6 +1485,7 @@
     "edFullLabel": "Complète",
     "edFullDesc": "Fixtures et univers illimités",
     "checkoutFull": "Passer à la version Complète — 99€",
+    "checkoutUpgrade": "Passer à la version Complète — 30 € (upgrade Standard → Full)",
     "logout": "Se déconnecter",
     "confirmLogout": "Confirmer la déconnexion ? (hors-ligne = version gratuite)",
     "confirmLogoutShort": "Confirmer la déconnexion ?",
