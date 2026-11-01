@@ -130,17 +130,27 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
 
   checkout: async (edition) => {
     const a = api();
-    if (!a) { set({ loginError: 'unavailable' }); return null; }
+    if (!a) { console.error('[license] API non dispo pour checkout'); set({ loginError: 'unavailable' }); return null; }
     try {
+      console.log('[license] checkout', edition);
       const r = await a.checkout(edition);
+      console.log('[license] checkout result', r);
       if (r.ok && r.url) {
-        await a.openUrl(r.url).catch(() => {});
+        const opened = await a.openUrl(r.url).catch((e: any) => { console.error('[license] openUrl failed', e); return false; });
+        if (!opened) {
+          // Fallback: essayer window.open, sinon stocker l'URL pour affichage
+          try { window.open(r.url, '_blank'); } catch {}
+          // Retourner l'URL quand même pour que le modal affiche le bouton de vérif
+        }
         return r.url;
       }
-      set({ loginError: (r as any).code || r.message || 'checkoutFailed' });
+      const errMsg = (r as any)?.message || (r as any)?.error || 'checkoutFailed';
+      console.error('[license] checkout failed', r);
+      set({ loginError: errMsg });
       return null;
-    } catch {
-      set({ loginError: 'network' });
+    } catch (e: any) {
+      console.error('[license] checkout exception', e);
+      set({ loginError: e?.message || 'network' });
       return null;
     }
   },

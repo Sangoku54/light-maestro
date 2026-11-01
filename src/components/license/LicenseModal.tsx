@@ -27,6 +27,7 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
   // Vrai après l'ouverture du checkout Stripe : propose la vérification
   // d'achat (le webhook a entre-temps activé l'édition côté serveur).
   const [checkoutPending, setCheckoutPending] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   const doSubmit = async () => {
     if (!email || !password) return;
@@ -50,9 +51,15 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
 
   const doCheckout = async (edition: 'standard' | 'full') => {
     setBusy(true);
+    setCheckoutError(null);
     const url = await state.checkout(edition);
     setBusy(false);
-    if (url) setCheckoutPending(true);
+    if (url) {
+      setCheckoutPending(true);
+    } else {
+      const err = state.loginError;
+      if (err) setCheckoutError(err === 'network' ? 'Erreur réseau — vérifiez votre connexion.' : err);
+    }
   };
 
   const doVerifyPurchase = async () => {
@@ -157,6 +164,9 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                 >
                   {busy ? t('license.busy') : t('license.checkPurchase')}
                 </button>
+              )}
+              {checkoutError && (
+                <p className="text-[11px] text-red-400 text-center">{checkoutError}</p>
               )}
               <button
                 onClick={() => {
