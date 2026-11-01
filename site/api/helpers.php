@@ -75,7 +75,7 @@ function verify_token(?string $token): ?int {
 /**
  * Lis le header Authorization Bearer et retourne l'user id, ou null.
  */
-function get_current_user(): ?int {
+function auth_user_id(): ?int {
     $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
     if (!preg_match('/^Bearer\s+(.+)$/i', $auth, $m)) return null;
     return verify_token($m[1]);
