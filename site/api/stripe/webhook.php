@@ -2,6 +2,7 @@
 /**
  * POST /stripe/webhook.php
  * Reçoit les événements Stripe et active la licence après paiement réussi.
+ * Sans dépendance externe — vérifie la signature Stripe manuellement.
  *
  * Événement traité : checkout.session.completed
  *   → lit metadata.edition + metadata.user_id
@@ -13,52 +14,67 @@
 
 require_once __DIR__ . '/../helpers.php';
 
-use Stripe\StripeClient;
-use Stripe\Exception\SignatureVerificationException;
-
 $payload = @file_get_contents('php://input');
 $sigHeader = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
 
-try {
-    $stripe = new StripeClient(STRIPE_SECRET_KEY);
-    $event = \Stripe\Webhook::constructEvent($payload, $sigHeader, STRIPE_WEBHOOK_SECRET);
-} catch (SignatureVerificationException $e) {
+// Vérification manuelle de la signature Stripe (sans SDK)
+function verifyStripeSignature(string $payload, string $sigHeader, string $secret): bool {
+    if (!$sigHeader) return false;
+    $parts = explode(',', $sigHeader);
+    $timestamp = '';
+    $signature = '';
+    foreach ($parts as $part) {
+        $kv = explode('=', $part, 2);
+        if ($kv[0] === 't') $timestamp = $kv[1];
+        if ($kv[0] === 'v1') $signature = $kv[1];
+    }
+    if (!$timestamp || !$signature) return false;
+    $signedPayload = $timestamp . '.' . $payload;
+    $expectedSig = hash_hmac('sha256', $signedPayload, $secret);
+    return hash_equals($expectedSig, $signature);
+}
+
+if (!verifyStripeSignature($payload, $sigHeader, STRIPE_WEBHOOK_SECRET)) {
     respond(['error' => 'invalid_signature'], 400);
 }
 
-if ($event->type === 'checkout.session.completed') {
-    $session = $event->data->object;
-    $metadata = $session->metadata ?? [];
+$data = json_decode($payload, true);
+if (!$data || !isset($data['type'])) {
+    respond(['received' => false], 400);
+}
+
+if ($data['type'] === 'checkout.session.completed') {
+    $session = $data['data']['object'] ?? null;
+    if (!$session) {
+        respond(['received' => true]);
+        exit;
+    }
+    $metadata = $session['metadata'] ?? [];
     $userId = (int)($metadata['user_id'] ?? 0);
     $edition = $metadata['edition'] ?? '';
 
     if ($userId > 0 && ($edition === 'standard' || $edition === 'full')) {
-        // Anti-downgrade : on ne monte que l'édition (un rachat standard
-        // par erreur ne doit jamais faire perdre une édition full).
+        // Anti-downgrade
         $rank = ['free' => 0, 'standard' => 1, 'full' => 2];
-        $cur = db()->prepare('SELECT edition FROM users WHERE id = ?');
-        $cur->execute([$userId]);
-        $row = $cur->fetch();
+        $stmt = db()->prepare('SELECT edition FROM users WHERE id = ?');
+        $stmt->execute([$userId]);
+        $row = $stmt->fetch();
         $current = is_array($row) ? (string)($row['edition'] ?? 'free') : 'free';
         if (($rank[$edition] ?? 0) > ($rank[$current] ?? 0)) {
-            // Active la licence (paiement unique → edition persistée).
             db()->prepare('UPDATE users SET edition = ? WHERE id = ?')->execute([$edition, $userId]);
         }
 
-        // Trace le paiement (audit / SAV). Ignore les doublons (même intent).
+        // Trace le paiement
         try {
-            $pi = $session->payment_intent ?? null;
+            $pi = $session['payment_intent'] ?? null;
             if ($pi) {
-                $amount = $session->amount_total ?? 0;
+                $amount = (int)($session['amount_total'] ?? 0);
                 db()->prepare(
                     'INSERT IGNORE INTO payments (user_id, stripe_payment_intent, edition, amount_cents) VALUES (?, ?, ?, ?)'
                 )->execute([$userId, $pi, $edition, $amount]);
             }
-        } catch (Throwable $ignore) {
-            // L'audit ne doit jamais faire échouer l'activation.
-        }
+        } catch (Throwable $ignore) {}
     }
 }
 
-// Toujours répondre 200 à Stripe (sinon il rejoue l'événement).
 respond(['received' => true]);

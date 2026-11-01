@@ -2,6 +2,7 @@
 /**
  * POST /stripe/checkout.php
  * Crée une session de paiement Stripe (paiement unique) pour une édition.
+ * Sans dépendance externe — utilise l'API Stripe via cURL natif.
  *
  * header : Authorization: Bearer <token>   (compte connecté)
  * body   : { edition: 'standard' | 'full' }
@@ -9,8 +10,6 @@
  */
 
 require_once __DIR__ . '/../helpers.php';
-
-use Stripe\StripeClient;
 
 $userId = verify_token($_SERVER['HTTP_AUTHORIZATION'] ?? null);
 if ($userId === null) {
@@ -25,8 +24,7 @@ if (!$priceId) {
     respond(['error' => 'invalid_edition', 'message' => "Édition inconnue: $edition"], 400);
 }
 
-// Anti-double-paiement : un user Standard qui achète Full paierait 99 €
-// alors qu'il ne devrait payer que la différence (upgrade.php).
+// Vérifie l'utilisateur et l'édition actuelle
 $stmt = db()->prepare('SELECT edition, stripe_customer_id, email FROM users WHERE id = ?');
 $stmt->execute([$userId]);
 $user = $stmt->fetch();
@@ -42,27 +40,65 @@ if ($edition === 'full' && $user['edition'] === 'standard') {
     respond(['error' => 'use_upgrade', 'message' => 'Vous avez la version Standard — utilisez l\'upgrade (30 € de différence)', 'upgrade_url' => '/api/stripe/upgrade.php'], 409);
 }
 
-$stripe = new StripeClient(STRIPE_SECRET_KEY);
+// --- Appels API Stripe via cURL (pas de SDK nécessaire) ---
+$secretKey = STRIPE_SECRET_KEY;
+$baseUrl = 'https://api.stripe.com/v1';
 
-// Réutilise le customer Stripe existant ou en crée un.
+// 1. Créer ou récupérer le customer Stripe
 $customerId = $user['stripe_customer_id'];
 if (!$customerId) {
-    $customer = $stripe->customers->create(['email' => $user['email']]);
-    $customerId = $customer->id;
-    $upd = db()->prepare('UPDATE users SET stripe_customer_id = ? WHERE id = ?');
-    $upd->execute([$customerId, $userId]);
+    $data = [
+        'email' => $user['email'],
+        'metadata' => ['user_id' => (string)$userId],
+    ];
+    $ch = curl_init("$baseUrl/customers");
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($data));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $secretKey]);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    $resp = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($httpCode < 200 || $httpCode >= 300) {
+        respond(['error' => 'stripe_error', 'message' => 'Erreur Stripe lors de la création du client'], 500);
+    }
+    $customer = json_decode($resp, true);
+    if (!isset($customer['id'])) {
+        respond(['error' => 'stripe_error', 'message' => 'Réponse invalide Stripe (customer)'], 500);
+    }
+    $customerId = $customer['id'];
+    // Sauvegarde le customer ID
+    db()->prepare('UPDATE users SET stripe_customer_id = ? WHERE id = ?')->execute([$customerId, $userId]);
 }
 
-$session = $stripe->checkout->sessions->create([
+// 2. Créer la session de checkout
+$checkoutData = [
     'mode' => 'payment',
     'customer' => $customerId,
-    'line_items' => [[ 'price' => $priceId, 'quantity' => 1 ]],
-    'metadata' => [
-        'user_id' => (string)$userId,
-        'edition' => $edition,
-    ],
+    'line_items[0][price]' => $priceId,
+    'line_items[0][quantity]' => '1',
+    'metadata[user_id]' => (string)$userId,
+    'metadata[edition]' => $edition,
     'success_url' => 'https://light-maestro.com/merci.html',
-    'cancel_url'  => 'https://light-maestro.com/tarifs.html',
-]);
+    'cancel_url' => 'https://light-maestro.com/tarifs.html',
+];
 
-respond(['url' => $session->url]);
+$ch = curl_init("$baseUrl/checkout/sessions");
+curl_setopt($ch, CURLOPT_POST, true);
+curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($checkoutData));
+curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $secretKey]);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+$resp = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+
+if ($httpCode < 200 || $httpCode >= 300) {
+    respond(['error' => 'stripe_error', 'message' => 'Erreur Stripe: ' . substr($resp ?: '', 0, 200)], 500);
+}
+
+$session = json_decode($resp, true);
+if (!isset($session['url'])) {
+    respond(['error' => 'stripe_error', 'message' => 'Pas d\'URL de checkout dans la réponse Stripe'], 500);
+}
+
+respond(['url' => $session['url']]);

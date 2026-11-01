@@ -3,21 +3,21 @@
  *
  * Contrat HTTP du serveur (implémenté dans `site/api/`) :
  *
- *   POST {LICENSE_API_URL}/auth/register
+ *   POST {LICENSE_API_URL}/auth/register.php
  *     body  : { email, password, displayName? }
  *     réponse 200 : { token, edition, email, displayName }
  *     réponse 409 : { error: 'email_taken' }
  *
- *   POST {LICENSE_API_URL}/auth/login
+ *   POST {LICENSE_API_URL}/auth/login.php
  *     body  : { email, password }
  *     réponse 200 : { token, edition, email, displayName, stripeCustomerId? }
  *     réponse 401 : { error: 'invalid_credentials' }
  *
- *   POST {LICENSE_API_URL}/auth/me
+ *   POST {LICENSE_API_URL}/auth/me.php
  *     header : Authorization: Bearer <token>
  *     réponse 200 : { edition, email, displayName, stripeCustomerId? }
  *
- *   POST {LICENSE_API_URL}/stripe/checkout
+ *   POST {LICENSE_API_URL}/stripe/checkout.php
  *     header : Authorization: Bearer <token>
  *     body   : { edition: 'standard'|'full' }
  *     réponse 200 : { url }   (URL de checkout Stripe)
@@ -117,7 +117,7 @@ export async function registerWithLicense(
     };
   }
   try {
-    const data = await postJson('/auth/register', { email, password, displayName });
+    const data = await postJson('/auth/register.php', { email, password, displayName });
     return toResult(data, email);
   } catch (e) {
     if (e instanceof LicenseError) throw e;
@@ -145,7 +145,7 @@ export async function loginWithLicense(
   }
 
   try {
-    const data = await postJson('/auth/login', { email, password });
+    const data = await postJson('/auth/login.php', { email, password });
     return toResult(data, email);
   } catch (e) {
     if (e instanceof LicenseError) throw e;
@@ -157,7 +157,7 @@ export async function loginWithLicense(
 export async function refreshLicense(token: string): Promise<LicenseLoginResult | null> {
   if (LICENSE_OFFLINE_MODE) return null;
   try {
-    const data = await postJson('/auth/me', {}, token);
+    const data = await postJson('/auth/me.php', {}, token);
     return {
       ...toResult(data, ''),
       token,
@@ -177,7 +177,7 @@ export async function startCheckout(
 ): Promise<string | null> {
   if (LICENSE_OFFLINE_MODE) return null;
   try {
-    const data = await postJson('/stripe/checkout', { edition }, token);
+    const data = await postJson('/stripe/checkout.php', { edition }, token);
     return typeof data.url === 'string' ? data.url : null;
   } catch {
     return null;
