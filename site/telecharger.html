@@ -31,7 +31,7 @@
     <div class="card" id="dl-gate" style="margin-bottom:16px; border-color:#7c3aed">
       <div id="dl-form">
         <h3 class="h3">Se connecter</h3>
-        <p style="margin-top:8px">Votre compte est votre licence (Gratuit, Standard ou Complète). L'application applique votre édition à la connexion.</p>
+        <p style="margin-top:8px">Afin de télécharger votre programme, merci soit de créer un compte, soit de vous connecter.</p>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px">
           <input id="dl-email" type="email" placeholder="vous@exemple.com" style="flex:1; min-width:200px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/>
           <div style="position:relative; flex:1; min-width:160px"><input id="dl-pass" type="password" placeholder="Mot de passe" style="flex:1; min-width:160px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/><button type="button" id="dl-toggle-pass" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#9ca3af;cursor:pointer;font-size:16px;padding:4px">👁️</button></div>
@@ -188,10 +188,12 @@
   $('dl-btn-portable').addEventListener('click',function(e){
     if(!session||!session.token){e.preventDefault();setMsg('Veuillez vous connecter pour télécharger.',true);return;}
     trackDownload('portable');
+    window.location.href='./downloads/Light Maestro 1.0.39.exe';
   });
   $('dl-btn-setup').addEventListener('click',function(e){
     if(!session||!session.token){e.preventDefault();setMsg('Veuillez vous connecter pour télécharger.',true);return;}
     trackDownload('setup');
+    window.location.href='./downloads/Light Maestro Setup 1.0.39.exe';
   });
   $('dl-logout').addEventListener('click',function(){
     try{sessionStorage.removeItem(K);}catch(e){}
