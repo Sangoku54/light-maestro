@@ -8,7 +8,7 @@
  */
 
 // ── Base de données ────────────────────────────────────────────────
-define('DB_HOST', 'localhost');
+define('DB_HOST', '127.0.0.1');
 define('DB_NAME', 'light2862516');
 define('DB_USER', '');       // À REMPLIR — identifiant MySQL LWS
 define('DB_PASS', '');       // À REMPLIR — mot de passe MySQL LWS
