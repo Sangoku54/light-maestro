@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <title>Test POST API</title>
+    <style>
+        body { background: #0a0a0f; color: #ede8dc; font-family: monospace; padding: 20px; }
+        pre { background: #12121a; padding: 16px; border-radius: 8px; overflow-x: auto; }
+        .ok { color: #4ade80; }
+        .err { color: #f87171; }
+        button { background: #8b5cf6; color: white; border: none; padding: 10px 20px; 
+                 border-radius: 6px; cursor: pointer; margin: 4px; font-size: 14px; }
+        button:hover { background: #7c3aed; }
+        #output { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Test POST API — light-maestro.com</h1>
+    <p>Ce test simule exactement ce que fait le formulaire d'inscription.</p>
+    
+    <button onclick="testRegister()">Test Register (POST JSON)</button>
+    <button onclick="testLogin()">Test Login (POST JSON)</button>
+    <button onclick="testEcho()">Test Echo (GET)</button>
+    <button onclick="testCORS()">Test CORS Preflight (OPTIONS)</button>
+    
+    <div id="output"></div>
+    
+    <script>
+        var API = 'https://light-maestro.com/api';
+        
+        function log(msg, isError) {
+            var out = document.getElementById('output');
+            var div = document.createElement('div');
+            div.style.padding = '8px';
+            div.style.margin = '4px 0';
+            div.style.background = isError ? '#1a0a0a' : '#0a1a0a';
+            div.style.borderLeft = '3px solid ' + (isError ? '#f87171' : '#4ade80');
+            div.style.whiteSpace = 'pre-wrap';
+            div.textContent = msg;
+            out.appendChild(div);
+        }
+        
+        async function testRegister() {
+            document.getElementById('output').innerHTML = '';
+            log('Test: POST ' + API + '/auth/register.php', false);
+            try {
+                var r = await fetch(API + '/auth/register.php', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({email: 'test-' + Date.now() + '@example.com', password: 'testpass123', displayName: 'Test User'})
+                });
+                log('HTTP: ' + r.status, r.status >= 400);
+                var text = await r.text();
+                log('Response: ' + text.substring(0, 500), r.status >= 400);
+            } catch (e) {
+                log('Error: ' + e.message, true);
+            }
+        }
+        
+        async function testLogin() {
+            document.getElementById('output').innerHTML = '';
+            log('Test: POST ' + API + '/auth/login.php', false);
+            try {
+                var r = await fetch(API + '/auth/login.php', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({email: 'test+t1@gmail.com', password: 'testpass123'})
+                });
+                log('HTTP: ' + r.status, r.status >= 400);
+                var text = await r.text();
+                log('Response: ' + text.substring(0, 500), r.status >= 400);
+            } catch (e) {
+                log('Error: ' + e.message, true);
+            }
+        }
+        
+        async function testEcho() {
+            document.getElementById('output').innerHTML = '';
+            log('Test: GET ' + API + '/echo.php', false);
+            try {
+                var r = await fetch(API + '/echo.php');
+                log('HTTP: ' + r.status, r.status >= 400);
+                var text = await r.text();
+                log('Response: ' + text, false);
+            } catch (e) {
+                log('Error: ' + e.message, true);
+            }
+        }
+        
+        async function testCORS() {
+            document.getElementById('output').innerHTML = '';
+            log('Test: OPTIONS ' + API + '/auth/register.php', false);
+            try {
+                var r = await fetch(API + '/auth/register.php', {
+                    method: 'OPTIONS',
+                    headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer test'}
+                });
+                log('HTTP: ' + r.status, r.status >= 400);
+                log('Headers: ' + JSON.stringify(Object.fromEntries(r.headers.entries())), false);
+            } catch (e) {
+                log('Error: ' + e.message, true);
+            }
+        }
+    </script>
+</body>
+</html>
