@@ -162,7 +162,7 @@
     if(!email||!pass){setMsg('Enter your email and password.',true);return;}
     setMsg(mode==='register'?'Creating account…':'Signing in…');
     try{
-      var d=await call(mode==='register'?'/auth/register':'/auth/login',{email:email,password:pass});
+      var d=await call(mode==='register'?'/auth/register.php':'/auth/login.php',{email:email,password:pass});
       unlock({email:d.email||email,edition:d.edition||'free',token:d.token||''});
       setMsg('');
     }catch(e){
@@ -186,7 +186,7 @@
     var email=$('dl-reset-email').value.trim();
     if(!email){setResetMsg('Enter your email.',true);return;}
     setResetMsg('Sending…');
-    call('/auth/forgot-password',{email:email}).then(function(){
+    call('/auth/forgot-password.php',{email:email}).then(function(){
       $('dl-reset-email-shown').textContent=email;
       $('dl-reset-form').style.display='none';$('dl-reset-ok').style.display='block';
       setResetMsg('');

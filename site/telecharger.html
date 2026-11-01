@@ -163,7 +163,7 @@
     if(!email||!pass){setMsg('Indiquez votre email et votre mot de passe.',true);return;}
     setMsg(mode==='register'?'Création du compte…':'Connexion…');
     try{
-      var d=await call(mode==='register'?'/auth/register':'/auth/login',{email:email,password:pass});
+      var d=await call(mode==='register'?'/auth/register.php':'/auth/login.php',{email:email,password:pass});
       unlock({email:d.email||email,edition:d.edition||'free',token:d.token||''});
       setMsg('');
     }catch(e){
@@ -187,7 +187,7 @@
     var email=$('dl-reset-email').value.trim();
     if(!email){setResetMsg('Indiquez votre email.',true);return;}
     setResetMsg('Envoi en cours…');
-    call('/auth/forgot-password',{email:email}).then(function(){
+    call('/auth/forgot-password.php',{email:email}).then(function(){
       $('dl-reset-email-shown').textContent=email;
       $('dl-reset-form').style.display='none';$('dl-reset-ok').style.display='block';
       setResetMsg('');
