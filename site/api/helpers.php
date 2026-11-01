@@ -36,35 +36,49 @@ function body(): array {
  * Génère un token signé style JWT (HS256) sans librairie externe.
  * Format: base64(header).base64(payload).hmac_sha256(base64_header.base64_payload, secret)
  */
+function b64url_encode(string $data): string {
+    return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+}
+
+function b64url_decode(string $data): string {
+    $pad = strlen($data) % 4;
+    if ($pad) $data .= str_repeat('=', 4 - $pad);
+    return base64_decode(strtr($data, '-_', '+/'));
+}
+
 function sign_token(int $userId): string {
     $secret = defined('JWT_SECRET') && JWT_SECRET ? JWT_SECRET : 'light-maestro-change-me';
     $ttl = defined('JWT_TTL') ? JWT_TTL : (60 * 60 * 24 * 30);
     $now = time();
 
-    $header = base64_encode(json_encode(['alg' => 'HS256', 'typ' => 'JWT'], JSON_UNESCAPED_UNICODE));
-    $payload = base64_encode(json_encode([
+    $header = b64url_encode(json_encode(['alg' => 'HS256', 'typ' => 'JWT'], JSON_UNESCAPED_UNICODE));
+    $payload = b64url_encode(json_encode([
         'sub' => $userId,
         'iat' => $now,
         'exp' => $now + $ttl,
     ], JSON_UNESCAPED_UNICODE));
-    $sig = base64_encode(hash_hmac('sha256', $header . '.' . $payload, $secret, true));
+    $sig = b64url_encode(hash_hmac('sha256', $header . '.' . $payload, $secret, true));
 
     return $header . '.' . $payload . '.' . $sig;
 }
 
 /**
  * Vérifie un token et retourne l'id utilisateur, ou null si invalide/expiré.
+ * Supporte à la fois les anciens tokens (base64 avec padding ==) et les nouveaux (base64url).
  */
 function verify_token(?string $token): ?int {
     if (!$token) return null;
-    $parts = explode('.', $token);
+
+    // Normalize: strip any padding and convert to base64url for consistent processing
+    $clean = str_replace(['+', '/', '='], ['-', '_', ''], $token);
+    $parts = explode('.', $clean);
     if (count($parts) !== 3) return null;
 
     $secret = defined('JWT_SECRET') && JWT_SECRET ? JWT_SECRET : 'light-maestro-change-me';
-    $expectedSig = base64_encode(hash_hmac('sha256', $parts[0] . '.' . $parts[1], $secret, true));
-    if (!hash_equals($expectedSig, $parts[2])) return null;
+    $computed = b64url_encode(hash_hmac('sha256', $parts[0] . '.' . $parts[1], $secret, true));
+    if (!hash_equals($computed, $parts[2])) return null;
 
-    $payload = json_decode(base64_decode($parts[1]), true);
+    $payload = json_decode(b64url_decode($parts[1]), true);
     if (!$payload || !isset($payload['sub']) || !isset($payload['exp'])) return null;
     if ($payload['exp'] < time()) return null;
 

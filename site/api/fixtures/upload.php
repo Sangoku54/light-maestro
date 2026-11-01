@@ -12,7 +12,9 @@
 
 require_once __DIR__ . '/../helpers.php';
 
-$userId = verify_token($_SERVER['HTTP_AUTHORIZATION'] ?? null);
+$auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+preg_match('/^Bearer\s+(.+)$/i', $auth, $m);
+$userId = verify_token($m[1] ?? null);
 if (!$userId) respond(['error' => 'unauthorized'], 401);
 
 $b = body();
