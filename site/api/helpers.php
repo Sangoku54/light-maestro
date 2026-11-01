@@ -1,10 +1,10 @@
 <?php
 /**
- * Helpers partagés : envoi JSON, lecture du corps, CORS, JWT.
+ * Helpers partagés : envoi JSON, lecture du corps, CORS, tokens signés.
+ * Aucune dépendance externe — fonctionne sur LWS sans Composer.
+ *
+ * ⚠️ Config (DB_HOST, DB_USER, DB_PASS, JWT_SECRET, Stripe) dans config.php.
  */
-
-use Firebase\JWT\JWT;
-use Firebase\JWT\Key;
 
 require_once __DIR__ . '/config.php';
 
@@ -32,33 +32,57 @@ function body(): array {
     return is_array($decoded) ? $decoded : [];
 }
 
-/** Signe un jeton d'accès pour l'app (id utilisateur). */
+/**
+ * Génère un token signé style JWT (HS256) sans librairie externe.
+ * Format: base64(header).base64(payload).hmac_sha256(base64_header.base64_payload, secret)
+ */
 function sign_token(int $userId): string {
+    $secret = defined('JWT_SECRET') && JWT_SECRET ? JWT_SECRET : 'light-maestro-change-me';
+    $ttl = defined('JWT_TTL') ? JWT_TTL : (60 * 60 * 24 * 30);
     $now = time();
-    $payload = [
+
+    $header = base64_encode(json_encode(['alg' => 'HS256', 'typ' => 'JWT'], JSON_UNESCAPED_UNICODE));
+    $payload = base64_encode(json_encode([
         'sub' => $userId,
         'iat' => $now,
-        'exp' => $now + JWT_TTL,
-    ];
-    return JWT::encode($payload, JWT_SECRET, 'HS256');
+        'exp' => $now + $ttl,
+    ], JSON_UNESCAPED_UNICODE));
+    $sig = base64_encode(hash_hmac('sha256', $header . '.' . $payload, $secret, true));
+
+    return $header . '.' . $payload . '.' . $sig;
 }
 
 /**
- * Valide un jeton Bearer et retourne l'id utilisateur, ou null si invalide.
+ * Vérifie un token et retourne l'id utilisateur, ou null si invalide/expiré.
  */
-function verify_token(?string $header): ?int {
-    if (!$header || !preg_match('/^Bearer\s+(.+)$/i', $header, $m)) return null;
-    try {
-        $decoded = JWT::decode($m[1], new Key(JWT_SECRET, 'HS256'));
-        $sub = $decoded->sub ?? null;
-        return is_numeric($sub) ? (int)$sub : null;
-    } catch (Throwable $e) {
-        return null;
-    }
+function verify_token(?string $token): ?int {
+    if (!$token) return null;
+    $parts = explode('.', $token);
+    if (count($parts) !== 3) return null;
+
+    $secret = defined('JWT_SECRET') && JWT_SECRET ? JWT_SECRET : 'light-maestro-change-me';
+    $expectedSig = base64_encode(hash_hmac('sha256', $parts[0] . '.' . $parts[1], $secret, true));
+    if (!hash_equals($expectedSig, $parts[2])) return null;
+
+    $payload = json_decode(base64_decode($parts[1]), true);
+    if (!$payload || !isset($payload['sub']) || !isset($payload['exp'])) return null;
+    if ($payload['exp'] < time()) return null;
+
+    $sub = $payload['sub'];
+    return is_numeric($sub) ? (int)$sub : null;
 }
 
 /**
- * Édition → limite d'univers (contrat aligné avec l'app : electron/license/types.ts).
+ * Lis le header Authorization Bearer et retourne l'user id, ou null.
+ */
+function get_current_user(): ?int {
+    $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    if (!preg_match('/^Bearer\s+(.+)$/i', $auth, $m)) return null;
+    return verify_token($m[1]);
+}
+
+/**
+ * Édition → limites.
  */
 function edition_limits(string $edition): array {
     switch ($edition) {
@@ -69,11 +93,7 @@ function edition_limits(string $edition): array {
 }
 
 /**
- * Email HTML de confirmation d'inscription, aux couleurs Light Maestro.
- * Ne contient JAMAIS le mot de passe (envoyé en clair = compromis dès la
- * première fuite de boîte mail) : l'utilisateur le connaît déjà, il vient
- * de le choisir. Échec silencieux (log serveur) pour ne jamais faire
- * échouer l'inscription à cause du mail.
+ * Email HTML de confirmation d'inscription.
  */
 function send_confirmation_email(string $email, ?string $displayName): void {
     $name = $displayName ?: explode('@', $email)[0];
@@ -84,7 +104,7 @@ function send_confirmation_email(string $email, ?string $displayName): void {
         . '<div style="font-weight:900;letter-spacing:.18em;font-size:13px;"><span style="display:inline-block;background:#8b5cf6;color:#fff;border-radius:8px;padding:4px 8px;margin-right:8px;">LM</span>LIGHT MAESTRO</div>'
         . '<h1 style="margin:24px 0 8px;font-size:24px;">Bienvenue, ' . $nameSafe . '.</h1>'
         . '<p style="color:#9ca3af;line-height:1.7;">Votre compte est créé (édition <b style="color:#fff;">Gratuite</b> : 1 fixture, 1 univers, sans limite de temps).</p>'
-        . '<p style="color:#9ca3af;line-height:1.7;">Connectez-vous dans l’application via <b style="color:#fff;">Compte &amp; Licence</b> avec votre email :</p>'
+        . '<p style="color:#9ca3af;line-height:1.7;">Connectez-vous dans l\'application via <b style="color:#fff;">Compte & Licence</b> avec votre email :</p>'
         . '<div style="background:#12121a;border:1px solid #2a2a3e;border-radius:12px;padding:14px 16px;margin:16px 0;">'
         . '<div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.08em;">Email du compte</div>'
         . '<div style="font-size:16px;font-weight:800;margin-top:4px;">' . htmlspecialchars($email, ENT_QUOTES, 'UTF-8') . '</div></div>'
@@ -131,12 +151,11 @@ function send_reset_email(string $email, string $displayName, string $resetUrl):
 }
 
 /**
- * Alerte admin : notifie ADMIN_EMAIL (config.php) à chaque événement notable
- * (inscription, téléchargement). Échec silencieux — ne jamais bloquer la
- * requête utilisateur à cause du mail d'alerte.
+ * Alerte admin par email.
  */
 function notify_admin(string $event, string $detail): void {
-    if (!defined('ADMIN_EMAIL') || !ADMIN_EMAIL) return;
+    $adminEmail = defined('ADMIN_EMAIL') ? ADMIN_EMAIL : '';
+    if (!$adminEmail) return;
     $subject = '[Light Maestro] ' . $event;
     $body = '<!doctype html><html lang="fr"><body style="margin:0;background:#0a0a0f;color:#ede8dc;font-family:Arial,sans-serif;">'
         . '<div style="max-width:560px;margin:0 auto;padding:32px 24px;">'
@@ -149,7 +168,7 @@ function notify_admin(string $event, string $detail): void {
         . "Content-Type: text/html; charset=UTF-8\r\n"
         . "From: Light Maestro <contact@light-maestro.com>\r\n";
     try {
-        @mail(ADMIN_EMAIL, $subject, $body, $headers);
+        @mail($adminEmail, $subject, $body, $headers);
     } catch (Throwable $e) {
         error_log('[license] alerte admin impossible : ' . $e->getMessage());
     }
