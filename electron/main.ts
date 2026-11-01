@@ -832,7 +832,7 @@ ipcMain.handle('license:register', async (_event, email: string, password: strin
 });
 ipcMain.handle('license:checkout', async (_event, edition: string) => {
   const token = licenseStore.getToken();
-  console.log('[ipc:checkout] edition=', edition, 'token present=', !!token);
+  console.log('[ipc:checkout] edition=', edition, 'token present=', !!token, 'token len=', token?.length);
   if (!token) {
     console.warn('[ipc:checkout] no token — user not logged in');
     return { ok: false, code: 'invalid_token', message: 'Non connecté' };

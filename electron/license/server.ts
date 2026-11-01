@@ -186,7 +186,12 @@ export async function startCheckout(
     }
     return url;
   } catch (e: any) {
-    console.error('[license:startCheckout] erreur', e?.message || e);
+    // logger l'erreur complète pour debug
+    console.error('[license:startCheckout] ERREUR détaillée:', {
+      message: e?.message,
+      code: e?.code,
+      stack: e?.stack,
+    });
     return null;
   }
 }
