@@ -10,15 +10,15 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
 'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
 })(window,document,'script','dataLayer','GTM-WGVS2N8P');</script>
 <!-- End Google Tag Manager -->
-<title>Light Maestro � Logiciel DMX pro + audio-r�actif | 3 modes, 1500+ fixtures, 3D Stage</title>
-<meta name="description" content="Light Maestro � logiciel lumi�re pro : 3 modes, 1500+ fixtures, ArtNet/sACN/USB, Virtual Console, 3D Stage, Show auto audio-r�actif. Windows."/>
-<meta property="og:title" content="Light Maestro � Logiciel lumi�re pro"/>
-<meta property="og:description" content="Logiciel lumi�re pro. Du DJ set au th��tre, sans compromis."/>
+<title>Light Maestro — Logiciel DMX pro + audio-réactif | 3 modes, 1500+ fixtures, 3D Stage</title>
+<meta name="description" content="Light Maestro — logiciel lumière pro : 3 modes, 1500+ fixtures, ArtNet/sACN/USB, Virtual Console, 3D Stage, Show auto audio-réactif. Windows."/>
+<meta property="og:title" content="Light Maestro — Logiciel lumière pro"/>
+<meta property="og:description" content="Logiciel lumière pro. Du DJ set au théâtre, sans compromis."/>
 <meta property="og:type" content="website"/>
 <link rel="icon" type="image/png" href="./assets/favicon-32.png"/>
 <link rel="stylesheet" href="./assets/site.css"/>
 <style>
-/* -- LM Splash -- hyper-r�aliste : sc�ne + �cran 3D sync -- */
+/* ── LM Splash ── hyper-réaliste : scène + écran 3D sync ── */
 #lm-splash{position:fixed; inset:0; z-index:9999; background:#000; display:flex; flex-direction:column; overflow:hidden; isolation:isolate}
 #lm-splash[hidden]{display:none !important}
 #lm-splash .splash-bg, #lm-splash video.splash-video{position:absolute; inset:0; width:100%; height:100%; object-fit:cover}
@@ -63,7 +63,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
 .mini-label{position:absolute; left:10px; bottom:10px; font-size:10px; letter-spacing:.1em; text-transform:uppercase; font-weight:800; color: rgba(255,255,255,.85); background: rgba(0,0,0,.45); border:1px solid rgba(255,255,255,.12); padding:6px 8px; border-radius:999px; backdrop-filter: blur(6px)}
 .splash-progress{position:absolute; left:0; right:0; bottom:0; height:3px; background: rgba(255,255,255,.08)}
 .splash-progress i{position:absolute; left:0; top:0; bottom:0; width:0%; background: linear-gradient(90deg, #8b5cf6, #06b6d4); box-shadow: 0 0 12px rgba(192,132,252,.7); transition: width .1s linear}
-/* Quand la vraie vid�o est pr�sente, elle devient le fond hyper-r�aliste : on all�ge les overlays synth�tiques */
+/* Quand la vraie vidéo est présente, elle devient le fond hyper-réaliste : on allège les overlays synthétiques */
 #lm-splash.has-video .splash-bg{opacity:.42}
 #lm-splash.has-video .splash-stage{opacity:.88}
 #lm-splash.has-video video.splash-video{filter: saturate(1.08) contrast(1.08) brightness(.96)}
@@ -74,7 +74,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
 <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-WGVS2N8P"
 height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <!-- End Google Tag Manager (noscript) -->
-<!-- -- Splash immersif : sc�ne hyper-r�aliste + �cran Light Maestro en sync -- -->
+<!-- ── Splash immersif : scène hyper-réaliste + écran Light Maestro en sync ── -->
 <div id="lm-splash" role="dialog" aria-modal="true" aria-label="Intro Light Maestro">
   <video class="splash-video" autoplay muted loop playsinline poster="./assets/splash-poster.jpg" style="display:none"></video>
   <div class="splash-bg" aria-hidden="true"></div>
@@ -89,22 +89,22 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   </div>
   <div class="splash-ui">
     <div>
-      <span class="splash-badge">? Live � Sc�ne r�elle ? Vue 3D Light Maestro � sync temps r�el</span>
-      <h1 class="splash-title">La sc�ne s'allume.<br><em>Light Maestro</em> la pilote.</h1>
-      <p class="splash-sub">Ce que vous voyez en salle, vous le pr�visualisez � l'identique dans la vue 3D � faisceaux, couleurs et mouvements parfaitement synchronis�s.</p>
-      <div class="splash-sync"><span class="dot"></span> Sync DMX � 30 fps � Latence ~18 ms � r�el = 3D</div>
+      <span class="splash-badge">● Live • Scène réelle ⇄ Vue 3D Light Maestro — sync temps réel</span>
+      <h1 class="splash-title">La scène s'allume.<br><em>Light Maestro</em> la pilote.</h1>
+      <p class="splash-sub">Ce que vous voyez en salle, vous le prévisualisez à l'identique dans la vue 3D — faisceaux, couleurs et mouvements parfaitement synchronisés.</p>
+      <div class="splash-sync"><span class="dot"></span> Sync DMX • 30 fps • Latence ~18 ms — réel = 3D</div>
       <div class="splash-actions">
-        <button class="btn-enter" id="splash-enter">Entrer dans Light Maestro ?</button>
+        <button class="btn-enter" id="splash-enter">Entrer dans Light Maestro →</button>
         <button class="btn-skip" id="splash-skip">Passer l'intro</button>
       </div>
     </div>
   </div>
-  <div class="splash-laptop" aria-label="Aper�u Light Maestro 3D Stage">
-    <div class="splash-laptop-top"><i style="background:#ff5f56"></i><i style="background:#ffbd2e"></i><i style="background:#27c93f"></i><span class="mono" style="margin-left:8px; font-size:11px; color:#a1a1aa">Light Maestro � 3D Stage � Quick Show � 128 BPM</span><span style="margin-left:auto; font-size:10px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:#22c55e; background: rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.24); padding:4px 8px; border-radius:999px">? Live</span></div>
+  <div class="splash-laptop" aria-label="Aperçu Light Maestro 3D Stage">
+    <div class="splash-laptop-top"><i style="background:#ff5f56"></i><i style="background:#ffbd2e"></i><i style="background:#27c93f"></i><span class="mono" style="margin-left:8px; font-size:11px; color:#a1a1aa">Light Maestro — 3D Stage • Quick Show • 128 BPM</span><span style="margin-left:auto; font-size:10px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:#22c55e; background: rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.24); padding:4px 8px; border-radius:999px">● Live</span></div>
     <div class="splash-laptop-screen">
       <div class="mini-stage" id="mini-stage"></div>
       <div id="mini-beams"></div>
-      <span class="mini-label">Vue 3D � m�me show, m�me seconde</span>
+      <span class="mini-label">Vue 3D — même show, même seconde</span>
     </div>
     <div class="splash-progress"><i id="splash-bar"></i></div>
   </div>
@@ -117,24 +117,24 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     </a>
     <nav class="nav-links" aria-label="Navigation principale">
       <a class="active" href="./index.html">Accueil</a>
-      <a href="./fonctionnalites.html">Fonctionnalit�s</a>
+      <a href="./fonctionnalites.html">Fonctionnalités</a>
       <a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a>
       <a href="./tarifs.html">Tarifs</a>
-      <a href="./telecharger.html">T�l�charger</a>
+      <a href="./telecharger.html">Télécharger</a>
       <a href="./support.html">Support</a>
     </nav>
     <div style="display:flex; gap:10px; align-items:center">
-      <a class="nav-cta" href="./telecharger.html">? T�l�charger � Windows</a>
-      <a href="./index-en.html" style="font-size:12px; font-weight:700; color:#9ca3af; text-decoration:none" title="English version">???? EN</a>
-      <button class="hamburger" data-menu aria-label="Menu">=</button>
+      <a class="nav-cta" href="./telecharger.html">⬇ Télécharger — Windows</a>
+      <a href="./index-en.html" style="font-size:12px; font-weight:700; color:#9ca3af; text-decoration:none" title="English version">🇬🇧 EN</a>
+      <button class="hamburger" data-menu aria-label="Menu">≡</button>
     </div>
   </div>
   <div data-menu-panel style="display:none; border-top:1px solid #1f1f2e; background: rgba(6,6,10,.88)">
     <div class="wrap" style="padding:12px 20px; display:flex; flex-wrap:wrap; gap:10px">
-      <a href="./fonctionnalites.html">Fonctionnalit�s</a>
+      <a href="./fonctionnalites.html">Fonctionnalités</a>
       <a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a>
       <a href="./tarifs.html">Tarifs</a>
-      <a href="./telecharger.html">T�l�charger</a>
+      <a href="./telecharger.html">Télécharger</a>
       <a href="./support.html">Support</a>
     </div>
   </div>
@@ -144,46 +144,46 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <div class="wrap">
     <div class="hero-grid">
       <div>
-         <span class="kicker">? Nouveau � v1.0.39 � Windows 10/11 � Electron 30</span>
-        <h1 class="h1">Votre lumi�re, <span style="background:linear-gradient(90deg,#c084fc,#06b6d4); -webkit-background-clip:text; background-clip:text; color:transparent">parfaitement orchestr�e</span>.</h1>
-        <p class="lead">Light Maestro pilote vos lyres, PARs et strobes en DMX pro (USB, ArtNet, sACN) et les fait danser sur la musique � automatiquement. Du DJ set intimiste � la prod th��tre, sans changer d'outil.</p>
+         <span class="kicker">● Nouveau — v1.0.39 • Windows 10/11 • Electron 30</span>
+        <h1 class="h1">Votre lumière, <span style="background:linear-gradient(90deg,#c084fc,#06b6d4); -webkit-background-clip:text; background-clip:text; color:transparent">parfaitement orchestrée</span>.</h1>
+        <p class="lead">Light Maestro pilote vos lyres, PARs et strobes en DMX pro (USB, ArtNet, sACN) et les fait danser sur la musique — automatiquement. Du DJ set intimiste à la prod théâtre, sans changer d'outil.</p>
         <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:18px">
-          <a class="btn btn-primary" href="./telecharger.html">? T�l�charger gratuitement</a>
-          <a class="btn btn-ghost" href="./tutoriels.html">? Voir les tutoriels</a>
-          <a class="btn btn-ghost" href="./fonctionnalites.html">D�couvrir les fonctionnalit�s ?</a>
+          <a class="btn btn-primary" href="./telecharger.html">⬇ Télécharger gratuitement</a>
+          <a class="btn btn-ghost" href="./tutoriels.html">▶ Voir les tutoriels</a>
+          <a class="btn btn-ghost" href="./fonctionnalites.html">Découvrir les fonctionnalités →</a>
         </div>
         <div class="meta" style="margin-top:16px; gap:12px">
           <span><b>1500+ fixtures</b> compatibles</span>
-          <span>�</span>
+          <span>•</span>
           <span><b>Multi-univers</b> DMX</span>
-          <span>�</span>
-          <span><b>8 effets</b> audio-r�actifs</span>
-          <span>�</span>
-          <span><b>3D Stage</b> temps r�el</span>
+          <span>•</span>
+          <span><b>8 effets</b> audio-réactifs</span>
+          <span>•</span>
+          <span><b>3D Stage</b> temps réel</span>
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px">
-          <span class="badge violet">Enttec � DMXKing � ArtNet � sACN E1.31</span>
+          <span class="badge violet">Enttec • DMXKing • ArtNet • sACN E1.31</span>
           <span class="badge cyan">MIDI Learn & Feedback</span><span class="badge cyan">MIDI Clock IN</span>
-          <span class="badge">RGB Matrix � EFX � Cue Lists</span>
+          <span class="badge">RGB Matrix • EFX • Cue Lists</span>
         </div>
       </div>
       <div class="hero-visual">
         <div class="screen">
-          <div class="screen-top"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="mono" style="margin-left:8px; font-size:11px; color:#a1a1aa">Light Maestro � Quick Show � 128 BPM � Auto</span></div>
+          <div class="screen-top"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="mono" style="margin-left:8px; font-size:11px; color:#a1a1aa">Light Maestro — Quick Show • 128 BPM • Auto</span></div>
           <div class="screen-body">
             <div style="width:92%; display:grid; gap:10px">
               <div class="wave"><div class="tick"><span class="on"></span><span class="on"></span><span></span><span class="on"></span><span></span><span class="on"></span><span class="on"></span><span></span></div></div>
               <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px">
-                <div class="card" style="padding:12px; border-radius:14px"><div class="badge violet" style="font-size:10px">Intro ? Verse</div><div style="font-weight:800; margin-top:8px; font-size:13px">Build Up</div><div style="color:#9ca3af; font-size:12px">DMX HTP/LTP � 30 fps</div></div>
-                <div class="card" style="padding:12px; border-radius:14px"><div class="badge cyan" style="font-size:10px">Drop � Peak</div><div style="font-weight:800; margin-top:8px; font-size:13px">Strobe Blast</div><div style="color:#9ca3af; font-size:12px">Safety limiter ON</div></div>
-                <div class="card" style="padding:12px; border-radius:14px"><div class="badge" style="font-size:10px">Chorus</div><div style="font-weight:800; margin-top:8px; font-size:13px">Color Wave</div><div style="color:#9ca3af; font-size:12px">Palette Warm ? Party</div></div>
+                <div class="card" style="padding:12px; border-radius:14px"><div class="badge violet" style="font-size:10px">Intro → Verse</div><div style="font-weight:800; margin-top:8px; font-size:13px">Build Up</div><div style="color:#9ca3af; font-size:12px">DMX HTP/LTP • 30 fps</div></div>
+                <div class="card" style="padding:12px; border-radius:14px"><div class="badge cyan" style="font-size:10px">Drop • Peak</div><div style="font-weight:800; margin-top:8px; font-size:13px">Strobe Blast</div><div style="color:#9ca3af; font-size:12px">Safety limiter ON</div></div>
+                <div class="card" style="padding:12px; border-radius:14px"><div class="badge" style="font-size:10px">Chorus</div><div style="font-weight:800; margin-top:8px; font-size:13px">Color Wave</div><div style="color:#9ca3af; font-size:12px">Palette Warm → Party</div></div>
               </div>
             </div>
           </div>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; color:#a1a1aa; font-size:12px">
-          <span class="mono">? DMX ON � 2 univers � ArtNet 0 / sACN U1</span>
-          <span class="mono">Latence audio?DMX ~18 ms</span>
+          <span class="mono">● DMX ON • 2 univers • ArtNet 0 / sACN U1</span>
+          <span class="mono">Latence audio→DMX ~18 ms</span>
         </div>
       </div>
     </div>
@@ -193,43 +193,43 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <section class="section">
   <div class="wrap">
     <div style="text-align:center; max-width:820px; margin:0 auto">
-      <span class="kicker">3 modes � 1 outil � Infini</span>
-      <h2 class="h2" style="margin-top:12px">Pensez DJ. Pensez r�gisseur. Pensez tourn�e.</h2>
-      <p class="lead" style="margin:0 auto">Un seul logiciel qui s'adapte � votre r�le du jour � sans r�apprendre une usine � gaz.</p>
+      <span class="kicker">3 modes • 1 outil • Infini</span>
+      <h2 class="h2" style="margin-top:12px">Pensez DJ. Pensez régisseur. Pensez tournée.</h2>
+      <p class="lead" style="margin:0 auto">Un seul logiciel qui s'adapte à votre rôle du jour — sans réapprendre une usine à gaz.</p>
     </div>
     <div class="grid grid-3" style="margin-top:22px">
       <div class="card">
-        <div style="display:flex; gap:12px; align-items:center"><span class="ico">??</span><span class="badge violet">Quick Show � DJ</span></div>
+        <div style="display:flex; gap:12px; align-items:center"><span class="ico">🎧</span><span class="badge violet">Quick Show — DJ</span></div>
         <h3 class="h3" style="margin-top:12px">Les lights suivent la musique, seules.</h3>
-        <p>Show auto : beat detection adaptative, analyse fr�quentielle (low/mid/high), d�tection de sections (intro/verse/chorus/drop/outro). 8 effets int�gr�s, palettes auto, division du temps, intensit� & mouvement � branchez une cl� USB, lancez.</p>
+        <p>Show auto : beat detection adaptative, analyse fréquentielle (low/mid/high), détection de sections (intro/verse/chorus/drop/outro). 8 effets intégrés, palettes auto, division du temps, intensité & mouvement — branchez une clé USB, lancez.</p>
         <ul style="margin:12px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
-          <li>BPM temps r�el + tap tempo</li>
+          <li>BPM temps réel + tap tempo</li>
           <li>Color Wave, Strobe, Chase, Dimmer Pulse, Pan Sweep, Build Up, Breakdown, Peak Drop</li>
-          <li>Presets .lmpreset � export / import en 1 clic</li>
+          <li>Presets .lmpreset — export / import en 1 clic</li>
         </ul>
-        <a class="btn btn-ghost" style="margin-top:14px" href="./tutoriels.html#quickshow">Voir le tuto Quick Show ?</a>
+        <a class="btn btn-ghost" style="margin-top:14px" href="./tutoriels.html#quickshow">Voir le tuto Quick Show →</a>
       </div>
       <div class="card">
-        <div style="display:flex; gap:12px; align-items:center"><span class="ico cyan">??</span><span class="badge cyan">Design � Technicien</span></div>
-        <h3 class="h3" style="margin-top:12px">L'�diteur complet pour techniciens exigeants.</h3>
-        <p>Sc�nes avec fade in/out, Chasers (loop/ping-pong/single), Cue Lists th��tre (GO), RGB Matrix (line/circle/diamond/square/triangle + audio-r�actif), EFX param�trique (cercle, 8, carr�...), preview temps r�el.</p>
+        <div style="display:flex; gap:12px; align-items:center"><span class="ico cyan">🔧</span><span class="badge cyan">Design — Technicien</span></div>
+        <h3 class="h3" style="margin-top:12px">L'éditeur complet pour techniciens exigeants.</h3>
+        <p>Scènes avec fade in/out, Chasers (loop/ping-pong/single), Cue Lists théâtre (GO), RGB Matrix (line/circle/diamond/square/triangle + audio-réactif), EFX paramétrique (cercle, 8, carré...), preview temps réel.</p>
         <ul style="margin:12px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
-          <li>Biblioth�que 1500+ fixtures � import .qxf direct</li>
+          <li>Bibliothèque 1500+ fixtures • import .qxf direct</li>
           <li>Groupes, multi-head, canaux : Intensity/Pan/Tilt/Color/Gobo/Shutter</li>
-          <li>Projets .lmshow / .lmproj � JSON ouvert</li>
+          <li>Projets .lmshow / .lmproj — JSON ouvert</li>
         </ul>
-        <a class="btn btn-ghost" style="margin-top:14px" href="./tutoriels.html#design">Voir le tuto Design ?</a>
+        <a class="btn btn-ghost" style="margin-top:14px" href="./tutoriels.html#design">Voir le tuto Design →</a>
       </div>
       <div class="card">
-        <div style="display:flex; gap:12px; align-items:center"><span class="ico ivory">??</span><span class="badge">Perform � Live</span></div>
-        <h3 class="h3" style="margin-top:12px">Votre console virtuelle, � votre main.</h3>
-        <p>Virtual Console custom : boutons, sliders, <b>Masters de Groupe</b>, frames. MIDI Learn + feedback LED, <b>MIDI Clock IN</b> (BPM suit Ableton), OSC, MTC, t�l�commande web LAN. Tout est mappable, tout est live.</p>
+        <div style="display:flex; gap:12px; align-items:center"><span class="ico ivory">🎭</span><span class="badge">Perform — Live</span></div>
+        <h3 class="h3" style="margin-top:12px">Votre console virtuelle, à votre main.</h3>
+        <p>Virtual Console custom : boutons, sliders, <b>Masters de Groupe</b>, frames. MIDI Learn + feedback LED, <b>MIDI Clock IN</b> (BPM suit Ableton), OSC, MTC, télécommande web LAN. Tout est mappable, tout est live.</p>
         <ul style="margin:12px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.7">
-          <li>Widgets boutons/sliders/<b>Masters de Groupe</b>/frames � pages & grid</li>
+          <li>Widgets boutons/sliders/<b>Masters de Groupe</b>/frames • pages & grid</li>
           <li>MIDI / MIDI Clock / OSC / MTC / Web Remote</li>
-          <li>Grand Master, Blackout, submasters par groupe, HTP/LTP temps r�el</li>
+          <li>Grand Master, Blackout, submasters par groupe, HTP/LTP temps réel</li>
         </ul>
-        <a class="btn btn-ghost" style="margin-top:14px" href="./tutoriels.html#perform">Voir le tuto Perform ?</a>
+        <a class="btn btn-ghost" style="margin-top:14px" href="./tutoriels.html#perform">Voir le tuto Perform →</a>
       </div>
     </div>
   </div>
@@ -240,20 +240,20 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <div style="display:flex; gap:16px; align-items:end; justify-content:space-between; flex-wrap:wrap">
       <div>
         <span class="kicker">Pourquoi Light Maestro</span>
-        <h2 class="h2" style="margin-top:10px">Puissance pro. Simplicit� radicale.</h2>
+        <h2 class="h2" style="margin-top:10px">Puissance pro. Simplicité radicale.</h2>
       </div>
-      <a class="btn btn-primary" href="./fonctionnalites.html">Toutes les fonctionnalit�s ?</a>
+      <a class="btn btn-primary" href="./fonctionnalites.html">Toutes les fonctionnalités →</a>
     </div>
     <div class="grid grid-3" style="margin-top:18px">
-      <div class="card"><span class="ico">?</span><h3 class="h3" style="margin-top:12px">Moteur DMX multi-univers</h3><p>USB (Enttec Open/Pro, DMXKing) � <b>plug & play</b>, dongle d�tect� au lancement � ArtNet, sACN E1.31. 1 univers en Standard, illimit�s en Compl�te. Merge HTP/LTP, 60 fps, Grand Master & Blackout instantan�. Stable en tourn�e.</p></div>
-      <div class="card"><span class="ico cyan">???</span><h3 class="h3" style="margin-top:12px">Audio Intelligence</h3><p>Onset detection + BPM adaptatif, s�paration fr�quentielle, d�tection de sections, 8 effets audio-r�actifs � et une <b>chor�graphie harmonieuse</b> : les t�tes identiques bougent ensemble, la vague traverse le rig.</p></div>
-      <div class="card"><span class="ico ivory">??</span><h3 class="h3" style="margin-top:12px">1500+ fixtures</h3><p>Biblioth�que universelle. Import .qxf, multi-modes, multi-heads. Chauvet, ADJ, BeamZ, Eurolite� et vos customs en 2 minutes.</p></div>
-      <div class="card"><span class="ico">??</span><h3 class="h3" style="margin-top:12px">Show programming complet</h3><p>Sc�nes, Chasers, Cue Lists, RGB Matrix, EFX. Solo, groupe, univers � tout est adressable, tout est temporis�.</p></div>
-      <div class="card"><span class="ico cyan">???</span><h3 class="h3" style="margin-top:12px">Live Control</h3><p>Virtual Console (boutons/sliders/frames) + MIDI Learn + OSC + MTC + Web Remote LAN. Vos contr�leurs s'allument en retour. Votre show, vos mains.</p></div>
-      <div class="card"><span class="ico ivory">??</span><h3 class="h3" style="margin-top:12px">3D Stage temps r�el</h3><p><b>Faisceaux r�alistes</b> � fondu le long du faisceau, arr�t au sol, <b>gobos projet�s</b>, plages m�caniques r�elles (pan 540��) � la 3D montre ce que vos fixtures feront, avant de brancher une lyre.</p></div>
+      <div class="card"><span class="ico">⚡</span><h3 class="h3" style="margin-top:12px">Moteur DMX multi-univers</h3><p>USB (Enttec Open/Pro, DMXKing) — <b>plug & play</b>, dongle détecté au lancement — ArtNet, sACN E1.31. 1 univers en Standard, illimités en Complète. Merge HTP/LTP, 60 fps, Grand Master & Blackout instantané. Stable en tournée.</p></div>
+      <div class="card"><span class="ico cyan">🎚️</span><h3 class="h3" style="margin-top:12px">Audio Intelligence</h3><p>Onset detection + BPM adaptatif, séparation fréquentielle, détection de sections, 8 effets audio-réactifs — et une <b>chorégraphie harmonieuse</b> : les têtes identiques bougent ensemble, la vague traverse le rig.</p></div>
+      <div class="card"><span class="ico ivory">💡</span><h3 class="h3" style="margin-top:12px">1500+ fixtures</h3><p>Bibliothèque universelle. Import .qxf, multi-modes, multi-heads. Chauvet, ADJ, BeamZ, Eurolite… et vos customs en 2 minutes.</p></div>
+      <div class="card"><span class="ico">🎨</span><h3 class="h3" style="margin-top:12px">Show programming complet</h3><p>Scènes, Chasers, Cue Lists, RGB Matrix, EFX. Solo, groupe, univers — tout est adressable, tout est temporisé.</p></div>
+      <div class="card"><span class="ico cyan">🕹️</span><h3 class="h3" style="margin-top:12px">Live Control</h3><p>Virtual Console (boutons/sliders/frames) + MIDI Learn + OSC + MTC + Web Remote LAN. Vos contrôleurs s'allument en retour. Votre show, vos mains.</p></div>
+      <div class="card"><span class="ico ivory">🧱</span><h3 class="h3" style="margin-top:12px">3D Stage temps réel</h3><p><b>Faisceaux réalistes</b> — fondu le long du faisceau, arrêt au sol, <b>gobos projetés</b>, plages mécaniques réelles (pan 540°…) — la 3D montre ce que vos fixtures feront, avant de brancher une lyre.</p></div>
     </div>
     <div class="notice" style="margin-top:16px">
-      <b>Compatibilit� terrain :</b> ArtNet & sACN en r�seau, USB DMX en direct, sortie multi-univers simultan�e. HTP/LTP, merge externe, et journal DMX pour d�bug � tout est l�.
+      <b>Compatibilité terrain :</b> ArtNet & sACN en réseau, USB DMX en direct, sortie multi-univers simultanée. HTP/LTP, merge externe, et journal DMX pour débug — tout est là.
     </div>
   </div>
 </section>
@@ -265,27 +265,27 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         <span class="kicker">Workflow</span>
         <h2 class="h2" style="margin-top:10px">De l'audio au show, en 3 minutes.</h2>
         <ol style="margin:14px 0 0; padding-left:18px; color:#d1d5db; line-height:1.8; font-size:14px">
-          <li><b style="color:white">Importez</b> votre morceau (MP3/WAV/FLAC) � analyse automatique.</li>
-          <li><b style="color:white">Laissez le Show auto</b> g�n�rer Chasers, Colors, Strobes, Dimmer & EFX sur vos fixtures.</li>
-          <li><b style="color:white">Affinez</b> en Design (sc�nes/cues) puis <b style="color:white">jouez</b> en Perform (pads, sliders, MIDI).</li>
+          <li><b style="color:white">Importez</b> votre morceau (MP3/WAV/FLAC) — analyse automatique.</li>
+          <li><b style="color:white">Laissez le Show auto</b> générer Chasers, Colors, Strobes, Dimmer & EFX sur vos fixtures.</li>
+          <li><b style="color:white">Affinez</b> en Design (scènes/cues) puis <b style="color:white">jouez</b> en Perform (pads, sliders, MIDI).</li>
         </ol>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:16px">
-          <a class="btn btn-primary" href="./tutoriels.html">Voir le workflow en vid�o</a>
-          <a class="btn btn-ghost" href="./telecharger.html">T�l�charger & tester</a>
+          <a class="btn btn-primary" href="./tutoriels.html">Voir le workflow en vidéo</a>
+          <a class="btn btn-ghost" href="./telecharger.html">Télécharger & tester</a>
         </div>
-        <div class="meta" style="margin-top:12px">Formats : <b>.lmpreset</b> (preset) � <b>.lmshow</b> (show) � <b>.lmproj</b> (projet complet) � JSON ouvert</div>
+        <div class="meta" style="margin-top:12px">Formats : <b>.lmpreset</b> (preset) • <b>.lmshow</b> (show) • <b>.lmproj</b> (projet complet) • JSON ouvert</div>
       </div>
       <div class="card" style="padding:0; overflow:hidden">
         <div style="padding:14px; border-bottom:1px solid #1f1f2e; display:flex; align-items:center; justify-content:space-between">
-          <b style="font-size:13px; letter-spacing:.06em; text-transform:uppercase">Timeline � Quick Show</b>
-          <span class="badge violet">Beat Division � Section Aware</span>
+          <b style="font-size:13px; letter-spacing:.06em; text-transform:uppercase">Timeline — Quick Show</b>
+          <span class="badge violet">Beat Division • Section Aware</span>
         </div>
         <div style="padding:14px; display:grid; gap:10px">
           <div style="display:flex; gap:8px"><span class="badge">Intro 12s</span><span class="badge cyan">Verse 24s</span><span class="badge violet">Chorus 16s</span><span class="badge">Drop 8s</span><span class="badge">Outro</span></div>
           <div style="height:8px; border-radius:999px; background: linear-gradient(90deg, #1f1f2e, #8b5cf6 40%, #06b6d4 75%, #ede8dc 100%); border:1px solid #2a2a3e"></div>
           <div class="grid grid-3">
-            <div style="background: rgba(255,255,255,.04); border:1px solid #1f1f2e; border-radius:12px; padding:10px"><div style="font-size:11px; color:#9ca3af; letter-spacing:.08em; text-transform:uppercase">EFX Track</div><div style="font-weight:800; font-size:13px; margin-top:4px">Pan Sweep � 2 bars</div></div>
-            <div style="background: rgba(255,255,255,.04); border:1px solid #1f1f2e; border-radius:12px; padding:10px"><div style="font-size:11px; color:#9ca3af; letter-spacing:.08em; text-transform:uppercase">Color Track</div><div style="font-weight:800; font-size:13px; margin-top:4px">Warm ? Party</div></div>
+            <div style="background: rgba(255,255,255,.04); border:1px solid #1f1f2e; border-radius:12px; padding:10px"><div style="font-size:11px; color:#9ca3af; letter-spacing:.08em; text-transform:uppercase">EFX Track</div><div style="font-weight:800; font-size:13px; margin-top:4px">Pan Sweep • 2 bars</div></div>
+            <div style="background: rgba(255,255,255,.04); border:1px solid #1f1f2e; border-radius:12px; padding:10px"><div style="font-size:11px; color:#9ca3af; letter-spacing:.08em; text-transform:uppercase">Color Track</div><div style="font-weight:800; font-size:13px; margin-top:4px">Warm → Party</div></div>
             <div style="background: rgba(255,255,255,.04); border:1px solid #1f1f2e; border-radius:12px; padding:10px"><div style="font-size:11px; color:#9ca3af; letter-spacing:.08em; text-transform:uppercase">Strobe Track</div><div style="font-weight:800; font-size:13px; margin-top:4px">Peak limiter</div></div>
           </div>
         </div>
@@ -298,12 +298,12 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <div class="wrap">
     <div class="card" style="display:flex; gap:18px; align-items:center; justify-content:space-between; flex-wrap:wrap; padding:20px">
       <div>
-        <h3 class="h3" style="margin:0">Pr�t � passer en Maestro ?</h3>
-        <p style="margin:6px 0 0">Windows 10/11 � Installeur & Portable � Support humain</p>
+        <h3 class="h3" style="margin:0">Prêt à passer en Maestro ?</h3>
+        <p style="margin:6px 0 0">Windows 10/11 • Installeur & Portable • Support humain</p>
       </div>
       <div style="display:flex; gap:10px; flex-wrap:wrap">
-         <a class="btn btn-primary" href="./telecharger.html">? T�l�charger v1.0.39</a>
-        <a class="btn btn-ghost" href="./tarifs.html">Voir les tarifs ?</a>
+         <a class="btn btn-primary" href="./telecharger.html">⬇ Télécharger v1.0.39</a>
+        <a class="btn btn-ghost" href="./tarifs.html">Voir les tarifs →</a>
       </div>
     </div>
   </div>
@@ -314,12 +314,12 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <div class="footer-grid">
       <div>
         <div style="display:flex; align-items:center; gap:10px; font-weight:900; letter-spacing:.18em; font-size:12px"><img src="./assets/logo.svg" alt="Light Maestro" style="width:28px;height:28px;border-radius:8px"/> LIGHT MAESTRO</div>
-        <p style="margin:10px 0 0; max-width:360px">DMX pro + audio-r�actif. Con�u pour la sc�ne, pens� pour la tourn�e.</p>
-         <p class="mono" style="margin-top:10px; font-size:11px; color:#6b7280">� <span data-year></span> Light Maestro � v1.0.39 � Electron 30 � Made for the stage.</p>
+        <p style="margin:10px 0 0; max-width:360px">DMX pro + audio-réactif. Conçu pour la scène, pensé pour la tournée.</p>
+         <p class="mono" style="margin-top:10px; font-size:11px; color:#6b7280">© <span data-year></span> Light Maestro • v1.0.39 • Electron 30 • Made for the stage.</p>
       </div>
-      <div><div style="font-weight:800; color:white; margin-bottom:8px">Produit</div><div style="display:grid; gap:8px"><a href="./fonctionnalites.html">Fonctionnalit�s</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">T�l�charger</a><a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a></div></div>
+      <div><div style="font-weight:800; color:white; margin-bottom:8px">Produit</div><div style="display:grid; gap:8px"><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a><a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a></div></div>
       <div><div style="font-weight:800; color:white; margin-bottom:8px">Ressources</div><div style="display:grid; gap:8px"><a href="./support.html">Support & FAQ</a><a href="./support.html#contact">Contact</a></div></div>
-      <div><div style="font-weight:800; color:white; margin-bottom:8px">L�gal</div><div style="display:grid; gap:8px"><a href="./mentions-legales.html">Mentions l�gales</a><a href="./support.html#confidentialite">Confidentialit�</a><a href="./licence.html">Licence</a></div></div>
+      <div><div style="font-weight:800; color:white; margin-bottom:8px">Légal</div><div style="display:grid; gap:8px"><a href="./mentions-legales.html">Mentions légales</a><a href="./support.html#confidentialite">Confidentialité</a><a href="./licence.html">Licence</a></div></div>
     </div>
   </div>
 </footer>
@@ -328,7 +328,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 (function(){
   const splash = document.getElementById('lm-splash');
   if(!splash) return;
-  // Ne jamais bloquer le retour : 1 fois par session, sinon skip direct. Commentez la ligne suivante pour forcer � chaque visite.
+  // Ne jamais bloquer le retour : 1 fois par session, sinon skip direct. Commentez la ligne suivante pour forcer à chaque visite.
   if(sessionStorage.getItem('lm-splash-seen')==='1'){ splash.hidden=true; return; }
   const enter = document.getElementById('splash-enter');
   const skip = document.getElementById('splash-skip');
@@ -338,8 +338,8 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   const spotsC = document.getElementById('splash-spots');
   const miniBeamsC = document.getElementById('mini-beams');
   const miniStage = document.getElementById('mini-stage');
-  // Vid�o hyper-r�aliste : site/assets/splash.mp4 (8.8 Mo, Coverr � faisceaux + haze)
-  // Remplace le fichier par ta captation finale quand tu veux, m�me nom, aucun code � toucher.
+  // Vidéo hyper-réaliste : site/assets/splash.mp4 (8.8 Mo, Coverr — faisceaux + haze)
+  // Remplace le fichier par ta captation finale quand tu veux, même nom, aucun code à toucher.
   if(video){
     const trySrc = './assets/splash.mp4';
     fetch(trySrc, {method:'HEAD'}).then(r=>{
@@ -350,7 +350,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         video.addEventListener('loadeddata', ()=>{ splash.classList.add('has-video'); });
       }
     }).catch(()=>{});
-    // Fallback direct (file:// ne supporte pas HEAD) : tente quand m�me
+    // Fallback direct (file:// ne supporte pas HEAD) : tente quand même
     if(location.protocol==='file:'){ video.src=trySrc; video.style.display='block'; splash.classList.add('has-video'); video.play().catch(()=>{}); }
   }
   // Construit les faisceaux : 7 lyres sur la truss + spots au sol + mini vue 3D en sync
@@ -380,11 +380,11 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     t = (now - start)/1000;
     const p = Math.min((now - start)/duration, 1);
     if(bar) bar.style.width = (p*100)+'%';
-    // Mouvement : sweep + circle, synchronis� entre sc�ne r�elle et vue 3D
+    // Mouvement : sweep + circle, synchronisé entre scène réelle et vue 3D
     for(let i=0;i<N;i++){
       const phase = t*0.9 + i*0.55;
-      const tilt = Math.sin(phase)*26; // -26?26deg
-      const sway = Math.cos(phase*0.7)*3; // l�ger sway horizontal
+      const tilt = Math.sin(phase)*26; // -26→26deg
+      const sway = Math.cos(phase*0.7)*3; // léger sway horizontal
       const hue = palette[Math.floor(t/1.6)%palette.length][i%3];
       const ang = tilt;
       beams[i].style.transform = 'translateX(-50%) rotate('+ang+'deg) translateX('+sway+'px)';
@@ -393,7 +393,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       spots[i].style.left = (12+i*(76/(N-1)) + tilt*0.28) + '%';
       spots[i].style.opacity = 0.55 + Math.sin(phase)*0.3;
       spots[i].style.background = 'radial-gradient(ellipse at center, '+hue+' 0%, rgba(168,85,247,.32) 42%, transparent 74%)';
-      // mini en sync 1:1 � m�me angle, m�me couleur
+      // mini en sync 1:1 — même angle, même couleur
       miniBeams[i].style.transform = 'translateX(-50%) rotate('+ang+'deg)';
       miniBeams[i].style.background = 'linear-gradient(180deg, '+hue+' 0%, rgba(192,132,252,.42) 28%, transparent 76%)';
       miniBeams[i].style.opacity = beams[i].style.opacity;
@@ -414,14 +414,12 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   enter && enter.addEventListener('click', forceDismiss);
   skip && skip.addEventListener('click', forceDismiss);
   document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') forceDismiss(); });
-  // Emp�che le scroll derri�re le splash tant qu'il est visible
+  // Empêche le scroll derrière le splash tant qu'il est visible
   document.body.style.overflow='hidden';
   raf=requestAnimationFrame(frame);
-  // Auto-dismiss m�me si JS bloqu� : secours 8s
+  // Auto-dismiss même si JS bloqué : secours 8s
   setTimeout(()=>{ if(!splash.hidden) forceDismiss(); }, 8200);
 })();
 </script>
-<style>.dl-float{position:fixed;bottom:24px;right:24px;z-index:9999}.dl-float a{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;background:linear-gradient(135deg,#a855f7,#7c3aed);color:#fff;text-decoration:none;border-radius:12px;font-weight:700;font-size:14px;box-shadow:0 4px 14px rgba(168,85,247,.4);transition:transform .2s,box-shadow .2s}.dl-float a:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(168,85,247,.5)}</style><div class="dl-float"><a href="./telecharger.html">Télécharger gratuitement</a></div></body>
+</body>
 </html>
-
-
