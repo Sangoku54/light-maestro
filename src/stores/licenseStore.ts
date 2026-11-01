@@ -151,19 +151,22 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
         set({ loginError: 'checkoutNoUrl' });
         return null;
       }
+      // Convertir les chemins relatifs en URL absolue pour window.open
+      const BASE = 'https://light-maestro.com/api';
+      const fullUrl = /^https?:\/\//i.test(url) ? url : `${BASE}${url}`;
       // Essayer openUrl (main process → shell.openExternal)
-      let opened = await a.openUrl(url).catch((e: any) => {
+      let opened = await a.openUrl(fullUrl).catch((e: any) => {
         console.error('[license] openUrl erreur', e);
         return null;
       });
       if (opened?.ok) {
-        console.log('[license] openUrl ok', url);
+        console.log('[license] openUrl ok', fullUrl);
       } else {
         // Fallback robuste : ouvrir dans le navigateur par défaut
         console.warn('[license] openUrl failed, using default browser');
-        window.open(url, '_blank');
+        window.open(fullUrl, '_blank');
       }
-      return url;
+      return fullUrl;
     } catch (e: any) {
       console.error('[license] checkout exception', e);
       const msg = e?.message || String(e);

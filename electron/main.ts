@@ -16,7 +16,7 @@ import { AudioAnalyzer } from './audio/analyzer';
 import { crashLogger } from './utils/crash-logger';
 import { packProject, unpackProject } from './project-envelope';
 import { LicenseStore } from './license/store';
-import { loginWithLicense, registerWithLicense, refreshLicense, startCheckout, LicenseError } from './license/server';
+import { loginWithLicense, registerWithLicense, refreshLicense, startCheckout, LicenseError, LICENSE_API_URL } from './license/server';
 
 // Disable GPU cache to avoid permission errors on Windows
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
@@ -872,8 +872,11 @@ ipcMain.handle('license:refresh', async () => {
 });
 ipcMain.handle('license:openUrl', async (_event, url: string) => {
   try {
-    if (!/^https:\/\//i.test(url)) return { ok: false };
-    await shell.openExternal(url);
+    // Accept relative paths (e.g. /api/stripe/upgrade.php) → resolve to full URL
+    let fullUrl = url;
+    if (/^\//.test(url)) fullUrl = LICENSE_API_URL + url;
+    else if (!/^https?:\/\//i.test(fullUrl)) return { ok: false };
+    await shell.openExternal(fullUrl);
     return { ok: true };
   } catch {
     return { ok: false };

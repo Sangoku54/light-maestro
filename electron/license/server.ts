@@ -77,6 +77,11 @@ async function postJson(
     if (res.status === 401) {
       throw new LicenseError('invalid_credentials', data?.error || 'Identifiants invalides');
     }
+    if (res.status === 409 && data?.error === 'use_upgrade') {
+      // Cas spécial : l'user a déjà Standard et essaie d'acheter Full
+      // → on retourne l'objet tel quel pour que le caller gère le redirect
+      return data;
+    }
     if (res.status === 409) {
       throw new LicenseError('email_taken', data?.message || 'Un compte existe déjà avec cet email');
     }
@@ -180,6 +185,11 @@ export async function startCheckout(
     console.log('[license:startCheckout] appel /stripe/checkout.php edition=', edition);
     const data = await postJson('/stripe/checkout.php', { edition }, token);
     console.log('[license:startCheckout] repondu', JSON.stringify(data));
+    // Cas use_upgrade : redirect vers l'upgrade (Standard → Full à 30 €)
+    if (data && typeof data.upgrade_url === 'string') {
+      console.log('[license:startCheckout] use_upgrade →', data.upgrade_url);
+      return data.upgrade_url;
+    }
     const url = typeof data.url === 'string' ? data.url : null;
     if (!url) {
       console.warn('[license:startCheckout] pas d\'URL dans la reponse', data);
