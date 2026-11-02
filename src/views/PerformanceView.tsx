@@ -1778,6 +1778,7 @@ const VCWidgetRenderer: React.FC<{
   const [resizing, setResizing] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [origPos, setOrigPos] = useState({ x: 0, y: 0 });
+  const [origFrameId, setOrigFrameId] = useState<string | null>(null);
   const [origSize, setOrigSize] = useState({ w: 0, h: 0 });
   const vcUpdateWidget = usePerformStore((s) => s.vcUpdateWidget);
   const gridSnap = usePerformStore((s) => s.vcGridSnap);
@@ -1786,56 +1787,75 @@ const VCWidgetRenderer: React.FC<{
 
   const snap = (v: number) => gridSnap ? Math.round(v / GRID_SIZE) * GRID_SIZE : v;
 
-  // Drag — les origines sont des LOCALES capturées (pas le state) : le
-  // setState est asynchrone, lire dragStart/origPos dans onMove utilisait les
-  // valeurs du rendu précédent → la tuile « se sauvait » au premier mouvement.
+  // Drag — toujours lire le store fraîchement (pas les props figées) pour
+  // gérer le repositionnement à l'intérieur d'un frame sans que le widget
+  // ne s'échappe.
   const handleDragStart = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     e.stopPropagation();
     setDragging(true);
     const startX = e.clientX;
     const startY = e.clientY;
-    // Position ABSOLUE au canvas (relève le frameId si présent)
-    let absX = widget.x;
-    let absY = widget.y;
-    if (widget.frameId) {
-      const frame = usePerformStore.getState().vcWidgets.find(w => w.id === widget.frameId && w.pageIndex === activePage);
-      if (frame) {
-        absX = frame.x + widget.x;
-        absY = frame.y + 32 + widget.y;
-      }
-    }
+    // Lire la position actuelle fraîchement depuis le store
+    const cur = usePerformStore.getState().vcWidgets.find(w => w.id === widget.id);
+    if (!cur) return;
     setDragStart({ x: startX, y: startY });
-    setOrigPos({ x: absX, y: absY });
+    setOrigPos({ x: cur.x, y: cur.y });
+    setOrigFrameId(cur.frameId ?? null);
 
     const onMove = (ev: MouseEvent) => {
-      const newAbsX = snap(origPos.x + ev.clientX - startX);
-      const newAbsY = snap(origPos.y + ev.clientY - startY);
+      const dx = snap(ev.clientX - startX);
+      const dy = snap(ev.clientY - startY);
+      const newX = snap(origPos.x + dx);
+      const newY = snap(origPos.y + dy);
 
-      // Détecter si on entre/sort d'un frame pendant le drag
+      // Lire le store fraîchement à chaque frame de mouvement
       const allWidgets = usePerformStore.getState().vcWidgets;
-      const targetFrame = allWidgets.find(f =>
-        f.type === 'frame' &&
-        f.pageIndex === activePage &&
-        f.id !== widget.id &&
-        newAbsX >= f.x &&
-        newAbsX + widget.width <= f.x + f.width &&
-        newAbsY >= f.y + 32 &&
-        newAbsY + widget.height <= f.y + f.height
-      );
+      const curW = allWidgets.find(w => w.id === widget.id);
+      if (!curW) return;
 
-      if (targetFrame) {
-        vcUpdateWidget(widget.id, {
-          frameId: targetFrame.id,
-          x: newAbsX - targetFrame.x,
-          y: newAbsY - (targetFrame.y + 32),
-        });
+      // Si le widget est dans un frame, ses x/y sont relatifs au frame.
+      // Sinon, ce sont des coordonnées absolues au canvas.
+      if (curW.frameId) {
+        const frame = allWidgets.find(
+          f => f.type === 'frame' && f.pageIndex === activePage && f.id === curW.frameId
+        );
+        if (frame) {
+          // Vérifier que la nouvelle position reste dans le contenu du frame
+          // (sous la barre de titre de 32px)
+          if (
+            newX >= 0 &&
+            newX + curW.width <= frame.width &&
+            newY >= 0 &&
+            newY + curW.height <= frame.height - 32
+          ) {
+            vcUpdateWidget(widget.id, { x: newX, y: newY, frameId: curW.frameId });
+          }
+          // Sinon : on ne bouge pas (le widget reste coincé dans le frame
+          // jusqu'à ce qu'on le sorte explicitement).
+        }
       } else {
-        vcUpdateWidget(widget.id, {
-          frameId: null,
-          x: newAbsX,
-          y: newAbsY,
-        });
+        // Widget hors frame : coordonnées absolues au canvas.
+        // Vérifier si on entre dans un frame.
+        const targetFrame = allWidgets.find(
+          f =>
+            f.type === 'frame' &&
+            f.pageIndex === activePage &&
+            f.id !== widget.id &&
+            newX >= f.x &&
+            newX + curW.width <= f.x + f.width &&
+            newY >= f.y + 32 &&
+            newY + curW.height <= f.y + f.height
+        );
+        if (targetFrame) {
+          vcUpdateWidget(widget.id, {
+            frameId: targetFrame.id,
+            x: newX - targetFrame.x,
+            y: newY - (targetFrame.y + 32),
+          });
+        } else {
+          vcUpdateWidget(widget.id, { x: newX, y: newY, frameId: null });
+        }
       }
     };
 

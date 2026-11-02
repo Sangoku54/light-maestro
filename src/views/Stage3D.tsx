@@ -5974,16 +5974,28 @@ export function headingRadForPos(pos: FixturePos, mountMode: string, _stageDims:
    //   ground  côté gauche/droit   → faisceau vers le centre de la scène
    //   ground  devant (y < 0.25)   → faisceau vers l'arrière (+Z)
    //   hanging / top               → faisceau vers le public (-Z)
-   if (mountMode === 'rear') {
+   //
+   // mountMode peut être obsolète (fixtures créées avant ce fix) : on le
+   // ré-derive depuis la position quand il s'agit d'une valeur par défaut.
+   let mode = mountMode;
+   if (mode === 'hanging' || mode === 'top') {
+     if (pos.y > 0.75) mode = 'rear';
+     else if (pos.y < 0.25) mode = 'ground';
+     else if (pos.x < 0.25 || pos.x > 0.75) mode = 'ground';
+     // sinon reste hanging/top → public
+   }
+   if (mode === 'rear') {
      return 0;
    }
-   if (mountMode === 'ground') {
+   if (mode === 'ground') {
      if (pos.y < 0.25) {
        // Sol, devant : faisceau vers l'arrière (+Z)
        return Math.PI;
      }
      if (pos.x < 0.25 || pos.x > 0.75) {
        // Sol, côté : faisceau vers le centre de la scène (0.5, 0.5)
+       // pos.x < 0.5 (gauche) → dx négatif → rotation -Z vers +X (droite, centre)
+       // pos.x > 0.5 (droite) → dx positif → rotation -Z vers -X (gauche, centre)
        const dx = pos.x - 0.5;
        const dz = pos.y - 0.5;
        return Math.atan2(dx, -dz);
