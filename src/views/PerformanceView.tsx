@@ -1789,7 +1789,8 @@ const VCWidgetRenderer: React.FC<{
 
   // Drag — toujours lire le store fraîchement (pas les props figées) pour
   // gérer le repositionnement à l'intérieur d'un frame sans que le widget
-  // ne s'échappe.
+  // ne s'échappe. Toutes les calculs se font en coordonnées ABSOLUES au
+  // canvas ; on ne convertit en relatives au frame qu'à l'écriture.
   const handleDragStart = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     e.stopPropagation();
@@ -1799,40 +1800,49 @@ const VCWidgetRenderer: React.FC<{
     // Lire la position actuelle fraîchement depuis le store
     const cur = usePerformStore.getState().vcWidgets.find(w => w.id === widget.id);
     if (!cur) return;
+    // Convertir en coordonnées ABSOLUES au canvas si le widget est dans un frame
+    let absX = cur.x;
+    let absY = cur.y;
+    if (cur.frameId) {
+      const frame = usePerformStore.getState().vcWidgets.find(
+        f => f.type === 'frame' && f.pageIndex === activePage && f.id === cur.frameId
+      );
+      if (frame) {
+        absX = frame.x + cur.x;
+        absY = frame.y + 32 + cur.y; // 32 = hauteur barre de titre
+      }
+    }
     setDragStart({ x: startX, y: startY });
-    setOrigPos({ x: cur.x, y: cur.y });
+    setOrigPos({ x: absX, y: absY });
     setOrigFrameId(cur.frameId ?? null);
 
     const onMove = (ev: MouseEvent) => {
-      const dx = snap(ev.clientX - startX);
-      const dy = snap(ev.clientY - startY);
-      const newX = snap(origPos.x + dx);
-      const newY = snap(origPos.y + dy);
+      const newAbsX = snap(origPos.x + ev.clientX - startX);
+      const newAbsY = snap(origPos.y + ev.clientY - startY);
 
       // Lire le store fraîchement à chaque frame de mouvement
       const allWidgets = usePerformStore.getState().vcWidgets;
       const curW = allWidgets.find(w => w.id === widget.id);
       if (!curW) return;
 
-      // Si le widget est dans un frame, ses x/y sont relatifs au frame.
-      // Sinon, ce sont des coordonnées absolues au canvas.
+      // Si le widget est dans un frame, vérifier qu'il reste dedans
       if (curW.frameId) {
         const frame = allWidgets.find(
           f => f.type === 'frame' && f.pageIndex === activePage && f.id === curW.frameId
         );
         if (frame) {
-          // Vérifier que la nouvelle position reste dans le contenu du frame
-          // (sous la barre de titre de 32px)
+          // Convertir la position absolue cible en relatives au frame
+          const relX = newAbsX - frame.x;
+          const relY = newAbsY - (frame.y + 32);
           if (
-            newX >= 0 &&
-            newX + curW.width <= frame.width &&
-            newY >= 0 &&
-            newY + curW.height <= frame.height - 32
+            relX >= 0 &&
+            relX + curW.width <= frame.width &&
+            relY >= 0 &&
+            relY + curW.height <= frame.height - 32
           ) {
-            vcUpdateWidget(widget.id, { x: newX, y: newY, frameId: curW.frameId });
+            vcUpdateWidget(widget.id, { x: relX, y: relY, frameId: curW.frameId });
           }
-          // Sinon : on ne bouge pas (le widget reste coincé dans le frame
-          // jusqu'à ce qu'on le sorte explicitement).
+          // Sinon : on ne bouge pas (reste dans le frame)
         }
       } else {
         // Widget hors frame : coordonnées absolues au canvas.
@@ -1842,19 +1852,19 @@ const VCWidgetRenderer: React.FC<{
             f.type === 'frame' &&
             f.pageIndex === activePage &&
             f.id !== widget.id &&
-            newX >= f.x &&
-            newX + curW.width <= f.x + f.width &&
-            newY >= f.y + 32 &&
-            newY + curW.height <= f.y + f.height
+            newAbsX >= f.x &&
+            newAbsX + curW.width <= f.x + f.width &&
+            newAbsY >= f.y + 32 &&
+            newAbsY + curW.height <= f.y + f.height
         );
         if (targetFrame) {
           vcUpdateWidget(widget.id, {
             frameId: targetFrame.id,
-            x: newX - targetFrame.x,
-            y: newY - (targetFrame.y + 32),
+            x: newAbsX - targetFrame.x,
+            y: newAbsY - (targetFrame.y + 32),
           });
         } else {
-          vcUpdateWidget(widget.id, { x: newX, y: newY, frameId: null });
+          vcUpdateWidget(widget.id, { x: newAbsX, y: newAbsY, frameId: null });
         }
       }
     };

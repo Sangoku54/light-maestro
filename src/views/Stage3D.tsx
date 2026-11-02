@@ -6054,10 +6054,14 @@ function fitMountRotation(f3d: Fixture3D, mode: string): void {
   if (mode === 'rear') {
     if (f3d.armGroup) f3d.armGroup.rotation.x = Math.PI / 2;
   } else if (mode === 'ground') {
-    f3d._mountTilt = Math.PI / 2;
-  } else if (mode === 'hanging') {
-    if (f3d.armGroup) f3d.armGroup.rotation.x = Math.PI;
+    // Fixture au sol : tête inclinée vers le bas (head rotation X négative)
+    // pour que le faisceau sorte horizontalement vers l'avant (public).
     f3d._mountTilt = -Math.PI / 2;
+  } else if (mode === 'hanging') {
+    // Fixture suspendue : tête inclinée vers le haut (head rotation X positive)
+    // pour que le faisceau sorte vers le bas (sol).
+    f3d._mountTilt = Math.PI / 2;
+    if (f3d.armGroup) f3d.armGroup.rotation.x = Math.PI;
   }
 
   // Extra heads follow the mount compensation (no independent static tilt)
