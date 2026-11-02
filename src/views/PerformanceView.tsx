@@ -1776,10 +1776,11 @@ const VCWidgetRenderer: React.FC<{
   const { t } = useTranslation();
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [origPos, setOrigPos] = useState({ x: 0, y: 0 });
-  const [origFrameId, setOrigFrameId] = useState<string | null>(null);
-  const [origSize, setOrigSize] = useState({ w: 0, h: 0 });
+  // Use refs for drag state so closures read live values (not stale React state)
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const origPosRef = useRef({ x: 0, y: 0 });
+  const origFrameIdRef = useRef<string | null>(null);
+  const origSizeRef = useRef({ w: 0, h: 0 });
   const vcUpdateWidget = usePerformStore((s) => s.vcUpdateWidget);
   const gridSnap = usePerformStore((s) => s.vcGridSnap);
   const allWidgets = usePerformStore((s) => s.vcWidgets);
@@ -1799,20 +1800,20 @@ const VCWidgetRenderer: React.FC<{
     const store = usePerformStore.getState();
     const cur = store.vcWidgets.find(w => w.id === widget.id);
     if (!cur) return;
-    setDragStart({ x: startX, y: startY });
-    setOrigPos({ x: cur.x, y: cur.y });
-    setOrigFrameId(cur.frameId ?? null);
+    dragStartRef.current = { x: startX, y: startY };
+    origPosRef.current = { x: cur.x, y: cur.y };
+    origFrameIdRef.current = cur.frameId ?? null;
 
     const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
+      const dx = ev.clientX - dragStartRef.current.x;
+      const dy = ev.clientY - dragStartRef.current.y;
       // Seuil de mouvement : ignorer les micro-mouvements au clic pur
       if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
       const sdx = snap(dx);
       const sdy = snap(dy);
       vcUpdateWidget(widget.id, {
-        x: snap(origPos.x + sdx),
-        y: snap(origPos.y + sdy),
+        x: snap(origPosRef.current.x + sdx),
+        y: snap(origPosRef.current.y + sdy),
       });
     };
 
@@ -1868,15 +1869,16 @@ const VCWidgetRenderer: React.FC<{
     setResizing(true);
     const startX = e.clientX;
     const startY = e.clientY;
-    const origW = widget.width;
-    const origH = widget.height;
-    setDragStart({ x: startX, y: startY });
-    setOrigSize({ w: origW, h: origH });
+    const store = usePerformStore.getState();
+    const cur = store.vcWidgets.find(w => w.id === widget.id);
+    if (!cur) return;
+    origSizeRef.current = { w: cur.width, h: cur.height };
+    dragStartRef.current = { x: startX, y: startY };
 
     const onMove = (ev: MouseEvent) => {
       vcUpdateWidget(widget.id, {
-        width: Math.max(40, snap(origW + ev.clientX - startX)),
-        height: Math.max(30, snap(origH + ev.clientY - startY)),
+        width: Math.max(40, snap(origSizeRef.current.w + ev.clientX - dragStartRef.current.x)),
+        height: Math.max(30, snap(origSizeRef.current.h + ev.clientY - dragStartRef.current.y)),
       });
     };
 

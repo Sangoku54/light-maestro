@@ -2522,7 +2522,13 @@ export const Stage3D: React.FC<{
         const stageY = deckTopAt(stageDecksRef.current, pos.x, pos.y) + pos.h;
         f3d.group.position.set(stageX, stageY, stageZ);
         f3d.group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(f3d.channelMap));
-        if (pos.mountMode) f3d.mountMode = pos.mountMode;
+        if (pos.mountMode) {
+          f3d.mountMode = pos.mountMode;
+          // Reset _baseTilt and headGroup rotation to match new mount mode
+          const newBaseTilt = (pos.mountMode === 'rear' || pos.mountMode === 'ground' || pos.mountMode === 'hanging') ? Math.PI / 2 : 0;
+          f3d._baseTilt = newBaseTilt;
+          if (f3d.headGroup) f3d.headGroup.rotation.x = newBaseTilt;
+        }
         // fitMountRotation supprimé : mount géré dans la boucle de rendu via mountComp
         f3d.group.rotation.x = 0;
         if (f3d.armGroup) f3d.armGroup.rotation.x = 0;
@@ -2603,7 +2609,12 @@ export const Stage3D: React.FC<{
       const stageY = deckTopAt(stageDecksRef.current, pos.x, pos.y) + pos.h;
       f3d.group.position.set(stageX, stageY, stageZ);
       f3d.group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(f3d.channelMap));
-      if (pos.mountMode) f3d.mountMode = pos.mountMode;
+      if (pos.mountMode) {
+        f3d.mountMode = pos.mountMode;
+        const newBaseTilt = (pos.mountMode === 'rear' || pos.mountMode === 'ground' || pos.mountMode === 'hanging') ? Math.PI / 2 : 0;
+        f3d._baseTilt = newBaseTilt;
+        if (f3d.headGroup) f3d.headGroup.rotation.x = newBaseTilt;
+      }
       // fitMountRotation supprimé : mount géré dans la boucle de rendu via mountComp
       f3d.group.rotation.x = 0;
       if (f3d.armGroup) f3d.armGroup.rotation.x = 0;
