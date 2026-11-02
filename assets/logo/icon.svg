@@ -1,42 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="fan0" gradientUnits="userSpaceOnUse" x1="300" y1="240" x2="334.93" y2="75.67">
-      <stop offset="0%" stop-color="#a855f7" stop-opacity="0.9"/>
-      <stop offset="100%" stop-color="#a855f7" stop-opacity="0"/>
+    <linearGradient id="lmGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#60a5fa;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#a855f7;stop-opacity:1" />
     </linearGradient>
-    <linearGradient id="fan1" gradientUnits="userSpaceOnUse" x1="300" y1="240" x2="431.99" y2="103.33">
-      <stop offset="0%" stop-color="#c084fc" stop-opacity="0.95"/>
-      <stop offset="100%" stop-color="#c084fc" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="fan2" gradientUnits="userSpaceOnUse" x1="300" y1="240" x2="463.01" y2="199.36">
-      <stop offset="0%" stop-color="#a855f7" stop-opacity="0.9"/>
-      <stop offset="100%" stop-color="#a855f7" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="thin0" gradientUnits="userSpaceOnUse" x1="300" y1="240" x2="364.79" y2="118.15">
-      <stop offset="0%" stop-color="#c084fc" stop-opacity="0.55"/>
-      <stop offset="100%" stop-color="#c084fc" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="thin1" gradientUnits="userSpaceOnUse" x1="300" y1="240" x2="419.51" y2="171.00">
-      <stop offset="0%" stop-color="#c084fc" stop-opacity="0.55"/>
-      <stop offset="100%" stop-color="#c084fc" stop-opacity="0"/>
-    </linearGradient>
-    <radialGradient id="tipglow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="rgba(255,255,255,0.55)"/>
-      <stop offset="40%" stop-color="rgba(255,255,255,0.20)"/>
-      <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
-    </radialGradient>
   </defs>
-  
-  <path d="M300,240 L311.72,72.41 L357.46,82.13 Z" fill="url(#fan0)"/>
-  <path d="M300,240 L408.98,84.36 L451.74,125.66 Z" fill="url(#fan1)"/>
-  <path d="M300,240 L455.77,177.07 L467.08,222.44 Z" fill="url(#fan2)"/>
-  <path d="M300,240 L358.32,114.93 L371.08,121.71 Z" fill="url(#thin0)"/>
-  <path d="M300,240 L415.74,164.84 L422.96,177.35 Z" fill="url(#thin1)"/>
-    <line x1="300" y1="240" x2="438.93" y2="96.13" stroke="#ffffff" stroke-width="4" stroke-linecap="round" opacity="0.8"/>
-  <circle cx="300" cy="240" r="58.0" fill="url(#tipglow)"/>
-    <line x1="180.5" y1="363.7" x2="300.0" y2="240.0" stroke="rgba(255,255,255,0.10)" stroke-width="26" stroke-linecap="round"/>
-    <line x1="180.5" y1="363.7" x2="300.0" y2="240.0" stroke="#ede8dc" stroke-width="13" stroke-linecap="round" opacity="0.72"/>
-    <line x1="180.5" y1="363.7" x2="300.0" y2="240.0" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.95"/>
-    <circle cx="300" cy="240" r="7.5" fill="#ffffff"/>
-    <g stroke="#ffffff" stroke-width="2" stroke-linecap="round" opacity="0.9"><line x1="311.0" y1="240.0" x2="318.0" y2="240.0"/><line x1="307.8" y1="247.8" x2="312.7" y2="252.7"/><line x1="300.0" y1="251.0" x2="300.0" y2="258.0"/><line x1="292.2" y1="247.8" x2="287.3" y2="252.7"/><line x1="289.0" y1="240.0" x2="282.0" y2="240.0"/><line x1="292.2" y1="232.2" x2="287.3" y2="227.3"/><line x1="300.0" y1="229.0" x2="300.0" y2="222.0"/><line x1="307.8" y1="232.2" x2="312.7" y2="227.3"/></g>
+  <rect width="512" height="512" rx="120" fill="#0a0a0f" />
+  <path d="M 160 320 L 160 160 L 260 160 L 260 220 L 340 220 L 340 320 L 260 320 L 260 260 L 160 260 Z" fill="url(#lmGrad)" />
+  <text x="256" y="420" font-family="Arial, sans-serif" font-size="64" font-weight="bold" fill="#ffffff" text-anchor="middle">LM</text>
 </svg>

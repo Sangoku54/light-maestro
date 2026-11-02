@@ -764,7 +764,9 @@ export const Stage3D: React.FC<{
   // for new roster entries, never overwrite already-placed musicians.
   useEffect(() => {
     const defaults = buildRosterPositions(musicians);
-    musicianPositionsRef.current = { ...musicianPositionsRef.current, ...defaults };
+    // Les positions personnalisées (déjà placées par l'utilisateur) prennent le
+    // dessus sur les defaults : on ne doit JAMAIS écraser un musicien déjà déplacé.
+    musicianPositionsRef.current = { ...defaults, ...musicianPositionsRef.current };
   }, [musicians]);
 
   // Clear any stale test state when the 3D view opens so fixtures start dark
@@ -5958,11 +5960,33 @@ function updateFixtureSupport(
  * Pour une fixture SANS pan/tilt (par, bar�), le heading (drag de rotation)
  * reste le seul outil d'aim ? respect� si ? 0.
  */
-export function headingRadForPos(pos: FixturePos, _mountMode: string, _stageDims: { width: number; depth: number }, hasPanTilt = true): number {
+export function headingRadForPos(pos: FixturePos, mountMode: string, _stageDims: { width: number; depth: number }, hasPanTilt = true): number {
    if (!hasPanTilt && pos.heading) return ((pos.heading ?? 0) * Math.PI) / 180;
-   // Toutes les fixtures visent le CENTRE de la sc�ne, quelque soit leur position.
-   // Heading = atan2(x - 0.5, y - 0.5) car le faisceau neutre pointe vers -Z (public).
-   return Math.atan2(pos.x - 0.5, pos.y - 0.5);
+   // Règle d'orientation par défaut (vue audience) — faisceau neutre vers -Z (public),
+   // sauf cas particuliers :
+   //   rear    (arrière de scène)  → faisceau vers l'avant (public), parallèle au sol
+   //   ground  côté gauche/droit   → faisceau vers le centre de la scène
+   //   ground  devant (y < 0.25)   → faisceau vers l'arrière (+Z)
+   //   hanging / top               → faisceau vers le public (-Z)
+   if (mountMode === 'rear') {
+     return 0;
+   }
+   if (mountMode === 'ground') {
+     if (pos.y < 0.25) {
+       // Sol, devant : faisceau vers l'arrière (+Z)
+       return Math.PI;
+     }
+     if (pos.x < 0.25 || pos.x > 0.75) {
+       // Sol, côté : faisceau vers le centre de la scène (0.5, 0.5)
+       const dx = 0.5 - pos.x;
+       const dz = 0.5 - pos.y;
+       return Math.atan2(dx, -dz);
+     }
+     // Sol, centre : vers le public
+     return 0;
+   }
+   // hanging et top : faisceau vers le public (-Z)
+   return 0;
 }
 /** True si la fixture a au moins un canal pan/tilt DMX (fixture motoris�e). */
 export function hasPanTiltChannels(cm: { panOffsets?: number[]; panOffset?: number | null; tiltOffsets?: number[]; tiltOffset?: number | null; scanXOffset?: number | null; scanYOffset?: number | null }): boolean {

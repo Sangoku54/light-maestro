@@ -256,7 +256,7 @@ const VirtualConsolePanel: React.FC = () => {
     startedAudios: Set<string>;
   } | null>(null);
 
-  const pageWidgets = widgets.filter((w) => w.pageIndex === activePage);
+  const pageWidgets = widgets.filter((w) => w.pageIndex === activePage && !w.frameId);
 
   // Close palette on outside click
   useEffect(() => {
@@ -1781,6 +1781,8 @@ const VCWidgetRenderer: React.FC<{
   const [origSize, setOrigSize] = useState({ w: 0, h: 0 });
   const vcUpdateWidget = usePerformStore((s) => s.vcUpdateWidget);
   const gridSnap = usePerformStore((s) => s.vcGridSnap);
+  const allWidgets = usePerformStore((s) => s.vcWidgets);
+  const activePage = usePerformStore((s) => s.vcActivePage);
 
   const snap = (v: number) => gridSnap ? Math.round(v / GRID_SIZE) * GRID_SIZE : v;
 
@@ -1809,6 +1811,30 @@ const VCWidgetRenderer: React.FC<{
       setDragging(false);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+
+      // Détecter si le widget est maintenant à l'intérieur d'un frame
+      const cur = allWidgets.find(w => w.id === widget.id);
+      if (!cur) return;
+      const frames = allWidgets.filter(
+        w => w.type === 'frame' && w.pageIndex === activePage && w.id !== widget.id
+      );
+      const targetFrame = frames.find(f => {
+        const contentTop = f.y + 32; // après la barre de titre
+        return cur.x >= f.x &&
+               cur.x + cur.width <= f.x + f.width &&
+               cur.y >= contentTop &&
+               cur.y + cur.height <= f.y + f.height;
+      });
+      if (targetFrame) {
+        vcUpdateWidget(widget.id, {
+          frameId: targetFrame.id,
+          x: cur.x - targetFrame.x,
+          y: cur.y - (targetFrame.y + 32),
+        });
+      } else if (cur.frameId) {
+        // Hors de tout frame : on détache
+        vcUpdateWidget(widget.id, { frameId: null });
+      }
     };
 
     document.addEventListener('mousemove', onMove);
@@ -1852,7 +1878,7 @@ const VCWidgetRenderer: React.FC<{
     case 'group-master':
       return <VCGroupMasterWidget widget={widget} onDragStart={handleDragStart} onResizeStart={handleResizeStart} onContextMenu={onContextMenu} />;
     case 'frame':
-      return <VCFrameWidget widget={widget} onDragStart={handleDragStart} onResizeStart={handleResizeStart} onContextMenu={onContextMenu} />;
+      return <VCFrameWidget widget={widget} onDragStart={handleDragStart} onResizeStart={handleResizeStart} onContextMenu={onContextMenu} onShow3D={onShow3D} />;
     default:
       return null;
   }
@@ -2632,7 +2658,8 @@ const VCFrameWidget: React.FC<{
   onDragStart: (e: React.MouseEvent) => void;
   onResizeStart: (e: React.MouseEvent) => void;
   onContextMenu: (x: number, y: number) => void;
-}> = ({ widget, onDragStart, onResizeStart, onContextMenu }) => {
+  onShow3D?: () => void;
+}> = ({ widget, onDragStart, onResizeStart, onContextMenu, onShow3D }) => {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(widget.config.collapsed || false);
   const vcUpdateWidget = usePerformStore((s) => s.vcUpdateWidget);
@@ -2678,12 +2705,20 @@ const VCFrameWidget: React.FC<{
 
       {/* Content area */}
       {!collapsed && (
-        <div className="p-2" style={{ height: widget.height - 32 }}>
+        <div className="p-2" style={{ height: widget.height - 32, position: 'relative' }}>
           {childWidgets.length === 0 && (
             <div className="flex items-center justify-center h-full text-[10px] text-gray-700">
               {t('perform.vc.dragWidgetsHere')}
             </div>
           )}
+          {childWidgets.map((child) => (
+            <VCWidgetRenderer
+              key={child.id}
+              widget={child}
+              onContextMenu={(x, y) => onContextMenu(x, y)}
+              onShow3D={onShow3D}
+            />
+          ))}
         </div>
       )}
 
