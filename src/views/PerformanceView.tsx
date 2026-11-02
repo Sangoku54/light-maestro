@@ -2445,7 +2445,7 @@ const VCButtonWidget: React.FC<{
 
       {/* Button */}
       <button
-        onMouseDown={(e) => { handleMouseDown(e); }}
+        onMouseDown={(e) => { e.stopPropagation(); handleMouseDown(e); }}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onClick={handleClick}

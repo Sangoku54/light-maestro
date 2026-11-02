@@ -3074,7 +3074,7 @@ export const Stage3D: React.FC<{
           const dmxTilt = ((tiltVal / 255) - 0.5) * tiltRangeRad;
           const rawElev = dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180;
           const elevation = freeAim ? rawElev : clampTiltZone(rawElev, f3d.mountMode);
-          const tiltTarget = f3d._mountTilt + elevation;
+          const tiltTarget = (f3d._mountTilt ?? 0) + elevation;
           const tiltDelta = tiltTarget - f3d.headGroup.rotation.x;
           const tiltMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
           f3d.headGroup.rotation.x += Math.abs(tiltDelta) > tiltMaxStep
@@ -6033,31 +6033,27 @@ export function clampTiltZone(elevRad: number, mountMode: string): number {
 }
 
 function fitMountRotation(f3d: Fixture3D, mode: string): void {
-  // Keep the base at the bottom in all modes.
-  // Rotate only the head tilt compensation (_mountTilt), never armGroup.x.
-  // armGroup.rotation.x is left at 0 so it never interferes with the beam.
-  //
-  // Chaque compensation produit un faisceau NEUTRE horizontal vers -Z (public)
-  // à tilt DMX neutre (elevation = 0). Seul le mode 'top' garde le faisceau
-  // vers le bas.
-  //
-  //   rear    : _mountTilt = +p/2 → (0,0,-1)  faisceau vers l'avant
-  //   ground  : _mountTilt = +p/2 → (0,0,-1)  faisceau vers l'avant
-  //   hanging : _mountTilt = +p/2 → (0,0,-1)  faisceau vers l'avant
-  //   top     : _mountTilt = 0      → (0,-1,0)  faisceau vers le bas
-
+  // Reset complet : pas de rotation statique sur armGroup.
   f3d.group.rotation.x = 0;
   if (f3d.armGroup) f3d.armGroup.rotation.x = 0;
   f3d._mountTilt = 0;
 
-  if (mode === 'rear' || mode === 'ground' || mode === 'hanging') {
-    // +π/2 autour de X : le faisceau qui sort vers -Y local pointe vers -Z (public)
-    f3d._mountTilt = Math.PI / 2;
+  // À tilt DMX neutre (elevation = 0), le faisceau doit pointer horizontalement
+  // vers l'avant (-Z, public). Le faisceau sort le long de -Y local, donc il
+  // faut +π/2 autour de X pour transformer (0,-1,0) en (0,0,-1).
+  if (f3d.headGroup) {
+    if (mode === 'rear' || mode === 'ground' || mode === 'hanging') {
+      f3d.headGroup.rotation.x = Math.PI / 2;
+      f3d._mountTilt = Math.PI / 2;
+    }
+    // mode 'top' : rotation.x reste 0 → faisceau vers le bas (-Y)
   }
-  // top : _mountTilt reste 0 → faisceau vers le bas (-Y)
 
-  // Extra heads follow the mount compensation
+  // Extra heads suivent la même compensation
   for (const eh of f3d.extraHeads ?? []) {
     eh._mountTilt = f3d._mountTilt;
+    if (eh.headGroup) {
+      eh.headGroup.rotation.x = f3d._mountTilt;
+    }
   }
 }
