@@ -6015,7 +6015,7 @@ export function headingRadForPos(pos: FixturePos, mountMode: string, _stageDims:
    //   x > 0.5 (droite)  → phi < 0 → faisceau vers la gauche
    //   x = 0.5 (centre)  → phi = 0 → faisceau droit vers le public (-Z)
    // y détermine l'inclinaison avant/arrière du faisceau
-   return Math.atan2(0.5 - pos.x, pos.y - 0.5);
+   return Math.atan2(0.5 - pos.x, Math.abs(pos.y - 0.5));
 }
 /** True si la fixture a au moins un canal pan/tilt DMX (fixture motoris�e). */
 export function hasPanTiltChannels(cm: { panOffsets?: number[]; panOffset?: number | null; tiltOffsets?: number[]; tiltOffset?: number | null; scanXOffset?: number | null; scanYOffset?: number | null }): boolean {

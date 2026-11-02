@@ -1,6 +1,6 @@
 /**
  * Validation des directions de faisceaux :
- * - rear / ground / hanging : visent le CENTRE de la scène (phi = atan2(0.5-x, y-0.5))
+ * - rear / ground / hanging : visent le CENTRE de la scène (phi = atan2(0.5-x, |y-0.5|))
  *   gauche → phi > 0 → faisceau vers la droite
  *   droite → phi < 0 → faisceau vers la gauche
  *   centre → phi = 0 → faisceau droit devant le public
@@ -22,7 +22,6 @@ function pie(a: number): number {
 
 function worldBeamDir(phi: number): { x: number; z: number } {
   // Beam direction after armGroup rotation around Y: (sin(phi), -cos(phi))
-  // because the default beam points along local -Z and R_y(phi) * (0,0,-1) = (sin(phi), -cos(phi))
   return { x: Math.sin(phi), z: -Math.cos(phi) };
 }
 
@@ -49,13 +48,13 @@ describe('headingRadForPos — rear/ground/hanging visent le centre de la scène
     }
   });
 
-  it('devant centre (x=0.5, y=0.1) : phi = atan2(0, -0.4) = PI, vers l\'arriere de scene', () => {
+  it('devant centre (x=0.5, y=0.1) : phi = atan2(0, 0.4) = 0, vers l\'avant', () => {
     const pos = { x: 0.5, y: 0.1, h: 0.6, heading: 0 };
     for (const mode of ['hanging', 'rear', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      expect(pie(phi)).toBeCloseTo(Math.PI, 9);
+      expect(pie(phi)).toBeCloseTo(0, 9);
       const dir = worldBeamDir(phi);
-      expect(dir.z).toBeGreaterThan(0.99); // vers l'arrière (+Z, vers fond de scene)
+      expect(dir.z).toBeLessThan(-0.99); // vers l'avant (-Z)
     }
     // top : heading indifferent
     const phiTop = headingRadForPos(pos as any, 'top', DIMS);
@@ -96,6 +95,8 @@ describe('headingRadForPos — rear/ground/hanging visent le centre de la scène
         // Cotes : dir.x oppose au cote (gauche -> droite, droite -> gauche)
         if (pos.x < 0.5) expect(dir.x).toBeGreaterThan(0);
         if (pos.x > 0.5) expect(dir.x).toBeLessThan(0);
+        // Toujours vers l'avant (-Z)
+        expect(dir.z).toBeLessThan(-0.5);
       }
     }
   });
