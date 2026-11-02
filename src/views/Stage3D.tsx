@@ -1471,9 +1471,17 @@ export const Stage3D: React.FC<{
         exit.name = 'lightExit';
         eh.add(exit);
         armGroup.add(eh);
-        extraHeads.push({ headGroup: eh, lightTarget: exit, tiltOffset: off, _mountTilt: 0 });
+        extraHeads.push({ headGroup: eh, lightTarget: exit, tiltOffset: off, _mountTilt: baseTilt });
       });
     }
+
+    // Base tilt compensation per mount mode — set once at creation.
+    // Beam exits along local -Y; +π/2 around X makes it point to -Z (front audience).
+    let baseTilt = 0;
+    if (pos.mountMode === 'rear' || pos.mountMode === 'ground' || pos.mountMode === 'hanging') {
+      baseTilt = Math.PI / 2;
+    }
+    // top: baseTilt stays 0 → beam points down (-Y)
 
     // Multi-head RGB fixtures (e.g. spider with N RGBW heads, no pan/tilt per head).
     // Each head gets its own RGB segment and is positioned in a circle.
@@ -1498,7 +1506,7 @@ export const Stage3D: React.FC<{
         exit.name = 'lightExit';
         eh.add(exit);
         group.add(eh);
-        extraHeads.push({ headGroup: eh, lightTarget: exit, tiltOffset: 0, _mountTilt: 0, rgbSegmentIdx: k });
+        extraHeads.push({ headGroup: eh, lightTarget: exit, tiltOffset: 0, _mountTilt: baseTilt, rgbSegmentIdx: k });
       }
     }
 
@@ -1541,14 +1549,6 @@ export const Stage3D: React.FC<{
         eh.headGroup.add(ehSpr);
       }
     }
-
-    // Base tilt compensation per mount mode — set once at creation.
-    // Beam exits along local -Y; +π/2 around X makes it point to -Z (front audience).
-    let baseTilt = 0;
-    if (pos.mountMode === 'rear' || pos.mountMode === 'ground' || pos.mountMode === 'hanging') {
-      baseTilt = Math.PI / 2;
-    }
-    // top: baseTilt stays 0 → beam points down (-Y)
 
     return {
       id: fixture.id,
