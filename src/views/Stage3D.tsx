@@ -2892,7 +2892,7 @@ export const Stage3D: React.FC<{
          }
          // Auto-sweep: slow stage scan when no DMX for 3+ seconds
         const idleSec = (performance.now() - dmxLastActivityRef.current) / 1000;
-        if (idleSec > 3 && f3d.armGroup && f3d.headGroup) {
+        if (idleSec > 3 && f3d.armGroup && f3d.headGroup && hasPanTiltChannels(f3d.channelMap)) {
           const t = performance.now() * 0.001;
           const panTarget = Math.sin(t * 0.4) * 0.7 * Math.PI;
           const tiltTarget = f3d._baseTilt + Math.sin(t * 0.35 + 1.2) * 0.35 * Math.PI + (f3d._staticTilt ?? 0);
