@@ -35,7 +35,7 @@ import {
   type DmxFixtureCapability,
 } from '../hooks/dmx-cues';
 import { useTranslation } from 'react-i18next';
-import { Eye, Camera, Maximize2, ChevronUp, PanelTop, PanelRight, Users, GripVertical, X, LayoutGrid, Music, Zap, List, Search, Crosshair, Sparkles, LampDesk, Undo2, RotateCcw } from 'lucide-react';
+import { Eye, Camera, Maximize2, Minimize2, ChevronUp, PanelTop, PanelBottom, PanelRight, Users, GripVertical, X, LayoutGrid, Music, Zap, List, Search, Crosshair, Sparkles, LampDesk, Undo2, RotateCcw, Home, ArrowLeft, Layers } from 'lucide-react';
 import { DEFAULT_POSITIONS, MUSICIAN_KINDS, isRosterEmpty, normalizeRoster, rosterTotal, type MusicianKind, type MusicianRoster } from '../utils/musicians';
 import { SUPPORT_KINDS, isBarSupport, needsSupportGeometry, resolveSupportKind, supportColumnHeight, DEFAULT_BAR_SPAN, BAR_HUNG_DEFAULT, BAR_DROP, BAR_CABLE_LEN, type FixtureSupport } from '../utils/supports';
 import { deckTopAt, deckRectMeters, deckToMeters, deckFromMeters, type StageDeck } from '../utils/stage-decks';
@@ -5157,10 +5157,10 @@ export const Stage3D: React.FC<{
                 </div>
                 <div className="grid grid-cols-4 gap-1">
                   {([
-                    { v: 'top' as const, label: t('stage3D.mountTop'), icon: '??', tip: { title: t('stage3D.mountTopTipTitle'), text: t('stage3D.mountTopTipText'), example: t('stage3D.mountTopTipExample'), tone: 'info' as const } },
-                    { v: 'ground' as const, label: t('stage3D.mountGround'), icon: '??', tip: { title: t('stage3D.mountGroundTipTitle'), text: t('stage3D.mountGroundTipText'), example: t('stage3D.mountGroundTipExample'), tone: 'info' as const } },
-                    { v: 'rear' as const, label: t('stage3D.mountRear'), icon: '?', tip: { title: t('stage3D.mountRearTipTitle'), text: t('stage3D.mountRearTipText'), example: t('stage3D.mountRearTipExample'), tone: 'info' as const } },
-                    { v: 'hanging' as const, label: t('stage3D.mountHanging'), icon: '??', tip: { title: t('stage3D.mountHangingTipTitle'), text: t('stage3D.mountHangingTipText'), example: t('stage3D.mountHangingTipExample'), tone: 'success' as const } },
+                    { v: 'top' as const, label: t('stage3D.mountTop'), icon: <PanelTop size={12} />, tip: { title: t('stage3D.mountTopTipTitle'), text: t('stage3D.mountTopTipText'), example: t('stage3D.mountTopTipExample'), tone: 'info' as const } },
+                    { v: 'ground' as const, label: t('stage3D.mountGround'), icon: <Home size={12} />, tip: { title: t('stage3D.mountGroundTipTitle'), text: t('stage3D.mountGroundTipText'), example: t('stage3D.mountGroundTipExample'), tone: 'info' as const } },
+                    { v: 'rear' as const, label: t('stage3D.mountRear'), icon: <ArrowLeft size={12} />, tip: { title: t('stage3D.mountRearTipTitle'), text: t('stage3D.mountRearTipText'), example: t('stage3D.mountRearTipExample'), tone: 'info' as const } },
+                    { v: 'hanging' as const, label: t('stage3D.mountHanging'), icon: <PanelBottom size={12} />, tip: { title: t('stage3D.mountHangingTipTitle'), text: t('stage3D.mountHangingTipText'), example: t('stage3D.mountHangingTipExample'), tone: 'success' as const } },
                   ]).map(opt => (
                     <RichTooltip key={opt.v} content={opt.tip}>
                       <button
@@ -5188,12 +5188,12 @@ export const Stage3D: React.FC<{
                 </div>
                 <div className="grid grid-cols-6 gap-1">
                   {([
-                    { v: 'truss' as const, label: t('stage3D.support_truss'), icon: '??', tip: { title: t('stage3D.supportTrussTipTitle'), text: t('stage3D.supportTrussTipText'), example: t('stage3D.supportTrussTipExample'), tone: 'info' as const } },
-                    { v: 'totem' as const, label: t('stage3D.support_totem'), icon: '??', tip: { title: t('stage3D.supportTotemTipTitle'), text: t('stage3D.supportTotemTipText'), example: t('stage3D.supportTotemTipExample'), tone: 'info' as const } },
-                    { v: 'tripod' as const, label: t('stage3D.support_tripod'), icon: '??', tip: { title: t('stage3D.supportTripodTipTitle'), text: t('stage3D.supportTripodTipText'), example: t('stage3D.supportTripodTipExample'), tone: 'info' as const } },
-                    { v: 'floor' as const, label: t('stage3D.support_floor'), icon: '??', tip: { title: t('stage3D.supportFloorTipTitle'), text: t('stage3D.supportFloorTipText'), example: t('stage3D.supportFloorTipExample'), tone: 'info' as const } },
-                    { v: 'frontBar' as const, label: t('stage3D.support_frontBar'), icon: '?', tip: { title: t('stage3D.supportFrontBarTipTitle'), text: t('stage3D.supportFrontBarTipText'), tone: 'info' as const } },
-                    { v: 'backBar' as const, label: t('stage3D.support_backBar'), icon: '?', tip: { title: t('stage3D.supportBackBarTipTitle'), text: t('stage3D.supportBackBarTipText'), tone: 'info' as const } },
+                    { v: 'truss' as const, label: t('stage3D.support_truss'), icon: <LayoutGrid size={12} />, tip: { title: t('stage3D.supportTrussTipTitle'), text: t('stage3D.supportTrussTipText'), example: t('stage3D.supportTrussTipExample'), tone: 'info' as const } },
+                    { v: 'totem' as const, label: t('stage3D.support_totem'), icon: <Layers size={12} />, tip: { title: t('stage3D.supportTotemTipTitle'), text: t('stage3D.supportTotemTipText'), example: t('stage3D.supportTotemTipExample'), tone: 'info' as const } },
+                    { v: 'tripod' as const, label: t('stage3D.support_tripod'), icon: <Crosshair size={12} />, tip: { title: t('stage3D.supportTripodTipTitle'), text: t('stage3D.supportTripodTipText'), example: t('stage3D.supportTripodTipExample'), tone: 'info' as const } },
+                    { v: 'floor' as const, label: t('stage3D.support_floor'), icon: <PanelBottom size={12} />, tip: { title: t('stage3D.supportFloorTipTitle'), text: t('stage3D.supportFloorTipText'), example: t('stage3D.supportFloorTipExample'), tone: 'info' as const } },
+                    { v: 'frontBar' as const, label: t('stage3D.support_frontBar'), icon: <Maximize2 size={12} />, tip: { title: t('stage3D.supportFrontBarTipTitle'), text: t('stage3D.supportFrontBarTipText'), tone: 'info' as const } },
+                    { v: 'backBar' as const, label: t('stage3D.support_backBar'), icon: <Minimize2 size={12} />, tip: { title: t('stage3D.supportBackBarTipTitle'), text: t('stage3D.supportBackBarTipText'), tone: 'info' as const } },
                   ]).map(opt => (
                     <RichTooltip key={opt.v} content={opt.tip}>
                       <button
