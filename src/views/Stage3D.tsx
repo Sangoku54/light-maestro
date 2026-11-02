@@ -5168,13 +5168,14 @@ export const Stage3D: React.FC<{
                           mountMode: opt.v,
                           ...(opt.v === 'ground' ? { h: 0 } : {}),
                         })}
-                        className={`px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
+                        className={`w-full text-center px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
                           (selectedPos.mountMode || 'top') === opt.v
                             ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
                             : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
                         }`}
                       >
-                        <span className="mr-1">{opt.icon}</span>{opt.label}
+                        <span className="mr-1">{opt.icon}</span>
+                        <span className="truncate">{opt.label}</span>
                       </button>
                     </RichTooltip>
                   ))}
@@ -5198,13 +5199,14 @@ export const Stage3D: React.FC<{
                     <RichTooltip key={opt.v} content={opt.tip}>
                       <button
                         onClick={() => setFixturePosition(selectedFixture.id, { support: opt.v })}
-                        className={`px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
+                        className={`w-full text-center px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
                           resolveSupportKind(selectedPos.support) === opt.v
                             ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
                             : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
                         }`}
                       >
-                        <span className="mr-1">{opt.icon}</span>{opt.label}
+                        <span className="mr-1">{opt.icon}</span>
+                        <span className="truncate">{opt.label}</span>
                       </button>
                     </RichTooltip>
                   ))}

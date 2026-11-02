@@ -1812,9 +1812,12 @@ const VCWidgetRenderer: React.FC<{
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
 
-      // Détecter si le widget est maintenant à l'intérieur d'un frame
-      const cur = allWidgets.find(w => w.id === widget.id);
+      // Lire le store fraîchement (allWidgets est obsolète car capturé
+      // dans la closure du mousedown, avant que vcUpdateWidget ne mette à jour
+      // le store pendant le drag).
+      const cur = usePerformStore.getState().vcWidgets.find(w => w.id === widget.id);
       if (!cur) return;
+      const allWidgets = usePerformStore.getState().vcWidgets;
       const frames = allWidgets.filter(
         w => w.type === 'frame' && w.pageIndex === activePage && w.id !== widget.id
       );
