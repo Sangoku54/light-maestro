@@ -1804,11 +1804,15 @@ const VCWidgetRenderer: React.FC<{
     setOrigFrameId(cur.frameId ?? null);
 
     const onMove = (ev: MouseEvent) => {
-      const dx = snap(ev.clientX - startX);
-      const dy = snap(ev.clientY - startY);
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      // Seuil de mouvement : ignorer les micro-mouvements au clic pur
+      if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+      const sdx = snap(dx);
+      const sdy = snap(dy);
       vcUpdateWidget(widget.id, {
-        x: snap(origPos.x + dx),
-        y: snap(origPos.y + dy),
+        x: snap(origPos.x + sdx),
+        y: snap(origPos.y + sdy),
       });
     };
 

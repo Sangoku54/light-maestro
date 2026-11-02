@@ -461,6 +461,7 @@ interface Fixture3D {
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
   _mountTilt: number;           // mount-mode head tilt compensation (p for ground, 0 otherwise)
+  _baseTilt: number;            // base tilt set at creation from mount mode
   _zeroPanDeg: number;          // point z�ro pan VISUEL (degr�s) : d�calage du faisceau dans la 3D
   _zeroTiltDeg: number;         // point z�ro tilt VISUEL (degr�s) : d�calage du faisceau dans la 3D
   lastPan?: number;             // dernier byte pan vu (pour � capturer le centre du mouvement �)
@@ -1541,6 +1542,14 @@ export const Stage3D: React.FC<{
       }
     }
 
+    // Base tilt compensation per mount mode — set once at creation.
+    // Beam exits along local -Y; +π/2 around X makes it point to -Z (front audience).
+    let baseTilt = 0;
+    if (pos.mountMode === 'rear' || pos.mountMode === 'ground' || pos.mountMode === 'hanging') {
+      baseTilt = Math.PI / 2;
+    }
+    // top: baseTilt stays 0 → beam points down (-Y)
+
     return {
       id: fixture.id,
       group,
@@ -1554,7 +1563,8 @@ export const Stage3D: React.FC<{
       mountMode: pos.mountMode || 'top',
       beamAngle: pos.beamAngle ?? 0.15,
       _staticTilt: (pos.tilt ?? 0) * Math.PI / 180,
-      _mountTilt: 0,
+      _mountTilt: baseTilt,
+      _baseTilt: baseTilt,
       _zeroPanDeg: pos.zeroPan ?? 0,
       _zeroTiltDeg: pos.zeroTilt ?? 0,
       trailPositions: [],
@@ -3078,8 +3088,7 @@ export const Stage3D: React.FC<{
           const dmxTilt = ((tiltVal / 255) - 0.5) * tiltRangeRad;
           const rawElev = dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180;
           const elevation = freeAim ? rawElev : clampTiltZone(rawElev, f3d.mountMode);
-          const mountComp = (f3d.mountMode === 'rear' || f3d.mountMode === 'ground' || f3d.mountMode === 'hanging') ? Math.PI / 2 : 0;
-          const tiltTarget = mountComp + elevation;
+          const tiltTarget = (f3d._baseTilt ?? 0) + elevation;
           const tiltDelta = tiltTarget - f3d.headGroup.rotation.x;
           const tiltMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
           f3d.headGroup.rotation.x += Math.abs(tiltDelta) > tiltMaxStep
