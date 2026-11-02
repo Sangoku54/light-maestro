@@ -5993,29 +5993,29 @@ function updateFixtureSupport(
  */
 export function headingRadForPos(pos: FixturePos, mountMode: string, _stageDims: { width: number; depth: number }, hasPanTilt = true): number {
    if (!hasPanTilt && pos.heading) return ((pos.heading ?? 0) * Math.PI) / 180;
-   // Règle d'orientation par défaut (vue audience) — faisceau neutre vers -Z (public),
-   // sauf cas particuliers :
-   //   rear    (arrière de scène)  → faisceau vers l'avant (public), parallèle au sol
-   //   ground  côté gauche/droit   → faisceau vers le centre de la scène
-   //   ground  devant (y < 0.25)   → faisceau vers l'arrière (+Z)
-   //   hanging / top               → faisceau vers le public (-Z)
+   // Règle d'orientation : toutes les fixtures visent le CENTRE de la scène.
    //
    // mountMode peut être obsolète (fixtures créées avant ce fix) : on le
    // ré-derive depuis la position quand il s'agit d'une valeur par défaut.
+   // Si le mode est déjà explicite ('top' ou 'rear'), on le respecte.
    let mode = mountMode;
-   if (mode === 'hanging' || mode === 'top') {
+   if (mode !== 'top' && mode !== 'rear') {
      if (pos.y > 0.75) mode = 'rear';
      else if (pos.y < 0.25) mode = 'ground';
      else if (pos.x < 0.25 || pos.x > 0.75) mode = 'ground';
-     // sinon reste hanging/top → public
+     // sinon reste hanging
    }
-   if (mode === 'rear' || mode === 'ground' || mode === 'hanging') {
-     // rear, ground et hanging : faisceau par défaut vers le public (-Z)
-     // ground : fixe au sol, mais vise le public (pan ±90° couvre les côtés)
+   if (mode === 'top') {
+     // top : faisceau vers le bas, heading indifferent
      return 0;
    }
-   // hanging et top : faisceau vers le public (-Z)
-   return 0;
+   // rear / ground / hanging : viser le centre de la scène
+   // phi = atan2(0.5-x, y-0.5) :
+   //   x < 0.5 (gauche)  → phi > 0 → faisceau vers la droite
+   //   x > 0.5 (droite)  → phi < 0 → faisceau vers la gauche
+   //   x = 0.5 (centre)  → phi = 0 → faisceau droit vers le public (-Z)
+   // y détermine l'inclinaison avant/arrière du faisceau
+   return Math.atan2(0.5 - pos.x, pos.y - 0.5);
 }
 /** True si la fixture a au moins un canal pan/tilt DMX (fixture motoris�e). */
 export function hasPanTiltChannels(cm: { panOffsets?: number[]; panOffset?: number | null; tiltOffsets?: number[]; tiltOffset?: number | null; scanXOffset?: number | null; scanYOffset?: number | null }): boolean {

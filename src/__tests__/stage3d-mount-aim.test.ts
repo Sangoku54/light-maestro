@@ -1,9 +1,11 @@
 /**
  * Validation des directions de faisceaux :
- * - rear / ground / hanging : faisceau par defaut vers le public (-Z),
- *   le pan +/-90 deg couvre les cotes.
- * - top : faisceau vers le bas (-Y).
- * - heading utilisateur (sans pan/tilt) respecte si != 0.
+ * - rear / ground / hanging : visent le CENTRE de la scène (phi = atan2(0.5-x, y-0.5))
+ *   gauche → phi > 0 → faisceau vers la droite
+ *   droite → phi < 0 → faisceau vers la gauche
+ *   centre → phi = 0 → faisceau droit devant le public
+ * - top : faisceau vers le bas (heading indifferent)
+ * - heading utilisateur (sans pan/tilt) respecte si != 0
  */
 import { describe, it, expect } from 'vitest';
 import { headingRadForPos, clampPanZone, clampTiltZone } from '../views/Stage3D';
@@ -19,77 +21,86 @@ function pie(a: number): number {
 }
 
 function worldBeamDir(phi: number): { x: number; z: number } {
-  return { x: -Math.sin(phi), z: -Math.cos(phi) };
+  // Beam direction after armGroup rotation around Y: (sin(phi), -cos(phi))
+  // because the default beam points along local -Z and R_y(phi) * (0,0,-1) = (sin(phi), -cos(phi))
+  return { x: Math.sin(phi), z: -Math.cos(phi) };
 }
 
-describe('headingRadForPos — rear/ground/hanging visent le public, top vers le bas', () => {
-  it('arriere gauche (x=0.2, y=0.95) : vers le public (0) pour rear/ground/hanging', () => {
+describe('headingRadForPos — rear/ground/hanging visent le centre de la scène', () => {
+  it('arriere gauche (x=0.2, y=0.95) : phi = atan2(0.3, 0.45) ≈ +0.588, vers droite+avant', () => {
     const pos = { x: 0.2, y: 0.95, h: 0.6, heading: 0 };
     for (const mode of ['hanging', 'rear', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      expect(pie(phi)).toBeCloseTo(0, 9);
+      expect(pie(phi)).toBeCloseTo(Math.atan2(0.3, 0.45), 5);
       const dir = worldBeamDir(phi);
-      expect(dir.z).toBeLessThan(-0.99); // vers le public (-Z)
+      expect(dir.x).toBeGreaterThan(0.5); // vers la droite
+      expect(dir.z).toBeLessThan(-0.7);   // vers l'avant (-Z)
     }
   });
 
-  it('arriere droite (x=0.9, y=0.95) : vers le public (0) pour rear/ground/hanging', () => {
+  it('arriere droite (x=0.9, y=0.95) : phi = atan2(-0.4, 0.45) ≈ -0.727, vers gauche+avant', () => {
     const pos = { x: 0.9, y: 0.95, h: 0.6, heading: 0 };
     for (const mode of ['hanging', 'rear', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      expect(pie(phi)).toBeCloseTo(0, 9);
+      expect(pie(phi)).toBeCloseTo(Math.atan2(-0.4, 0.45), 5);
       const dir = worldBeamDir(phi);
-      expect(dir.z).toBeLessThan(-0.99);
+      expect(dir.x).toBeLessThan(-0.5); // vers la gauche
+      expect(dir.z).toBeLessThan(-0.7); // vers l'avant
     }
   });
 
-  it('devant centre (x=0.5, y=0.1) : vers le public (0) pour rear/ground/hanging', () => {
+  it('devant centre (x=0.5, y=0.1) : phi = atan2(0, -0.4) = PI, vers l\'arriere de scene', () => {
     const pos = { x: 0.5, y: 0.1, h: 0.6, heading: 0 };
     for (const mode of ['hanging', 'rear', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      expect(pie(phi)).toBeCloseTo(0, 9);
+      expect(pie(phi)).toBeCloseTo(Math.PI, 9);
       const dir = worldBeamDir(phi);
-      expect(dir.z).toBeLessThan(-0.99);
+      expect(dir.z).toBeGreaterThan(0.99); // vers l'arrière (+Z, vers fond de scene)
     }
-    // top : vers le bas (heading indifferent)
+    // top : heading indifferent
     const phiTop = headingRadForPos(pos as any, 'top', DIMS);
     expect(pie(phiTop)).toBeCloseTo(0, 9);
   });
 
-  it('cote gauche (x=0.1, y=0.5) : vers le public (0) pour rear/ground/hanging', () => {
+  it('cote gauche (x=0.1, y=0.5) : phi = atan2(0.4, 0) = +PI/2, parallele vers +X (droite)', () => {
     const pos = { x: 0.1, y: 0.5, h: 0.6, heading: 0 };
     for (const mode of ['hanging', 'rear', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      expect(pie(phi)).toBeCloseTo(0, 9);
+      expect(pie(phi)).toBeCloseTo(Math.PI / 2, 9);
       const dir = worldBeamDir(phi);
-      expect(dir.z).toBeLessThan(-0.99);
+      expect(dir.x).toBeGreaterThan(0.99); // tout a droite
+      expect(dir.z).toBeCloseTo(0, 5);
     }
   });
 
-  it('cote droit (x=0.9, y=0.5) : vers le public (0) pour rear/ground/hanging', () => {
+  it('cote droit (x=0.9, y=0.5) : phi = atan2(-0.4, 0) = -PI/2, parallele vers -X (gauche)', () => {
     const pos = { x: 0.9, y: 0.5, h: 0.6, heading: 0 };
     for (const mode of ['hanging', 'rear', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      expect(pie(phi)).toBeCloseTo(0, 9);
+      expect(pie(phi)).toBeCloseTo(-Math.PI / 2, 9);
       const dir = worldBeamDir(phi);
-      expect(dir.z).toBeLessThan(-0.99);
+      expect(dir.x).toBeLessThan(-0.99); // tout a gauche
+      expect(dir.z).toBeCloseTo(0, 5);
     }
   });
 
-  it('coins : vers le public (0) pour rear/ground/hanging', () => {
+  it('coins : chacun vise le centre de la scene', () => {
     const posFL = { x: 0.1, y: 0.1, h: 0.6, heading: 0 };
     const posBL = { x: 0.1, y: 0.95, h: 0.6, heading: 0 };
-    for (const pos of [posFL, posBL]) {
+    const posFR = { x: 0.9, y: 0.1, h: 0.6, heading: 0 };
+    const posBR = { x: 0.9, y: 0.95, h: 0.6, heading: 0 };
+    for (const pos of [posFL, posBL, posFR, posBR]) {
       for (const mode of ['ground', 'rear', 'hanging'] as const) {
         const phi = headingRadForPos(pos as any, mode, DIMS);
-        expect(pie(phi)).toBeCloseTo(0, 9);
         const dir = worldBeamDir(phi);
-        expect(dir.z).toBeLessThan(-0.99);
+        // Cotes : dir.x oppose au cote (gauche -> droite, droite -> gauche)
+        if (pos.x < 0.5) expect(dir.x).toBeGreaterThan(0);
+        if (pos.x > 0.5) expect(dir.x).toBeLessThan(0);
       }
     }
   });
 
-  it('centre (x=0.5, y=0.5) : vers le public (-Z) pour tous les modes', () => {
+  it('centre (x=0.5, y=0.5) : phi = 0 pour tous les modes', () => {
     for (const mode of ['hanging', 'ground', 'rear', 'top'] as const) {
       const pos = { x: 0.5, y: 0.5, h: 0.6, heading: 0 };
       const phi = headingRadForPos(pos as any, mode, DIMS);
@@ -97,12 +108,10 @@ describe('headingRadForPos — rear/ground/hanging visent le public, top vers le
     }
   });
 
-  it('fixture motorisee : heading herite IGNORE (regle public gagne)', () => {
+  it('fixture motorisee : heading herite IGNORE (regle centre gagne)', () => {
     const pos = { x: 0.2, y: 0.95, h: 0.6, heading: 260 };
     const phi = headingRadForPos(pos as any, 'hanging', DIMS, true);
-    expect(pie(phi)).toBeCloseTo(0, 9);
-    const dir = worldBeamDir(phi);
-    expect(dir.z).toBeLessThan(-0.99);
+    expect(pie(phi)).toBeCloseTo(Math.atan2(0.3, 0.45), 5);
   });
 
   it('fixture SANS pan/tilt (par, bar) : heading utilisateur != 0 respecte', () => {
@@ -111,9 +120,9 @@ describe('headingRadForPos — rear/ground/hanging visent le public, top vers le
       const phi = headingRadForPos(pos as any, mode, DIMS, false);
       expect(phi).toBeCloseTo((48 * Math.PI) / 180, 9);
     }
-    // heading 0 -> regle public (0)
+    // heading 0 -> regle centre
     const phi0 = headingRadForPos({ x: 0.2, y: 0.95, heading: 0 } as any, 'ground', DIMS, false);
-    expect(pie(phi0)).toBeCloseTo(0, 9);
+    expect(pie(phi0)).toBeCloseTo(Math.atan2(0.3, 0.45), 5);
   });
 });
 
