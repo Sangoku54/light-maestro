@@ -806,7 +806,11 @@ export class FixtureLibrary {
       }
 
       // ── Build fixture ID ────────────────────────────────
-      const id = `${manufacturer}-${model}`.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+      // Keep hyphens from the model name (e.g. "7x10W Mini" → "7x10W-Mini")
+      // but strip truly invalid characters (×, é, …).
+      const id = `${manufacturer}-${model}`
+        .replace(/\s+/g, '-')
+        .replace(/[^a-zA-Z0-9_\-]/g, '');
 
       return {
         id,
@@ -1174,7 +1178,11 @@ export class FixtureLibrary {
       }
 
       // ── Build fixture ID ────────────────────────────────
-      const id = `${manufacturer}-${model}`.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+      // Keep hyphens from the model name (e.g. "7x10W Mini" → "7x10W-Mini")
+      // but strip truly invalid characters (×, é, …).
+      const id = `${manufacturer}-${model}`
+        .replace(/\s+/g, '-')
+        .replace(/[^a-zA-Z0-9_\-]/g, '');
 
       return {
         id,
