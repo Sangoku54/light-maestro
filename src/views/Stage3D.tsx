@@ -2895,13 +2895,13 @@ export const Stage3D: React.FC<{
         if (idleSec > 3 && f3d.armGroup && f3d.headGroup) {
           const t = performance.now() * 0.001;
           const panTarget = Math.sin(t * 0.4) * 0.7 * Math.PI;
-          const tiltTarget = f3d._mountTilt + Math.sin(t * 0.35 + 1.2) * 0.35 * Math.PI + (f3d._staticTilt ?? 0);
+          const tiltTarget = f3d._baseTilt + Math.sin(t * 0.35 + 1.2) * 0.35 * Math.PI + (f3d._staticTilt ?? 0);
           f3d.armGroup.rotation.y += (panTarget - f3d.armGroup.rotation.y) * 0.15;
           f3d.headGroup.rotation.x += (tiltTarget - f3d.headGroup.rotation.x) * 0.15;
            (f3d.extraHeads ?? []).forEach((eh, k) => {
              // Skip rgbSegment-based extra heads (no tilt) � only tilt-based heads auto-sweep
              if (eh.rgbSegmentIdx !== undefined) return;
-             const ehTarget = eh._mountTilt + Math.sin(t * 0.35 + 1.2 + (k + 1) * 1.1) * 0.35 * Math.PI + (f3d._staticTilt ?? 0);
+             const ehTarget = f3d._baseTilt + Math.sin(t * 0.35 + 1.2 + (k + 1) * 1.1) * 0.35 * Math.PI + (f3d._staticTilt ?? 0);
              eh.headGroup.rotation.x += (ehTarget - eh.headGroup.rotation.x) * 0.15;
            });
         }
@@ -6009,23 +6009,9 @@ export function headingRadForPos(pos: FixturePos, mountMode: string, _stageDims:
      else if (pos.x < 0.25 || pos.x > 0.75) mode = 'ground';
      // sinon reste hanging/top → public
    }
-   if (mode === 'rear') {
-     return 0;
-   }
-   if (mode === 'ground') {
-     if (pos.y < 0.25) {
-       // Sol, devant : faisceau vers l'arrière (+Z)
-       return Math.PI;
-     }
-     if (pos.x < 0.25 || pos.x > 0.75) {
-       // Sol, côté : faisceau vers le centre de la scène (0.5, 0.5)
-       // pos.x < 0.5 (gauche) → dx négatif → rotation -Z vers +X (droite, centre)
-       // pos.x > 0.5 (droite) → dx positif → rotation -Z vers -X (gauche, centre)
-       const dx = pos.x - 0.5;
-       const dz = pos.y - 0.5;
-       return Math.atan2(dx, -dz);
-     }
-     // Sol, centre : vers le public
+   if (mode === 'rear' || mode === 'ground' || mode === 'hanging') {
+     // rear, ground et hanging : faisceau par défaut vers le public (-Z)
+     // ground : fixe au sol, mais vise le public (pan ±90° couvre les côtés)
      return 0;
    }
    // hanging et top : faisceau vers le public (-Z)
