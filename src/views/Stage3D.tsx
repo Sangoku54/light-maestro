@@ -6034,37 +6034,29 @@ export function clampTiltZone(elevRad: number, mountMode: string): number {
 
 function fitMountRotation(f3d: Fixture3D, mode: string): void {
   // Keep the base at the bottom in all modes.
-  // Rotate only the arm (rear) or head (ground), never the whole group.
-  // This avoids the base disc appearing inverted.
+  // Rotate only the head tilt compensation (_mountTilt), never armGroup.x.
+  // armGroup.rotation.x is left at 0 so it never interferes with the beam.
   //
   // Chaque compensation produit un faisceau NEUTRE horizontal vers -Z (public)
-  // � tilt DMX neutre. La direction (avant/arri�re/c�t�s) est ensuite donn�e
-  // par le heading (headingRadForPos) � jamais par une inversion du tilt ici
-  // (une inversion tilt + un heading p s'annulent ? direction fausse).
+  // à tilt DMX neutre (elevation = 0). Seul le mode 'top' garde le faisceau
+  // vers le bas.
   //
-  //   rear    : arm +p/2, tilt 0    ? (0,0,-1)
-  //   ground  : arm 0,    tilt +p/2 ? (0,0,-1)
-  //   hanging : arm p,    tilt -p/2 ? (0,0,-1)
-  //   top     : rien (faisceau vers le bas, mode sp�cifique)
+  //   rear    : _mountTilt = +p/2 → (0,0,-1)  faisceau vers l'avant
+  //   ground  : _mountTilt = +p/2 → (0,0,-1)  faisceau vers l'avant
+  //   hanging : _mountTilt = +p/2 → (0,0,-1)  faisceau vers l'avant
+  //   top     : _mountTilt = 0      → (0,-1,0)  faisceau vers le bas
 
   f3d.group.rotation.x = 0;
   if (f3d.armGroup) f3d.armGroup.rotation.x = 0;
   f3d._mountTilt = 0;
 
-  if (mode === 'rear') {
-    if (f3d.armGroup) f3d.armGroup.rotation.x = Math.PI / 2;
-  } else if (mode === 'ground') {
-    // Fixture au sol : tête inclinée vers le bas (head rotation X négative)
-    // pour que le faisceau sorte horizontalement vers l'avant (public).
-    f3d._mountTilt = -Math.PI / 2;
-  } else if (mode === 'hanging') {
-    // Fixture suspendue : tête inclinée vers le haut (head rotation X positive)
-    // pour que le faisceau sorte vers le bas (sol).
+  if (mode === 'rear' || mode === 'ground' || mode === 'hanging') {
+    // +π/2 autour de X : le faisceau qui sort vers -Y local pointe vers -Z (public)
     f3d._mountTilt = Math.PI / 2;
-    if (f3d.armGroup) f3d.armGroup.rotation.x = Math.PI;
   }
+  // top : _mountTilt reste 0 → faisceau vers le bas (-Y)
 
-  // Extra heads follow the mount compensation (no independent static tilt)
+  // Extra heads follow the mount compensation
   for (const eh of f3d.extraHeads ?? []) {
     eh._mountTilt = f3d._mountTilt;
   }

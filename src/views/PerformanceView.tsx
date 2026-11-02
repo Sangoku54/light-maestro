@@ -1798,14 +1798,16 @@ const VCWidgetRenderer: React.FC<{
     const startX = e.clientX;
     const startY = e.clientY;
     // Lire la position actuelle fraîchement depuis le store
-    const cur = usePerformStore.getState().vcWidgets.find(w => w.id === widget.id);
+    const store = usePerformStore.getState();
+    const cur = store.vcWidgets.find(w => w.id === widget.id);
     if (!cur) return;
+    const activePageFresh = store.vcActivePage;
     // Convertir en coordonnées ABSOLUES au canvas si le widget est dans un frame
     let absX = cur.x;
     let absY = cur.y;
     if (cur.frameId) {
-      const frame = usePerformStore.getState().vcWidgets.find(
-        f => f.type === 'frame' && f.pageIndex === activePage && f.id === cur.frameId
+      const frame = store.vcWidgets.find(
+        f => f.type === 'frame' && f.pageIndex === activePageFresh && f.id === cur.frameId
       );
       if (frame) {
         absX = frame.x + cur.x;
@@ -1827,8 +1829,9 @@ const VCWidgetRenderer: React.FC<{
 
       // Si le widget est dans un frame, vérifier qu'il reste dedans
       if (curW.frameId) {
+        const activePageFresh = usePerformStore.getState().vcActivePage;
         const frame = allWidgets.find(
-          f => f.type === 'frame' && f.pageIndex === activePage && f.id === curW.frameId
+          f => f.type === 'frame' && f.pageIndex === activePageFresh && f.id === curW.frameId
         );
         if (frame) {
           // Convertir la position absolue cible en relatives au frame
@@ -1847,10 +1850,11 @@ const VCWidgetRenderer: React.FC<{
       } else {
         // Widget hors frame : coordonnées absolues au canvas.
         // Vérifier si on entre dans un frame.
+        const activePageFresh = usePerformStore.getState().vcActivePage;
         const targetFrame = allWidgets.find(
           f =>
             f.type === 'frame' &&
-            f.pageIndex === activePage &&
+            f.pageIndex === activePageFresh &&
             f.id !== widget.id &&
             newAbsX >= f.x &&
             newAbsX + curW.width <= f.x + f.width &&
