@@ -1787,96 +1787,70 @@ const VCWidgetRenderer: React.FC<{
 
   const snap = (v: number) => gridSnap ? Math.round(v / GRID_SIZE) * GRID_SIZE : v;
 
-  // Drag — toujours lire le store fraîchement (pas les props figées) pour
-  // gérer le repositionnement à l'intérieur d'un frame sans que le widget
-  // ne s'échappe. Toutes les calculs se font en coordonnées ABSOLUES au
-  // canvas ; on ne convertit en relatives au frame qu'à l'écriture.
+  // Drag — tout en coordonnées du store (absolues si hors frame, relatives au
+  // frame si dedans). Le delta souris s'ajoute directement, pas de conversion
+  // complexe pendant le drag. L'entrée/sortie de frame se gère en onUp.
   const handleDragStart = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     e.stopPropagation();
     setDragging(true);
     const startX = e.clientX;
     const startY = e.clientY;
-    // Lire la position actuelle fraîchement depuis le store
     const store = usePerformStore.getState();
     const cur = store.vcWidgets.find(w => w.id === widget.id);
     if (!cur) return;
-    const activePageFresh = store.vcActivePage;
-    // Convertir en coordonnées ABSOLUES au canvas si le widget est dans un frame
-    let absX = cur.x;
-    let absY = cur.y;
-    if (cur.frameId) {
-      const frame = store.vcWidgets.find(
-        f => f.type === 'frame' && f.pageIndex === activePageFresh && f.id === cur.frameId
-      );
-      if (frame) {
-        absX = frame.x + cur.x;
-        absY = frame.y + 32 + cur.y; // 32 = hauteur barre de titre
-      }
-    }
     setDragStart({ x: startX, y: startY });
-    setOrigPos({ x: absX, y: absY });
+    setOrigPos({ x: cur.x, y: cur.y });
     setOrigFrameId(cur.frameId ?? null);
 
     const onMove = (ev: MouseEvent) => {
-      const newAbsX = snap(origPos.x + ev.clientX - startX);
-      const newAbsY = snap(origPos.y + ev.clientY - startY);
-
-      // Lire le store fraîchement à chaque frame de mouvement
-      const allWidgets = usePerformStore.getState().vcWidgets;
-      const curW = allWidgets.find(w => w.id === widget.id);
-      if (!curW) return;
-
-      // Si le widget est dans un frame, vérifier qu'il reste dedans
-      if (curW.frameId) {
-        const activePageFresh = usePerformStore.getState().vcActivePage;
-        const frame = allWidgets.find(
-          f => f.type === 'frame' && f.pageIndex === activePageFresh && f.id === curW.frameId
-        );
-        if (frame) {
-          // Convertir la position absolue cible en relatives au frame
-          const relX = newAbsX - frame.x;
-          const relY = newAbsY - (frame.y + 32);
-          if (
-            relX >= 0 &&
-            relX + curW.width <= frame.width &&
-            relY >= 0 &&
-            relY + curW.height <= frame.height - 32
-          ) {
-            vcUpdateWidget(widget.id, { x: relX, y: relY, frameId: curW.frameId });
-          }
-          // Sinon : on ne bouge pas (reste dans le frame)
-        }
-      } else {
-        // Widget hors frame : coordonnées absolues au canvas.
-        // Vérifier si on entre dans un frame.
-        const activePageFresh = usePerformStore.getState().vcActivePage;
-        const targetFrame = allWidgets.find(
-          f =>
-            f.type === 'frame' &&
-            f.pageIndex === activePageFresh &&
-            f.id !== widget.id &&
-            newAbsX >= f.x &&
-            newAbsX + curW.width <= f.x + f.width &&
-            newAbsY >= f.y + 32 &&
-            newAbsY + curW.height <= f.y + f.height
-        );
-        if (targetFrame) {
-          vcUpdateWidget(widget.id, {
-            frameId: targetFrame.id,
-            x: newAbsX - targetFrame.x,
-            y: newAbsY - (targetFrame.y + 32),
-          });
-        } else {
-          vcUpdateWidget(widget.id, { x: newAbsX, y: newAbsY, frameId: null });
-        }
-      }
+      const dx = snap(ev.clientX - startX);
+      const dy = snap(ev.clientY - startY);
+      vcUpdateWidget(widget.id, {
+        x: snap(origPos.x + dx),
+        y: snap(origPos.y + dy),
+      });
     };
 
     const onUp = () => {
       setDragging(false);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+
+      // Détecter entrée/sortie de frame après le drag
+      const store = usePerformStore.getState();
+      const curW = store.vcWidgets.find(w => w.id === widget.id);
+      if (!curW) return;
+      const activePageFresh = store.vcActivePage;
+
+      if (curW.frameId) {
+        // Widget dans un frame : vérifier que le frame existe toujours
+        const frame = store.vcWidgets.find(
+          f => f.type === 'frame' && f.pageIndex === activePageFresh && f.id === curW.frameId
+        );
+        if (!frame) {
+          vcUpdateWidget(widget.id, { frameId: null });
+        }
+      } else {
+        // Widget hors frame : vérifier s'il est entré dans un frame
+        const targetFrame = store.vcWidgets.find(
+          f =>
+            f.type === 'frame' &&
+            f.pageIndex === activePageFresh &&
+            f.id !== widget.id &&
+            curW.x >= f.x &&
+            curW.x + curW.width <= f.x + f.width &&
+            curW.y >= f.y + 32 &&
+            curW.y + curW.height <= f.y + f.height
+        );
+        if (targetFrame) {
+          vcUpdateWidget(widget.id, {
+            frameId: targetFrame.id,
+            x: curW.x - targetFrame.x,
+            y: curW.y - (targetFrame.y + 32),
+          });
+        }
+      }
     };
 
     document.addEventListener('mousemove', onMove);

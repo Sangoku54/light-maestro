@@ -2513,7 +2513,9 @@ export const Stage3D: React.FC<{
         f3d.group.position.set(stageX, stageY, stageZ);
         f3d.group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(f3d.channelMap));
         if (pos.mountMode) f3d.mountMode = pos.mountMode;
-        fitMountRotation(f3d, pos.mountMode || 'top');
+        // fitMountRotation supprimé : mount géré dans la boucle de rendu via mountComp
+        f3d.group.rotation.x = 0;
+        if (f3d.armGroup) f3d.armGroup.rotation.x = 0;
         f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
         f3d._zeroPanDeg = pos.zeroPan ?? 0;
         f3d._zeroTiltDeg = pos.zeroTilt ?? 0;
@@ -2592,7 +2594,9 @@ export const Stage3D: React.FC<{
       f3d.group.position.set(stageX, stageY, stageZ);
       f3d.group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(f3d.channelMap));
       if (pos.mountMode) f3d.mountMode = pos.mountMode;
-       fitMountRotation(f3d, pos.mountMode || 'top');
+      // fitMountRotation supprimé : mount géré dans la boucle de rendu via mountComp
+      f3d.group.rotation.x = 0;
+      if (f3d.armGroup) f3d.armGroup.rotation.x = 0;
        f3d._staticTilt = ((pos.tilt ?? 0) * Math.PI) / 180;
       f3d._zeroPanDeg = pos.zeroPan ?? 0;
       f3d._zeroTiltDeg = pos.zeroTilt ?? 0;
@@ -3074,7 +3078,8 @@ export const Stage3D: React.FC<{
           const dmxTilt = ((tiltVal / 255) - 0.5) * tiltRangeRad;
           const rawElev = dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180;
           const elevation = freeAim ? rawElev : clampTiltZone(rawElev, f3d.mountMode);
-          const tiltTarget = (f3d._mountTilt ?? 0) + elevation;
+          const mountComp = (f3d.mountMode === 'rear' || f3d.mountMode === 'ground' || f3d.mountMode === 'hanging') ? Math.PI / 2 : 0;
+          const tiltTarget = mountComp + elevation;
           const tiltDelta = tiltTarget - f3d.headGroup.rotation.x;
           const tiltMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
           f3d.headGroup.rotation.x += Math.abs(tiltDelta) > tiltMaxStep
