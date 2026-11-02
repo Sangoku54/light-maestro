@@ -5991,7 +5991,7 @@ function updateFixtureSupport(
  * Pour une fixture SANS pan/tilt (par, bar�), le heading (drag de rotation)
  * reste le seul outil d'aim ? respect� si ? 0.
  */
-export function headingRadForPos(pos: FixturePos, mountMode: string, _stageDims: { width: number; depth: number }, hasPanTilt = true): number {
+export function headingRadForPos(pos: FixturePos, mountMode: string, stageDims: { width: number; depth: number }, hasPanTilt = true): number {
    if (!hasPanTilt && pos.heading) return ((pos.heading ?? 0) * Math.PI) / 180;
    // Règle d'orientation : toutes les fixtures visent le CENTRE de la scène.
    //
@@ -6015,7 +6015,7 @@ export function headingRadForPos(pos: FixturePos, mountMode: string, _stageDims:
    //   x > 0.5 (droite)  → phi < 0 → faisceau vers la gauche
    //   x = 0.5 (centre)  → phi = 0 → faisceau droit vers le public (-Z)
    // y détermine l'inclinaison avant/arrière du faisceau
-   return Math.atan2(0.5 - pos.x, Math.abs(pos.y - 0.5));
+   return Math.atan2((0.5 - pos.x) * stageDims.width, Math.abs(pos.y - 0.5) * stageDims.depth);
 }
 /** True si la fixture a au moins un canal pan/tilt DMX (fixture motoris�e). */
 export function hasPanTiltChannels(cm: { panOffsets?: number[]; panOffset?: number | null; tiltOffsets?: number[]; tiltOffset?: number | null; scanXOffset?: number | null; scanYOffset?: number | null }): boolean {
