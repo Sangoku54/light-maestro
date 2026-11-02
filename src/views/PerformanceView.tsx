@@ -1795,49 +1795,54 @@ const VCWidgetRenderer: React.FC<{
     setDragging(true);
     const startX = e.clientX;
     const startY = e.clientY;
-    const origX = widget.x;
-    const origY = widget.y;
+    // Position ABSOLUE au canvas (relève le frameId si présent)
+    let absX = widget.x;
+    let absY = widget.y;
+    if (widget.frameId) {
+      const frame = usePerformStore.getState().vcWidgets.find(w => w.id === widget.frameId && w.pageIndex === activePage);
+      if (frame) {
+        absX = frame.x + widget.x;
+        absY = frame.y + 32 + widget.y;
+      }
+    }
     setDragStart({ x: startX, y: startY });
-    setOrigPos({ x: origX, y: origY });
+    setOrigPos({ x: absX, y: absY });
 
     const onMove = (ev: MouseEvent) => {
-      vcUpdateWidget(widget.id, {
-        x: snap(origX + ev.clientX - startX),
-        y: snap(origY + ev.clientY - startY),
-      });
+      const newAbsX = snap(origPos.x + ev.clientX - startX);
+      const newAbsY = snap(origPos.y + ev.clientY - startY);
+
+      // Détecter si on entre/sort d'un frame pendant le drag
+      const allWidgets = usePerformStore.getState().vcWidgets;
+      const targetFrame = allWidgets.find(f =>
+        f.type === 'frame' &&
+        f.pageIndex === activePage &&
+        f.id !== widget.id &&
+        newAbsX >= f.x &&
+        newAbsX + widget.width <= f.x + f.width &&
+        newAbsY >= f.y + 32 &&
+        newAbsY + widget.height <= f.y + f.height
+      );
+
+      if (targetFrame) {
+        vcUpdateWidget(widget.id, {
+          frameId: targetFrame.id,
+          x: newAbsX - targetFrame.x,
+          y: newAbsY - (targetFrame.y + 32),
+        });
+      } else {
+        vcUpdateWidget(widget.id, {
+          frameId: null,
+          x: newAbsX,
+          y: newAbsY,
+        });
+      }
     };
 
     const onUp = () => {
       setDragging(false);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-
-      // Lire le store fraîchement (allWidgets est obsolète car capturé
-      // dans la closure du mousedown, avant que vcUpdateWidget ne mette à jour
-      // le store pendant le drag).
-      const cur = usePerformStore.getState().vcWidgets.find(w => w.id === widget.id);
-      if (!cur) return;
-      const allWidgets = usePerformStore.getState().vcWidgets;
-      const frames = allWidgets.filter(
-        w => w.type === 'frame' && w.pageIndex === activePage && w.id !== widget.id
-      );
-      const targetFrame = frames.find(f => {
-        const contentTop = f.y + 32; // après la barre de titre
-        return cur.x >= f.x &&
-               cur.x + cur.width <= f.x + f.width &&
-               cur.y >= contentTop &&
-               cur.y + cur.height <= f.y + f.height;
-      });
-      if (targetFrame) {
-        vcUpdateWidget(widget.id, {
-          frameId: targetFrame.id,
-          x: cur.x - targetFrame.x,
-          y: cur.y - (targetFrame.y + 32),
-        });
-      } else if (cur.frameId) {
-        // Hors de tout frame : on détache
-        vcUpdateWidget(widget.id, { frameId: null });
-      }
     };
 
     document.addEventListener('mousemove', onMove);

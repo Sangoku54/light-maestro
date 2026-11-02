@@ -2267,8 +2267,12 @@ export const Stage3D: React.FC<{
         const id = dragMusicianRef.current;
         const pos = musicianPositionsRef.current[id];
         if (pos) {
-          const customPos = { ...(musicians.positions ?? {}), [id]: pos };
-          handleMusiciansChange({ ...musicians, positions: customPos });
+          // Lire le store fraîchement (musicians du closure peut être obsolète
+          // car le useEffect ne dépend pas de musicians).
+          const currentMusicians = useShowStore.getState().musicians;
+          const customPos = { ...(currentMusicians.positions ?? {}), [id]: pos };
+          useShowStore.getState().setMusicians({ ...currentMusicians, positions: customPos });
+          onMusiciansChange?.({ ...currentMusicians, positions: customPos });
         }
         const controls = controlsRef.current;
         if (controls) controls.enabled = true;
@@ -5168,7 +5172,7 @@ export const Stage3D: React.FC<{
                           mountMode: opt.v,
                           ...(opt.v === 'ground' ? { h: 0 } : {}),
                         })}
-                        className={`w-full text-center px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
+                        className={`w-full text-center overflow-hidden px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
                           (selectedPos.mountMode || 'top') === opt.v
                             ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
                             : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
@@ -5199,7 +5203,7 @@ export const Stage3D: React.FC<{
                     <RichTooltip key={opt.v} content={opt.tip}>
                       <button
                         onClick={() => setFixturePosition(selectedFixture.id, { support: opt.v })}
-                        className={`w-full text-center px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
+                        className={`w-full text-center overflow-hidden px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
                           resolveSupportKind(selectedPos.support) === opt.v
                             ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
                             : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
@@ -5980,8 +5984,8 @@ export function headingRadForPos(pos: FixturePos, mountMode: string, _stageDims:
      }
      if (pos.x < 0.25 || pos.x > 0.75) {
        // Sol, côté : faisceau vers le centre de la scène (0.5, 0.5)
-       const dx = 0.5 - pos.x;
-       const dz = 0.5 - pos.y;
+       const dx = pos.x - 0.5;
+       const dz = pos.y - 0.5;
        return Math.atan2(dx, -dz);
      }
      // Sol, centre : vers le public
