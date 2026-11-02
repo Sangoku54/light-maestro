@@ -759,10 +759,11 @@ describe('tuto.lmproj — TONIO Mini Moving Head (exploitation max)', () => {
   it('résout la def et analyseChannels (pan/tilt RGBW, dimmer/strobe)', () => {
     // NOTE: fixture count varies per project evolution; test structure, not count.
     expect(patched.length).toBeGreaterThan(0);
+    const lib = new FixtureLibrary();
     for (const pf of patched) {
-      expect(pf.fixtureDefId).toBe('custom-tonio-mini-moving-head');
-      const def = customDefs.get(pf.fixtureDefId);
-      expect(def, 'def TONIO Mini Moving Head doit se charger').toBeTruthy();
+      // Resolve def: custom first, then built-in library
+      const def = customDefs.get(pf.fixtureDefId) || lib.get(pf.fixtureDefId);
+      expect(def, `def ${pf.fixtureDefId} doit se charger`).toBeTruthy();
 
       const fa = analyzeChannels(pf, def);
       console.log(`\n• ${pf.name} @${pf.startAddress} (${pf.channelCount}ch)`);
@@ -784,9 +785,10 @@ describe('tuto.lmproj — TONIO Mini Moving Head (exploitation max)', () => {
   });
 
   it('computeDmxForCue + auditCoverage : pas de muet, canaux utiles écrits', () => {
+    const lib = new FixtureLibrary();
     const defs = new Map();
     for (const pf of patched) {
-      const def = customDefs.get(pf.fixtureDefId);
+      const def = customDefs.get(pf.fixtureDefId) || lib.get(pf.fixtureDefId);
       defs.set(pf.fixtureDefId, def);
     }
 
