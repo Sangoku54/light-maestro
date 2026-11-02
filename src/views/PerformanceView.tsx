@@ -2700,7 +2700,7 @@ const VCFrameWidget: React.FC<{
 
   return (
     <div
-      className="absolute bg-[#0d0d14]/90 border border-gray-700/50 rounded-xl backdrop-blur-sm overflow-hidden group"
+      className="absolute bg-[#0d0d14]/90 border border-gray-700/50 rounded-xl backdrop-blur-sm group"
       style={{
         left: widget.x,
         top: widget.y,
