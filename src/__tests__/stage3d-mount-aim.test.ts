@@ -55,14 +55,18 @@ describe('headingRadForPos — rear/ground/hanging visent le centre de la scène
     }
   });
 
-  it('devant centre (x=0.5, y=0.1) : phi = 0, vers l avant', () => {
+  it('devant centre (x=0.5, y=0.1) : phi ≈ π, vers l arrière (centre de scène)', () => {
     const pos = { x: 0.5, y: 0.1, h: 0.6, heading: 0 };
-    for (const mode of ['hanging', 'rear', 'ground'] as const) {
+    for (const mode of ['hanging', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      expect(pie(phi)).toBeCloseTo(0, 9);
+      // y < 0.25 et mode ground → inversé : pointe vers l'arrière
+      expect(pie(phi)).toBeCloseTo(Math.PI, 9);
       const dir = worldBeamDir(phi);
-      expect(dir.z).toBeLessThan(-0.99); // vers l'avant (-Z)
+      expect(dir.z).toBeGreaterThan(0.99); // vers l'arrière (+Z)
     }
+    // 'rear' ne passe pas par la branche ground (mode respecté) : reste à 0
+    const phiRear = headingRadForPos(pos as any, 'rear', DIMS);
+    expect(pie(phiRear)).toBeCloseTo(0, 9);
     const phiTop = headingRadForPos(pos as any, 'top', DIMS);
     expect(pie(phiTop)).toBeCloseTo(0, 9);
   });
@@ -107,7 +111,10 @@ describe('headingRadForPos — rear/ground/hanging visent le centre de la scène
         const dir = worldBeamDir(phi);
         if (pos.x < 0.5) expect(dir.x).toBeGreaterThan(0);
         if (pos.x > 0.5) expect(dir.x).toBeLessThan(0);
-        expect(dir.z).toBeLessThan(-0.5);
+        // ground devant (y<0.25) pointe vers l'arrière (+Z)
+        if (mode === 'ground' && pos.y < 0.25) expect(dir.z).toBeGreaterThan(0.5);
+        // rear ou ground derrière (y>0.75) pointe vers l'avant (-Z)
+        if (mode === 'rear' || (mode === 'ground' && pos.y > 0.75)) expect(dir.z).toBeLessThan(-0.5);
       }
     }
   });
@@ -143,16 +150,14 @@ describe('headingRadForPos — rear/ground/hanging visent le centre de la scène
     // phi = atan2((0.5-x)*2, |y-0.5|*20)
     const phiL = headingRadForPos(left as any, 'hanging', NARROW, true);
     const phiR = headingRadForPos(right as any, 'hanging', NARROW, true);
-    // Left: atan2((-0.005-0.5)*2, ...) = atan2(-1.01, 8.88) ≈ -0.113
-    expect(pie(phiL)).toBeCloseTo(Math.atan2(-1.01, 8.88), 5);
-    // Right: atan2((0.988-0.5)*2, ...) = atan2(0.976, 8.88) ≈ 0.110
-    expect(pie(phiR)).toBeCloseTo(Math.atan2(0.976, 8.88), 5);
-    // Gauche (x<0.5) → phi négatif → dir.x positif (vers centre)
-    // Droite (x>0.5) → phi positif → dir.x négatif (vers centre)
-    expect(Math.sin(phiL)).toBeLessThan(0);
-    expect(Math.sin(phiR)).toBeGreaterThan(0);
-    expect(-Math.cos(phiL)).toBeLessThan(-0.99);
-    expect(-Math.cos(phiR)).toBeLessThan(-0.99);
+    // y=0.056 < 0.25 → mode re-dérivé en 'ground' → pointe vers l'arrière (φ ≈ π)
+    expect(pie(phiL)).toBeCloseTo(-(Math.PI - Math.atan2(1.01, 8.88)), 5);
+    expect(pie(phiR)).toBeCloseTo(Math.PI - Math.atan2(0.976, 8.88), 5);
+    // φ ≈ π → dir.x ≈ 0, dir.z ≈ +1 (vers l'arrière / centre de scène)
+    expect(Math.abs(Math.sin(phiL))).toBeLessThan(0.2);
+    expect(Math.abs(Math.sin(phiR))).toBeLessThan(0.2);
+    expect(-Math.cos(phiL)).toBeGreaterThan(0.99);
+    expect(-Math.cos(phiR)).toBeGreaterThan(0.99);
   });
 });
 

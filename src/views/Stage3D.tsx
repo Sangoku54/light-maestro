@@ -1466,6 +1466,18 @@ export const Stage3D: React.FC<{
     }
     // top: baseTilt stays 0 → beam points down (-Y)
 
+    // Pour les fixtures sans armGroup/headGroup (ex. led_bar / wall washer),
+    // appliquer baseTilt aux pixel targets pour que ground/rear/hanging pointe vers l'avant (-Z)
+    // au lieu de pointer vers le sol (-Y).
+    if (!armGroup && !headGroup && baseTilt !== 0) {
+      const pixelTargets = (group as any).__ledPixelTargets;
+      if (pixelTargets) {
+        for (const tgt of pixelTargets) {
+          tgt.rotation.x = baseTilt;
+        }
+      }
+    }
+
     if (extraTilts.length > 0 && armGroup) {
       const extraMat = new THREE.MeshStandardMaterial({
         color: 0x2a2a35, roughness: 0.35, metalness: 0.5,
@@ -6047,7 +6059,15 @@ export function headingRadForPos(pos: FixturePos, mountMode: string, stageDims: 
    // 公式：atan2(width, max(1, width/depth)) = atan2(width*depth, max(depth, width))
    // 等价于 atan(aspectRatio) 弧度
    const maxPhiRad = Math.atan2(stageDims.width, Math.max(1, stageDims.width / stageDims.depth));
-   return Math.max(-maxPhiRad, Math.min(maxPhiRad, phi));
+   phi = Math.max(-maxPhiRad, Math.min(maxPhiRad, phi));
+   // Les fixtures au sol devant (y < 0.25) pointent vers l'arrière (centre de scène),
+   // pas vers le public. Inverser phi : phi -> π - phi (inverse Z, garde X vers le centre).
+   if (mode === 'ground' && pos.y < 0.25) {
+     phi = Math.PI - phi;
+     while (phi > Math.PI) phi -= 2 * Math.PI;
+     while (phi < -Math.PI) phi += 2 * Math.PI;
+   }
+   return phi;
 }
 /** True si la fixture a au moins un canal pan/tilt DMX (fixture motoris�e). */
 export function hasPanTiltChannels(cm: { panOffsets?: number[]; panOffset?: number | null; tiltOffsets?: number[]; tiltOffset?: number | null; scanXOffset?: number | null; scanYOffset?: number | null }): boolean {
