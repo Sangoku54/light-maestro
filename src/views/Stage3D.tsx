@@ -2908,9 +2908,9 @@ export const Stage3D: React.FC<{
         const idleSec = (performance.now() - dmxLastActivityRef.current) / 1000;
         if (idleSec > 3 && f3d.armGroup && f3d.headGroup && hasPanTiltChannels(f3d.channelMap)) {
           const t = performance.now() * 0.001;
-          const panTarget = Math.sin(t * 0.4) * 0.7 * Math.PI;
+          const sweepPan = f3d._headingRad + Math.sin(t * 0.4) * 0.7 * Math.PI;
           const tiltTarget = f3d._baseTilt + Math.sin(t * 0.35 + 1.2) * 0.35 * Math.PI + (f3d._staticTilt ?? 0);
-          f3d.armGroup.rotation.y += (panTarget - f3d.armGroup.rotation.y) * 0.15;
+          f3d.armGroup.rotation.y += (sweepPan - f3d.armGroup.rotation.y) * 0.15;
           f3d.headGroup.rotation.x += (tiltTarget - f3d.headGroup.rotation.x) * 0.15;
            (f3d.extraHeads ?? []).forEach((eh, k) => {
              // Skip rgbSegment-based extra heads (no tilt) � only tilt-based heads auto-sweep
@@ -3097,7 +3097,8 @@ export const Stage3D: React.FC<{
           // Zone PAN : �90� autour de la direction par d�faut (jamais derri�re)
           // � SAUF en mode Target (libre).
           const rawPan = ((panVal / 255) - 0.5) * panRangeRad + (f3d._zeroPanDeg * Math.PI) / 180;
-          const panTarget = freeAim ? rawPan : clampPanZone(rawPan);
+          const panAbs = f3d._headingRad + rawPan;
+          const panTarget = freeAim ? panAbs : clampPanZone(panAbs, f3d._headingRad);
           let panDelta = panTarget - f3d.armGroup.rotation.y;
           while (panDelta > Math.PI) panDelta -= 2 * Math.PI;
           while (panDelta < -Math.PI) panDelta += 2 * Math.PI;
@@ -6061,8 +6062,13 @@ export function hasPanTiltChannels(cm: { panOffsets?: number[]; panOffset?: numb
  *     fixtures en hauteur ; au SOL ('ground'), jamais sous l'horizon �
  *     rien � �clairer dans le plancher.
  */
-export function clampPanZone(relRad: number): number {
-  return Math.max(-Math.PI / 2, Math.min(Math.PI / 2, relRad));
+export function clampPanZone(absRad: number, headingRad: number): number {
+  // Clamp absolute angle to ±90� around the heading (never point behind).
+  let diff = absRad - headingRad;
+  while (diff > Math.PI) diff -= 2 * Math.PI;
+  while (diff < -Math.PI) diff += 2 * Math.PI;
+  diff = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, diff));
+  return headingRad + diff;
 }
 
 export function clampTiltZone(elevRad: number, mountMode: string): number {

@@ -161,11 +161,11 @@ describe('zone d eclairage utile - clamp PAN +/-90 / TILT +/-90 (sol : jamais so
   const H = Math.PI / 2;
 
   it('PAN : balayage limite a +/-90 face a eux (jamais derriere - mur du fond)', () => {
-    expect(clampPanZone(0)).toBeCloseTo(0, 9);
-    expect(clampPanZone(H * 0.6)).toBeCloseTo(H * 0.6, 9);
-    expect(clampPanZone(H * 1.4)).toBeCloseTo(H, 9);
-    expect(clampPanZone(-H * 1.4)).toBeCloseTo(-H, 9);
-    expect(clampPanZone(Math.PI)).toBeCloseTo(H, 9);
+    expect(clampPanZone(0, 0)).toBeCloseTo(0, 9);
+    expect(clampPanZone(H * 0.6, 0)).toBeCloseTo(H * 0.6, 9);
+    expect(clampPanZone(H * 1.4, 0)).toBeCloseTo(H, 9);
+    expect(clampPanZone(-H * 1.4, 0)).toBeCloseTo(-H, 9);
+    expect(clampPanZone(Math.PI, 0)).toBeCloseTo(H, 9);
   });
 
   it('TILT : elevation limitee a [-90, +90], sol : pas sous l horizon', () => {
