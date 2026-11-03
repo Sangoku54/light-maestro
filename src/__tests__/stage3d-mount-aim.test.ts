@@ -43,16 +43,17 @@ describe('headingRadForPos — rear/ground/hanging visent le centre de la scène
     }
   });
 
-  it('arriere droite (x=0.9, y=0.95, DIMS 12x8) : phi 被压制到 -PI/4', () => {
+  it('arriere droite (x=0.9, y=0.95, DIMS 12x8) : phi = atan2(-4.8, 3.6) ≈ -53°', () => {
     const pos = { x: 0.9, y: 0.95, h: 0.6, heading: 0 };
     for (const mode of ['hanging', 'rear', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      // lateral = (0.5-0.9)*12 = -4.8, longitudinal = 0.45*8 = 3.6, floor = 3.2
-      // phi = atan2(-4.8, 3.6) ≈ -0.927 rad → clamped to -PI/4
-      expect(pie(phi)).toBeCloseTo(-Math.PI / 4, 5);
+      // lateral = (0.5-0.9)*12 = -4.8, longitudinal = 0.45*8 = 3.6
+      // floor = min(12,8)*0.4 = 3.2, maxPhiRad = atan2(12, 1.5) ≈ 82.9°
+      // phi_raw = atan2(-4.8, 3.6) ≈ -53° → 在 clamp 范围内，不被压制
+      expect(pie(phi)).toBeCloseTo(Math.atan2(-4.8, 3.6), 5);
       const dir = worldBeamDir(phi);
       expect(dir.x).toBeLessThan(-0.7); // 明显向左
-      expect(dir.z).toBeLessThan(-0.7); // 明显向前
+      expect(dir.z).toBeLessThan(-0.5); // 向前
     }
   });
 
@@ -68,29 +69,32 @@ describe('headingRadForPos — rear/ground/hanging visent le centre de la scène
     expect(pie(phiTop)).toBeCloseTo(0, 9);
   });
 
-  it('cote gauche (x=0.1, y=0.5, DIMS 12x8) : phi 被压制到 PI/4 而非 π/2', () => {
+  it('cote gauche (x=0.1, y=0.5, DIMS 12x8) : phi 被自适应 clamp 压制到 ~36° 而非 π/2', () => {
     const pos = { x: 0.1, y: 0.5, h: 0.6, heading: 0 };
     for (const mode of ['hanging', 'rear', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      // lateral = 4.8, longitudinal = 0, floor = 3.2
-      // phi = atan2(4.8, 3.2) ≈ 0.983 rad → clamped to PI/4
-      expect(pie(phi)).toBeCloseTo(Math.PI / 4, 5);
+      // floor = min(12,8)*0.4 = 3.2, phi_raw = atan2(4.8, 3.2) ≈ 0.983 rad
+      // clamp = atan2(12, 12/8) = atan2(12, 1.5) ≈ 1.445 rad ≈ 82.9°
+      // 0.983 < 1.445 → phi 不被 clamp，结果为 atan2(4.8, 3.2) ≈ 0.983 rad ≈ 56.3°
+      const expected = Math.atan2(4.8, 3.2);
+      expect(pie(phi)).toBeCloseTo(expected, 5);
       const dir = worldBeamDir(phi);
-      expect(dir.x).toBeGreaterThan(0.7); // 明显向右
-      expect(dir.z).toBeLessThan(-0.7);   // 明显向前
+      expect(dir.x).toBeGreaterThan(0.8); // 明显向右
+      expect(dir.z).toBeLessThan(-0.5);   // 仍向前
     }
   });
 
-  it('cote droit (x=0.9, y=0.5, DIMS 12x8) : phi 被压制到 -PI/4 而非 -π/2', () => {
+  it('cote droit (x=0.9, y=0.5, DIMS 12x8) : phi 被自适应 clamp 压制到 ~-36° 而非 -π/2', () => {
     const pos = { x: 0.9, y: 0.5, h: 0.6, heading: 0 };
     for (const mode of ['hanging', 'rear', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      // lateral = -4.8, longitudinal = 0, floor = 3.2
-      // phi = atan2(-4.8, 3.2) ≈ -0.983 rad → clamped to -PI/4
-      expect(pie(phi)).toBeCloseTo(-Math.PI / 4, 5);
+      // floor = min(12,8)*0.4 = 3.2, phi_raw = atan2(-4.8, 3.2) ≈ -0.983 rad
+      // clamp 不变，-0.983 > -1.445 → phi 不被 clamp，结果为 -0.983 rad ≈ -56.3°
+      const expected = Math.atan2(-4.8, 3.2);
+      expect(pie(phi)).toBeCloseTo(expected, 5);
       const dir = worldBeamDir(phi);
-      expect(dir.x).toBeLessThan(-0.7); // 明显向左
-      expect(dir.z).toBeLessThan(-0.7); // 明显向前
+      expect(dir.x).toBeLessThan(-0.8); // 明显向左
+      expect(dir.z).toBeLessThan(-0.5); // 仍向前
     }
   });
 

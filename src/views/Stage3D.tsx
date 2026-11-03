@@ -6023,14 +6023,22 @@ export function headingRadForPos(pos: FixturePos, mountMode: string, stageDims: 
    // diverge vers ±π/2 quand y→0.5 (composante profondeur → 0). On ajoute un
    // plancher proportional à la profondeur du stage pour garder une visée
    // globalement orientée vers le public, avec une convergence latérale
-   // modérée (max ±30°).
+   // modérée (max ±90°).
+   //
+   // clamp 自适应：上限 = atan2(stage_width, stage_depth)
+   //   — 宽舞台 (10×6) → cap≈84°，允许大侧偏（保留原始发散特性）
+   //   — 窄舞台 (2×20) → cap≈11°，防止 y≈0.5 处发散到 ±90°
    const lateral = (0.5 - pos.x) * stageDims.width;
    const longitudinal = Math.abs(pos.y - 0.5) * stageDims.depth;
-   // Plancher : 40% de la profondeur du stage → empêche les angles extrêmes
-   const floor = stageDims.depth * 0.4;
+   // Plancher = min(w,d)*0.4：对窄舞台取 depth*0.4，对宽舞台取 width*0.4
+   // 确保 y≈0.5 时纵向分量不至于太小导致 phi 发散
+   const floor = Math.min(stageDims.width, stageDims.depth) * 0.4;
    let phi = Math.atan2(lateral, Math.max(longitudinal, floor));
-   // Cap à ±45° pour les stages très larges où le plancher ne suffit pas
-   return Math.max(-Math.PI / 4, Math.min(Math.PI / 4, phi));
+   // 自适应 clamp：基于舞台宽高比动态调整最大偏转角
+   // 公式：atan2(width, max(1, width/depth)) = atan2(width*depth, max(depth, width))
+   // 等价于 atan(aspectRatio) 弧度
+   const maxPhiRad = Math.atan2(stageDims.width, Math.max(1, stageDims.width / stageDims.depth));
+   return Math.max(-maxPhiRad, Math.min(maxPhiRad, phi));
 }
 /** True si la fixture a au moins un canal pan/tilt DMX (fixture motoris�e). */
 export function hasPanTiltChannels(cm: { panOffsets?: number[]; panOffset?: number | null; tiltOffsets?: number[]; tiltOffset?: number | null; scanXOffset?: number | null; scanYOffset?: number | null }): boolean {
