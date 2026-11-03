@@ -464,6 +464,7 @@ interface Fixture3D {
   _baseTilt: number;            // base tilt set at creation from mount mode
   _zeroPanDeg: number;          // point z�ro pan VISUEL (degr�s) : d�calage du faisceau dans la 3D
   _zeroTiltDeg: number;         // point z�ro tilt VISUEL (degr�s) : d�calage du faisceau dans la 3D
+  _headingRad: number;          // heading initial (phi) stocké séparément pour le DMX pan
   lastPan?: number;             // dernier byte pan vu (pour � capturer le centre du mouvement �)
   lastTilt?: number;            // dernier byte tilt vu (pour � capturer le centre du mouvement �)
   _smoothI?: number;            // intensit� liss�e 0..1 (anti-marches de fade, cf. updateDmxState)
@@ -1446,9 +1447,9 @@ export const Stage3D: React.FC<{
       }
     }
 
-    // Initialize armGroup rotation to the computed heading so DMX/auto-sweep
-    // pan deltas are measured from the correct global direction.
-    if (armGroup) armGroup.rotation.y = phi;
+    // Initialize armGroup rotation to 0 (DMX delta only). Heading stored in
+    // _headingRad so neutral DMX pan (128) doesn't cancel it.
+    if (armGroup) armGroup.rotation.y = 0;
 
     // Multi-arm fixtures (e.g. Tonio 6 arm): one extra head per additional tilt channel.
     // Heads are arranged in a circle around the center and share the arm (pan).
@@ -1573,6 +1574,7 @@ export const Stage3D: React.FC<{
       _baseTilt: baseTilt,
       _zeroPanDeg: pos.zeroPan ?? 0,
       _zeroTiltDeg: pos.zeroTilt ?? 0,
+      _headingRad: phi,
       trailPositions: [],
       trailLastAdd: 0,
       extraHeads: extraHeads.length > 0 ? extraHeads : undefined,
@@ -2529,7 +2531,8 @@ export const Stage3D: React.FC<{
         f3d.group.position.set(stageX, stageY, stageZ);
         const phi1 = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(f3d.channelMap));
         f3d.group.rotation.y = phi1;
-        if (f3d.armGroup) f3d.armGroup.rotation.y = phi1;
+        if (f3d.armGroup) f3d.armGroup.rotation.y = 0;
+        f3d._headingRad = phi1;
         if (pos.mountMode) {
           f3d.mountMode = pos.mountMode;
           // Reset _baseTilt and headGroup rotation to match new mount mode
@@ -2618,7 +2621,8 @@ export const Stage3D: React.FC<{
       f3d.group.position.set(stageX, stageY, stageZ);
       const phi2 = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(f3d.channelMap));
       f3d.group.rotation.y = phi2;
-      if (f3d.armGroup) f3d.armGroup.rotation.y = phi2;
+      if (f3d.armGroup) f3d.armGroup.rotation.y = 0;
+      f3d._headingRad = phi2;
       if (pos.mountMode) {
         f3d.mountMode = pos.mountMode;
         const newBaseTilt = (pos.mountMode === 'rear' || pos.mountMode === 'ground' || pos.mountMode === 'hanging') ? Math.PI / 2 : 0;
