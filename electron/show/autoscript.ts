@@ -236,7 +236,6 @@ export class AutoScriptEngine {
     // 2. Vitesse globale : config + modulation par l'énergie musicale
     const baseSpeed = this.config.speedMultiplier === 'half' ? 0.5
       : this.config.speedMultiplier === 'double' ? 2.0 : 1.0;
-    // En break-down on ralentit, en drop on accélère légèrement
     const energySpeed = 0.7 + analysis.totalEnergy * 0.6;
     this.state.speedFactor = Math.round(baseSpeed * energySpeed * 10) / 10;
 
@@ -248,27 +247,53 @@ export class AutoScriptEngine {
       this.state.phraseBeats = (this.state.phraseBeats + 1) % this.state.phraseLength;
     }
     const phraseEnd = this.state.phraseBeats === 0 && this.beatCount > 0;
+    // Progression dans la phrase (0 à 1) : pour courbes d'intensité crescendo/diminuendo
+    const phraseProgress = this.state.phraseBeats / Math.max(1, this.state.phraseLength - 1);
 
-    // 4. Section-based effect selection (uniquement en fin de phrase)
+    // 4. Détection downbeat : fin de phrase = temps fort (premier beat de la nouvelle phrase)
+    const onDownbeat = analysis.beat && phraseEnd;
+
+    // 5. Section-based effect selection : seulement sur downbeat ou fin de phrase
     if (this.config.sectionAware && analysis.sectionChange && !this.state.isLocked) {
       this.selectEffectForSection(analysis.section);
       this.state.phraseBeats = 0;
     }
 
-    // 5. Beat-synced effect changes (en fin de phrase, jamais verrouillé)
-    if (this.config.beatSync && analysis.beat &&
-        !this.state.isLocked && (phraseEnd || this.beatCount % this.config.beatDivision === 0)) {
-      this.advanceEffect(analysis);
+    // 6. Beat-synced effect changes : downbeat prioritaire, puis fin de phrase
+    if (this.config.beatSync && analysis.beat && !this.state.isLocked) {
+      const shouldChange = onDownbeat || phraseEnd || this.beatCount % this.config.beatDivision === 0;
+      if (shouldChange) {
+        this.advanceEffect(analysis);
+      }
     }
 
-    // 5. Color palette from audio or scheme
+    // 7. Intensité modulée par la phrase : crescendo vers la fin, puis relâchement
+    // Cela crée une respiration musicale naturelle (tension → relâchement)
+    let phraseIntensity = 1.0;
+    if (this.state.phraseLength > 1) {
+      // Courbe en cloche : milieu de phrase plus fort, début et fin plus doux
+      phraseIntensity = 0.6 + 0.4 * Math.sin(phraseProgress * Math.PI);
+    }
+    if (this.config.intensity === 'dynamic') {
+      const baseIntensity = Math.round(
+        analysis.totalEnergy * 255 * (this.config.maxBrightness / 255)
+      );
+      this.state.masterIntensity = Math.round(baseIntensity * phraseIntensity);
+    }
+
+    // 8. Détecter le début de phrase pour réinitialiser certains paramètres
+    if (this.state.phraseBeats === 1 && this.beatCount > 1) {
+      this.state.effectIntensity = Math.min(1, analysis.drums * 1.2);
+    }
+
+    // 9. Color palette from audio or scheme
     if (this.config.colorScheme === 'auto') {
       this.state.colorPalette = this.audioReactivePalette(analysis);
     } else {
       this.state.colorPalette = COLOR_PALETTES[this.config.colorScheme] || COLOR_PALETTES.auto;
     }
 
-    // 6. Stem-reactive parameters
+    // 10. Stem-reactive parameters
     if (this.config.drumReactive) {
       this.state.effectIntensity = analysis.drums;
       this.state.strobeRate = analysis.drums > 0.7
@@ -280,9 +305,9 @@ export class AutoScriptEngine {
       this.state.movementSpeed = 0.1 + analysis.vocals * 0.9;
     }
 
-    // 7. Movement from audio
-    this.state.panPosition = Math.round(128 + Math.sin(analysis.beatPhase * Math.PI * 2) * 127);
-    this.state.tiltPosition = Math.round(128 + Math.cos(analysis.beatPhase * Math.PI * 1.5) * 127);
+    // 11. Movement from audio (pan/tilt basés sur le beat et la phrase)
+    this.state.panPosition = Math.round(128 + Math.sin((analysis.beatPhase + phraseProgress) * Math.PI * 2) * 100);
+    this.state.tiltPosition = Math.round(128 + Math.cos((analysis.beatPhase * 1.5 + phraseProgress) * Math.PI) * 60);
 
     return this.state;
   }
