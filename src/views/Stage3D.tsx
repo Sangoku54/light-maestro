@@ -1131,7 +1131,8 @@ export const Stage3D: React.FC<{
     group.position.set(stageX, stageY, stageZ);
     // Apply heading rotation (degrees ? radians, Y axis rotation).
     // R�gle de zone (vue audience) pour les motoris�es ; heading = secours sans pan/tilt.
-    group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(channelMap));
+    const phi = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(channelMap));
+    group.rotation.y = phi;
     // User data for raycasting identification
     group.userData = { fixtureId: fixture.id, fixtureType: fixture.fixtureType };
 
@@ -1444,6 +1445,10 @@ export const Stage3D: React.FC<{
         group.add(armGroup);
       }
     }
+
+    // Initialize armGroup rotation to the computed heading so DMX/auto-sweep
+    // pan deltas are measured from the correct global direction.
+    if (armGroup) armGroup.rotation.y = phi;
 
     // Multi-arm fixtures (e.g. Tonio 6 arm): one extra head per additional tilt channel.
     // Heads are arranged in a circle around the center and share the arm (pan).
@@ -2521,7 +2526,9 @@ export const Stage3D: React.FC<{
         const stageZ = (pos.y - 0.5) * stageDimsRef.current.depth;
         const stageY = deckTopAt(stageDecksRef.current, pos.x, pos.y) + pos.h;
         f3d.group.position.set(stageX, stageY, stageZ);
-        f3d.group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(f3d.channelMap));
+        const phi1 = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(f3d.channelMap));
+        f3d.group.rotation.y = phi1;
+        if (f3d.armGroup) f3d.armGroup.rotation.y = phi1;
         if (pos.mountMode) {
           f3d.mountMode = pos.mountMode;
           // Reset _baseTilt and headGroup rotation to match new mount mode
@@ -2608,7 +2615,9 @@ export const Stage3D: React.FC<{
       const stageZ = (pos.y - 0.5) * stageDimsRef.current.depth;
       const stageY = deckTopAt(stageDecksRef.current, pos.x, pos.y) + pos.h;
       f3d.group.position.set(stageX, stageY, stageZ);
-      f3d.group.rotation.y = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(f3d.channelMap));
+      const phi2 = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(f3d.channelMap));
+      f3d.group.rotation.y = phi2;
+      if (f3d.armGroup) f3d.armGroup.rotation.y = phi2;
       if (pos.mountMode) {
         f3d.mountMode = pos.mountMode;
         const newBaseTilt = (pos.mountMode === 'rear' || pos.mountMode === 'ground' || pos.mountMode === 'hanging') ? Math.PI / 2 : 0;
