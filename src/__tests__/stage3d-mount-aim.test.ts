@@ -26,34 +26,32 @@ function pie(a: number): number {
 }
 
 function worldBeamDir(phi: number): { x: number; z: number } {
-  // Beam direction after armGroup rotation around Y: (sin(phi), -cos(phi))
-  return { x: Math.sin(phi), z: -Math.cos(phi) };
+  // dir = R_y(phi) · (0,-1,0) → (-sin(phi), 0, -cos(phi))
+  return { x: -Math.sin(phi), z: -Math.cos(phi) };
 }
 
 describe('headingRadForPos — rear/ground/hanging visent le centre de la scène', () => {
-  it('arriere gauche (x=0.2, y=0.95, DIMS 12x8) : phi = atan2(0.36, 0.36) = PI/4', () => {
+  it('arriere gauche (x=0.2, y=0.95, DIMS 12x8) : phi = atan2(-3.6, 0.36) = -PI/4', () => {
     const pos = { x: 0.2, y: 0.95, h: 0.6, heading: 0 };
     for (const mode of ['hanging', 'rear', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      // (0.5-0.2)*12 = 0.36, |0.95-0.5|*8 = 0.36
-      expect(pie(phi)).toBeCloseTo(Math.atan2(0.36, 0.36), 5);
+      // (0.2-0.5)*12 = -3.6, |0.95-0.5|*8 = 3.6 (floor=3.2, max prend 3.6)
+      expect(pie(phi)).toBeCloseTo(Math.atan2(-3.6, 3.6), 5);
       const dir = worldBeamDir(phi);
       expect(dir.x).toBeGreaterThan(0.5); // vers la droite
       expect(dir.z).toBeLessThan(-0.7);   // vers l'avant
     }
   });
 
-  it('arriere droite (x=0.9, y=0.95, DIMS 12x8) : phi = atan2(-4.8, 3.6) ≈ -53°', () => {
+  it('arriere droite (x=0.9, y=0.95, DIMS 12x8) : phi = atan2(4.8, 3.6) ≈ +53°', () => {
     const pos = { x: 0.9, y: 0.95, h: 0.6, heading: 0 };
     for (const mode of ['hanging', 'rear', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      // lateral = (0.5-0.9)*12 = -4.8, longitudinal = 0.45*8 = 3.6
-      // floor = min(12,8)*0.4 = 3.2, maxPhiRad = atan2(12, 1.5) ≈ 82.9°
-      // phi_raw = atan2(-4.8, 3.6) ≈ -53° → 在 clamp 范围内，不被压制
-      expect(pie(phi)).toBeCloseTo(Math.atan2(-4.8, 3.6), 5);
+      // (0.9-0.5)*12 = 4.8, |0.95-0.5|*8 = 3.6
+      expect(pie(phi)).toBeCloseTo(Math.atan2(4.8, 3.6), 5);
       const dir = worldBeamDir(phi);
-      expect(dir.x).toBeLessThan(-0.7); // 明显向左
-      expect(dir.z).toBeLessThan(-0.5); // 向前
+      expect(dir.x).toBeLessThan(-0.7); // vers la gauche
+      expect(dir.z).toBeLessThan(-0.5); // vers l'avant
     }
   });
 
@@ -76,7 +74,7 @@ describe('headingRadForPos — rear/ground/hanging visent le centre de la scène
       // floor = min(12,8)*0.4 = 3.2, phi_raw = atan2(4.8, 3.2) ≈ 0.983 rad
       // clamp = atan2(12, 12/8) = atan2(12, 1.5) ≈ 1.445 rad ≈ 82.9°
       // 0.983 < 1.445 → phi 不被 clamp，结果为 atan2(4.8, 3.2) ≈ 0.983 rad ≈ 56.3°
-      const expected = Math.atan2(4.8, 3.2);
+      const expected = Math.atan2(-4.8, 3.2);
       expect(pie(phi)).toBeCloseTo(expected, 5);
       const dir = worldBeamDir(phi);
       expect(dir.x).toBeGreaterThan(0.8); // 明显向右
@@ -90,7 +88,7 @@ describe('headingRadForPos — rear/ground/hanging visent le centre de la scène
       const phi = headingRadForPos(pos as any, mode, DIMS);
       // floor = min(12,8)*0.4 = 3.2, phi_raw = atan2(-4.8, 3.2) ≈ -0.983 rad
       // clamp 不变，-0.983 > -1.445 → phi 不被 clamp，结果为 -0.983 rad ≈ -56.3°
-      const expected = Math.atan2(-4.8, 3.2);
+      const expected = Math.atan2(4.8, 3.2);
       expect(pie(phi)).toBeCloseTo(expected, 5);
       const dir = worldBeamDir(phi);
       expect(dir.x).toBeLessThan(-0.8); // 明显向左
@@ -125,7 +123,7 @@ describe('headingRadForPos — rear/ground/hanging visent le centre de la scène
   it('fixture motorisee : heading herite IGNORE (regle centre gagne)', () => {
     const pos = { x: 0.2, y: 0.95, h: 0.6, heading: 260 };
     const phi = headingRadForPos(pos as any, 'hanging', DIMS, true);
-    expect(pie(phi)).toBeCloseTo(Math.atan2(0.36, 0.36), 5);
+    expect(pie(phi)).toBeCloseTo(Math.atan2(-3.6, 3.6), 5);
   });
 
   it('fixture SANS pan/tilt : heading utilisateur != 0 respecte', () => {
@@ -135,7 +133,7 @@ describe('headingRadForPos — rear/ground/hanging visent le centre de la scène
       expect(phi).toBeCloseTo((48 * Math.PI) / 180, 9);
     }
     const phi0 = headingRadForPos({ x: 0.2, y: 0.95, heading: 0 } as any, 'ground', DIMS, false);
-    expect(pie(phi0)).toBeCloseTo(Math.atan2(0.36, 0.36), 5);
+    expect(pie(phi0)).toBeCloseTo(Math.atan2(-3.6, 3.6), 5);
   });
 
   it('stage étroit 2x20 (tuto.lmproj) : phi faible, faisceaux quasi-parallèles', () => {
@@ -145,13 +143,14 @@ describe('headingRadForPos — rear/ground/hanging visent le centre de la scène
     // phi = atan2((0.5-x)*2, |y-0.5|*20)
     const phiL = headingRadForPos(left as any, 'hanging', NARROW, true);
     const phiR = headingRadForPos(right as any, 'hanging', NARROW, true);
-    // Left: atan2(0.505*2, 0.444*20) = atan2(1.01, 8.88) ≈ 0.113
-    expect(pie(phiL)).toBeCloseTo(Math.atan2(1.01, 8.88), 5);
-    // Right: atan2(-0.488*2, 0.444*20) = atan2(-0.976, 8.88) ≈ -0.110
-    expect(pie(phiR)).toBeCloseTo(Math.atan2(-0.976, 8.88), 5);
-    // Gauche → droite, Droite → gauche, tous deux vers l'avant
-    expect(Math.sin(phiL)).toBeGreaterThan(0);
-    expect(Math.sin(phiR)).toBeLessThan(0);
+    // Left: atan2((-0.005-0.5)*2, ...) = atan2(-1.01, 8.88) ≈ -0.113
+    expect(pie(phiL)).toBeCloseTo(Math.atan2(-1.01, 8.88), 5);
+    // Right: atan2((0.988-0.5)*2, ...) = atan2(0.976, 8.88) ≈ 0.110
+    expect(pie(phiR)).toBeCloseTo(Math.atan2(0.976, 8.88), 5);
+    // Gauche (x<0.5) → phi négatif → dir.x positif (vers centre)
+    // Droite (x>0.5) → phi positif → dir.x négatif (vers centre)
+    expect(Math.sin(phiL)).toBeLessThan(0);
+    expect(Math.sin(phiR)).toBeGreaterThan(0);
     expect(-Math.cos(phiL)).toBeLessThan(-0.99);
     expect(-Math.cos(phiR)).toBeLessThan(-0.99);
   });

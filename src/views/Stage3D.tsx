@@ -2908,9 +2908,9 @@ export const Stage3D: React.FC<{
         const idleSec = (performance.now() - dmxLastActivityRef.current) / 1000;
         if (idleSec > 3 && f3d.armGroup && f3d.headGroup && hasPanTiltChannels(f3d.channelMap)) {
           const t = performance.now() * 0.001;
-          const sweepPan = f3d._headingRad + Math.sin(t * 0.4) * 0.7 * Math.PI;
+          const sweepRelative = Math.sin(t * 0.4) * 0.7 * Math.PI;
           const tiltTarget = f3d._baseTilt + Math.sin(t * 0.35 + 1.2) * 0.35 * Math.PI + (f3d._staticTilt ?? 0);
-          f3d.armGroup.rotation.y += (sweepPan - f3d.armGroup.rotation.y) * 0.15;
+          f3d.armGroup.rotation.y += (sweepRelative - f3d.armGroup.rotation.y) * 0.15;
           f3d.headGroup.rotation.x += (tiltTarget - f3d.headGroup.rotation.x) * 0.15;
            (f3d.extraHeads ?? []).forEach((eh, k) => {
              // Skip rgbSegment-based extra heads (no tilt) � only tilt-based heads auto-sweep
@@ -3099,7 +3099,10 @@ export const Stage3D: React.FC<{
           const rawPan = ((panVal / 255) - 0.5) * panRangeRad + (f3d._zeroPanDeg * Math.PI) / 180;
           const panAbs = f3d._headingRad + rawPan;
           const panTarget = freeAim ? panAbs : clampPanZone(panAbs, f3d._headingRad);
-          let panDelta = panTarget - f3d.armGroup.rotation.y;
+          // panTarget est absolu (heading + offset). armGroup.rotation.y est RELATIF au
+          // heading (commence à 0 à la création), donc on compare l'offset relatif.
+          const panRelative = panTarget - f3d._headingRad;
+          let panDelta = panRelative - f3d.armGroup.rotation.y;
           while (panDelta > Math.PI) panDelta -= 2 * Math.PI;
           while (panDelta < -Math.PI) panDelta += 2 * Math.PI;
           const panMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
@@ -6034,7 +6037,7 @@ export function headingRadForPos(pos: FixturePos, mountMode: string, stageDims: 
    // clamp 自适应：上限 = atan2(stage_width, stage_depth)
    //   — 宽舞台 (10×6) → cap≈84°，允许大侧偏（保留原始发散特性）
    //   — 窄舞台 (2×20) → cap≈11°，防止 y≈0.5 处发散到 ±90°
-   const lateral = (0.5 - pos.x) * stageDims.width;
+   const lateral = (pos.x - 0.5) * stageDims.width;
    const longitudinal = Math.abs(pos.y - 0.5) * stageDims.depth;
    // Plancher = min(w,d)*0.4：对窄舞台取 depth*0.4，对宽舞台取 width*0.4
    // 确保 y≈0.5 时纵向分量不至于太小导致 phi 发散

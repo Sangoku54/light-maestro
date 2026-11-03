@@ -1848,7 +1848,12 @@ const VCWidgetRenderer: React.FC<{
           const fTop = frame.y + 32;
           const fBottom = frame.y + frame.height;
           if (wx < fLeft || wRight > fRight || wy < fTop || wBottom > fBottom) {
-            vcUpdateWidget(widget.id, { frameId: null });
+            // Convertir les coordonnées relatives au frame en absolus avant
+            // de détacher, sinon le widget réapparaît au coin (0,0) de la page
+            // et passe derrière les autres widgets.
+            const absX = frame.x + (curW.x ?? 0);
+            const absY = frame.y + 32 + (curW.y ?? 0);
+            vcUpdateWidget(widget.id, { frameId: null, x: absX, y: absY });
           }
         }
       } else {
