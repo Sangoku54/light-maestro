@@ -1456,6 +1456,15 @@ export const Stage3D: React.FC<{
     const extraTilts = (channelMap.tiltOffsets?.length ?? 0) > 1
       ? channelMap.tiltOffsets.slice(1)
       : [];
+
+    // Base tilt compensation per mount mode — set once at creation.
+    // Beam exits along local -Y; +π/2 around X makes it point to -Z (front audience).
+    let baseTilt = 0;
+    if (pos.mountMode === 'rear' || pos.mountMode === 'ground' || pos.mountMode === 'hanging') {
+      baseTilt = Math.PI / 2;
+    }
+    // top: baseTilt stays 0 → beam points down (-Y)
+
     if (extraTilts.length > 0 && armGroup) {
       const extraMat = new THREE.MeshStandardMaterial({
         color: 0x2a2a35, roughness: 0.35, metalness: 0.5,
@@ -1479,14 +1488,6 @@ export const Stage3D: React.FC<{
         extraHeads.push({ headGroup: eh, lightTarget: exit, tiltOffset: off, _mountTilt: baseTilt });
       });
     }
-
-    // Base tilt compensation per mount mode — set once at creation.
-    // Beam exits along local -Y; +π/2 around X makes it point to -Z (front audience).
-    let baseTilt = 0;
-    if (pos.mountMode === 'rear' || pos.mountMode === 'ground' || pos.mountMode === 'hanging') {
-      baseTilt = Math.PI / 2;
-    }
-    // top: baseTilt stays 0 → beam points down (-Y)
 
     // Multi-head RGB fixtures (e.g. spider with N RGBW heads, no pan/tilt per head).
     // Each head gets its own RGB segment and is positioned in a circle.

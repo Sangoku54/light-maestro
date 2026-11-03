@@ -1830,11 +1830,26 @@ const VCWidgetRenderer: React.FC<{
 
       if (curW.frameId) {
         // Widget dans un frame : vérifier que le frame existe toujours
+        // ET que le widget est encore à l'intérieur de ses limites.
+        // Si le widget a été déplacé hors du frame, on détache le frameId.
         const frame = store.vcWidgets.find(
           f => f.type === 'frame' && f.pageIndex === activePageFresh && f.id === curW.frameId
         );
         if (!frame) {
           vcUpdateWidget(widget.id, { frameId: null });
+        } else {
+          // Vérifier que le widget est encore dentro du frame
+          const wx = frame.x + (curW.x ?? 0);
+          const wy = frame.y + 32 + (curW.y ?? 0);
+          const wRight = wx + (curW.width ?? 0);
+          const wBottom = wy + (curW.height ?? 0);
+          const fLeft = frame.x;
+          const fRight = frame.x + frame.width;
+          const fTop = frame.y + 32;
+          const fBottom = frame.y + frame.height;
+          if (wx < fLeft || wRight > fRight || wy < fTop || wBottom > fBottom) {
+            vcUpdateWidget(widget.id, { frameId: null });
+          }
         }
       } else {
         // Widget hors frame : vérifier s'il est entré dans un frame
