@@ -43,15 +43,16 @@ describe('headingRadForPos — rear/ground/hanging visent le centre de la scène
     }
   });
 
-  it('arriere droite (x=0.9, y=0.95, DIMS 12x8) : phi = atan2(-0.48, 0.36), vers gauche+avant', () => {
+  it('arriere droite (x=0.9, y=0.95, DIMS 12x8) : phi 被压制到 -PI/4', () => {
     const pos = { x: 0.9, y: 0.95, h: 0.6, heading: 0 };
     for (const mode of ['hanging', 'rear', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      // (0.5-0.9)*12 = -0.48, |0.95-0.5|*8 = 0.36
-      expect(pie(phi)).toBeCloseTo(Math.atan2(-0.48, 0.36), 5);
+      // lateral = (0.5-0.9)*12 = -4.8, longitudinal = 0.45*8 = 3.6, floor = 3.2
+      // phi = atan2(-4.8, 3.6) ≈ -0.927 rad → clamped to -PI/4
+      expect(pie(phi)).toBeCloseTo(-Math.PI / 4, 5);
       const dir = worldBeamDir(phi);
-      expect(dir.x).toBeLessThan(-0.5); // vers la gauche
-      expect(dir.z).toBeLessThan(-0.5); // vers l'avant (z<0)
+      expect(dir.x).toBeLessThan(-0.7); // 明显向左
+      expect(dir.z).toBeLessThan(-0.7); // 明显向前
     }
   });
 
@@ -67,25 +68,29 @@ describe('headingRadForPos — rear/ground/hanging visent le centre de la scène
     expect(pie(phiTop)).toBeCloseTo(0, 9);
   });
 
-  it('cote gauche (x=0.1, y=0.5, DIMS 12x8) : phi = atan2(0.48, 0) = +PI/2', () => {
+  it('cote gauche (x=0.1, y=0.5, DIMS 12x8) : phi 被压制到 PI/4 而非 π/2', () => {
     const pos = { x: 0.1, y: 0.5, h: 0.6, heading: 0 };
     for (const mode of ['hanging', 'rear', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      expect(pie(phi)).toBeCloseTo(Math.PI / 2, 9);
+      // lateral = 4.8, longitudinal = 0, floor = 3.2
+      // phi = atan2(4.8, 3.2) ≈ 0.983 rad → clamped to PI/4
+      expect(pie(phi)).toBeCloseTo(Math.PI / 4, 5);
       const dir = worldBeamDir(phi);
-      expect(dir.x).toBeGreaterThan(0.99);
-      expect(dir.z).toBeCloseTo(0, 5);
+      expect(dir.x).toBeGreaterThan(0.7); // 明显向右
+      expect(dir.z).toBeLessThan(-0.7);   // 明显向前
     }
   });
 
-  it('cote droit (x=0.9, y=0.5, DIMS 12x8) : phi = atan2(-0.48, 0) = -PI/2', () => {
+  it('cote droit (x=0.9, y=0.5, DIMS 12x8) : phi 被压制到 -PI/4 而非 -π/2', () => {
     const pos = { x: 0.9, y: 0.5, h: 0.6, heading: 0 };
     for (const mode of ['hanging', 'rear', 'ground'] as const) {
       const phi = headingRadForPos(pos as any, mode, DIMS);
-      expect(pie(phi)).toBeCloseTo(-Math.PI / 2, 9);
+      // lateral = -4.8, longitudinal = 0, floor = 3.2
+      // phi = atan2(-4.8, 3.2) ≈ -0.983 rad → clamped to -PI/4
+      expect(pie(phi)).toBeCloseTo(-Math.PI / 4, 5);
       const dir = worldBeamDir(phi);
-      expect(dir.x).toBeLessThan(-0.99);
-      expect(dir.z).toBeCloseTo(0, 5);
+      expect(dir.x).toBeLessThan(-0.7); // 明显向左
+      expect(dir.z).toBeLessThan(-0.7); // 明显向前
     }
   });
 

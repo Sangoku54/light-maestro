@@ -6018,13 +6018,19 @@ export function headingRadForPos(pos: FixturePos, mountMode: string, stageDims: 
      // top : faisceau vers le bas, heading indifferent
      return 0;
    }
-   // rear / ground / hanging : viser le centre de la scène
-   // phi = atan2(0.5-x, y-0.5) :
-   //   x < 0.5 (gauche)  → phi > 0 → faisceau vers la droite
-   //   x > 0.5 (droite)  → phi < 0 → faisceau vers la gauche
-   //   x = 0.5 (centre)  → phi = 0 → faisceau droit vers le public (-Z)
-   // y détermine l'inclinaison avant/arrière du faisceau
-   return Math.atan2((0.5 - pos.x) * stageDims.width, Math.abs(pos.y - 0.5) * stageDims.depth);
+   // rear / ground / hanging : viser le centre de la scène avec convergence
+   // modérée. Sur un stage étroit (ex. 2×20), atan2(lateral, |y-0.5|*depth)
+   // diverge vers ±π/2 quand y→0.5 (composante profondeur → 0). On ajoute un
+   // plancher proportional à la profondeur du stage pour garder une visée
+   // globalement orientée vers le public, avec une convergence latérale
+   // modérée (max ±30°).
+   const lateral = (0.5 - pos.x) * stageDims.width;
+   const longitudinal = Math.abs(pos.y - 0.5) * stageDims.depth;
+   // Plancher : 40% de la profondeur du stage → empêche les angles extrêmes
+   const floor = stageDims.depth * 0.4;
+   let phi = Math.atan2(lateral, Math.max(longitudinal, floor));
+   // Cap à ±45° pour les stages très larges où le plancher ne suffit pas
+   return Math.max(-Math.PI / 4, Math.min(Math.PI / 4, phi));
 }
 /** True si la fixture a au moins un canal pan/tilt DMX (fixture motoris�e). */
 export function hasPanTiltChannels(cm: { panOffsets?: number[]; panOffset?: number | null; tiltOffsets?: number[]; tiltOffset?: number | null; scanXOffset?: number | null; scanYOffset?: number | null }): boolean {
