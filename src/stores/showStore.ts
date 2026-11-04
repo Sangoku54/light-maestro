@@ -324,6 +324,8 @@ const DMX_MAX_ADDRESS = 512;
 interface ShowState {
   patchedFixtures: PatchedFixture[];
   universes: ShowUniverse[];
+  licenseLimitReached: 'fixture' | 'universe' | null;
+  resetLicenseLimitReached: () => void;
 
   // Actions
   patchFixture: (
@@ -502,6 +504,7 @@ export const useShowStore = create<ShowState>((set, get) => ({
   stageDecks: defaultStageDecks(),
   stageRigs: defaultStageRigs(),
   universes: loadUniverses(),
+  licenseLimitReached: null,
   musicians: undefined,
   view3D: undefined,
   stageScene: undefined,
@@ -509,10 +512,11 @@ export const useShowStore = create<ShowState>((set, get) => ({
   patchFixture: (fixture) => {
     const { patchedFixtures } = get();
 
-    // â”€â”€ Licence : limite de fixtures (Ã©dition gratuite = 1 fixture) â”€â”€
+    // Licence : limite de fixtures (Ã©dition gratuite = 1 fixture)
     try {
       const limit = getLicenseLimits().maxFixtures;
       if (Number.isFinite(limit) && patchedFixtures.length >= limit) {
+        set({ licenseLimitReached: 'fixture' });
         return {
           error: `Licence gratuite limitÃ©e Ã  ${limit} fixture(s). Passez Ã  la version standard ou complÃ¨te pour en ajouter davantage.`,
         };
@@ -685,10 +689,11 @@ export const useShowStore = create<ShowState>((set, get) => ({
   },
 
   addShowUniverse: (config) => {
-    // â”€â”€ Licence : limite d'univers (gratuite + standard = 1 univers) â”€â”€
+    // Licence : limite d'univers (gratuite + standard = 1 univers)
     try {
       const limit = getLicenseLimits().maxUniverses;
       if (Number.isFinite(limit) && get().universes.length >= limit) {
+        set({ licenseLimitReached: 'universe' });
         return {
           error: `Licence actuelle limitÃ©e Ã  ${limit} univers. Passez Ã  la version complÃ¨te pour en ajouter davantage.`,
         };
@@ -741,6 +746,10 @@ export const useShowStore = create<ShowState>((set, get) => ({
       return { universes: next };
     });
     useAppStore.getState().markDirty();
+  },
+
+  resetLicenseLimitReached: () => {
+    set({ licenseLimitReached: null });
   },
 
   getUniverseMap: (universeId) => {

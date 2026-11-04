@@ -10,6 +10,7 @@ import { ShowManager } from './ShowManager';
 import { Stage2DEditor } from './Stage2DEditor';
 import { Stage3D } from './Stage3D';
 import { useFixtureTest } from '../hooks/useFixtureTest';
+import { LicenseLimitPopup } from '../components/license/LicenseLimitPopup';
 import { loadFixtureDefinitions, type DmxFixtureDefinition, clearFixtureDefCache } from '../hooks/dmx-cues';
 import { analyzeFixtureChannels as analyzeEngine, displayTypeForChannel } from '../engine/fixture-analyzer';
 import { auditFixtureCoverage, formatCoverageWarning } from '../engine/fixture-coverage';
@@ -7976,6 +7977,9 @@ const DesignSettingsPanel: React.FC = () => {
           </div>
         ))}
       </div>
+
+      {/* License limit popup */}
+      <LicenseLimitPopup />
     </div>
   );
 };

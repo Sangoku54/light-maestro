@@ -1518,6 +1518,12 @@
       "invalid_credentials": "Invalid credentials",
       "invalid_token": "Session expired — please sign in again",
       "invalid_edition": "Unknown edition"
+    },
+    "licenseLimit": {
+      "title": "License limit reached",
+      "limitFixture": "You are on the {{label}} edition. You cannot add more fixtures. Upgrade to Standard or Full to add more fixtures.",
+      "limitUniverse": "You are on the {{label}} edition. You cannot add more DMX universes. Upgrade to Full to add multiple universes.",
+      "upgradeHint": "Upgrade takes effect immediately after payment."
     }
   },
   "audio": {
