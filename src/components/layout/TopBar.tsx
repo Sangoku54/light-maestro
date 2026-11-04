@@ -37,6 +37,12 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
   const projectName = useAppStore((s) => s.projectName);
   const presetName = useAppStore((s) => s.presetName);
   const audioFileName = useAppStore((s) => s.quickShow.audioFileName);
+  const state = useLicenseStore((s) => ({
+    edition: s.edition,
+    loading: s.loading,
+    busy: s.loading,
+    checkout: s.checkout,
+  }));
 
   const toggleLanguage = () => {
     const next = i18n.language === 'fr' ? 'en' : 'fr';
@@ -160,6 +166,46 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
       >
         <AccountLabel />
       </button>
+
+      {/* Boutons d'upgrade directs (gratuits → Standard / Complète, Standard → Complète) */}
+      {state.edition === 'free' && (
+        <>
+          <div className="w-px h-4 bg-gray-700 hidden md:block shrink-0" />
+          <button
+            onClick={() => { setShowLicense(false); state.checkout('standard'); }}
+            disabled={state.loading || state.busy}
+            className="no-drag flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 transition-all"
+            title={t('topbar.upgradeStandard')}
+          >
+            <span className="hidden md:inline">{t('license.checkoutStandard')}</span>
+            <span className="md:hidden inline text-[10px]">Std 69€</span>
+          </button>
+          <div className="w-px h-4 bg-gray-700 hidden md:block shrink-0" />
+          <button
+            onClick={() => { setShowLicense(false); state.checkout('full'); }}
+            disabled={state.loading || state.busy}
+            className="no-drag flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-40 transition-all"
+            title={t('topbar.upgradeFull')}
+          >
+            <span className="hidden md:inline">{t('license.checkoutFullFree')}</span>
+            <span className="md:hidden inline text-[10px]">Full 99€</span>
+          </button>
+        </>
+      )}
+      {state.edition === 'standard' && (
+        <>
+          <div className="w-px h-4 bg-gray-700 hidden md:block shrink-0" />
+          <button
+            onClick={() => { setShowLicense(false); state.checkout('full'); }}
+            disabled={state.loading || state.busy}
+            className="no-drag flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-40 transition-all"
+            title={t('topbar.upgradeFull')}
+          >
+            <span className="hidden md:inline">{t('license.checkoutUpgrade')}</span>
+            <span className="md:hidden inline text-[10px]">Full 30€</span>
+          </button>
+        </>
+      )}
 
       {/* Centre d'aide */}
       <button
