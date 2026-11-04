@@ -5,7 +5,7 @@
   "author": "Light Maestro",
   "main": "dist/electron/main.js",
   "scripts": {
-    "check": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && vitest run",
+    "check": "tsc -p tsconfig.electron.json && tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && vitest run",
     "release": "npm run check && npm run dist",
     "dev": "concurrently \"npm run dev:renderer\" \"npm run dev:electron\"",
     "dev:renderer": "vite",
