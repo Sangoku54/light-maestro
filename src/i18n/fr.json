@@ -1518,10 +1518,8 @@
       "invalid_credentials": "Identifiants invalides",
       "invalid_input": "Email invalide ou mot de passe trop court (6 caractères minimum)",
       "server": "Erreur du serveur de licence",
-      "emailInvalid": "Email invalide",
-      "passwordMinLength": "6 caractères minimum",
-      "passwordTooShort": "Encore {{count}} caractère(s) — 6 minimum",
-      "passwordOk": "Longueur correcte (6 caractères minimum)",
+      "emailHint": "Entrez une adresse mail valide",
+      "passwordHint": "Saisissez 6 caractères minimum",
       "invalid_token": "Session expirée — reconnectez-vous",
       "invalid_edition": "Édition inconnue"
     },

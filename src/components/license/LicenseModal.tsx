@@ -232,8 +232,14 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                   placeholder={t('license.emailPlaceholder')}
                   className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-200 focus:outline-none focus:border-purple-500/50"
                 />
-                {email.trim().length > 0 && !EMAIL_RE.test(email.trim()) && (
-                  <p className="text-[10px] text-red-400 mt-1">{t('license.emailInvalid')}</p>
+                {email.trim().length > 0 && (
+                  <p
+                    className={`text-[10px] mt-1 ${
+                      EMAIL_RE.test(email.trim()) ? 'text-green-400/80' : 'text-red-400'
+                    }`}
+                  >
+                    {t('license.emailHint')}
+                  </p>
                 )}
               </div>
               <div>
@@ -264,23 +270,12 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                     </svg>
                   </button>
                 </div>
-                {/* Règle de longueur du mot de passe : affichée en permanence
-                    (le serveur PHP impose 6 caractères minimum) + état en direct. */}
-                <p
-                  className={`text-[10px] mt-1 ${
-                    password.length === 0
-                      ? 'text-gray-500'
-                      : password.length < MIN_PASSWORD_LENGTH
-                        ? 'text-red-400'
-                        : 'text-green-400/80'
-                  }`}
-                >
-                  {password.length === 0
-                    ? t('license.passwordMinLength')
-                    : password.length < MIN_PASSWORD_LENGTH
-                      ? t('license.passwordTooShort', { count: MIN_PASSWORD_LENGTH - password.length })
-                      : t('license.passwordOk')}
-                </p>
+                {/* Règle de longueur du mot de passe (6 caractères minimum,
+                    imposée par le serveur) : rappel rouge tant que la saisie
+                    est trop courte, disparaît dès le 6ᵉ caractère. */}
+                {password.length > 0 && password.length < MIN_PASSWORD_LENGTH && (
+                  <p className="text-[10px] text-red-400 mt-1">{t('license.passwordHint')}</p>
+                )}
               </div>
 
               {state.loginError && (
