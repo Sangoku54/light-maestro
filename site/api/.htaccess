@@ -16,3 +16,8 @@
 <Files "config.php.example">
   Require all denied
 </Files>
+# Documentation, journaux, sauvegardes et schéma SQL : servis uniquement
+# depuis le dépôt, pas depuis le site public.
+<FilesMatch "\.(md|example|log|sql|bak)$">
+  Require all denied
+</FilesMatch>

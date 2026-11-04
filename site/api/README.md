@@ -8,7 +8,7 @@ Backend PHP/MySQL qui relie l'app Light Maestro à Stripe (paiement unique, lice
 site/api/
   composer.json
   schema.sql
-  config.php
+  config.php.example   ← modèle (config.php n'est PAS versionné : secrets)
   helpers.php
   auth/register.php
   auth/login.php
@@ -22,10 +22,20 @@ site/api/
 ### 1. Créer la base MySQL
 - Dans le panneau LWS (ou cPanel), crée une base + un utilisateur MySQL.
 - Dans phpMyAdmin, importe `schema.sql` (crée `users` + `payments`).
+  Le fichier est fourni dans le dépôt (`site/api/schema.sql`) : le serveur
+  en refuse le téléchargement direct (`.htaccess`), téléverse-le ou copie
+  son contenu dans phpMyAdmin.
 
 ### 2. Déployer les fichiers
 - Uploade le dossier `api/` sur le serveur, par exemple sous `https://ton-domaine.fr/api/`.
-- Le fichier `config.php` et `helpers.php` doivent rester **hors de portée web** si possible, mais ici ils sont dans le même dossier : ils ne renvoient rien si appelés directement (pas de sortie), c'est sans risque.
+- `config.php` n'est **pas** versionné dans git : il contient les secrets
+  du serveur et ne doit jamais être écrasé par une mise en ligne. Crée-le
+  à partir de `config.php.example` et renseigne-le une seule fois.
+- `config.php` et `config.php.example` sont protégés par `.htaccess`
+  (accès direct → 403). `helpers.php` ne renvoie que du JSON : il n'expose
+  rien de sensible.
+- Les fichiers de documentation (`.md`), journaux (`.log`) et sauvegardes
+  (`.bak`) sont également refusés par `.htaccess`.
 
 ### 3. Installer les dépendances (Composer)
 LWS mutualisé inclut souvent PHP avec Composer. Si l'accès SSH/Composer n'est pas dispo :
