@@ -30,44 +30,15 @@
   <div class="wrap">
     <div class="card" id="dl-gate" style="margin-bottom:16px; border-color:#7c3aed">
       <div id="dl-form">
-        <h3 class="h3">Se connecter</h3>
-        <p style="margin-top:8px">Afin de télécharger votre programme, merci soit de créer un compte, soit de vous connecter.</p>
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px">
-          <input id="dl-email" type="email" placeholder="vous@exemple.com" style="flex:1; min-width:200px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/>
-          <div style="position:relative; flex:1; min-width:160px"><input id="dl-pass" type="password" placeholder="Mot de passe" style="flex:1; min-width:160px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/><button type="button" id="dl-toggle-pass" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#9ca3af;cursor:pointer;font-size:16px;padding:4px">👁️</button></div>
-          <button id="dl-login" class="btn btn-primary">Se connecter</button>
-          <button id="dl-register" class="btn btn-ghost">Créer un compte</button>
+        <h3 class="h3">Téléchargement direct</h3>
+        <p style="margin-top:8px">Aucun compte requis. Téléchargez Light Maestro gratuitement, installez-le, puis créez votre compte depuis l'application si vous le souhaitez.</p>
+        <div class="flex gap-2" style="min-width:260px; margin-top:12px">
+          <a id="dl-btn-portable" class="btn btn-primary" style="flex:1">Télécharger (portable)</a>
+          <a id="dl-btn-setup" class="btn btn-primary" style="flex:1">Télécharger (installateur)</a>
         </div>
-        <div style="margin-top:8px">
-          <a href="#" id="dl-forgot-link" style="font-size:11px; color:#8b5cf6; text-decoration:none">Mot de passe oublié ?</a>
-        </div>
-        <div class="meta" id="dl-msg" style="margin-top:10px"></div>
-      </div>
-      <div id="dl-reset-form" style="display:none">
-        <h3 class="h3">Réinitialiser le mot de passe</h3>
-        <p style="margin-top:8px">Entrez votre email et nous vous enverrons un lien pour créer un nouveau mot de passe.</p>
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px">
-          <input id="dl-reset-email" type="email" placeholder="vous@exemple.com" style="flex:1; min-width:200px; padding:10px 12px; border-radius:10px; border:1px solid #2a2a3a; background:#0d0d14; color:white"/>
-          <button id="dl-reset-send" class="btn btn-primary">Envoyer le lien</button>
-        </div>
-        <div class="meta" id="dl-reset-msg" style="margin-top:10px"></div>
-        <button id="dl-reset-back" class="btn btn-ghost" style="margin-top:10px; padding:6px 14px; font-size:11px">Retour</button>
-      </div>
-      <div id="dl-reset-ok" style="display:none">
-        <h3 class="h3">Lien envoyé</h3>
-        <p style="margin-top:8px">Un email a été envoyé à <b id="dl-reset-email-shown"></b>. Consultez votre boîte de réception (et les spams).</p>
-        <button id="dl-reset-done" class="btn btn-ghost" style="margin-top:10px; padding:6px 14px; font-size:11px">Retour</button>
-      </div>
-      <div id="dl-ok" style="display:none">
-        <div class="flex gap-8" style="align-items:center; flex-wrap:wrap">
-          <div class="fi" style="min-width:200px">
-            <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro 1.0.39.exe (portable)</div>
-            <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 33CF0A116CBD43BBC3E051D4A708CB41CB5887A71B3C3AB57C9DB27F8476BEE9</div>
-          </div>
-          <div class="flex gap-2" style="min-width:260px">
-            <a id="dl-btn-portable" class="btn btn-primary" style="flex:1">Télécharger (portable)</a>
-            <a id="dl-btn-setup" class="btn btn-primary" style="flex:1">Télécharger (installateur)</a>
-          </div>
+        <div class="meta" style="margin-top:10px">
+          <div class="mono" style="font-size:12px; color:#a1a1aa">Light Maestro 1.0.39.exe (portable)</div>
+          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 33CF0A116CBD43BBC3E051D4A708CB41CB5887A71B3C3AB57C9DB27F8476BEE9</div>
         </div>
       </div>
     </div>
@@ -123,87 +94,9 @@
   </div>
 </footer>
 <script>
-(function(){
-  var API='https://light-maestro.com/api', K='lm-dl-session';
-  function $(id){return document.getElementById(id);}
-  function setMsg(t,err){var m=$('dl-msg');if(!m)return;m.textContent=t||'';m.style.color=err?'#f87171':'';}
-  var session=null;
-  function unlock(sess){
-    session=sess;
-    $('dl-form').style.display='none';$('dl-ok').style.display='block';
-    $('dl-email-shown').textContent=sess.email||'';
-    ['dl-btn-portable','dl-btn-setup'].forEach(function(id){
-      var a=$(id);if(!a)return;
-      a.style.opacity='1';a.style.pointerEvents='auto';
-      a.removeAttribute('aria-disabled');a.classList.remove('disabled');
-      a.href = (id==='dl-btn-portable' ? './downloads/Light Maestro 1.0.39.exe' : './downloads/Light Maestro Setup 1.0.39.exe');
-    });
-    try{sessionStorage.setItem(K,JSON.stringify(sess));}catch(e){}
-  }
-  function trackDownload(file){
-    if(!session||!session.token)return;
-    try{fetch(API+'/track.php',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.token},body:JSON.stringify({file:file})});}catch(e){}
-  }
-  async function call(path,body,token){
-    var r=await fetch(API+path,{method:'POST',headers:Object.assign({'Content-Type':'application/json'},token?{'Authorization':'Bearer '+token}:{}),body:JSON.stringify(body)});
-    var d={};try{d=await r.json();}catch(e){}
-    if(!r.ok)throw new Error(d.message||d.error||('HTTP '+r.status));
-    return d;
-  }
-  async function go(mode){
-    var email=$('dl-email').value.trim(),pass=$('dl-pass').value;
-    if(!email||!pass){setMsg('Indiquez votre email et votre mot de passe.',true);return;}
-    setMsg(mode==='register'?'Création du compte…':'Connexion…');
-    try{
-      var d=await call(mode==='register'?'/auth/register.php':'/auth/login.php',{email:email,password:pass});
-      unlock({email:d.email||email,edition:d.edition||'free',token:d.token||''});
-      setMsg('');
-    }catch(e){
-      if(e.message.indexOf('existe déjà')>=0||e.message.indexOf('existe d\u00e9j\u00e0')>=0){
-        setMsg('Un compte existe déjà avec cet email — cliquez "Se connecter".',true);
-      }else{
-        setMsg('Échec ('+(mode==='register'?'inscription':'connexion')+') : '+e.message,true);
-      }
-    }
-  }
-  $('dl-login').addEventListener('click',function(){go('login');});
-  $('dl-register').addEventListener('click',function(){go('register');});
-  $('dl-toggle-pass').addEventListener('click',function(){
-    var p=$('dl-pass');
-    if(p.type==='password'){p.type='text';this.textContent='🙈';}else{p.type='password';this.textContent='👁️';}
-  });
-  $('dl-forgot-link').addEventListener('click',function(e){e.preventDefault();$('dl-form').style.display='none';$('dl-reset-form').style.display='block';$('dl-reset-email').value='';setResetMsg('');});
-  $('dl-reset-back').addEventListener('click',function(){$('dl-reset-form').style.display='none';$('dl-form').style.display='block';});
-  $('dl-reset-done').addEventListener('click',function(){$('dl-reset-ok').style.display='none';$('dl-form').style.display='block';});
-  $('dl-reset-send').addEventListener('click',function(){
-    var email=$('dl-reset-email').value.trim();
-    if(!email){setResetMsg('Indiquez votre email.',true);return;}
-    setResetMsg('Envoi en cours…');
-    call('/auth/forgot-password.php',{email:email}).then(function(){
-      $('dl-reset-email-shown').textContent=email;
-      $('dl-reset-form').style.display='none';$('dl-reset-ok').style.display='block';
-      setResetMsg('');
-    }).catch(function(e){setResetMsg('Erreur : '+e.message,true);});
-  });
-  $('dl-btn-portable').addEventListener('click',function(e){
-    if(!session||!session.token){e.preventDefault();setMsg('Veuillez vous connecter pour télécharger.',true);return;}
-    trackDownload('portable');
-    window.location.href='./downloads/Light Maestro 1.0.39.exe';
-  });
-  $('dl-btn-setup').addEventListener('click',function(e){
-    if(!session||!session.token){e.preventDefault();setMsg('Veuillez vous connecter pour télécharger.',true);return;}
-    trackDownload('setup');
-    window.location.href='./downloads/Light Maestro Setup 1.0.39.exe';
-  });
-  $('dl-logout').addEventListener('click',function(){
-    try{sessionStorage.removeItem(K);}catch(e){}
-    session=null;
-    $('dl-ok').style.display='none';$('dl-form').style.display='block';
-    $('dl-email').value='';$('dl-pass').value='';setMsg('');
-  });
-  try{var s=JSON.parse(sessionStorage.getItem(K)||'null');if(s&&s.email)unlock(s);}catch(e){}
-  function setResetMsg(t,err){var m=$('dl-reset-msg');if(!m)return;m.textContent=t||'';m.style.color=err?'#f87171':'';}
-})();
+  // Direct download — no account required
+  document.getElementById('dl-btn-portable').href = './downloads/Light Maestro 1.0.39.exe';
+  document.getElementById('dl-btn-setup').href = './downloads/Light Maestro Setup 1.0.39.exe';
 </script>
 <style>.dl-float{position:fixed;bottom:24px;right:24px;z-index:9999}.dl-float a{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;background:linear-gradient(135deg,#a855f7,#7c3aed);color:#fff;text-decoration:none;border-radius:12px;font-weight:700;font-size:14px;box-shadow:0 4px 14px rgba(168,85,247,.4);transition:transform .2s,box-shadow .2s}.dl-float a:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(168,85,247,.5)}</style><div class="dl-float"><a href="./telecharger.html">Télécharger gratuitement</a></div></body>
 </html>
