@@ -54,8 +54,12 @@ if ($event->type === 'checkout.session.completed') {
                     'INSERT IGNORE INTO payments (user_id, stripe_payment_intent, edition, amount_cents) VALUES (?, ?, ?, ?)'
                 )->execute([$userId, $pi, $edition, $amount]);
             }
-        } catch (Throwable $ignore) {
-            // L'audit ne doit jamais faire échouer l'activation.
+        } catch (Throwable $e) {
+            // L'audit ne doit jamais faire échouer l'activation, mais le
+            // défaut doit être visible (table `payments` absente, schéma
+            // différent…) : sans trace, aucun paiement n'était enregistré
+            // et personne ne le savait.
+            error_log('[stripe] audit paiement impossible : ' . $e->getMessage());
         }
     }
 }
