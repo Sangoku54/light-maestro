@@ -74,6 +74,9 @@ describe('E2E .lmproj autonome — cycle Export → Transport → Import', () =>
   let originalPreset: any;
   let originalShow: any;
 
+  // `getRealAudioBlobs()` lit et encode de vrais fichiers audio : sous
+  // charge (suite complète en parallèle), le beforeAll dépassait le
+  // timeout par défaut de 10 s et faisait échouer la suite entière.
   beforeAll(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lm-e2e-'));
     realBlobs = getRealAudioBlobs();
@@ -82,7 +85,7 @@ describe('E2E .lmproj autonome — cycle Export → Transport → Import', () =>
       const fakeAudio = 'data:audio/mpeg;base64,' + 'A'.repeat(5000);
       realBlobs = [{ key: 'audio-fake-fake', raw: fakeAudio }];
     }
-  });
+  }, 60_000);
 
   afterAll(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
