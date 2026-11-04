@@ -12,3 +12,7 @@
 <Files "config.php">
   Require all denied
 </Files>
+# Le modèle de config.php (sans secret) n'a rien à faire sur le web.
+<Files "config.php.example">
+  Require all denied
+</Files>

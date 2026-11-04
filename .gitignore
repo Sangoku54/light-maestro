@@ -3,3 +3,7 @@ dist/
 release/
 .git/
 *.log
+
+# Secrets du serveur (licence / Stripe) — versionné uniquement via
+# site/api/config.php.example. Ne jamais pousser les identifiants réels.
+site/api/config.php

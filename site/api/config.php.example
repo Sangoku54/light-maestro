@@ -1,10 +1,19 @@
 <?php
 /**
- * ⚠️⚠️⚠️ NE JAMAIS UPLOADER CE FICHIER DEPUIS GIT VERS LE SERVEUR ⚠️⚠️⚠️
+ * ⚠️ FICHIER MODÈLE — À NE PAS UTILISER DIRECTEMENT ⚠️
  *
- * Ce fichier contient les identifiants MySQL, Stripe et JWT du SERVEUR.
- * La version git a des valeurs VIDES (sécurité).
- * Remplissez TOUS les champs ci-dessous sur le serveur.
+ * Ce fichier est le modèle de `site/api/config.php` : il ne contient
+ * AUCUN secret, tous les champs sont vides.
+ *
+ * Sur le serveur (LWS) :
+ *   1. copier ce fichier en `config.php` (même dossier) ;
+ *   2. renseigner DB_USER, DB_PASS, JWT_SECRET, STRIPE_SECRET_KEY
+ *      (+ STRIPE_WEBHOOK_SECRET et les 3 prix Stripe) ;
+ *   3. ne JAMAIS modifier `config.php` dans le dépôt : il n'est pas
+ *      versionné (voir .gitignore), pour qu'une mise en ligne n'écrase
+ *      jamais les identifiants du serveur.
+ *
+ * `config.php` est protégé par `site/api/.htaccess` (accès direct → 403).
  */
 
 // ── Base de données ────────────────────────────────────────────────

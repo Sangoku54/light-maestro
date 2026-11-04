@@ -6,6 +6,21 @@
  * ⚠️ Config (DB_HOST, DB_USER, DB_PASS, JWT_SECRET, Stripe) dans config.php.
  */
 
+// `config.php` n'est PAS versionné dans git (il contient les identifiants
+// du serveur — le modèle de référence est `config.php.example`). Si le
+// fichier est absent, on répond en JSON propre au lieu d'une erreur PHP
+// fatale (page blanche) qui ne dit rien de la cause.
+if (!file_exists(__DIR__ . '/config.php')) {
+    header('Access-Control-Allow-Origin: *');
+    header('Content-Type: application/json; charset=utf-8');
+    http_response_code(500);
+    echo json_encode([
+        'error' => 'server',
+        'message' => 'Configuration serveur absente (config.php manquant)',
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 require_once __DIR__ . '/config.php';
 
 header('Access-Control-Allow-Origin: ' . CORS_ORIGIN);
