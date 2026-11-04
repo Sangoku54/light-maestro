@@ -232,6 +232,9 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                   placeholder={t('license.emailPlaceholder')}
                   className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-200 focus:outline-none focus:border-purple-500/50"
                 />
+                {email.trim().length > 0 && !EMAIL_RE.test(email.trim()) && (
+                  <p className="text-[10px] text-red-400 mt-1">{t('license.emailInvalid')}</p>
+                )}
               </div>
               <div>
                 <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('license.password')}</label>
@@ -261,6 +264,23 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                     </svg>
                   </button>
                 </div>
+                {/* Règle de longueur du mot de passe : affichée en permanence
+                    (le serveur PHP impose 6 caractères minimum) + état en direct. */}
+                <p
+                  className={`text-[10px] mt-1 ${
+                    password.length === 0
+                      ? 'text-gray-500'
+                      : password.length < MIN_PASSWORD_LENGTH
+                        ? 'text-red-400'
+                        : 'text-green-400/80'
+                  }`}
+                >
+                  {password.length === 0
+                    ? t('license.passwordMinLength')
+                    : password.length < MIN_PASSWORD_LENGTH
+                      ? t('license.passwordTooShort', { count: MIN_PASSWORD_LENGTH - password.length })
+                      : t('license.passwordOk')}
+                </p>
               </div>
 
               {state.loginError && (

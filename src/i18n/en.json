@@ -1518,6 +1518,10 @@
       "invalid_credentials": "Invalid credentials",
       "invalid_input": "Invalid email or password too short (6 characters minimum)",
       "server": "License server error",
+      "emailInvalid": "Invalid email",
+      "passwordMinLength": "Minimum 6 characters",
+      "passwordTooShort": "{{count}} character(s) left — 6 minimum",
+      "passwordOk": "Length OK (6 characters minimum)",
       "invalid_token": "Session expired — please sign in again",
       "invalid_edition": "Unknown edition"
     },
