@@ -176,7 +176,11 @@ function send_confirmation_email(string $email, ?string $displayName): void {
         . "From: Light Maestro <contact@light-maestro.com>\r\n"
         . "Reply-To: contact@light-maestro.com\r\n";
     try {
-        @mail($email, $subject, $body, $headers);
+        // mail() renvoie false en cas d'échec (il n lève pas d'exception) :
+        // sans ce test, un envoi impossible ne laissait aucune trace.
+        if (!@mail($email, $subject, $body, $headers)) {
+            error_log('[license] envoi email confirmation impossible vers ' . $email);
+        }
     } catch (Throwable $e) {
         error_log('[license] envoi email confirmation impossible : ' . $e->getMessage());
     }
@@ -204,7 +208,9 @@ function send_reset_email(string $email, string $displayName, string $resetUrl):
         . "From: Light Maestro <contact@light-maestro.com>\r\n"
         . "Reply-To: contact@light-maestro.com\r\n";
     try {
-        @mail($email, $subject, $body, $headers);
+        if (!@mail($email, $subject, $body, $headers)) {
+            error_log('[forgot-password] envoi email impossible vers ' . $email);
+        }
     } catch (Throwable $e) {
         error_log('[forgot-password] envoi email impossible : ' . $e->getMessage());
     }
@@ -228,7 +234,9 @@ function notify_admin(string $event, string $detail): void {
         . "Content-Type: text/html; charset=UTF-8\r\n"
         . "From: Light Maestro <contact@light-maestro.com>\r\n";
     try {
-        @mail($adminEmail, $subject, $body, $headers);
+        if (!@mail($adminEmail, $subject, $body, $headers)) {
+            error_log('[license] alerte admin impossible vers ' . $adminEmail);
+        }
     } catch (Throwable $e) {
         error_log('[license] alerte admin impossible : ' . $e->getMessage());
     }
