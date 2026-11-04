@@ -61,8 +61,37 @@ function b64url_decode(string $data): string {
     return base64_decode(strtr($data, '-_', '+/'));
 }
 
+/**
+ * Secret JWT effectif.
+ *
+ * Fail-closed : si le secret n'est pas configuré (vide) ou s'il s'agit du
+ * placeholder public présent dans le dépôt, on ne signe ni ne vérifie
+ * AUCUN jeton. Sans cela, n'importe qui pouvait forger un jeton pour un
+ * `sub` arbitraire et se faire passer pour un compte (licence payante
+ * comprise) via me.php.
+ *
+ * Aucun seuil de longueur n'est imposé ici : la valeur du serveur est
+ * inconnue et un seuil strict risquerait de couper l'accès à l'API.
+ */
+function jwt_secret(): string {
+    static $alreadyWarned = false;
+    $secret = defined('JWT_SECRET') ? trim((string)JWT_SECRET) : '';
+    if ($secret === '' || $secret === 'light-maestro-change-me') {
+        if (!$alreadyWarned) {
+            error_log('[license] JWT_SECRET absent ou placeholder — signature/vérification de jetons suspendue');
+            $alreadyWarned = true;
+        }
+        return '';
+    }
+    return $secret;
+}
+
 function sign_token(int $userId): string {
-    $secret = defined('JWT_SECRET') && JWT_SECRET ? JWT_SECRET : 'light-maestro-change-me';
+    $secret = jwt_secret();
+    if ($secret === '') {
+        // Message volontairement neutre côté client (le détail est dans le log).
+        throw new RuntimeException('Configuration serveur invalide (clé de signature absente)');
+    }
     $ttl = defined('JWT_TTL') ? JWT_TTL : (60 * 60 * 24 * 30);
     $now = time();
 
@@ -84,12 +113,14 @@ function sign_token(int $userId): string {
 function verify_token(?string $token): ?int {
     if (!$token) return null;
 
+    $secret = jwt_secret();
+    if ($secret === '') return null; // fail-closed : aucun jeton n'est accepté
+
     // Normalize: strip any padding and convert to base64url for consistent processing
     $clean = str_replace(['+', '/', '='], ['-', '_', ''], $token);
     $parts = explode('.', $clean);
     if (count($parts) !== 3) return null;
 
-    $secret = defined('JWT_SECRET') && JWT_SECRET ? JWT_SECRET : 'light-maestro-change-me';
     $computed = b64url_encode(hash_hmac('sha256', $parts[0] . '.' . $parts[1], $secret, true));
     if (!hash_equals($computed, $parts[2])) return null;
 
