@@ -1517,6 +1517,7 @@
       "email_taken": "Un compte existe déjà avec cet email",
       "invalid_credentials": "Identifiants invalides",
       "invalid_input": "Email invalide ou mot de passe trop court (6 caractères minimum)",
+      "rate_limited": "Trop de tentatives. Réessayez dans quelques minutes.",
       "server": "Erreur du serveur de licence",
       "invalid_token": "Session expirée — reconnectez-vous",
       "invalid_edition": "Édition inconnue"

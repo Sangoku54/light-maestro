@@ -20,6 +20,8 @@ interface PersistedLicense {
   displayName: string | null;
   token: string | null;
   validAt: number | null;
+  /** Limites fournies par le serveur (source de vérité). */
+  limits?: LicenseLimits;
 }
 
 const DEFAULTS: PersistedLicense = {
@@ -71,6 +73,7 @@ export class LicenseStore {
     email: string | null;
     displayName?: string | null;
     token?: string | null;
+    limits?: LicenseLimits;
   }): void {
     const current = this.read();
     this.write({
@@ -79,6 +82,7 @@ export class LicenseStore {
       displayName: input.displayName ?? null,
       token: input.token ?? current.token,
       validAt: Date.now(),
+      limits: input.limits ?? current.limits,
     });
   }
 
@@ -103,12 +107,16 @@ export class LicenseStore {
   getState(): LicenseState {
     const edition = this.getEdition();
     const data = this.read();
+    // Les limites du serveur ne sont retenues que si elles correspondent à
+    // l'édition courante (sinon on retombe sur les valeurs locales).
+    const limits =
+      data.edition === edition && data.limits ? data.limits : limitsForEdition(edition);
     return {
       edition,
       email: data.email ?? null,
       displayName: data.displayName ?? null,
       licensed: edition !== 'free',
-      limits: limitsForEdition(edition),
+      limits,
     };
   }
 }

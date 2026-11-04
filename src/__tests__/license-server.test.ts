@@ -36,6 +36,7 @@ import {
   LICENSE_API_URL,
   LicenseError,
 } from '@electron/license/server';
+import { limitsForEdition } from '@electron/license/types';
 
 /** Fausse réponse HTTP sufficientemente fidèle pour le client. */
 function fakeResponse(status: number, body: unknown, asJson = true): any {
@@ -172,5 +173,65 @@ describe('client HTTP de licence', () => {
     expect(url).toBe('https://checkout.stripe.com/upgrade');
     expect(netFetch).toHaveBeenCalledTimes(2);
     expect((netFetch.mock.calls[1] as [string])[0]).toBe(`${LICENSE_API_URL}/stripe/upgrade.php`);
+  });
+
+  it('HTTP 429 → code rate_limited avec le message du serveur', async () => {
+    netFetch.mockResolvedValue(
+      fakeResponse(429, {
+        error: 'rate_limited',
+        message: 'Trop de tentatives. Réessayez dans quelques minutes.',
+      }),
+    );
+
+    const err = await expectLicenseError(loginWithLicense('a@b.fr', 'mauvais'), 'rate_limited');
+    expect(err.message).toContain('tentatives');
+  });
+});
+
+describe('limites d\'édition', () => {
+  it('les limites du serveur sont reprises (PHP_INT_MAX → Infinity)', async () => {
+    netFetch.mockResolvedValue(
+      fakeResponse(200, {
+        token: 'tok',
+        edition: 'full',
+        email: 'a@b.fr',
+        limits: { maxFixtures: 9223372036854775807, maxUniverses: 9223372036854775807 },
+      }),
+    );
+
+    const res = await registerWithLicense('a@b.fr', 'secret123');
+
+    expect(res.limits).toEqual({ maxFixtures: Infinity, maxUniverses: Infinity });
+  });
+
+  it('les limites du serveur sont reprises quand elles sont finies', async () => {
+    netFetch.mockResolvedValue(
+      fakeResponse(200, {
+        token: 'tok',
+        edition: 'standard',
+        email: 'a@b.fr',
+        limits: { maxFixtures: 9223372036854775807, maxUniverses: 1 },
+      }),
+    );
+
+    const res = await loginWithLicense('a@b.fr', 'secret123');
+
+    expect(res.limits).toEqual({ maxFixtures: Infinity, maxUniverses: 1 });
+  });
+
+  it('sans limites serveur, le client reste undefined (repli local)', async () => {
+    netFetch.mockResolvedValue(
+      fakeResponse(200, { token: 'tok', edition: 'free', email: 'a@b.fr' }),
+    );
+
+    const res = await registerWithLicense('a@b.fr', 'secret123');
+
+    expect(res.limits).toBeUndefined();
+  });
+
+  it('les valeurs locales (miroir du serveur) sont inchangées', () => {
+    expect(limitsForEdition('free')).toEqual({ maxFixtures: 1, maxUniverses: 1 });
+    expect(limitsForEdition('standard')).toEqual({ maxFixtures: Infinity, maxUniverses: 1 });
+    expect(limitsForEdition('full')).toEqual({ maxFixtures: Infinity, maxUniverses: Infinity });
   });
 });

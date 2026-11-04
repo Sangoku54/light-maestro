@@ -804,6 +804,7 @@ ipcMain.handle('license:login', async (_event, email: string, password: string) 
       email: result.email,
       displayName: result.displayName,
       token: result.token,
+      limits: result.limits,
     });
     return { ok: true, state: licenseStore.getState() };
   } catch (e) {
@@ -821,6 +822,7 @@ ipcMain.handle('license:register', async (_event, email: string, password: strin
       email: result.email,
       displayName: result.displayName,
       token: result.token,
+      limits: result.limits,
     });
     return { ok: true, state: licenseStore.getState() };
   } catch (e) {

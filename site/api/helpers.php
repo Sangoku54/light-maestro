@@ -23,7 +23,34 @@ if (!file_exists(__DIR__ . '/config.php')) {
 
 require_once __DIR__ . '/config.php';
 
-header('Access-Control-Allow-Origin: ' . CORS_ORIGIN);
+/**
+ * Origines autorisées à appeler l'API depuis un navigateur.
+ *
+ * L'app Electron (process main) n'est pas soumise au CORS et n'envoie pas
+ * d'en-tête Origin. Aucune page du site n'appelle l'API en cross-origin
+ * (le formulaire de contact est en same-origin). La liste ci-dessous
+ * remplace donc le `Access-Control-Allow-Origin: *` sans impacter l'app.
+ */
+function cors_allowed_origin(?string $origin): ?string {
+    if (!$origin) return null;
+    $allowed = [
+        'https://light-maestro.com',
+        'https://www.light-maestro.com',
+    ];
+    if (in_array($origin, $allowed, true)) return $origin;
+    // Valeur explicite dans config.php (si elle n'est pas '*').
+    if (defined('CORS_ORIGIN') && CORS_ORIGIN !== '*' && CORS_ORIGIN === $origin) return $origin;
+    return null;
+}
+
+$requestOrigin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
+$allowedOrigin = cors_allowed_origin($requestOrigin !== '' ? $requestOrigin : null);
+if ($allowedOrigin) {
+    header('Access-Control-Allow-Origin: ' . $allowedOrigin);
+    header('Vary: Origin');
+} elseif ($requestOrigin !== '') {
+    error_log('[api] origine refusée : ' . $requestOrigin);
+}
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Content-Type: application/json; charset=utf-8');
@@ -143,12 +170,78 @@ function auth_user_id(): ?int {
 
 /**
  * Édition → limites.
+ *
+ * SOURCE DE VÉRITÉ SERVEUR. Le client Electron (electron/license/types.ts)
+ * en est le miroir : toute divergence se voit dans les tests
+ * (src/__tests__/license-server.test.ts).
  */
 function edition_limits(string $edition): array {
     switch ($edition) {
         case 'full':     return ['maxFixtures' => PHP_INT_MAX, 'maxUniverses' => PHP_INT_MAX];
         case 'standard': return ['maxFixtures' => PHP_INT_MAX, 'maxUniverses' => 1];
         default:         return ['maxFixtures' => 1, 'maxUniverses' => 1];
+    }
+}
+
+// ── Limitation des tentatives d'authentification ─────────────────
+//
+// Compteur par IP, sur les ÉCHECS uniquement (une connexion réussie ne
+// consomme rien). Stockage en fichier dans le dossier temporaire : aucune
+// dépendance, aucun accès base nécessaire.
+
+/** Adresse IP de l'appelant. */
+function client_ip(): string {
+    return (string)($_SERVER['REMOTE_ADDR'] ?? 'inconnu');
+}
+
+/** Chemin du fichier de compteur pour un couple (bucket, IP). */
+function rl_file(string $bucket, string $ip): string {
+    $dir = sys_get_temp_dir() . '/lm-ratelimit';
+    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+    return $dir . '/' . md5($bucket . '|' . $ip) . '.json';
+}
+
+/** Nombre d'échecs encore dans la fenêtre glissante. */
+function rl_failures(string $bucket, int $windowSec, string $ip): int {
+    $file = rl_file($bucket, $ip);
+    if (!is_file($file)) return 0;
+    $data = json_decode((string)@file_get_contents($file), true);
+    if (!is_array($data)) return 0;
+    $now = time();
+    $count = 0;
+    foreach ((array)($data['stamps'] ?? []) as $stamp) {
+        if (is_numeric($stamp) && (int)$stamp > $now - $windowSec) $count++;
+    }
+    return $count;
+}
+
+/** Enregistre un échec. */
+function rl_record_failure(string $bucket, string $ip): void {
+    $file = rl_file($bucket, $ip);
+    $data = is_file($file) ? json_decode((string)@file_get_contents($file), true) : [];
+    $stamps = is_array($data) ? (array)($data['stamps'] ?? []) : [];
+    $stamps[] = time();
+    if (count($stamps) > 50) $stamps = array_slice($stamps, -50);
+    @file_put_contents($file, json_encode(['stamps' => array_values($stamps)]));
+}
+
+/** Remet le compteur à zéro (succès). */
+function rl_clear(string $bucket, string $ip): void {
+    @unlink(rl_file($bucket, $ip));
+}
+
+/**
+ * Refuse la requête si trop d'échecs ont été accumulés pour cette IP.
+ * Renvoie 429 + Retry-After si le seuil est atteint.
+ */
+function rl_check(string $bucket, int $maxFailures, int $windowSec): void {
+    $ip = client_ip();
+    if (rl_failures($bucket, $windowSec, $ip) >= $maxFailures) {
+        header('Retry-After: ' . $windowSec);
+        respond([
+            'error' => 'rate_limited',
+            'message' => 'Trop de tentatives. Réessayez dans quelques minutes.',
+        ], 429);
     }
 }
 

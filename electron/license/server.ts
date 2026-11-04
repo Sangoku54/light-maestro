@@ -26,7 +26,7 @@
  */
 
 import { app, net } from 'electron';
-import type { LicenseEdition } from './types';
+import type { LicenseEdition, LicenseLimits } from './types';
 
 /** URL du serveur de licence (backend PHP hébergé sur LWS). */
 export const LICENSE_API_URL = 'https://light-maestro.com/api';
@@ -46,10 +46,12 @@ export interface LicenseLoginResult {
   email: string;
   displayName: string | null;
   stripeCustomerId?: string | null;
+  /** Limites fournies par le serveur (source de vérité) — undefined si absentes. */
+  limits?: LicenseLimits;
 }
 
 export class LicenseError extends Error {
-  readonly code: 'email_taken' | 'invalid_credentials' | 'invalid_input' | 'network' | 'server';
+  readonly code: 'email_taken' | 'invalid_credentials' | 'invalid_input' | 'network' | 'rate_limited' | 'server';
   constructor(code: LicenseError['code'], message: string) {
     super(message);
     this.code = code;
@@ -112,6 +114,10 @@ async function postJson(
       // Validation serveur (email / mot de passe) : message utile affiché à l'utilisateur.
       throw new LicenseError('invalid_input', data?.message || 'Données invalides');
     }
+    if (res.status === 429) {
+      // Trop de tentatives d'authentification pour cette IP.
+      throw new LicenseError('rate_limited', data?.message || 'Trop de tentatives. Réessayez dans quelques minutes.');
+    }
     if (res.status === 401) {
       throw new LicenseError('invalid_credentials', data?.error || 'Identifiants invalides');
     }
@@ -134,6 +140,24 @@ function parseEdition(raw: unknown): LicenseEdition {
   return 'free';
 }
 
+/**
+ * Convertit une limite PHP en nombre JS.
+ * PHP envoie PHP_INT_MAX pour « illimité » → on le traduit par Infinity.
+ */
+function parseLimit(raw: unknown): number | undefined {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return undefined;
+  return raw >= 1e15 ? Infinity : raw;
+}
+
+/** Extrait les limites du serveur si elles sont exploitables. */
+function parseLimits(raw: unknown): LicenseLimits | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const maxFixtures = parseLimit((raw as any).maxFixtures);
+  const maxUniverses = parseLimit((raw as any).maxUniverses);
+  if (maxFixtures === undefined || maxUniverses === undefined) return undefined;
+  return { maxFixtures, maxUniverses };
+}
+
 function toResult(data: any, email: string): LicenseLoginResult {
   return {
     token: typeof data.token === 'string' ? data.token : null,
@@ -141,6 +165,7 @@ function toResult(data: any, email: string): LicenseLoginResult {
     email: data.email || email,
     displayName: typeof data.displayName === 'string' ? data.displayName : null,
     stripeCustomerId: typeof data.stripeCustomerId === 'string' ? data.stripeCustomerId : null,
+    limits: parseLimits(data.limits),
   };
 }
 

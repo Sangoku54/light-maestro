@@ -30,4 +30,5 @@ respond([
     'email' => $user['email'],
     'displayName' => $user['display_name'] ?: null,
     'stripeCustomerId' => $user['stripe_customer_id'] ?: null,
+    'limits' => edition_limits((string)$user['edition']),
 ]);

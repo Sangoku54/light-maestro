@@ -23,10 +23,14 @@ if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 6) {
     respond(['error' => 'invalid_input', 'message' => 'Email invalide ou mot de passe trop court (min 6)'], 400);
 }
 
+// Limitation des tentatives (compteur sur les échecs uniquement).
+rl_check('register', 10, 3600); // 10 échecs / heure
+
 try {
     $stmt = db()->prepare('SELECT id FROM users WHERE email = ?');
     $stmt->execute([strtolower($email)]);
     if ($stmt->fetch()) {
+        rl_record_failure('register', client_ip());
         respond(['error' => 'email_taken', 'message' => 'Un compte existe déjà avec cet email'], 409);
     }
 
@@ -44,6 +48,7 @@ try {
         'edition' => 'free',
         'email' => strtolower($email),
         'displayName' => $displayName ?: null,
+        'limits' => edition_limits('free'),
     ]);
 } catch (Throwable $e) {
     error_log('[register] ' . $e->getMessage() . ' — ' . $e->getFile() . ':' . $e->getLine());
