@@ -43,9 +43,10 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
 
   const doSubmit = async () => {
     if (!email || !password) return;
-    // Validation locale : évite un aller-retour serveur et affiche tout de
-    // suite la cause exacte (le serveur renvoie 400 « invalid_input »).
-    if (!EMAIL_RE.test(email.trim()) || password.length < MIN_PASSWORD_LENGTH) {
+    // Validation locale : uniquement à la CRÉATION de compte (la règle des
+    // 6 caractères est une contrainte de création, pas de connexion — un
+    // compte existant doit pouvoir se connecter avec son mot de passe).
+    if (mode === 'register' && (!EMAIL_RE.test(email.trim()) || password.length < MIN_PASSWORD_LENGTH)) {
       useLicenseStore.setState({
         loginError: 'invalid_input',
         loginErrorDetail: null,
@@ -210,13 +211,13 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
               {/* Onglets connexion / inscription */}
               <div className="flex rounded-lg overflow-hidden border border-gray-700">
                 <button
-                  onClick={() => setMode('login')}
+                  onClick={() => { state.clearLoginError(); setMode('login'); }}
                   className={`flex-1 py-1.5 text-xs font-semibold ${mode === 'login' ? 'bg-purple-600/30 text-purple-200' : 'bg-gray-800/50 text-gray-400'}`}
                 >
                   {t('license.loginTab')}
                 </button>
                 <button
-                  onClick={() => setMode('register')}
+                  onClick={() => { state.clearLoginError(); setMode('register'); }}
                   className={`flex-1 py-1.5 text-xs font-semibold ${mode === 'register' ? 'bg-purple-600/30 text-purple-200' : 'bg-gray-800/50 text-gray-400'}`}
                 >
                   {t('license.registerTab')}
@@ -232,7 +233,9 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                   placeholder={t('license.emailPlaceholder')}
                   className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-200 focus:outline-none focus:border-purple-500/50"
                 />
-                {email.trim().length > 0 && (
+                {/* Rappels de saisie : uniquement en création de compte
+                    (contraintes de création, pas de connexion). */}
+                {mode === 'register' && email.trim().length > 0 && (
                   <p
                     className={`text-[10px] mt-1 ${
                       EMAIL_RE.test(email.trim()) ? 'text-green-400/80' : 'text-red-400'
@@ -271,9 +274,10 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                   </button>
                 </div>
                 {/* Règle de longueur du mot de passe (6 caractères minimum,
-                    imposée par le serveur) : rappel rouge tant que la saisie
-                    est trop courte, disparaît dès le 6ᵉ caractère. */}
-                {password.length > 0 && password.length < MIN_PASSWORD_LENGTH && (
+                    imposée par le serveur à la création) : rappel rouge tant
+                    que la saisie est trop courte, disparaît au 6ᵉ caractère.
+                    Masqué en mode connexion. */}
+                {mode === 'register' && password.length > 0 && password.length < MIN_PASSWORD_LENGTH && (
                   <p className="text-[10px] text-red-400 mt-1">{t('license.passwordHint')}</p>
                 )}
               </div>
