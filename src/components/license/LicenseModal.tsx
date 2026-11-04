@@ -3,11 +3,15 @@
  * achat (redirection vers le checkout Stripe) + crédits & sécurité.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLicenseStore, type LicenseEdition } from '../../stores/licenseStore';
 import { version as appVersion } from '../../../package.json';
 import { toast } from '../Toast';
+
+/** Validation email minimal (miroir du filtre PHP FILTER_VALIDATE_EMAIL). */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD_LENGTH = 6;
 
 const EDITION_META: Record<LicenseEdition, { labelKey: string; descKey: string; color: string }> = {
   free: { labelKey: 'license.edFreeLabel', descKey: 'license.edFreeDesc', color: 'text-gray-400 border-gray-600' },
@@ -29,18 +33,35 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
   const [checkoutPending, setCheckoutPending] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
+  // À l'ouverture : on efface l'erreur précédente (issue d'une autre
+  // opération — checkout, session précédente…) pour n'afficher que
+  // l'erreur réellement liée à la tentative en cours.
+  useEffect(() => {
+    state.clearLoginError();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const doSubmit = async () => {
     if (!email || !password) return;
+    // Validation locale : évite un aller-retour serveur et affiche tout de
+    // suite la cause exacte (le serveur renvoie 400 « invalid_input »).
+    if (!EMAIL_RE.test(email.trim()) || password.length < MIN_PASSWORD_LENGTH) {
+      useLicenseStore.setState({
+        loginError: 'invalid_input',
+        loginErrorDetail: null,
+      });
+      return;
+    }
     setBusy(true);
     if (mode === 'register') {
-      const ok = await state.register(email, password);
+      const ok = await state.register(email.trim(), password);
       setBusy(false);
       if (ok) {
         onClose();
         try { toast(t('toasts.registered', { email }), 'ok'); } catch {}
       }
     } else {
-      const ok = await state.login(email, password);
+      const ok = await state.login(email.trim(), password);
       setBusy(false);
       if (ok) {
         onClose();
@@ -243,7 +264,12 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
               </div>
 
               {state.loginError && (
-                <p className="text-[11px] text-red-400">{t('license.err.' + state.loginError, { defaultValue: state.loginError })}</p>
+                <p className="text-[11px] text-red-400">
+                  {t('license.err.' + state.loginError, { defaultValue: state.loginError })}
+                  {state.loginErrorDetail && state.loginErrorDetail !== state.loginError && (
+                    <span className="block text-red-300/80 mt-0.5">{state.loginErrorDetail}</span>
+                  )}
+                </p>
               )}
 
               <button

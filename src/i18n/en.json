@@ -1516,6 +1516,8 @@
       "checkoutFailed": "Checkout unavailable",
       "email_taken": "An account already exists with this email",
       "invalid_credentials": "Invalid credentials",
+      "invalid_input": "Invalid email or password too short (6 characters minimum)",
+      "server": "License server error",
       "invalid_token": "Session expired — please sign in again",
       "invalid_edition": "Unknown edition"
     },

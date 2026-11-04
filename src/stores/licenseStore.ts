@@ -55,6 +55,9 @@ interface LicenseApi {
 interface LicenseStoreState extends LicenseState {
   loading: boolean;
   loginError: string | null;
+  /** Message détaillé renvoyé par le serveur (affiché sous le code d'erreur). */
+  loginErrorDetail: string | null;
+  clearLoginError: () => void;
   refresh: () => Promise<void>;
   login: (email: string, password: string) => Promise<boolean>;
   register: (email: string, password: string) => Promise<boolean>;
@@ -78,6 +81,11 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
   ...DEFAULT_STATE,
   loading: true,
   loginError: null,
+  loginErrorDetail: null,
+
+  /** Efface l'erreur courante (à l'ouverture de la modale : évite d'afficher
+   *  une erreur périmée venue d'une autre opération). */
+  clearLoginError: () => set({ loginError: null, loginErrorDetail: null }),
 
   refresh: async () => {
     const a = api();
@@ -87,7 +95,7 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
       // repli sur l'état local persisté si le pont ne l'expose pas encore.
       const r = typeof a.refresh === 'function' ? await a.refresh() : { ok: true, state: await a.getState() };
       const s = (r as any).state;
-      if (s) set({ ...(s as LicenseState), loading: false, loginError: null });
+      if (s) set({ ...(s as LicenseState), loading: false, loginError: null, loginErrorDetail: null });
       else set({ loading: false });
     } catch {
       set({ ...DEFAULT_STATE, loading: false });
@@ -96,34 +104,40 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
 
   login: async (email, password) => {
     const a = api();
-    if (!a) { set({ loginError: 'unavailable' }); return false; }
+    if (!a) { set({ loginError: 'unavailable', loginErrorDetail: null }); return false; }
     try {
       const r = await a.login(email, password);
       if (r.ok && r.state) {
-        set({ ...r.state, loginError: null });
+        set({ ...r.state, loginError: null, loginErrorDetail: null });
         return true;
       }
-      set({ loginError: (r as any).code || r.message || 'loginFailed' });
+      set({
+        loginError: (r as any).code || r.message || 'loginFailed',
+        loginErrorDetail: (r as any).code ? (r as any).message || null : null,
+      });
       return false;
     } catch {
-      set({ loginError: 'network' });
+      set({ loginError: 'network', loginErrorDetail: null });
       return false;
     }
   },
 
   register: async (email, password) => {
     const a = api();
-    if (!a) { set({ loginError: 'unavailable' }); return false; }
+    if (!a) { set({ loginError: 'unavailable', loginErrorDetail: null }); return false; }
     try {
       const r = await a.register(email, password);
       if (r.ok && r.state) {
-        set({ ...r.state, loginError: null });
+        set({ ...r.state, loginError: null, loginErrorDetail: null });
         return true;
       }
-      set({ loginError: (r as any).code || r.message || 'registerFailed' });
+      set({
+        loginError: (r as any).code || r.message || 'registerFailed',
+        loginErrorDetail: (r as any).code ? (r as any).message || null : null,
+      });
       return false;
     } catch {
-      set({ loginError: 'network' });
+      set({ loginError: 'network', loginErrorDetail: null });
       return false;
     }
   },
@@ -142,7 +156,7 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
       if (!r.ok) {
         const err = (r as any)?.message || (r as any)?.error || 'checkoutFailed';
         console.error('[license] checkout non-ok', err);
-        set({ loginError: err });
+        set({ loginError: err, loginErrorDetail: null });
         return null;
       }
       const url = (r as any).url;
@@ -180,7 +194,7 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
   logout: async () => {
     const a = api();
     if (a) { await a.logout().catch(() => {}); }
-    set({ ...DEFAULT_STATE, loginError: null });
+    set({ ...DEFAULT_STATE, loginError: null, loginErrorDetail: null });
   },
 }));
 

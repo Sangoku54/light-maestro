@@ -17,6 +17,9 @@ $password = (string)($b['password'] ?? '');
 $displayName = trim((string)($b['displayName'] ?? ''));
 
 if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 6) {
+    // Trace explicite : ce rejet est un 400 (pas une exception PHP) et ne
+    // apparaissait donc dans aucun log serveur.
+    error_log('[register] données invalides — email=' . $email . ' longueur_mot_de_passe=' . strlen($password));
     respond(['error' => 'invalid_input', 'message' => 'Email invalide ou mot de passe trop court (min 6)'], 400);
 }
 

@@ -25,6 +25,7 @@
  *  Tout autre code / erreur réseau => échec, l'app reste sur `free`.
  */
 
+import { app, net } from 'electron';
 import type { LicenseEdition } from './types';
 
 /** URL du serveur de licence (backend PHP hébergé sur LWS). */
@@ -48,11 +49,48 @@ export interface LicenseLoginResult {
 }
 
 export class LicenseError extends Error {
-  readonly code: 'email_taken' | 'invalid_credentials' | 'network' | 'server';
+  readonly code: 'email_taken' | 'invalid_credentials' | 'invalid_input' | 'network' | 'server';
   constructor(code: LicenseError['code'], message: string) {
     super(message);
     this.code = code;
   }
+}
+
+/**
+ * Attend que l'app Electron soit prête.
+ * `net.fetch` (pile réseau Chromium) n'est utilisable qu'après le 'ready'.
+ */
+async function waitAppReady(): Promise<void> {
+  try {
+    if (app.isReady()) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 3000);
+      app.once('ready', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  } catch {
+    /* contexte non-Electron : on continue */
+  }
+}
+
+/**
+ * Effectue l'appel HTTP avec la pile réseau Chromium (`net.fetch`).
+ *
+ * Pourquoi pas le `fetch` de Node/undici : celui-ci utilise son propre
+ * magasin de certificats CA et ne voit pas les proxys/HTTPS-inspection du
+ * système (antivirus, proxy d'entreprise), alors que Chromium s'appuie sur le
+ * magasin Windows. Résultat observé : `fetch()` refusait le certificat SSL
+ * de l'hébergeur alors que le navigateur (et `net.fetch`) l'acceptait →
+ * toutes les appels API échouaient depuis l'exe (cf. commit d8003fa).
+ */
+async function httpFetch(url: string, init: RequestInit): Promise<Response> {
+  await waitAppReady();
+  if (typeof net !== 'undefined' && typeof net.fetch === 'function') {
+    return net.fetch(url, init as any);
+  }
+  return fetch(url, init);
 }
 
 async function postJson(
@@ -62,10 +100,7 @@ async function postJson(
 ): Promise<any> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  // net.fetch = pile réseau Chromium (même gestion SSL que le navigateur)
-  // au lieu de fetch() Node.js/undici qui peut rejeter le certificat SSL
-  // de l'hébergeur alors qu'un navigateur l'accepte.
-  const res = await fetch(`${LICENSE_API_URL}${path}`, {
+  const res = await httpFetch(`${LICENSE_API_URL}${path}`, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
@@ -73,6 +108,10 @@ async function postJson(
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    if (res.status === 400) {
+      // Validation serveur (email / mot de passe) : message utile affiché à l'utilisateur.
+      throw new LicenseError('invalid_input', data?.message || 'Données invalides');
+    }
     if (res.status === 401) {
       throw new LicenseError('invalid_credentials', data?.error || 'Identifiants invalides');
     }
