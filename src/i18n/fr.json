@@ -1518,11 +1518,11 @@
       "invalid_credentials": "Identifiants invalides",
       "invalid_input": "Email invalide ou mot de passe trop court (6 caractères minimum)",
       "server": "Erreur du serveur de licence",
-      "emailHint": "Entrez une adresse mail valide",
-      "passwordHint": "Saisissez 6 caractères minimum",
       "invalid_token": "Session expirée — reconnectez-vous",
       "invalid_edition": "Édition inconnue"
     },
+    "emailHint": "Entrez une adresse mail valide",
+    "passwordHint": "Saisissez 6 caractères minimum",
     "licenseLimit": {
       "title": "Limite de licence atteinte",
       "limitFixture": "Vous êtes en édition {{label}}. Vous ne pouvez pas ajouter de nouvelle fixture. Passez à Standard ou Complète pour ajouter plus de fixtures.",

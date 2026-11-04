@@ -1518,11 +1518,11 @@
       "invalid_credentials": "Invalid credentials",
       "invalid_input": "Invalid email or password too short (6 characters minimum)",
       "server": "License server error",
-      "emailHint": "Enter a valid email address",
-      "passwordHint": "Enter at least 6 characters",
       "invalid_token": "Session expired — please sign in again",
       "invalid_edition": "Unknown edition"
     },
+    "emailHint": "Enter a valid email address",
+    "passwordHint": "Enter at least 6 characters",
     "licenseLimit": {
       "title": "License limit reached",
       "limitFixture": "You are on the {{label}} edition. You cannot add more fixtures. Upgrade to Standard or Full to add more fixtures.",
