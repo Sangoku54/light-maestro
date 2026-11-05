@@ -36,6 +36,10 @@ define('JWT_TTL', 60 * 60 * 24 * 30); // 30 jours
 // ── CORS ────────────────────────────────────────────────────────────
 define('CORS_ORIGIN', '*');
 
+// ── Site public ─────────────────────────────────────────────────────
+// URL du site (utilisée pour le lien de réinitialisation envoyé par email).
+define('SITE_URL', 'https://light-maestro.com');
+
 // ── Alerte admin ─────────────────────────────────────────────────────
 define('ADMIN_EMAIL', 'admintrack@light-maestro.com');
 

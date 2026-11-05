@@ -32,6 +32,13 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
   // d'achat (le webhook a entre-temps activé l'édition côté serveur).
   const [checkoutPending, setCheckoutPending] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  // Sous-vues du parcours « mot de passe oublié » (onglet Connexion).
+  const [view, setView] = useState<'form' | 'forgot' | 'reset'>('form');
+  const [forgotSent, setForgotSent] = useState(false);
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetDone, setResetDone] = useState(false);
 
   // À l'ouverture : on efface l'erreur précédente (issue d'une autre
   // opération — checkout, session précédente…) pour n'afficher que
@@ -68,6 +75,43 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
         onClose();
         try { toast(t('toasts.welcomeBack'), 'ok'); } catch {}
       }
+    }
+  };
+
+  /** Revient au formulaire de connexion/inscription. */
+  const backToForm = () => {
+    setView('form');
+    setForgotSent(false);
+    setResetDone(false);
+    state.clearResetError();
+  };
+
+  /** Demande l'email de réinitialisation (mot de passe oublié). */
+  const doForgot = async () => {
+    const mail = email.trim();
+    if (!mail) return;
+    if (!EMAIL_RE.test(mail)) {
+      useLicenseStore.setState({ resetError: 'invalid_input', resetErrorDetail: null });
+      return;
+    }
+    setBusy(true);
+    const ok = await state.forgotPassword(mail);
+    setBusy(false);
+    if (ok) setForgotSent(true);
+  };
+
+  /** Applique le nouveau mot de passe à partir du code reçu par email. */
+  const doReset = async () => {
+    const code = resetCode.trim();
+    if (!code) return;
+    if (newPassword.length < MIN_PASSWORD_LENGTH || newPassword !== confirmPassword) return;
+    setBusy(true);
+    const ok = await state.resetPassword(code, newPassword);
+    setBusy(false);
+    if (ok) {
+      setResetDone(true);
+      setNewPassword('');
+      setConfirmPassword('');
     }
   };
 
@@ -208,6 +252,8 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
             </div>
           ) : (
             <div className="space-y-3">
+              {view === 'form' ? (
+                <>
               {/* Onglets connexion / inscription */}
               <div className="flex rounded-lg overflow-hidden border border-gray-700">
                 <button
@@ -282,6 +328,17 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                 )}
               </div>
 
+              {/* Mot de passe oublié — accès au parcours de réinitialisation */}
+              {mode === 'login' && (
+                <button
+                  type="button"
+                  onClick={() => { state.clearResetError(); setForgotSent(false); setResetDone(false); setView('forgot'); }}
+                  className="text-[11px] text-purple-300/90 hover:text-purple-200 underline underline-offset-2 self-start"
+                >
+                  {t('license.forgotLink')}
+                </button>
+              )}
+
               {state.loginError && (
                 <p className="text-[11px] text-red-400">
                   {t('license.err.' + state.loginError, { defaultValue: state.loginError })}
@@ -303,6 +360,157 @@ export const LicenseModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                 <p>{t('license.priceStandard')}</p>
                 <p>{t('license.priceFull')}</p>
               </div>
+                </>
+              ) : view === 'forgot' ? (
+                /* ── Mot de passe oublié ─────────────────────────────── */
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-white">{t('license.forgotTitle')}</h4>
+                    <button
+                      type="button"
+                      onClick={backToForm}
+                      className="text-[10px] text-gray-500 hover:text-gray-300"
+                    >
+                      {t('license.backToLogin')}
+                    </button>
+                  </div>
+
+                  {forgotSent ? (
+                    <>
+                      <p className="text-[11px] text-emerald-400 leading-relaxed">{t('license.forgotSent')}</p>
+                      <button
+                        type="button"
+                        onClick={() => { state.clearResetError(); setView('reset'); }}
+                        className="w-full px-3 py-2 rounded-md bg-purple-600 text-white text-xs font-semibold hover:bg-purple-500"
+                      >
+                        {t('license.resetHaveCode')}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-[11px] text-gray-400 leading-relaxed">{t('license.forgotText')}</p>
+                      <div>
+                        <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('license.email')}</label>
+                        <input
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') doForgot(); }}
+                          placeholder={t('license.emailPlaceholder')}
+                          className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-200 focus:outline-none focus:border-purple-500/50"
+                        />
+                      </div>
+
+                      {state.resetError && (
+                        <p className="text-[11px] text-red-400">
+                          {t('license.err.' + state.resetError, { defaultValue: state.resetError })}
+                          {state.resetErrorDetail && state.resetErrorDetail !== state.resetError && (
+                            <span className="block text-red-300/80 mt-0.5">{state.resetErrorDetail}</span>
+                          )}
+                        </p>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={doForgot}
+                        disabled={busy || !email.trim()}
+                        className="w-full px-3 py-2 rounded-md bg-purple-600 text-white text-xs font-semibold hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {busy ? t('license.busy') : t('license.forgotSubmit')}
+                      </button>
+                    </>
+                  )}
+                </div>
+              ) : (
+                /* ── Réinitialisation du mot de passe ────────────────── */
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-white">{t('license.resetTitle')}</h4>
+                    <button
+                      type="button"
+                      onClick={backToForm}
+                      className="text-[10px] text-gray-500 hover:text-gray-300"
+                    >
+                      {t('license.backToLogin')}
+                    </button>
+                  </div>
+
+                  <p className="text-[11px] text-gray-400 leading-relaxed">{t('license.resetText')}</p>
+
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('license.resetCode')}</label>
+                    <input
+                      type="text"
+                      value={resetCode}
+                      onChange={(e) => setResetCode(e.target.value)}
+                      placeholder={t('license.resetCodePlaceholder')}
+                      className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-200 focus:outline-none focus:border-purple-500/50"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('license.resetNewPassword')}</label>
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') doReset(); }}
+                      placeholder="••••••••"
+                      className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-200 focus:outline-none focus:border-purple-500/50"
+                    />
+                    {newPassword.length > 0 && newPassword.length < MIN_PASSWORD_LENGTH && (
+                      <p className="text-[10px] text-red-400 mt-1">{t('license.passwordHint')}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase tracking-wider">{t('license.resetConfirmPassword')}</label>
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') doReset(); }}
+                      placeholder="••••••••"
+                      className="w-full mt-1 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded text-xs text-gray-200 focus:outline-none focus:border-purple-500/50"
+                    />
+                    {confirmPassword.length > 0 && confirmPassword !== newPassword && (
+                      <p className="text-[10px] text-red-400 mt-1">{t('license.resetMismatch')}</p>
+                    )}
+                  </div>
+
+                  {state.resetError && (
+                    <p className="text-[11px] text-red-400">
+                      {t('license.err.' + state.resetError, { defaultValue: state.resetError })}
+                      {state.resetErrorDetail && state.resetErrorDetail !== state.resetError && (
+                        <span className="block text-red-300/80 mt-0.5">{state.resetErrorDetail}</span>
+                      )}
+                    </p>
+                  )}
+
+                  {resetDone && (
+                    <p className="text-[11px] text-emerald-400 leading-relaxed">{t('license.resetSuccess')}</p>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={doReset}
+                    disabled={busy || !resetCode.trim() || newPassword.length < MIN_PASSWORD_LENGTH || newPassword !== confirmPassword}
+                    className="w-full px-3 py-2 rounded-md bg-purple-600 text-white text-xs font-semibold hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {busy ? t('license.busy') : t('license.resetSubmit')}
+                  </button>
+
+                  {resetDone && (
+                    <button
+                      type="button"
+                      onClick={backToForm}
+                      className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-700 text-gray-300 text-xs font-semibold hover:bg-gray-700"
+                    >
+                      {t('license.backToLogin')}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

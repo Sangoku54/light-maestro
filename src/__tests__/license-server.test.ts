@@ -33,6 +33,8 @@ import {
   registerWithLicense,
   loginWithLicense,
   startCheckout,
+  requestPasswordReset,
+  resetPassword,
   LICENSE_API_URL,
   LicenseError,
 } from '@electron/license/server';
@@ -64,10 +66,15 @@ async function expectLicenseError(promise: Promise<unknown>, code: string): Prom
 
 const originalGlobalFetch = globalThis.fetch;
 
+// Reset global : chaque test repart d'une pile réseau vierge, quel que soit
+// le bloc de tests dans lequel il se trouve.
+beforeEach(() => {
+  netFetch.mockReset();
+  globalFetch.mockReset();
+});
+
 describe('client HTTP de licence', () => {
   beforeEach(() => {
-    netFetch.mockReset();
-    globalFetch.mockReset();
     // Le repli du module utilise le `fetch` global : on le redirige.
     globalThis.fetch = globalFetch as unknown as typeof fetch;
   });
@@ -155,6 +162,18 @@ describe('client HTTP de licence', () => {
     expect(err.message).toContain('502');
   });
 
+  it('HTTP 200 mais corps non JSON (erreur PHP en HTML) → code server, PAS de faux succès', async () => {
+    // Cas réel : l'endpoint cassé renvoyait un 200 avec la page d'erreur PHP
+    // (« Fatal error: require_once... »). Sans ce contrôle, l'app aurait
+    // annoncé « email de réinitialisation envoyé » alors qu'aucun n'est parti.
+    netFetch.mockResolvedValue(
+      fakeResponse(200, '<br /><b>Fatal error</b>: Class "Key" not found', false),
+    );
+
+    const err = await expectLicenseError(requestPasswordReset('a@b.fr'), 'server');
+    expect(err.message).toContain('inattendue');
+  });
+
   it('panne réseau → code network', async () => {
     netFetch.mockRejectedValue(new TypeError('fetch failed'));
 
@@ -185,6 +204,82 @@ describe('client HTTP de licence', () => {
 
     const err = await expectLicenseError(loginWithLicense('a@b.fr', 'mauvais'), 'rate_limited');
     expect(err.message).toContain('tentatives');
+  });
+});
+
+describe('mot de passe oublié / réinitialisation', () => {
+  it('requestPasswordReset POST /auth/forgot-password.php avec l\'email', async () => {
+    netFetch.mockResolvedValue(fakeResponse(200, { ok: true }));
+
+    await requestPasswordReset('a@b.fr');
+
+    expect(netFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = netFetch.mock.calls[0] as [string, any];
+    expect(url).toBe(`${LICENSE_API_URL}/auth/forgot-password.php`);
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({ email: 'a@b.fr' });
+  });
+
+  it('requestPasswordReset : le serveur répond 200 même pour une adresse inconnue', async () => {
+    netFetch.mockResolvedValue(fakeResponse(200, { ok: true }));
+
+    await expect(requestPasswordReset('inconnu@example.invalid')).resolves.toBeUndefined();
+  });
+
+  it('requestPasswordReset : erreur 400 → invalid_input', async () => {
+    netFetch.mockResolvedValue(fakeResponse(400, { error: 'invalid_input', message: 'Email invalide' }));
+
+    const err = await expectLicenseError(requestPasswordReset('pas-un-email'), 'invalid_input');
+    expect(err.message).toContain('Email');
+  });
+
+  it('requestPasswordReset : panne réseau → network', async () => {
+    netFetch.mockRejectedValue(new TypeError('fetch failed'));
+
+    await expectLicenseError(requestPasswordReset('a@b.fr'), 'network');
+  });
+
+  it('resetPassword POST /auth/reset-password.php avec token + newPassword', async () => {
+    netFetch.mockResolvedValue(fakeResponse(200, { ok: true }));
+
+    await resetPassword('code-123', 'Nouveau1234!');
+
+    expect(netFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = netFetch.mock.calls[0] as [string, any];
+    expect(url).toBe(`${LICENSE_API_URL}/auth/reset-password.php`);
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({ token: 'code-123', newPassword: 'Nouveau1234!' });
+  });
+
+  it('resetPassword : code expiré → code token_expired (message dédié)', async () => {
+    netFetch.mockResolvedValue(
+      fakeResponse(400, { error: 'token_expired', message: 'Ce code a expiré.' }),
+    );
+
+    const err = await expectLicenseError(resetPassword('code-123', 'Nouveau1234!'), 'token_expired');
+    expect(err.message).toContain('expiré');
+  });
+
+  it('resetPassword : code invalide → code token_invalid', async () => {
+    netFetch.mockResolvedValue(
+      fakeResponse(400, { error: 'token_invalid', message: 'Ce code n\'est plus valable.' }),
+    );
+
+    await expectLicenseError(resetPassword('code-123', 'Nouveau1234!'), 'token_invalid');
+  });
+
+  it('resetPassword : erreur 400 générique → invalid_input', async () => {
+    netFetch.mockResolvedValue(
+      fakeResponse(400, { error: 'invalid_input', message: 'Mot de passe trop court.' }),
+    );
+
+    await expectLicenseError(resetPassword('code-123', '123'), 'invalid_input');
+  });
+
+  it('resetPassword : panne réseau → network', async () => {
+    netFetch.mockRejectedValue(new TypeError('fetch failed'));
+
+    await expectLicenseError(resetPassword('code-123', 'Nouveau1234!'), 'network');
   });
 });
 

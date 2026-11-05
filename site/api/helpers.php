@@ -160,6 +160,87 @@ function verify_token(?string $token): ?int {
 }
 
 /**
+ * Signe un jeton de réinitialisation de mot de passe (HS256, sans librairie).
+ *
+ * Les endpoints `forgot-password.php` / `reset-password.php` utilisaient
+ * `firebase/php-jwt` : la dépendance est absente du serveur (pas de dossier
+ * `vendor/`), donc les deux endpoints renvoyaient une erreur PHP fatale
+ * (« Class "Key" not found »). On réutilise les helpers JWT déjà présents
+ * ici (b64url_encode + hash_hmac), aucune installation n'est nécessaire.
+ *
+ * TTL : 1 heure par défaut.
+ */
+function sign_reset_token(int $userId, int $ttl = 3600): string {
+    $secret = jwt_secret();
+    if ($secret === '') {
+        throw new RuntimeException('Configuration serveur invalide (clé de signature absente)');
+    }
+    $now = time();
+
+    $header = b64url_encode(json_encode(['alg' => 'HS256', 'typ' => 'JWT'], JSON_UNESCAPED_UNICODE));
+    $payload = b64url_encode(json_encode([
+        'sub' => $userId,
+        'type' => 'password_reset',
+        'iat' => $now,
+        'exp' => $now + $ttl,
+    ], JSON_UNESCAPED_UNICODE));
+    $sig = b64url_encode(hash_hmac('sha256', $header . '.' . $payload, $secret, true));
+
+    return $header . '.' . $payload . '.' . $sig;
+}
+
+/**
+ * Vérifie un jeton de réinitialisation et retourne l'id utilisateur, ou null.
+ *
+ * Fail-closed : sans secret configuré, aucun jeton n'est accepté.
+ * Le contrôle décisif reste la comparaison avec le hash stocké en base
+ * (voir forgot-password.php / reset-password.php) : un jeton valide mais
+ * révoqué est refusé.
+ */
+function verify_reset_token(?string $token): ?int {
+    if (!$token) return null;
+
+    $secret = jwt_secret();
+    if ($secret === '') return null;
+
+    $clean = str_replace(['+', '/', '='], ['-', '_', ''], $token);
+    $parts = explode('.', $clean);
+    if (count($parts) !== 3) return null;
+
+    $computed = b64url_encode(hash_hmac('sha256', $parts[0] . '.' . $parts[1], $secret, true));
+    if (!hash_equals($computed, $parts[2])) return null;
+
+    $payload = json_decode(b64url_decode($parts[1]), true);
+    if (!is_array($payload)) return null;
+    if (($payload['type'] ?? '') !== 'password_reset') return null;
+    if (!isset($payload['sub'], $payload['exp'])) return null;
+    if ((int)$payload['exp'] < time()) return null;
+
+    $sub = $payload['sub'];
+    return is_numeric($sub) ? (int)$sub : null;
+}
+
+/**
+ * URL publique du site (lien de réinitialisation envoyé par email).
+ * Surchargeable via SITE_URL dans config.php.
+ */
+function site_base_url(): string {
+    if (defined('SITE_URL') && SITE_URL) return rtrim((string)SITE_URL, '/');
+    return 'https://light-maestro.com';
+}
+
+/**
+ * Lien de réinitialisation envoyé par email.
+ *
+ * Le lien pointe vers le formulaire web de réinitialisation (endpoint GET de
+ * reset-password.php) : l'ancien lien `https://light-maestro.com/reset-password.php`
+ * renvoyait un 404 (le fichier n'existe qu'un peu plus haut dans l'arborescence).
+ */
+function password_reset_url(string $token): string {
+    return site_base_url() . '/api/auth/reset-password.php?token=' . urlencode($token);
+}
+
+/**
  * Lis le header Authorization Bearer et retourne l'user id, ou null.
  */
 function auth_user_id(): ?int {
@@ -281,11 +362,22 @@ function send_confirmation_email(string $email, ?string $displayName): void {
 
 /**
  * Envoie un email de réinitialisation de mot de passe.
+ *
+ * Le corps contient le lien web ET le code du jeton : ce code permet de
+ * réinitialiser le mot de passe depuis l'application (Compte & Licence →
+ * Réinitialiser le mot de passe), sans avoir à ouvrir le navigateur.
  */
-function send_reset_email(string $email, string $displayName, string $resetUrl): void {
+function send_reset_email(string $email, string $displayName, string $resetUrl, string $token = ''): void {
     $nameSafe = htmlspecialchars($displayName, ENT_QUOTES, 'UTF-8');
     $urlSafe = htmlspecialchars($resetUrl, ENT_QUOTES, 'UTF-8');
     $subject = 'Réinitialisation de ton mot de passe — Light Maestro';
+    $codeBlock = '';
+    if ($token !== '') {
+        $tokenSafe = htmlspecialchars($token, ENT_QUOTES, 'UTF-8');
+        $codeBlock = '<p style="color:#9ca3af;line-height:1.7;">Tu peux aussi le faire directement dans l\'application Light Maestro : <b style="color:#fff;">Compte & Licence → Mot de passe oublié → Réinitialiser</b>, puis colle ce code :</p>'
+            . '<div style="background:#12121a;border:1px solid #2a2a3e;border-radius:12px;padding:14px 16px;margin:16px 0;word-break:break-all;font-family:Consolas,monospace;font-size:13px;color:#c084fc;">'
+            . $tokenSafe . '</div>';
+    }
     $body = '<!doctype html><html lang="fr"><body style="margin:0;background:#0a0a0f;color:#ede8dc;font-family:Arial,sans-serif;">'
         . '<div style="max-width:560px;margin:0 auto;padding:32px 24px;">'
         . '<div style="font-weight:900;letter-spacing:.18em;font-size:13px;"><span style="display:inline-block;background:#8b5cf6;color:#fff;border-radius:8px;padding:4px 8px;margin-right:8px;">LM</span>LIGHT MAESTRO</div>'
@@ -293,6 +385,7 @@ function send_reset_email(string $email, string $displayName, string $resetUrl):
         . '<p style="color:#9ca3af;line-height:1.7;">Salut ' . $nameSafe . ',</p>'
         . '<p style="color:#9ca3af;line-height:1.7;">Tu as demandé la réinitialisation de ton mot de passe. Clique sur le bouton ci-dessous pour en créer un nouveau.</p>'
         . '<div style="margin:24px 0;"><a href="' . $urlSafe . '" style="display:inline-block;background:#8b5cf6;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700;">Réinitialiser mon mot de passe</a></div>'
+        . $codeBlock
         . '<p style="color:#6b7280;font-size:12px;line-height:1.6;">Ce lien expire dans 1 heure. Si tu n\'as pas fait cette demande, ignore cet email.</p>'
         . '<p style="margin-top:24px;font-size:12px;color:#6b7280;">Light Maestro — <a href="https://light-maestro.com" style="color:#8b5cf6;">light-maestro.com</a></p>'
         . '</div></body></html>';

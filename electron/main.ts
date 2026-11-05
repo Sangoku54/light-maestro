@@ -16,7 +16,7 @@ import { AudioAnalyzer } from './audio/analyzer';
 import { crashLogger } from './utils/crash-logger';
 import { packProject, unpackProject } from './project-envelope';
 import { LicenseStore } from './license/store';
-import { loginWithLicense, registerWithLicense, refreshLicense, startCheckout, LicenseError, LICENSE_API_URL } from './license/server';
+import { loginWithLicense, registerWithLicense, refreshLicense, startCheckout, requestPasswordReset, resetPassword, LicenseError, LICENSE_API_URL } from './license/server';
 
 // Disable GPU cache to avoid permission errors on Windows
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
@@ -825,6 +825,41 @@ ipcMain.handle('license:register', async (_event, email: string, password: strin
       limits: result.limits,
     });
     return { ok: true, state: licenseStore.getState() };
+  } catch (e) {
+    if (e instanceof LicenseError) {
+      return { ok: false, code: e.code, message: e.message };
+    }
+    return { ok: false, code: 'network', message: 'Erreur inattendue' };
+  }
+});
+// Mot de passe oublié : demande d'email de réinitialisation.
+// Le serveur répond toujours 200 (adresse inconnue ou non) → pas de fuite
+// d'information sur les comptes existants.
+ipcMain.handle('license:forgotPassword', async (_event, email: string) => {
+  const mail = String(email ?? '').trim();
+  if (!mail) {
+    return { ok: false, code: 'invalid_input', message: 'Email manquant' };
+  }
+  try {
+    await requestPasswordReset(mail);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof LicenseError) {
+      return { ok: false, code: e.code, message: e.message };
+    }
+    return { ok: false, code: 'network', message: 'Erreur inattendue' };
+  }
+});
+// Réinitialisation : nouveau mot de passe à partir du code reçu par email.
+ipcMain.handle('license:resetPassword', async (_event, token: string, newPassword: string) => {
+  const code = String(token ?? '').trim();
+  const pwd = String(newPassword ?? '');
+  if (!code) {
+    return { ok: false, code: 'invalid_input', message: 'Code manquant' };
+  }
+  try {
+    await resetPassword(code, pwd);
+    return { ok: true };
   } catch (e) {
     if (e instanceof LicenseError) {
       return { ok: false, code: e.code, message: e.message };

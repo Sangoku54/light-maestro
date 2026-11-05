@@ -227,6 +227,10 @@ contextBridge.exposeInMainWorld('lightMaestro', {
       ipcRenderer.invoke('license:login', email, password),
     register: (email: string, password: string, displayName?: string) =>
       ipcRenderer.invoke('license:register', email, password, displayName),
+    forgotPassword: (email: string) =>
+      ipcRenderer.invoke('license:forgotPassword', email),
+    resetPassword: (token: string, newPassword: string) =>
+      ipcRenderer.invoke('license:resetPassword', token, newPassword),
     checkout: (edition: 'standard' | 'full') =>
       ipcRenderer.invoke('license:checkout', edition),
     refresh: () => ipcRenderer.invoke('license:refresh'),

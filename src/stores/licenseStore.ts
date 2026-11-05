@@ -35,6 +35,12 @@ interface LoginResponse {
   state?: LicenseState;
 }
 
+interface SimpleResponse {
+  ok: boolean;
+  code?: string;
+  message?: string;
+}
+
 interface CheckoutResponse {
   ok: boolean;
   code?: string;
@@ -46,6 +52,10 @@ interface LicenseApi {
   getState: () => Promise<LicenseState>;
   login: (email: string, password: string) => Promise<LoginResponse>;
   register: (email: string, password: string, displayName?: string) => Promise<LoginResponse>;
+  /** Demande l'email de réinitialisation (toujours « ok » côté serveur). */
+  forgotPassword: (email: string) => Promise<SimpleResponse>;
+  /** Applique un nouveau mot de passe à partir du code reçu par email. */
+  resetPassword: (token: string, newPassword: string) => Promise<SimpleResponse>;
   checkout: (edition: 'standard' | 'full') => Promise<CheckoutResponse>;
   refresh: () => Promise<{ ok: boolean; state?: LicenseState }>;
   openUrl: (url: string) => Promise<{ ok: boolean }>;
@@ -57,10 +67,17 @@ interface LicenseStoreState extends LicenseState {
   loginError: string | null;
   /** Message détaillé renvoyé par le serveur (affiché sous le code d'erreur). */
   loginErrorDetail: string | null;
+  /** Erreur des flux « mot de passe oublié » / « réinitialisation ». */
+  resetError: string | null;
+  /** Message détaillé du serveur pour l'erreur de réinitialisation. */
+  resetErrorDetail: string | null;
   clearLoginError: () => void;
+  clearResetError: () => void;
   refresh: () => Promise<void>;
   login: (email: string, password: string) => Promise<boolean>;
   register: (email: string, password: string) => Promise<boolean>;
+  forgotPassword: (email: string) => Promise<boolean>;
+  resetPassword: (token: string, newPassword: string) => Promise<boolean>;
   checkout: (edition: 'standard' | 'full') => Promise<string | null>;
   logout: () => Promise<void>;
 }
@@ -82,10 +99,15 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
   loading: true,
   loginError: null,
   loginErrorDetail: null,
+  resetError: null,
+  resetErrorDetail: null,
 
   /** Efface l'erreur courante (à l'ouverture de la modale : évite d'afficher
    *  une erreur périmée venue d'une autre opération). */
   clearLoginError: () => set({ loginError: null, loginErrorDetail: null }),
+
+  /** Efface l'erreur du flux mot de passe oublié / réinitialisation. */
+  clearResetError: () => set({ resetError: null, resetErrorDetail: null }),
 
   refresh: async () => {
     const a = api();
@@ -142,6 +164,62 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
     }
   },
 
+  /**
+   * Demande l'email de réinitialisation du mot de passe.
+   *
+   * Le serveur répond toujours « ok » (que l'adresse existe ou non) : un
+   * échec ici ne signifie donc PAS que l'email n'a pas été envoyé.
+   */
+  forgotPassword: async (email) => {
+    const a = api();
+    if (!a || typeof a.forgotPassword !== 'function') {
+      set({ resetError: 'unavailable', resetErrorDetail: null });
+      return false;
+    }
+    try {
+      const r = await a.forgotPassword(email);
+      if (r.ok) {
+        set({ resetError: null, resetErrorDetail: null });
+        return true;
+      }
+      set({
+        resetError: (r as any).code || 'resetFailed',
+        resetErrorDetail: (r as any).code ? (r as any).message || null : null,
+      });
+      return false;
+    } catch {
+      set({ resetError: 'network', resetErrorDetail: null });
+      return false;
+    }
+  },
+
+  /**
+   * Applique un nouveau mot de passe à partir du code reçu par email.
+   * `false` = échec (code expiré/invalide, mot de passe trop court, réseau…).
+   */
+  resetPassword: async (token, newPassword) => {
+    const a = api();
+    if (!a || typeof a.resetPassword !== 'function') {
+      set({ resetError: 'unavailable', resetErrorDetail: null });
+      return false;
+    }
+    try {
+      const r = await a.resetPassword(token, newPassword);
+      if (r.ok) {
+        set({ resetError: null, resetErrorDetail: null });
+        return true;
+      }
+      set({
+        resetError: (r as any).code || 'resetFailed',
+        resetErrorDetail: (r as any).code ? (r as any).message || null : null,
+      });
+      return false;
+    } catch {
+      set({ resetError: 'network', resetErrorDetail: null });
+      return false;
+    }
+  },
+
   checkout: async (edition) => {
     const a = api();
     if (!a) {
@@ -194,7 +272,13 @@ export const useLicenseStore = create<LicenseStoreState>((set) => ({
   logout: async () => {
     const a = api();
     if (a) { await a.logout().catch(() => {}); }
-    set({ ...DEFAULT_STATE, loginError: null, loginErrorDetail: null });
+    set({
+      ...DEFAULT_STATE,
+      loginError: null,
+      loginErrorDetail: null,
+      resetError: null,
+      resetErrorDetail: null,
+    });
   },
 }));
 
