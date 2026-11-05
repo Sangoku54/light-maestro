@@ -1,0 +1,441 @@
+{
+  "generatedAt": "2026-08-25T17:06:33.392Z",
+  "oflDir": "C:\\Users\\vitte\\.openclaw-autoclaw\\agents\\mon-codeur\\workspace\\light-maestro\\resources\\fixtures\\ofl",
+  "stats": {
+    "fichiersJson": 626,
+    "defsChargees": 619,
+    "redirects": 7,
+    "parseFailFiles": [
+      "cameo\\ts60.json",
+      "kino-flo\\celeb-led-250-dmx.json",
+      "kino-flo\\celeb-led-450-dmx.json",
+      "lixada\\mini-beam-rgbw.json",
+      "lixada\\mini-moving-head-rgbw.json",
+      "minuit-une\\m-carre.json",
+      "stairville\\mh-x30.json"
+    ],
+    "doublons": [],
+    "lasers": 24,
+    "lasersMuets": 0,
+    "canauxLasersNonExploites": 0,
+    "fauxPositifs": 0,
+    "projecteursExclus": 2,
+    "i1Failures": 0,
+    "i2FixturesFails": 0,
+    "i2Violations": 0
+  },
+  "i1Failures": [],
+  "lasersMuets": [],
+  "tousLasers": [
+    {
+      "file": "american-dj\\boom-box-fx2.json",
+      "manufacturer": "American DJ",
+      "model": "Boom Box Fx2",
+      "fixtureType": "Laser",
+      "mode": "19-channel",
+      "channelCount": 19,
+      "reason": "type",
+      "roles": [
+        "mode@16",
+        "rgb[1,2,6]"
+      ],
+      "laserColorMode": "rgb",
+      "muet": false
+    },
+    {
+      "file": "american-dj\\galaxian-3d.json",
+      "manufacturer": "American DJ",
+      "model": "Galaxian 3D",
+      "fixtureType": "Laser",
+      "mode": "5-channel",
+      "channelCount": 5,
+      "reason": "type",
+      "roles": [
+        "rgb[0,1]",
+        "rot[2,3]"
+      ],
+      "laserColorMode": "rgb",
+      "muet": false
+    },
+    {
+      "file": "american-dj\\inno-pocket-fusion.json",
+      "manufacturer": "American DJ",
+      "model": "Inno Pocket Fusion",
+      "fixtureType": "Laser",
+      "mode": "11-channel",
+      "channelCount": 11,
+      "reason": "type",
+      "roles": [
+        "mode@7",
+        "wheel@2 (16 caps)"
+      ],
+      "laserColorMode": "wheel",
+      "muet": false
+    },
+    {
+      "file": "american-dj\\stinger-ii.json",
+      "manufacturer": "American DJ",
+      "model": "Stinger II",
+      "fixtureType": "Laser",
+      "mode": "9-channel",
+      "channelCount": 9,
+      "reason": "type",
+      "roles": [
+        "mode@0",
+        "rot[8]"
+      ],
+      "laserColorMode": "none",
+      "muet": false
+    },
+    {
+      "file": "cameo\\ioda-1000-rgb.json",
+      "manufacturer": "Cameo",
+      "model": "IODA 1000 RGB",
+      "fixtureType": "Laser",
+      "mode": "11-channel",
+      "channelCount": 11,
+      "reason": "type",
+      "roles": [
+        "mode@0",
+        "pattern@2 (128 caps)",
+        "scanX@6",
+        "scanY@7",
+        "wheel@1 (11 caps)",
+        "rot[4,5]"
+      ],
+      "laserColorMode": "wheel",
+      "muet": false
+    },
+    {
+      "file": "cameo\\ioda-400-rgy.json",
+      "manufacturer": "Cameo",
+      "model": "IODA 400 RGY",
+      "fixtureType": "Laser",
+      "mode": "11-channel",
+      "channelCount": 11,
+      "reason": "type",
+      "roles": [
+        "mode@0",
+        "pattern@2 (128 caps)",
+        "scanX@6",
+        "scanY@7",
+        "wheel@1 (11 caps)",
+        "rot[4,5]"
+      ],
+      "laserColorMode": "wheel",
+      "muet": false
+    },
+    {
+      "file": "cameo\\ioda-600-rgb.json",
+      "manufacturer": "Cameo",
+      "model": "IODA 600 RGB",
+      "fixtureType": "Laser",
+      "mode": "11-channel",
+      "channelCount": 11,
+      "reason": "type",
+      "roles": [
+        "mode@0",
+        "pattern@2 (128 caps)",
+        "scanX@6",
+        "scanY@7",
+        "wheel@1 (11 caps)",
+        "rot[4,5]"
+      ],
+      "laserColorMode": "wheel",
+      "muet": false
+    },
+    {
+      "file": "cameo\\multi-fx-bar.json",
+      "manufacturer": "Cameo",
+      "model": "Multi FX Bar",
+      "fixtureType": "Laser",
+      "mode": "29-Channel",
+      "channelCount": 29,
+      "reason": "type",
+      "roles": [
+        "rgb[0,1,2]",
+        "rot[22]"
+      ],
+      "laserColorMode": "rgb",
+      "muet": false
+    },
+    {
+      "file": "cameo\\storm.json",
+      "manufacturer": "Cameo",
+      "model": "STORM",
+      "fixtureType": "Laser",
+      "mode": "10-channel",
+      "channelCount": 10,
+      "reason": "type",
+      "roles": [
+        "wheel@1 (34 caps)",
+        "rot[8]",
+        "gate@6"
+      ],
+      "laserColorMode": "wheel",
+      "muet": false
+    },
+    {
+      "file": "chauvet-dj\\gigbar-2.json",
+      "manufacturer": "Chauvet DJ",
+      "model": "GigBAR 2",
+      "fixtureType": "Laser",
+      "mode": "23-channel",
+      "channelCount": 23,
+      "reason": "type",
+      "roles": [
+        "rgb[0,1,2]"
+      ],
+      "laserColorMode": "rgb",
+      "muet": false
+    },
+    {
+      "file": "eurolite\\led-b-40.json",
+      "manufacturer": "Eurolite",
+      "model": "LED B-40",
+      "fixtureType": "Laser",
+      "mode": "22 Channel",
+      "channelCount": 22,
+      "reason": "type",
+      "roles": [
+        "rgb[0,1,2]",
+        "gate@17"
+      ],
+      "laserColorMode": "rgb",
+      "muet": false
+    },
+    {
+      "file": "eurolite\\led-fe-1500.json",
+      "manufacturer": "Eurolite",
+      "model": "LED FE-1500",
+      "fixtureType": "Laser",
+      "mode": "9-channel",
+      "channelCount": 9,
+      "reason": "type",
+      "roles": [
+        "wheel@1 (34 caps)",
+        "rot[8]",
+        "gate@0"
+      ],
+      "laserColorMode": "wheel",
+      "muet": false
+    },
+    {
+      "file": "glp\\impression-laser.json",
+      "manufacturer": "GLP",
+      "model": "impression Laser",
+      "fixtureType": "Laser",
+      "mode": "Normal",
+      "channelCount": 20,
+      "reason": "type",
+      "roles": [
+        "scanX@13",
+        "scanY@14"
+      ],
+      "laserColorMode": "none",
+      "muet": false
+    },
+    {
+      "file": "jb-systems\\twin-effect-laser.json",
+      "manufacturer": "JB Systems",
+      "model": "Twin Effect Laser",
+      "fixtureType": "Laser",
+      "mode": "10-channel combined",
+      "channelCount": 10,
+      "reason": "type",
+      "roles": [
+        "mode@0"
+      ],
+      "laserColorMode": "none",
+      "muet": false
+    },
+    {
+      "file": "laserworld\\cs-1000rgb.json",
+      "manufacturer": "Laserworld",
+      "model": "CS-1000RGB",
+      "fixtureType": "Laser",
+      "mode": "11-channel",
+      "channelCount": 11,
+      "reason": "type",
+      "roles": [
+        "mode@0",
+        "pattern@1 (8 caps)",
+        "scanX@5",
+        "scanY@6",
+        "wheel@10 (1 caps)",
+        "rot[3,4]"
+      ],
+      "laserColorMode": "wheel",
+      "muet": false
+    },
+    {
+      "file": "laserworld\\ds-1000rgb.json",
+      "manufacturer": "Laserworld",
+      "model": "DS-1000RGB",
+      "fixtureType": "Laser",
+      "mode": "12-channel",
+      "channelCount": 12,
+      "reason": "type",
+      "roles": [
+        "mode@0",
+        "pattern@1 (3 caps)",
+        "scanX@3",
+        "scanY@4",
+        "wheel@11 (11 caps)",
+        "rot[6,7,8]"
+      ],
+      "laserColorMode": "wheel",
+      "muet": false
+    },
+    {
+      "file": "laserworld\\el-400rgb-mk2.json",
+      "manufacturer": "Laserworld",
+      "model": "EL-400RGB MK2",
+      "fixtureType": "Laser",
+      "mode": "9-channel",
+      "channelCount": 9,
+      "reason": "type",
+      "roles": [
+        "mode@0",
+        "pattern@1 (8 caps)",
+        "scanX@2",
+        "scanY@3"
+      ],
+      "laserColorMode": "none",
+      "muet": false
+    },
+    {
+      "file": "laserworld\\shownet.json",
+      "manufacturer": "Laserworld",
+      "model": "ShowNET",
+      "fixtureType": "Laser",
+      "mode": "Professional",
+      "channelCount": 34,
+      "reason": "type",
+      "roles": [
+        "scanX@3",
+        "scanY@5",
+        "rgb[13,14,15]"
+      ],
+      "laserColorMode": "rgb",
+      "muet": false
+    },
+    {
+      "file": "lep-laser\\diamond-pro-2-8.json",
+      "manufacturer": "lep-laser",
+      "model": "Diamond PRO 2.8",
+      "fixtureType": "Laser",
+      "mode": "12-channel",
+      "channelCount": 12,
+      "reason": "type",
+      "roles": [
+        "mode@0",
+        "pattern@1 (91 caps)",
+        "scanX@3",
+        "scanY@4",
+        "wheel@11 (11 caps)",
+        "rot[6,7,8]"
+      ],
+      "laserColorMode": "wheel",
+      "muet": false
+    },
+    {
+      "file": "minuit-une\\ivl-carre.json",
+      "manufacturer": "Minuit Une",
+      "model": "IVL Carré",
+      "fixtureType": "Laser",
+      "mode": "45 channel",
+      "channelCount": 39,
+      "reason": "type",
+      "roles": [
+        "rgb[4,5,6]"
+      ],
+      "laserColorMode": "rgb",
+      "muet": false
+    },
+    {
+      "file": "showtec\\dominator.json",
+      "manufacturer": "Showtec",
+      "model": "Dominator",
+      "fixtureType": "Laser",
+      "mode": "9-channel Version 1",
+      "channelCount": 9,
+      "reason": "type",
+      "roles": [
+        "wheel@1 (34 caps)",
+        "rot[8]",
+        "gate@5"
+      ],
+      "laserColorMode": "wheel",
+      "muet": false
+    },
+    {
+      "file": "stairville\\sonicpulse-led-bar-05.json",
+      "manufacturer": "Stairville",
+      "model": "SonicPulse LED Bar 05",
+      "fixtureType": "Color Changer",
+      "mode": "23-channel",
+      "channelCount": 23,
+      "reason": "signature",
+      "roles": [
+        "mode@2",
+        "rgb[7,8,9]",
+        "gate@3"
+      ],
+      "laserColorMode": "rgb",
+      "muet": false
+    },
+    {
+      "file": "stairville\\sonicpulse-led-bar-10.json",
+      "manufacturer": "Stairville",
+      "model": "SonicPulse LED Bar 10",
+      "fixtureType": "Color Changer",
+      "mode": "39-channel",
+      "channelCount": 39,
+      "reason": "signature",
+      "roles": [
+        "mode@2",
+        "rgb[7,8,9]",
+        "gate@3"
+      ],
+      "laserColorMode": "rgb",
+      "muet": false
+    },
+    {
+      "file": "sun-star\\g-2011-nova.json",
+      "manufacturer": "sun-star",
+      "model": "G-2011 / NOVA",
+      "fixtureType": "Laser",
+      "mode": "Default",
+      "channelCount": 6,
+      "reason": "type",
+      "roles": [
+        "mode@0",
+        "scanX@2",
+        "scanY@3"
+      ],
+      "laserColorMode": "none",
+      "muet": false
+    }
+  ],
+  "fauxPositifs": [],
+  "projecteursExclus": [
+    {
+      "file": "panasonic\\pt-rz120.json",
+      "manufacturer": "panasonic",
+      "model": "PT-RZ120",
+      "fixtureType": "Laser",
+      "mode": "1",
+      "channelCount": 11
+    },
+    {
+      "file": "panasonic\\pt-rz120l.json",
+      "manufacturer": "panasonic",
+      "model": "PT-RZ120L",
+      "fixtureType": "Laser",
+      "mode": "1",
+      "channelCount": 11
+    }
+  ],
+  "i2Violations": []
+}

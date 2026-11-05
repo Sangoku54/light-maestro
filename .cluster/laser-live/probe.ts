@@ -1,0 +1,2 @@
+import fs from 'fs';import path from 'path';import { FixtureLibrary } from '../../electron/fixtures/library';
+const OFL=path.join(process.cwd(),'resources','fixtures','ofl');const lib=new FixtureLibrary();const def=lib.parseOFLFixture(fs.readFileSync(path.join(OFL,'cameo','ioda-400-rgy.json'),'utf8'),'cameo');const mo=def.modes[def.modes.length-1];console.log(JSON.stringify(mo.channels[1],null,1).slice(0,800));

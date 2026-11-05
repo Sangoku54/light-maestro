@@ -1,0 +1,12 @@
+import { FixtureLibrary } from '../../electron/fixtures/library';
+const fs=require('fs');
+const lib=new FixtureLibrary();
+const raw=fs.readFileSync(require('path').join(process.cwd(),'resources','fixtures','ofl','glp','impression-laser.json'),'utf8');
+const def=lib.parseOFLFixture(raw,'glp');
+console.log('type:',def&&def.type,'| modes:',def&&def.modes.length);
+const longest=Math.max(...def.modes.map((m:any)=>m.channels.length));
+const mo=def.modes.find((x:any)=>x.channels.length===longest);
+const pf:any={id:def.id,manufacturer:def.manufacturer,model:def.model,fixtureType:def.type,modeIndex:0,modeName:mo.name,universeId:'u1',startAddress:1,channelCount:longest,name:def.id,tier:'primary'};
+const { analyzeFixtureChannels } = require('../../src/engine/fixture-analyzer');
+const fa=analyzeFixtureChannels(pf,{...def,modes:[mo]});
+console.log('isLaser:',fa.isLaser,'| rgbOffsets:',JSON.stringify(fa.rgbOffsets),'| pan:',JSON.stringify(fa.panOffsets),'| tilt:',JSON.stringify(fa.tiltOffsets));

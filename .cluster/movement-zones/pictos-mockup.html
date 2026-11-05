@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zones de mouvement — pictogrammes « tête mobile »</title>
+<style>
+  :root {
+    --bg: #0a0a0f; --panel: #12121a; --border: #1f1f2e;
+    --ivoire: #ede8dc; --violet: #8b5cf6; --violet2: #a78bfa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px; background: var(--bg); color: var(--ivoire);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.5;
+  }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  h1 .accent { color: var(--violet2); }
+  .sub { color: #9b98a8; font-size: 13px; margin-bottom: 28px; max-width: 720px; }
+  .grid {
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .card .label { font-weight: 600; font-size: 14px; }
+  .card .dmx { font-size: 11px; color: #9b98a8; font-family: ui-monospace, monospace; }
+  .stage-note { font-size: 11px; color: #6d6a7c; }
+  .legend {
+    margin-top: 28px; padding: 14px 16px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 10px; font-size: 13px; color: #b8b5c4;
+    display: flex; gap: 24px; flex-wrap: wrap;
+  }
+  .legend b { color: var(--ivoire); }
+</style>
+</head>
+<body>
+  <h1>Pictogrammes « <span class="accent">tête mobile</span> » — zones de mouvement</h1>
+  <div class="sub">
+    Chaque pictogramme est un <b>cône</b> : la <b>pointe</b> (rond) = la position de la tête mobile (la source),
+    l'<b>ouverture</b> = la direction réelle dans laquelle le faisceau a le droit de balayer.
+    Vue de dessus (plan). Le rectangle gris = la scène ; le public est en bas.
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="legend">
+    <span><b>Cône violet</b> = zone pan autorisée (vue de dessus)</span>
+    <span><b>↑/↓</b> = sens du tilt (au-dessus / vers le sol)</span>
+    <span><b>Trait fin</b> = faisceau verrouillé (fixe)</span>
+  </div>
+
+<script>
+const V = 130; // viewBox size
+const S = 8;   // scale factor for drawing coordinates
+function polar(cx, cy, deg, r) {
+  const a = deg * Math.PI / 180;
+  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+}
+function conePath(cx, cy, dirDeg, halfDeg, r) {
+  const [x1, y1] = polar(cx, cy, dirDeg - halfDeg, r);
+  const [x2, y2] = polar(cx, cy, dirDeg + halfDeg, r);
+  const large = (halfDeg * 2) > 180 ? 1 : 0;
+  return `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
+}
+// Stage rect in the center-bottom (audience below). Back wall = top.
+const stageRect = `<rect x="33" y="38" width="64" height="46" rx="3" fill="#171722" stroke="#2a2a3a" stroke-width="1"/>`;
+
+// Each preset: apex position + cone direction + half-angle (plan view)
+const presets = [
+  { label: "Tête mobile — sol gauche", apex:[24,60], dir:0,   half:45, pan:"128 → 255", tilt:"128 → 255", note:"cône → scène (droite) · ↑ 0–90°" },
+  { label: "Tête mobile — sol droite", apex:[106,60], dir:180, half:45, pan:"0 → 128", tilt:"128 → 255", note:"cône → scène (gauche) · ↑ 0–90°" },
+  { label: "Tête mobile — sol centre", apex:[65,88], dir:-90,  half:45, pan:"64 → 192", tilt:"128 → 255", note:"cône → scène · ↑ 0–90°" },
+  { label: "Tête mobile — pont arrière", apex:[65,32], dir:90, half:45, pan:"64 → 192", tilt:"0 → 128", note:"cône → bas/avant (scène) · ↓" },
+  { label: "Tête mobile — pont avant", apex:[65,88], dir:-90,  half:45, pan:"64 → 192", tilt:"0 → 128", note:"cône → fond de scène · ↓" },
+  { label: "Tête mobile — face public", apex:[65,30], dir:90,  half:80, pan:"0 → 255", tilt:"0 → 255", note:"cône large → public" },
+  { label: "Tête mobile — fixe", apex:[65,60], dir:0,   half:0,  pan:"verrouillé", tilt:"verrouillé", note:"faisceau fixe (uplight)" },
+];
+
+const grid = document.getElementById('grid');
+for (const p of presets) {
+  const svg = `
+  <svg viewBox="0 0 ${V} ${V}" width="100%" style="max-width:200px;margin:0 auto;display:block">
+    ${stageRect}
+    ${p.half > 0
+      ? `<path d="${conePath(p.apex[0], p.apex[1], p.dir, p.half, 62)}" fill="#8b5cf6" fill-opacity="0.22" stroke="#a78bfa" stroke-width="1.2"/>`
+      : `<line x1="${p.apex[0]}" y1="${p.apex[1]}" x2="${p.apex[0]+62}" y2="${p.apex[1]}" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="4 3"/>`}
+    <circle cx="${p.apex[0]}" cy="${p.apex[1]}" r="5" fill="#ede8dc" stroke="#8b5cf6" stroke-width="2"/>
+    <text x="4" y="126" font-size="7" fill="#6d6a7c" font-family="monospace">▼ public</text>
+  </svg>`;
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    ${svg}
+    <div class="label">${p.label}</div>
+    <div class="dmx">pan ${p.pan} · tilt ${p.tilt}</div>
+    <div class="stage-note">${p.note}</div>`;
+  grid.appendChild(card);
+}
+</script>
+</body>
+</html>
