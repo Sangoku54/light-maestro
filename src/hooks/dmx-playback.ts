@@ -1789,7 +1789,7 @@ if (fa.isLaser) {
                   chVals[pf.startAddress+fa.tiltOffsets[m]] = tv;
                   if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: 128, tilt: tv }), tilt: tv });
                 }}
-              }else{for(const po of fa.panOffsets)chVals[pf.startAddress+po]=Math.round(Math.max(0,Math.min(255,128+zeroPd)));for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=Math.round(Math.max(0,Math.min(255,128+zeroTd)));}
+              }else{const mountTd = (fixturePositions?.[pf.id]?.mountMode === 'rear' || fixturePositions?.[pf.id]?.mountMode === 'ground' || fixturePositions?.[pf.id]?.mountMode === 'hanging') ? -64 : 0;for(const po of fa.panOffsets)chVals[pf.startAddress+po]=Math.round(Math.max(0,Math.min(255,128+zeroPd)));for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=Math.round(Math.max(0,Math.min(255,128+zeroTd+mountTd)));}
             } // fin else autoscript (chaser freeze ci-dessus)
             }
           }
