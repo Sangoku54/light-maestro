@@ -3565,8 +3565,13 @@ export const Stage3D: React.FC<{
         for (const off of (cm.tiltOffsets ?? [])) setCh(pf.startAddress + off, v);
         if (cm.tiltOffset !== null && !(cm.tiltOffsets ?? []).includes(cm.tiltOffset)) setCh(pf.startAddress + cm.tiltOffset, v);
       };
+      // Compensation matériel rear/ground/hanging : le tilt DMX résolu par
+      // solvePanTilt est relatif à la monture (0 = horizontal monture), mais
+      // le matériel interprète DMX 128 = horizontal sol. Pour une fixture
+      // rear, il faut -64 (DMX 64 au lieu de 128) pour viser le public.
+      const mountTd = (f3d.mountMode === 'rear' || f3d.mountMode === 'ground' || f3d.mountMode === 'hanging') ? -64 : 0;
       writePan(solved.pan);
-      writeTilt(solved.tilt);
+      writeTilt(Math.max(0, Math.min(255, solved.tilt + mountTd)));
 
       // Capture le look (dimmer/couleur/strobe/shutter) DANS le programmer
       // via setCh � un simple objet snapshot ne met pas � jour le store.
@@ -3602,7 +3607,7 @@ export const Stage3D: React.FC<{
             armRotX: f3d.armGroup.rotation.x ?? 0,
           },
         );
-        if (sub) setCh(pf.startAddress + eh.tiltOffset, sub.tilt);
+        if (sub) setCh(pf.startAddress + eh.tiltOffset, Math.max(0, Math.min(255, sub.tilt + mountTd)));
       }
     }
   }, [patchedFixtures]);
@@ -6050,7 +6055,7 @@ export function headingRadForPos(pos: FixturePos, mountMode: string, stageDims: 
    //   — 宽舞台 (10×6) → cap≈84°，允许大侧偏（保留原始发散特性）
    //   — 窄舞台 (2×20) → cap≈11°，防止 y≈0.5 处发散到 ±90°
    const lateral = (pos.x - 0.5) * stageDims.width;
-   const longitudinal = Math.abs(pos.y - 0.5) * stageDims.depth;
+   const longitudinal = Math.abs(pos.y - 0.5) * stageDims.depth;  // fixture à droite (x>0.5) doit viser le centre (-X) → angle négatif
    // Plancher = min(w,d)*0.4：对窄舞台取 depth*0.4，对宽舞台取 width*0.4
    // 确保 y≈0.5 时纵向分量不至于太小导致 phi 发散
    const floor = Math.min(stageDims.width, stageDims.depth) * 0.4;
