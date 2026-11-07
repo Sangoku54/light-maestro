@@ -8145,7 +8145,13 @@ const FixtureEditorModal: React.FC<{ onClose: () => void; preloadedFixture?: any
   const addCapability = (target: 'create' | 'edit', mi: number, ci: number) => {
     const [modes] = target === 'create' ? [createModes] as const : [editModes] as const;
     const ch = modes[mi].channels[ci];
-    const cap: { min: number; max: number; name: string; color?: string } = { min: 0, max: 255, name: 'New Capability' };
+    const lastCap = (ch.capabilities || []).at(-1);
+    // Pré-remplir le début à max+1 de la dernière macro (ex. 1-50 → prochaine à 51)
+    const cap: { min: number | undefined; max: number | undefined; name: string; color?: string } = {
+      min: lastCap ? lastCap.max + 1 : 0,
+      max: 255,
+      name: 'New Capability',
+    };
     if (ch.type === 'Colour') cap.color = '#ff0000';
     updateChannel(target, mi, ci, { capabilities: [...(ch.capabilities || []), cap] });
   };
@@ -8156,7 +8162,7 @@ const FixtureEditorModal: React.FC<{ onClose: () => void; preloadedFixture?: any
     updateChannel(target, mi, ci, { capabilities: caps.length ? caps : undefined });
   };
 
-  const updateCapability = (target: 'create' | 'edit', mi: number, ci: number, capIdx: number, updates: Partial<{ min: number; max: number; name: string; color: string }>) => {
+  const updateCapability = (target: 'create' | 'edit', mi: number, ci: number, capIdx: number, updates: Partial<{ min: number | undefined; max: number | undefined; name: string; color: string }>) => {
     const [modes] = target === 'create' ? [createModes] : [editModes];
     const caps = (modes[mi].channels[ci].capabilities || []).map((c, i) => i === capIdx ? { ...c, ...updates } : c);
     updateChannel(target, mi, ci, { capabilities: caps });
@@ -8251,10 +8257,16 @@ const FixtureEditorModal: React.FC<{ onClose: () => void; preloadedFixture?: any
         {(ch.capabilities || []).map((cap, cci) => (
           <div key={cci} className="flex items-center gap-1.5">
             <span className="text-[9px] text-gray-600 w-5 shrink-0">{cci + 1}</span>
-            <input type="number" value={cap.min} onChange={(e) => updateCapability(target, mi, ci, cci, { min: Math.max(0, Math.min(255, parseInt(e.target.value) || 0)) })}
+            <input type="number" value={cap.min ?? ''} onChange={(e) => {
+              const v = e.target.value === '' ? undefined : Math.max(0, Math.min(255, parseInt(e.target.value) || 0));
+              updateCapability(target, mi, ci, cci, { min: v });
+            }}
               className="w-12 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono outline-none" placeholder="0" />
             <span className="text-[9px] text-gray-600">–</span>
-            <input type="number" value={cap.max} onChange={(e) => updateCapability(target, mi, ci, cci, { max: Math.max(0, Math.min(255, parseInt(e.target.value) || 0)) })}
+            <input type="number" value={cap.max ?? ''} onChange={(e) => {
+              const v = e.target.value === '' ? undefined : Math.max(0, Math.min(255, parseInt(e.target.value) || 0));
+              updateCapability(target, mi, ci, cci, { max: v });
+            }}
               className="w-12 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono outline-none" placeholder="255" />
             <input type="text" value={cap.name} onChange={(e) => updateCapability(target, mi, ci, cci, { name: e.target.value })}
               className="flex-1 min-w-0 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 outline-none" placeholder="Name" />
