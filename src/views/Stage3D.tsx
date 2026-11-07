@@ -3535,7 +3535,7 @@ export const Stage3D: React.FC<{
       const f3d = fixturesRef.current.get(fid);
       const pf = patchedFixtures.find((f) => f.id === fid);
       // Seules les fixtures qui tournent r�ellement en 3D (arm = pan) sont vis�es.
-      if (!f3d || !pf || !f3d.armGroup) continue;
+      if (!f3d || !pf) continue;
       const cm = f3d.channelMap;
       const panCh = cm.panOffset ?? cm.panOffsets?.[0] ?? null;
       const tiltCh = cm.tiltOffset ?? cm.tiltOffsets?.[0] ?? null;
@@ -3551,7 +3551,7 @@ export const Stage3D: React.FC<{
           headingRad: f3d.group.rotation.y + (f3d._zeroPanDeg * Math.PI) / 180,
           mountTilt: f3d._mountTilt ?? 0,
           staticTilt: (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180,
-          armRotX: f3d.armGroup.rotation.x ?? 0,
+          armRotX: f3d.armGroup?.rotation.x ?? 0,
           panCurrent: curPan,
         },
       );
