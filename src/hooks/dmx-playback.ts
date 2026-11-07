@@ -528,6 +528,7 @@ import { useAppStore } from '../stores/appStore';
 import { useProgrammerStore } from '../stores/programmerStore';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { recordAudioTick } from '../utils/latency-meter';
+import { manualTargetRef } from '../utils/manualTarget';
 
 
 /**
@@ -1790,7 +1791,15 @@ if (fa.isLaser) {
                   if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: 128, tilt: tv }), tilt: tv });
                 }}
               }else{const mountTd = (fixturePositions?.[pf.id]?.mountMode === 'rear' || fixturePositions?.[pf.id]?.mountMode === 'ground' || fixturePositions?.[pf.id]?.mountMode === 'hanging') ? -64 : 0;for(const po of fa.panOffsets)chVals[pf.startAddress+po]=Math.round(Math.max(0,Math.min(255,128+zeroPd)));for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=Math.round(Math.max(0,Math.min(255,128+zeroTd+mountTd)));}
-            } // fin else autoscript (chaser freeze ci-dessus)
+              // Cible manuelle (target depuis la modale 3D) : verrouille pan/tilt
+          // tant que l'utilisateur n'a pas reposé la cible ailleurs. Prend le
+          // pas sur le mouvement autoscript et sur le neutre 128+zero.
+          const manual = manualTargetRef.get(pf.id);
+          if (manual) {
+            for (const po of fa.panOffsets) chVals[pf.startAddress + po] = manual.pan;
+            for (const to of fa.tiltOffsets) chVals[pf.startAddress + to] = manual.tilt;
+          }
+        } // fin else autoscript (chaser freeze ci-dessus)
             }
           }
 

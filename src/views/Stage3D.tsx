@@ -54,6 +54,7 @@ import { fixtureTestState } from '../utils/fixture-test-state';
 import { generateAllThumbnails, getVariantsForCategory } from '../utils/fixtureThumbnails';
 import { useProgrammerStore } from '../stores/programmerStore';
 import { applyTrussVisibility } from '../utils/stage-truss-visibility';
+import { setManualTarget } from '../utils/manualTarget';
 
 // --- Constants -----------------------------------------------
 
@@ -3572,6 +3573,9 @@ export const Stage3D: React.FC<{
       const mountTd = (f3d.mountMode === 'rear' || f3d.mountMode === 'ground' || f3d.mountMode === 'hanging') ? -64 : 0;
       writePan(solved.pan);
       writeTilt(Math.max(0, Math.min(255, solved.tilt + mountTd)));
+      // Verrouille la position visée : le playback ne doit plus écraser
+      // ces pan/tilt avec le neutre ou un mouvement autoscript.
+      setManualTarget(fid, solved.pan, Math.max(0, Math.min(255, solved.tilt + mountTd)));
 
       // Capture le look (dimmer/couleur/strobe/shutter) DANS le programmer
       // via setCh � un simple objet snapshot ne met pas � jour le store.
