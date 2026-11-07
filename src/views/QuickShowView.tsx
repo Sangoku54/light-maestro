@@ -327,12 +327,13 @@ function getSectionProfile(section: string, cfg: any): {
   const sectionColors = cfg.customPalette?.[section] && cfg.customPalette[section].length > 0
     ? cfg.customPalette[section]
     : pal;
+  const movementMap: Record<string, string> = { smooth: 'wave', sharp: 'zigzag', dynamic: 'sweep' };
   return {
-    intensity: cfg.sectionAware ? (baseIntensity[section] || 'medium') : cfg.intensity || 'dynamic',
+    intensity: cfg.intensity !== 'dynamic' ? cfg.intensity : (cfg.sectionAware ? (baseIntensity[section] || 'medium') : cfg.intensity || 'dynamic'),
     colors: sectionColors,
     color: sectionColors[0] || '#ff0064',
     strobe: cfg.sectionAware ? (baseStrobe[section] || false) : false,
-    movement: cfg.sectionAware ? (baseMovement[section] || 'sweep') : (({ smooth: 'wave', sharp: 'zigzag', dynamic: 'sweep' } as Record<string, string>)[cfg.movement] || cfg.movement || 'sweep'),
+    movement: cfg.movement !== 'dynamic' ? (movementMap[cfg.movement] || cfg.movement) : (cfg.sectionAware ? (baseMovement[section] || 'sweep') : 'sweep'),
     colorTemp: (baseColorTemp[section] || 'neutral') as 'warm' | 'neutral' | 'cool',
     strobeProbability: baseStrobe[section] ? 0.8 : 0.2,
     dimmerPulseOnBeat: section === 'drop' || section === 'chorus',
