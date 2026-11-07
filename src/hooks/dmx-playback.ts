@@ -529,6 +529,7 @@ import { useProgrammerStore } from '../stores/programmerStore';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { recordAudioTick } from '../utils/latency-meter';
 import { manualTargetRef } from '../utils/manualTarget';
+import { hasSceneAim, getSceneAim, computeAimDMX } from '../utils/sceneAim';
 
 
 /**
@@ -1631,7 +1632,35 @@ if (fa.isLaser) {
             }
           }
           if(panCount>0||tiltCount>0){
-            if (chaserOwnsFixture) {
+            // ── Cible de scène (aiming 3D) : priorité sur l'autoscript,
+            // sous le chaser. Quand une cible est définie pour la fixture,
+            // les pan/tilt sont calculés par solvePanTilt pour viser le point
+            // 3D, pas par un pattern abstrait.
+            let aimWritten = false;
+            if (hasSceneAim(pf.id)) {
+              const aimPos = fixturePositions?.[pf.id];
+              if (aimPos) {
+                const aim = computeAimDMX(
+                  aimPos.x,
+                  aimPos.y,
+                  aimPos.h ?? 0,
+                  getSceneAim(pf.id)!,
+                  aimPos.heading ?? 0,
+                  aimPos.mountMode ?? 'top',
+                  aimPos.zeroPan,
+                  aimPos.zeroTilt
+                );
+                if (aim) {
+                  for (const po of fa.panOffsets) chVals[pf.startAddress + po] = aim.pan;
+                  for (const to of fa.tiltOffsets) chVals[pf.startAddress + to] = aim.tilt;
+                  chaserHoldRef.current.set(pf.id, { pan: aim.pan, tilt: aim.tilt });
+                  aimWritten = true;
+                }
+              }
+            }
+            if (aimWritten) {
+              // Cible appliquée : sauter le mouvement autoscript ci-dessous.
+            } else if (chaserOwnsFixture) {
               // Freeze total : la fixture est sous contrôle chaser.
               // Si la scène définit pan/tilt, on les utilise ; sinon on maintient
               // la dernière position connue (jamais le centre par défaut).
