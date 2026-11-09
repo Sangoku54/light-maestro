@@ -55,6 +55,7 @@ import { generateAllThumbnails, getVariantsForCategory } from '../utils/fixtureT
 import { useProgrammerStore } from '../stores/programmerStore';
 import { applyTrussVisibility } from '../utils/stage-truss-visibility';
 import { setManualTarget } from '../utils/manualTarget';
+import { setSceneAim } from '../utils/sceneAim';
 
 // --- Constants -----------------------------------------------
 
@@ -3576,6 +3577,9 @@ export const Stage3D: React.FC<{
       // Verrouille la position visée : le playback ne doit plus écraser
       // ces pan/tilt avec le neutre ou un mouvement autoscript.
       setManualTarget(fid, solved.pan, Math.max(0, Math.min(255, solved.tilt + mountTd)));
+      // Stocke aussi la cible 3D pour le playback (scène aiming) — cohérence
+      // entre le clic cible modale et le calcul DMX pan/tilt.
+      setSceneAim(fid, point.x, point.y, point.z);
 
       // Capture le look (dimmer/couleur/strobe/shutter) DANS le programmer
       // via setCh � un simple objet snapshot ne met pas � jour le store.
