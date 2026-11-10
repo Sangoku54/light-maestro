@@ -529,6 +529,7 @@ import { useProgrammerStore } from '../stores/programmerStore';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { recordAudioTick } from '../utils/latency-meter';
 import { manualTargetRef } from '../utils/manualTarget';
+import { computeBlackoutTrackOverrides, type BlackoutTrackRef } from '../utils/blackoutTrack';
 import { hasSceneAim, getSceneAim, computeAimDMX } from '../utils/sceneAim';
 
 
@@ -632,6 +633,7 @@ export function useDmxPlayback(options: {
   colorTracksRef?: React.MutableRefObject<ColorTrackRef[]>; // Color track overrides
   strobeTracksRef?: React.MutableRefObject<StrobeTrackRef[]>; // Strobe track overrides
   dimmerTracksRef?: React.MutableRefObject<DimmerTrackRef[] | null>; // Dimmer track overrides (highest priority for intensity)
+  blackoutTracksRef?: React.MutableRefObject<BlackoutTrackRef[] | null>; // Blackout track overrides (intensity 0 + shutter fermé sur fixtures ciblées)
   chaserTracksRef?: React.MutableRefObject<ChaserTrackRef[] | null>; // Chaser track takeover (full control of target fixtures)
   chasersRef?: React.MutableRefObject<Array<{ id: string; steps: Array<{ sceneId: string; fadeIn?: number; hold?: number; fadeOut?: number }> }>>; // Saved chasers
   scenesRef?: React.MutableRefObject<Array<{ id: string; channels: Record<number, number> }>>; // Saved scenes (for chaser steps)
@@ -649,7 +651,7 @@ export function useDmxPlayback(options: {
   forceDropRef?: React.MutableRefObject<boolean>; // Force next tick to use drop parameters
   arbiterSource?: string; // Output-arbiter source id this engine writes as (default 'quickshow')
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,chaserTracksRef,chasersRef,scenesRef,showTracksRef,showsRef,sceneTracksRef,matrixTracksRef,matricesRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,panTiltLimitsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource,sceneLiveOverridesRef}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,blackoutTracksRef,chaserTracksRef,chasersRef,scenesRef,showTracksRef,showsRef,sceneTracksRef,matrixTracksRef,matricesRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,panTiltLimitsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource,sceneLiveOverridesRef}=options;
   // Sécurité photosensibilité : le plafond utilisateur est lui-même plafonné
   // (vieux projet, preset ou entrée MIDI ne doivent jamais dépasser le max UI).
   const strobeLimitSafe = clampStrobeLimit(strobeLimit);
@@ -1028,6 +1030,15 @@ export function useDmxPlayback(options: {
         for (const [fid, v] of matrixTrack.strobe) {
           if (!strobeOverridesEarly.has(fid)) strobeOverridesEarly.set(fid, v);
         }
+      }
+      // Blackout track : fixtures à rendre inactives (noir) durant l'intervalle.
+      let blackoutOverrides: Map<string, { active: boolean }> | null = null;
+      if (blackoutTracksRef?.current && blackoutTracksRef.current.length > 0) {
+        blackoutOverrides = computeBlackoutTrackOverrides(
+          blackoutTracksRef.current,
+          ct,
+          patchedFixturesRef.current,
+        );
       }
       if(crossfadeT>0&&nextCue){
         try{
@@ -1608,6 +1619,20 @@ if (fa.isLaser) {
               const iAddrNS = pf.startAddress + fa.intensityOffset;
               chVals[iAddrNS] = strobePhaseNS >= 0 ? mapIntensityVal(dimmerVal, fa) : mapIntensityVal(0, fa);
             }
+          }
+
+          // Blackout track override : intensité 0 + shutter fermé sur la fixture,
+          // priorité absolue sur couleur, mouvement, strobe, gobo… déjà écrits.
+          const blackoutActive = blackoutOverrides?.get(pf.id);
+          if (blackoutActive) {
+            if (fa.intensityOffset !== null) chVals[pf.startAddress + fa.intensityOffset] = 0;
+            for (const seg of fa.rgbSegments) {
+              chVals[pf.startAddress + seg.r] = 0;
+              if (seg.g !== null) chVals[pf.startAddress + seg.g] = 0;
+              if (seg.b !== null) chVals[pf.startAddress + seg.b] = 0;
+              if (seg.w !== null) chVals[pf.startAddress + seg.w] = 0;
+            }
+            if (fa.shutterOffset !== null) chVals[pf.startAddress + fa.shutterOffset] = 0;
           }
 
           // PAN/TILT — check EFX override first, then chaser freeze, fall back to auto pattern
