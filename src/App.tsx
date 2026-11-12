@@ -839,28 +839,17 @@ const StatusBar: React.FC = () => {
           <span>{bpm > 0 ? `${Math.round(bpm)} BPM` : t('statusBar.listening')}</span>
         </div>
       )}
-      <div className="flex-1" />
-      <span title={`Build ${appVersion}`}>Light Maestro v{appVersion}</span>
-      <div className="flex items-center gap-2 ml-4">
+      <div className="flex items-center gap-2 mx-auto">
+        <span title={`Build ${appVersion}`}>Light Maestro v{appVersion}</span>
         {license.edition === 'free' && (
-          <>
-            <button
-              onClick={() => license.checkout('standard')}
-              disabled={license.loading}
-              className="px-2 py-1 rounded text-[10px] font-semibold bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 transition-all"
-              title={t('license.checkoutStandard')}
-            >
-              Std 69€
-            </button>
-            <button
-              onClick={() => license.checkout('full')}
-              disabled={license.loading}
-              className="px-2 py-1 rounded text-[10px] font-semibold bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-40 transition-all"
-              title={t('license.checkoutFullFree')}
-            >
-              Full 99€
-            </button>
-          </>
+          <button
+            onClick={() => license.checkout('standard')}
+            disabled={license.loading}
+            className="px-2 py-1 rounded text-[10px] font-semibold bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 transition-all"
+            title={t('license.checkoutStandard')}
+          >
+            Standard
+          </button>
         )}
         {license.edition === 'standard' && (
           <button
@@ -869,7 +858,7 @@ const StatusBar: React.FC = () => {
             className="px-2 py-1 rounded text-[10px] font-semibold bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-40 transition-all"
             title={t('license.checkoutUpgrade')}
           >
-            Full 30€
+            Passer en Full
           </button>
         )}
       </div>
