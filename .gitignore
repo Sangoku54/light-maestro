@@ -1,7 +1,13 @@
 node_modules/
 dist/
 release/
-.git/
+.DELIVERY/
+DELIVERY/
+LM/*.exe
+site/downloads/
+.openclaw/backups/
+.openclaw/tmp/
+.LM/
 *.log
 
 # Secrets du serveur (licence / Stripe) — versionné uniquement via
