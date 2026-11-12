@@ -55,6 +55,9 @@
     </div>
   </div>
 </footer>
-<script src="./assets/site.js"></script>
+<script>
+  // Notify admin that a payment was completed (merci-en.html = Stripe redirect back).
+  try { navigator.sendBeacon('/api/track.php', JSON.stringify({ file: 'paypal-success', version: '?' })); } catch(_) {}
+</script>
 </body>
 </html>

@@ -6,6 +6,7 @@
  * Événement traité : checkout.session.completed
  *   → lit metadata.edition + metadata.user_id
  *   → met à jour users.edition
+ *   → notifie admin par email
  *
  * ⚠️ Enregistrer cet endpoint dans Stripe (Dashboard → Webhooks) et y associer
  *    STRIPE_WEBHOOK_SECRET. Ne jamais désactiver la vérification de signature.
@@ -55,11 +56,28 @@ if ($event->type === 'checkout.session.completed') {
                 )->execute([$userId, $pi, $edition, $amount]);
             }
         } catch (Throwable $e) {
-            // L'audit ne doit jamais faire échouer l'activation, mais le
-            // défaut doit être visible (table `payments` absente, schéma
-            // différent…) : sans trace, aucun paiement n'était enregistré
-            // et personne ne le savait.
             error_log('[stripe] audit paiement impossible : ' . $e->getMessage());
+        }
+
+        // Notifie l'admin par email (montant, édition, user_id).
+        try {
+            // Récupère l'email de l'utilisateur pour le rapport.
+            $emStmt = db()->prepare('SELECT email, display_name FROM users WHERE id = ?');
+            $emStmt->execute([$userId]);
+            $uInfo = $emStmt->fetch();
+            $emailAddr = $uInfo ? $uInfo['email'] : "user #$userId";
+            $displayName = $uInfo ? ($uInfo['display_name'] ?: '') : '';
+            $labelEdition = $edition === 'standard' ? 'Standard (69 €)' : 'Complète (99 €)';
+            $upgradeTag = ($metadata['upgrade_from'] ?? '') === 'standard' ? ' — Upgrade Standard→Full (30 €)' : '';
+            notify_admin(
+                'Nouveau paiement Stripe',
+                "$emailAddr" . ($displayName ? " ($displayName)" : "")
+                . " — Édition $labelEdition" . $upgradeTag
+                . " — Montant brut : " . number_format($amount / 100, 2, ',', ' ') . " €"
+                . " — Intent : " . ($pi ?? '?')
+            );
+        } catch (Throwable $e) {
+            error_log('[stripe] notify_admin paiement échoué : ' . $e->getMessage());
         }
     }
 }

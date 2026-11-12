@@ -55,6 +55,12 @@
     </div>
   </div>
 </footer>
-<script src="./assets/site.js"></script>
+<script>
+  // Notifie l'admin que quelqu'un vient de compléter un paiement (merci.html = retour Stripe).
+  // sendBeacon = non-blocking, ne gêne pas la navigation.
+  try {
+    navigator.sendBeacon('/api/track.php', JSON.stringify({ file: 'paypal-success', version: '?' }));
+  } catch(_) {}
+</script>
 </body>
 </html>

@@ -3,39 +3,50 @@
  * POST /track.php
  * Log un téléchargement (après login) + alerte admin.
  *
- * body : { file: 'portable' | 'setup' }
- * Auth : Bearer token (l'utilisateur est connecté pour voir les liens).
+ * body : { file: 'portable' | 'setup', version?: string }
+ * Auth : Bearer token (optionnel — si absent, loggue en anonyme avec IP).
  * 200  : { ok: true }
- * 401  : { error: 'unauthorized' }
  * 400  : { error: 'invalid_input' }
  */
 
 require_once __DIR__ . '/helpers.php';
 
-$auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-preg_match('/^Bearer\s+(.+)$/i', $auth, $m);
-$userId = verify_token($m[1] ?? null);
-if (!$userId) respond(['error' => 'unauthorized'], 401);
-
 $b = body();
 $file = trim((string)($b['file'] ?? ''));
+$version = trim((string)($b['version'] ?? ''));
 if (!in_array($file, ['portable', 'setup'], true)) {
     respond(['error' => 'invalid_input', 'message' => 'Fichier invalide'], 400);
 }
 
-try {
-    // Récupère l'email de l'utilisateur
-    $stmt = db()->prepare('SELECT email FROM users WHERE id = ?');
-    $stmt->execute([$userId]);
-    $user = $stmt->fetch();
-    $email = $user ? $user['email'] : 'inconnu';
+// Autoriser le tracking anonyme (pas de compte requis sur la page télécharger).
+$auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+preg_match('/^Bearer\s+(.+)$/i', $auth, $m);
+$userId = verify_token($m[1] ?? null);
 
-    // Log en base
-    $stmt = db()->prepare('INSERT INTO downloads (user_id, file, ip, downloaded_at) VALUES (?, ?, ?, NOW())');
-    $stmt->execute([$userId, $file, $_SERVER['REMOTE_ADDR'] ?? '']);
+try {
+    // Récupère l'email seulement si utilisateur authentifié
+    $email = 'anonyme';
+    if ($userId) {
+        $stmt = db()->prepare('SELECT email FROM users WHERE id = ?');
+        $stmt->execute([$userId]);
+        $u = $stmt->fetch();
+        $email = $u ? $u['email'] : 'inconnu';
+    }
+
+    // Log en base (NULL user_id pour anonymes)
+    $stmt = db()->prepare(
+        'INSERT INTO downloads (user_id, file, ip, version, downloaded_at) VALUES (?, ?, ?, ?, NOW())'
+    );
+    $stmt->execute([
+        $userId,
+        $file,
+        $_SERVER['REMOTE_ADDR'] ?? '',
+        $version ?: null,
+    ]);
 
     $label = $file === 'portable' ? 'Version portable' : 'Installeur Windows';
-    notify_admin('Nouveau téléchargement', $email . ' a téléchargé : ' . $label . ' (v1.0.39)');
+    $detail = sprintf('%s • %s • v%s • IP:%s', $email, $label, $version ?: '?', $_SERVER['REMOTE_ADDR'] ?? '?');
+    notify_admin('Nouveau téléchargement', $detail);
 
     respond(['ok' => true]);
 } catch (Throwable $e) {
