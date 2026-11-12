@@ -1,40 +1,62 @@
 <?php
 /**
- * POST /track.php — version ultra-simple pour diagnostic.
- * Si ça marche → le problème est dans helpers.php ou la DB.
- * Si ça plante → le problème est ailleurs.
+ * POST /track.php
+ * Log un téléchargement + alerte admin.
+ *
+ * body : { file: 'portable' | 'setup', version?: string }
+ * 200  : { ok: true }
+ * 400  : { error: 'invalid_input' }
  */
 
-// ── Copie minimale de body() et respond() ─────────────────────────────────────
-function body(): array {
-    $raw = file_get_contents('php://input');
-    $decoded = json_decode($raw ?: '', true);
-    return is_array($decoded) ? $decoded : [];
-}
+require_once __DIR__ . '/helpers.php';
 
-function respond($data, int $status = 200): void {
-    http_response_code($status);
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($data, JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
-// ── Log direct sans helpers.php ───────────────────────────────────────────────
 $b = body();
 $file = trim((string)($b['file'] ?? ''));
 $version = trim((string)($b['version'] ?? ''));
-
 if (!in_array($file, ['portable', 'setup'], true)) {
     respond(['error' => 'invalid_input', 'message' => 'Fichier invalide'], 400);
 }
 
-// Écriture directe du log
-$logDir = __DIR__ . '/logs';
-if (!is_dir($logDir)) @mkdir($logDir, 0755, true);
-$logFile = $logDir . '/events.log';
-$label = $file === 'portable' ? 'Version portable' : 'Installeur Windows';
-$ip = $_SERVER['REMOTE_ADDR'] ?? '?';
-$logLine = "[" . date('Y-m-d H:i:s') . "] Nouveau téléchargement | $file ($label) • v$version • IP:$ip\n";
-@file_put_contents($logFile, $logLine, FILE_APPEND | LOCK_EX);
+// ── Auth (optionnel) ──────────────────────────────────────────────────────────
+$email = 'anonyme';
+$userId = null;
 
-respond(['ok' => true, 'logged' => true]);
+try {
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
+        $token = $m[1];
+        if ($token) {
+            $userId = verify_token($token);
+            if ($userId) {
+                try {
+                    $stmt = db()->prepare('SELECT email FROM users WHERE id = ?');
+                    $stmt->execute([(int)$userId]);
+                    $u = $stmt->fetch();
+                    if ($u) $email = $u['email'];
+                } catch (Throwable $ignored) {/* DB indisponible */}
+            }
+        }
+    }
+} catch (Throwable $ignored) {/* auth ignorée */}
+
+// ── Insertion en base (non bloquante) ────────────────────────────────────────
+$ip = $_SERVER['REMOTE_ADDR'] ?? '';
+try {
+    $stmt = db()->prepare(
+        'INSERT INTO downloads (user_id, file, ip, downloaded_at) VALUES (?, ?, ?, NOW())'
+    );
+    $stmt->execute([
+        $userId ? (int)$userId : null,
+        $file,
+        $ip,
+    ]);
+} catch (Throwable $ignored) {/* table absente ou DB indisponible */}
+
+// ── Notification admin + log fichier ──────────────────────────────────────────
+try {
+    $label = $file === 'portable' ? 'Version portable' : 'Installeur Windows';
+    $ver = $version ?: '?';
+    notify_admin('Nouveau téléchargement', "$email • $label • v$ver • IP:$ip");
+} catch (Throwable $ignored) {/* notification ignorée */}
+
+respond(['ok' => true]);
