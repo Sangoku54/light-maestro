@@ -1018,6 +1018,16 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
     entryEndTime: number;
   } | null>(null);
 
+  // ── Blackout entry drag state (parallel to matrix drag) ──
+  const blackoutDragRef = useRef<{
+    trackId: string;
+    entryIndex: number;
+    mode: 'move' | 'resize-left' | 'resize-right';
+    startX: number;
+    entryTime: number;
+    entryEndTime: number;
+  } | null>(null);
+
   // ── Cue lookup for hover/click ───────────────────────
   const getCueAtPosition = useCallback(
     (clientX: number, clientY: number): { cue: Cue; fixtureName?: string; efxEntry?: EfxTrackEntry; trackName?: string } | null => {
@@ -1357,6 +1367,30 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
           const rawR = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
           const newEnd = Math.max(drag.entryTime + 0.2, snapT(rawR));
           onMatrixEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
+        }
+        return;
+      }
+
+      // Blackout entry drag/resize (parallel to matrix)
+      if (blackoutDragRef.current && onBlackoutEntryChange) {
+        const c = containerRef.current; if (!c) return;
+        const rect = c.getBoundingClientRect();
+        const drawW = (rect.width - LABEL_WIDTH) * zoomLevel;
+        if (drawW <= 0) return;
+        const dx = (e.clientX - blackoutDragRef.current.startX) / drawW * duration;
+        const drag = blackoutDragRef.current;
+        if (drag.mode === 'move') {
+          const newTime = snapT(Math.max(0, drag.entryTime + dx));
+          const newEnd = newTime + (drag.entryEndTime - drag.entryTime);
+          onBlackoutEntryChange?.(drag.trackId, drag.entryIndex, newTime, newEnd);
+        } else if (drag.mode === 'resize-left') {
+          const rawL = Math.max(0, Math.min(drag.entryEndTime - 0.1, drag.entryTime + dx));
+          const newTime = Math.min(drag.entryEndTime - 0.1, snapT(rawL));
+          onBlackoutEntryChange?.(drag.trackId, drag.entryIndex, newTime, drag.entryEndTime);
+        } else if (drag.mode === 'resize-right') {
+          const rawR = Math.max(drag.entryTime + 0.2, drag.entryEndTime + dx);
+          const newEnd = Math.max(drag.entryTime + 0.2, snapT(rawR));
+          onBlackoutEntryChange?.(drag.trackId, drag.entryIndex, drag.entryTime, newEnd);
         }
         return;
       }
@@ -2415,6 +2449,45 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
+    // -- Blackout entry drag detection (parallel to matrix) --
+    {
+      const c10 = containerRef.current;
+      if (c10 && onBlackoutEntryChange) {
+        const rect10 = c10.getBoundingClientRect();
+        const x10 = e.clientX - rect10.left - LABEL_WIDTH;
+        const y10 = e.clientY - rect10.top;
+        const drawW10 = rect10.width - LABEL_WIDTH;
+        const bT10 = blackoutTracks || [];
+        if (bT10.length > 0 && drawW10 > 0 && x10 >= 0 && y10 >= HEADER_HEIGHT) {
+          const mBase10 = HEADER_HEIGHT + tieredLayout.count * TRACK_HEIGHT + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT + (efxTracks?.length ?? 0) * EFX_TRACK_HEIGHT + (colorTracks?.length ?? 0) * COLOR_TRACK_HEIGHT + (strobeTracks?.length ?? 0) * STROBE_TRACK_HEIGHT + (dimmerTracks?.length ?? 0) * DIMMER_TRACK_HEIGHT + (chaserTracks?.length ?? 0) * CHASER_TRACK_HEIGHT + (showTracks?.length ?? 0) * SHOW_TRACK_HEIGHT + (sceneTracks?.length ?? 0) * SCENE_TRACK_HEIGHT + (matrixTracks?.length ?? 0) * MATRIX_TRACK_HEIGHT;
+          if (y10 >= mBase10) {
+            const bIdx10 = Math.floor((y10 - mBase10) / BLACKOUT_TRACK_HEIGHT);
+            if (bIdx10 >= 0 && bIdx10 < bT10.length) {
+              const bTrack = bT10[bIdx10];
+              for (let ei = 0; ei < bTrack.entries.length; ei++) {
+                const entry = bTrack.entries[ei];
+                const ex1 = (entry.time / duration) * drawW10;
+                const ex2 = (entry.endTime / duration) * drawW10;
+                const EDGE = 5;
+                if (Math.abs(x10 - ex1) < EDGE) {
+                  blackoutDragRef.current = { trackId: bTrack.id, entryIndex: ei, mode: 'resize-left', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (Math.abs(x10 - ex2) < EDGE) {
+                  blackoutDragRef.current = { trackId: bTrack.id, entryIndex: ei, mode: 'resize-right', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+                if (x10 > ex1 + EDGE && x10 < ex2 - EDGE) {
+                  blackoutDragRef.current = { trackId: bTrack.id, entryIndex: ei, mode: 'move', startX: e.clientX, entryTime: entry.time, entryEndTime: entry.endTime };
+                  e.preventDefault(); e.stopPropagation(); return;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     if (!onSectionsChange) return;
     const c = containerRef.current;
     if (!c) return;
@@ -2495,6 +2568,12 @@ if (editBlock) { setEditBlock(null); return; }
     // Matrix entry drag end
     if (matrixDragRef.current) {
       matrixDragRef.current = null;
+      return;
+    }
+
+    // Blackout entry drag end
+    if (blackoutDragRef.current) {
+      blackoutDragRef.current = null;
       return;
     }
 
