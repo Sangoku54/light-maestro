@@ -15,7 +15,8 @@
     "allinone": "python scripts/allinone_import.py --help",
     "start": "tsc -p tsconfig.electron.json && vite build && electron .",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder --publish never"
+    "dist": "npm run build && electron-builder --publish never",
+    "deploy": "powershell -ExecutionPolicy Bypass -File scripts/deploy-release.ps1"
   },
   "dependencies": {
     "artnet": "^1.4.0",
