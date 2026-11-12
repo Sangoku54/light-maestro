@@ -2,7 +2,7 @@
 /**
  * POST /track.php
  * Log un téléchargement + alerte admin.
- * Le log fichier est la source de vérité principale (fallback si DB indisponible).
+ * Version robuste : tolère les erreurs DB et SMTP.
  *
  * body : { file: 'portable' | 'setup', version?: string }
  * 200  : { ok: true }
@@ -19,35 +19,38 @@ if (!in_array($file, ['portable', 'setup'], true)) {
 }
 
 // ── Auth (optionnel) ──────────────────────────────────────────────────────────
-$auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-preg_match('/^Bearer\s+(.+)$/i', $auth, $m);
-$userId = verify_token($m[1] ?? null);
 $email = 'anonyme';
-if ($userId) {
-    try {
-        $stmt = db()->prepare('SELECT email FROM users WHERE id = ?');
-        $stmt->execute([$userId]);
-        $u = $stmt->fetch();
-        $email = $u ? $u['email'] : 'anonyme';
-    } catch (Throwable $e) {
-        error_log('[track] DB query failed: ' . $e->getMessage());
+try {
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
+        $token = $m[1];
+        if ($token) {
+            $userId = verify_token($token);
+            if ($userId) {
+                try {
+                    $u = db()->query("SELECT email FROM users WHERE id = " . (int)$userId)->fetch();
+                    if ($u) $email = $u['email'];
+                } catch (Throwable $ignored) {/* DB indisponible */}
+            }
+        }
     }
-}
+} catch (Throwable $ignored) {/* auth ignorée */}
 
 // ── Insertion en base (non bloquante) ────────────────────────────────────────
 try {
-    $stmt = db()->prepare(
-        'INSERT INTO downloads (user_id, file, ip, downloaded_at) VALUES (?, ?, ?, NOW())'
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+    db()->exec(
+        "INSERT INTO downloads (user_id, file, ip, downloaded_at) VALUES ("
+        . (intval($userId ?? 0)) . ", '" . addslashes($file) . "', '" . addslashes($ip) . "', NOW())"
     );
-    $stmt->execute([$userId, $file, $_SERVER['REMOTE_ADDR'] ?? '']);
-} catch (Throwable $e) {
-    // Table absente ou DB indisponible → logger mais continuer
-    error_log('[track] INSERT failed: ' . $e->getMessage());
-}
+} catch (Throwable $ignored) {/* table absente ou DB indisponible */}
 
 // ── Notification admin + log fichier ──────────────────────────────────────────
-$label = $file === 'portable' ? 'Version portable' : 'Installeur Windows';
-$detail = sprintf('%s • %s • v%s • IP:%s', $email, $label, $version ?: '?', $_SERVER['REMOTE_ADDR'] ?? '?');
-notify_admin('Nouveau téléchargement', $detail);
+try {
+    $label = $file === 'portable' ? 'Version portable' : 'Installeur Windows';
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '?';
+    $ver = $version ?: '?';
+    notify_admin('Nouveau téléchargement', "$email • $label • v$ver • IP:$ip");
+} catch (Throwable $ignored) {/* notification ignorée */}
 
 respond(['ok' => true]);
