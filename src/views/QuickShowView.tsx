@@ -3844,27 +3844,20 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
   /* ─── Blackout Track handlers (rend des fixtures inactives sur un intervalle) ─── */
   const [pendingBlackoutTrackId, setPendingBlackoutTrackId] = useState<string | null>(null);
+  /** Time to use when confirming the pick modal (for adding entry to existing track) */
+  const [pendingBlackoutTime, setPendingBlackoutTime] = useState<number>(0);
   const handleAddBlackoutTrack = useCallback(() => {
     pushHistory();
     // Ne pas créer la piste tout de suite — ouvrir juste la modale de sélection
     const tid = `blk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     setPendingBlackoutTrackId(tid);
+    setPendingBlackoutTime(typeof audioFile?.currentTime === 'number' ? audioFile.currentTime : 0);
     setBlackoutSelectedFixtures(new Set(useShowStore.getState().patchedFixtures.map(f => f.id))); // tout coché par défaut
     setBlackoutPickModal({ trackId: tid });
-  }, [pushHistory]);
+  }, [pushHistory, audioFile]);
   const handleDeleteBlackoutTrack = useCallback((trackId: string) => {
     pushHistory();
     setBlackoutTracks(prev => prev.filter(t => t.id !== trackId));
-  }, [pushHistory]);
-  const handleInsertBlackoutToTrack = useCallback((trackId: string, time: number, fixtureIds: string[], fixtureNames: string[]) => {
-    pushHistory();
-    const defDur = 5;
-    setBlackoutTracks(prev => prev.map(t => {
-      if (t.id !== trackId) return t;
-      const entry: BlackoutTrackEntry = { id: `blk-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, time, endTime: time + defDur, fixtureNames };
-      return { ...t, entries: [...t.entries, entry] };
-    }));
-    setBlackoutInsertMenu(null);
   }, [pushHistory]);
   const handleRemoveBlackoutEntry = useCallback((trackId: string, entryId: string) => {
     pushHistory();
@@ -3881,7 +3874,11 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
     }));
   }, [pushHistory]);
   const handleBlackoutTrackContextMenu = useCallback((trackId: string, time: number, clientX: number, clientY: number) => {
-    setBlackoutInsertMenu({ trackId, time, x: clientX, y: clientY });
+    // Ouvrir directement la modale de sélection pour ajouter une entrée sur cette piste
+    setPendingBlackoutTrackId(trackId);
+    setPendingBlackoutTime(time);
+    setBlackoutSelectedFixtures(new Set(useShowStore.getState().patchedFixtures.map(f => f.id)));
+    setBlackoutPickModal({ trackId });
   }, []);
   const handleBlackoutEntryClick = useCallback((trackId: string, entry: BlackoutTrackEntry) => {}, []);
   const handleBlackoutEntryContextMenu = useCallback((trackId: string, entry: BlackoutTrackEntry, clientX: number, clientY: number) => {
@@ -3896,33 +3893,28 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
     });
   }, []);
   const handleConfirmBlackoutPick = useCallback(() => {
-    if (!blackoutPickModal || !pendingBlackoutTrackId) return;
+    if (!blackoutPickModal) return;
     pushHistory();
     const fixtures = useShowStore.getState().patchedFixtures;
     const names = [...blackoutSelectedFixtures].map(id => fixtures.find(f => f.id === id)?.name || id);
     const trackId = blackoutPickModal.trackId;
-    // Créer la piste avec une entrée pré-remplie à l'heure actuelle (ou t=0 si rien)
-    const currentTime = typeof audioFile?.currentTime === 'number' ? audioFile.currentTime : 0;
-    const defDur = Math.max(5, Math.ceil(currentTime + 5) - currentTime);
-    const entry: BlackoutTrackEntry = { id: `blk-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, time: currentTime, endTime: currentTime + defDur, fixtureNames: names };
-    setBlackoutTracks(prev => [...prev, { id: trackId, name: names.length > 0 ? names.slice(0, 3).join(', ') : `Blackout ${prev.length + 1}`, entries: [entry], targetFixtureIds: [...blackoutSelectedFixtures] }]);
+    // Determine insertion time: pending time takes precedence (right-click on existing track), else current playback position
+    const insertTime = pendingBlackoutTime > 0 ? pendingBlackoutTime : (typeof audioFile?.currentTime === 'number' ? audioFile.currentTime : 0);
+    const defDur = Math.max(5, insertTime + 5 - insertTime);
+    const entry: BlackoutTrackEntry = { id: `blk-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, time: insertTime, endTime: insertTime + defDur, fixtureNames: names };
+    const hasExistingTrack = blackoutTracks.some(t => t.id === trackId);
+    if (!hasExistingTrack) {
+      // Creating a brand-new track
+      setBlackoutTracks(prev => [...prev, { id: trackId, name: names.length > 0 ? names.slice(0, 3).join(', ') : `Blackout ${prev.length + 1}`, entries: [entry], targetFixtureIds: [...blackoutSelectedFixtures] }]);
+    } else {
+      // Adding an entry to an existing track
+      setBlackoutTracks(prev => prev.map(t => t.id === trackId ? { ...t, entries: [...t.entries, entry] } : t));
+    }
     setBlackoutPickModal(null);
     setPendingBlackoutTrackId(null);
+    setPendingBlackoutTime(0);
     setBlackoutSelectedFixtures(new Set());
-  }, [blackoutPickModal, pendingBlackoutTrackId, blackoutSelectedFixtures, pushHistory, audioFile.currentTime]);
-  const handleQuickAddBlackoutEntry = useCallback((trackId: string, time: number) => {
-    pushHistory();
-    const fixtures = useShowStore.getState().patchedFixtures;
-    const ids = [...blackoutSelectedFixtures.size > 0 ? blackoutSelectedFixtures : new Set(fixtures.map(f => f.id))];
-    const names = [...ids].map(id => fixtures.find(f => f.id === id)?.name || id);
-    const defDur = 5;
-    setBlackoutTracks(prev => prev.map(t => {
-      if (t.id !== trackId) return t;
-      const entry: BlackoutTrackEntry = { id: `blk-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, time, endTime: time + defDur, fixtureNames: names.length > 0 ? names : fixtures.map(f => f.name) };
-      return { ...t, entries: [...t.entries, entry] };
-    }));
-    setBlackoutInsertMenu(null);
-  }, [pushHistory, blackoutSelectedFixtures]);
+  }, [blackoutPickModal, pendingBlackoutTrackId, pendingBlackoutTime, blackoutSelectedFixtures, pushHistory, blackoutTracks, audioFile]);
   const handleSelectAllBlackoutFixtures = useCallback(() => {
     const fixtures = useShowStore.getState().patchedFixtures;
     setBlackoutSelectedFixtures(new Set(fixtures.map(f => f.id)));
@@ -6427,20 +6419,9 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           <div className="fixed inset-0 z-40" onClick={() => setBlackoutInsertMenu(null)} />
           <div
             className="fixed z-50 bg-[#1a1a2e] border border-slate-700/50 rounded-lg shadow-xl py-1 min-w-[160px]"
-            style={{ ...clampRect(blackoutInsertMenu.x, blackoutInsertMenu.y, 200, 100, window.innerWidth, window.innerHeight) }}
+            style={{ ...clampRect(blackoutInsertMenu.x, blackoutInsertMenu.y, 180, 60, window.innerWidth, window.innerHeight) }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-3 py-1.5 text-[10px] text-slate-400 uppercase tracking-wider border-b border-gray-800">
-              {t('quickshow.trackBlackout')} — {blackoutInsertMenu.time.toFixed(2)}s
-            </div>
-            <button
-              onClick={() => {
-                handleQuickAddBlackoutEntry(blackoutInsertMenu.trackId, blackoutInsertMenu.time);
-              }}
-              className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-gray-800"
-            >
-              {t('quickshow.addBlackoutEntry')}
-            </button>
             <button
               onClick={() => { handleDeleteBlackoutTrack(blackoutInsertMenu.trackId); setBlackoutInsertMenu(null); }}
               className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
