@@ -3843,11 +3843,14 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
   }, []);
 
   /* ─── Blackout Track handlers (rend des fixtures inactives sur un intervalle) ─── */
+  const [pendingBlackoutTrackId, setPendingBlackoutTrackId] = useState<string | null>(null);
   const handleAddBlackoutTrack = useCallback(() => {
     pushHistory();
-    const trackId = `blk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    setBlackoutTracks(prev => [...prev, { id: trackId, name: `Blackout ${prev.length + 1}`, entries: [] }]);
-    setBlackoutPickModal({ trackId });
+    // Ne pas créer la piste tout de suite — ouvrir juste la modale de sélection
+    const tid = `blk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setPendingBlackoutTrackId(tid);
+    setBlackoutSelectedFixtures(new Set(useShowStore.getState().patchedFixtures.map(f => f.id))); // tout coché par défaut
+    setBlackoutPickModal({ trackId: tid });
   }, [pushHistory]);
   const handleDeleteBlackoutTrack = useCallback((trackId: string) => {
     pushHistory();
@@ -3893,21 +3896,33 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
     });
   }, []);
   const handleConfirmBlackoutPick = useCallback(() => {
-    if (!blackoutPickModal) return;
+    if (!blackoutPickModal || !pendingBlackoutTrackId) return;
     pushHistory();
     const fixtures = useShowStore.getState().patchedFixtures;
     const names = [...blackoutSelectedFixtures].map(id => fixtures.find(f => f.id === id)?.name || id);
     const trackId = blackoutPickModal.trackId;
-    // If creating new track, add it first
-    if (!blackoutPickModal.entryId) {
-      setBlackoutTracks(prev => [...prev, { id: trackId, name: `Blackout ${prev.length + 1}`, entries: [], targetFixtureIds: [...blackoutSelectedFixtures] }]);
-    } else {
-      // Update existing track's target
-      setBlackoutTracks(prev => prev.map(t => t.id === trackId ? { ...t, targetFixtureIds: [...blackoutSelectedFixtures], name: names.length > 0 ? names.slice(0, 3).join(', ') : t.name } : t));
-    }
+    // Créer la piste avec une entrée pré-remplie à l'heure actuelle (ou t=0 si rien)
+    const currentTime = typeof audioFile?.currentTime === 'number' ? audioFile.currentTime : 0;
+    const defDur = Math.max(5, Math.ceil(currentTime + 5) - currentTime);
+    const entry: BlackoutTrackEntry = { id: `blk-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, time: currentTime, endTime: currentTime + defDur, fixtureNames: names };
+    setBlackoutTracks(prev => [...prev, { id: trackId, name: names.length > 0 ? names.slice(0, 3).join(', ') : `Blackout ${prev.length + 1}`, entries: [entry], targetFixtureIds: [...blackoutSelectedFixtures] }]);
     setBlackoutPickModal(null);
+    setPendingBlackoutTrackId(null);
     setBlackoutSelectedFixtures(new Set());
-  }, [blackoutPickModal, blackoutSelectedFixtures, pushHistory]);
+  }, [blackoutPickModal, pendingBlackoutTrackId, blackoutSelectedFixtures, pushHistory, audioFile.currentTime]);
+  const handleQuickAddBlackoutEntry = useCallback((trackId: string, time: number) => {
+    pushHistory();
+    const fixtures = useShowStore.getState().patchedFixtures;
+    const ids = [...blackoutSelectedFixtures.size > 0 ? blackoutSelectedFixtures : new Set(fixtures.map(f => f.id))];
+    const names = [...ids].map(id => fixtures.find(f => f.id === id)?.name || id);
+    const defDur = 5;
+    setBlackoutTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      const entry: BlackoutTrackEntry = { id: `blk-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, time, endTime: time + defDur, fixtureNames: names.length > 0 ? names : fixtures.map(f => f.name) };
+      return { ...t, entries: [...t.entries, entry] };
+    }));
+    setBlackoutInsertMenu(null);
+  }, [pushHistory, blackoutSelectedFixtures]);
   const handleSelectAllBlackoutFixtures = useCallback(() => {
     const fixtures = useShowStore.getState().patchedFixtures;
     setBlackoutSelectedFixtures(new Set(fixtures.map(f => f.id)));
@@ -6420,15 +6435,7 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
             </div>
             <button
               onClick={() => {
-                const tid = blackoutInsertMenu.trackId;
-                const at = blackoutInsertMenu.time;
-                setBlackoutInsertMenu(null);
-                // Select all fixtures by default for quick entry
-                const fixtures = useShowStore.getState().patchedFixtures;
-                const names = fixtures.map(f => f.name);
-                const ids = fixtures.map(f => f.id);
-                setBlackoutSelectedFixtures(new Set(ids));
-                setBlackoutPickModal({ trackId: tid });
+                handleQuickAddBlackoutEntry(blackoutInsertMenu.trackId, blackoutInsertMenu.time);
               }}
               className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-gray-800"
             >
