@@ -167,9 +167,6 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, onModeChange }) => {
         <AccountLabel />
       </button>
 
-      {/* Boutons d'upgrade (déplacés en bas de page, à côté de la version) */}
-      {/* Boutons d'upgrade retirés de ce fichier */}
-
       {/* Centre d'aide */}
       <button
         onClick={() => setShowHelp(true)}
