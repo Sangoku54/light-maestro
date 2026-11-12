@@ -1199,7 +1199,20 @@ async function loadProject(
         if (data.chaserTracks) setChaserTracks(data.chaserTracks);
         if (data.showTracks) setShowTracks(data.showTracks);
         if (data.sceneTracks) setSceneTracks(data.sceneTracks);
-        if (data.blackoutTracks) setBlackoutTracks(data.blackoutTracks);
+        if (data.blackoutTracks) {
+          // Migrate legacy blackout data: ensure every entry has fixtureIds,
+          // and every track has targetFixtureIds (fallback for engine).
+          const migrated = data.blackoutTracks.map((t: any) => {
+            const ids = t.targetFixtureIds ?? [];
+            const entries = (t.entries || []).map((e: any) => ({
+              ...e,
+              fixtureIds: e.fixtureIds ?? ids,
+              fixtureNames: e.fixtureNames ?? [],
+            }));
+            return { ...t, entries, targetFixtureIds: ids.length > 0 ? ids : [...new Set(entries.flatMap((e: any) => e.fixtureIds ?? []))] };
+          });
+          setBlackoutTracks(migrated);
+        }
         if (data.fixtureTracks) setFixtureTracks(data.fixtureTracks);
         if (setDisabledFixtures) setDisabledFixtures(data.disabledFixtures ? new Set(data.disabledFixtures) : new Set());
         if (data.analysis) {
@@ -3901,14 +3914,18 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
     // Determine insertion time: pending time takes precedence (right-click on existing track), else current playback position
     const insertTime = pendingBlackoutTime > 0 ? pendingBlackoutTime : (typeof audioFile?.currentTime === 'number' ? audioFile.currentTime : 0);
     const defDur = Math.max(5, insertTime + 5 - insertTime);
-    const entry: BlackoutTrackEntry = { id: `blk-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, time: insertTime, endTime: insertTime + defDur, fixtureNames: names };
+    const entry: BlackoutTrackEntry = { id: `blk-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, time: insertTime, endTime: insertTime + defDur, fixtureNames: names, fixtureIds: [...blackoutSelectedFixtures] };
     const hasExistingTrack = blackoutTracks.some(t => t.id === trackId);
     if (!hasExistingTrack) {
       // Creating a brand-new track
       setBlackoutTracks(prev => [...prev, { id: trackId, name: names.length > 0 ? names.slice(0, 3).join(', ') : `Blackout ${prev.length + 1}`, entries: [entry], targetFixtureIds: [...blackoutSelectedFixtures] }]);
     } else {
-      // Adding an entry to an existing track
-      setBlackoutTracks(prev => prev.map(t => t.id === trackId ? { ...t, entries: [...t.entries, entry] } : t));
+      // Adding an entry to an existing track — also merge targetFixtureIds so the engine fallback works
+      setBlackoutTracks(prev => prev.map(t => t.id === trackId ? {
+        ...t,
+        entries: [...t.entries, entry],
+        targetFixtureIds: Array.from(new Set([...(t.targetFixtureIds ?? []), ...blackoutSelectedFixtures]))
+      } : t));
     }
     setBlackoutPickModal(null);
     setPendingBlackoutTrackId(null);
