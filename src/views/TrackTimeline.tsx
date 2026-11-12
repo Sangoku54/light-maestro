@@ -255,7 +255,9 @@ export interface BlackoutTrackEntry {
   id: string;
   time: number;
   endTime: number;
-  fixtureNames: string[]; // displayed label
+  fixtureNames: string[]; // displayed label on timeline
+  /** Optional: also store IDs for engine compatibility */
+  fixtureIds?: string[];
 }
 
 export interface BlackoutTrack {

@@ -27,7 +27,12 @@ export interface BlackoutTrackRef {
   id: string;
   entries: BlackoutTrackEntryRef[];
   name?: string;
+  /** Fallback fixture IDs when entry-level fixtureIds is missing (UI compat) */
+  targetFixtureIds?: string[];
 }
+
+/** Bridge type — accepts both UI-format (fixtureNames-only) and engine-format (fixtureIds) entries */
+type BlackoutTrackEntryLike = BlackoutTrackEntryRef & { fixtureNames?: string[] };
 
 import type { PatchedFixture } from '../stores/showStore';
 
@@ -47,7 +52,9 @@ export function computeBlackoutTrackOverrides(
     if (!tr.entries || tr.entries.length === 0) continue;
     const entry = tr.entries.find(e => currentTime >= e.time && currentTime < e.endTime);
     if (!entry) continue;
-    for (const fid of entry.fixtureIds) {
+    // Support both engine-format (fixtureIds) and UI-format (targetFixtureIds fallback)
+    const ids = (entry as any).fixtureIds || tr.targetFixtureIds || [];
+    for (const fid of ids) {
       if (patchedFixtures.some(f => f.id === fid)) {
         result.set(fid, { active: true });
       }
