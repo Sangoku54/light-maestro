@@ -403,27 +403,54 @@ function send_reset_email(string $email, string $displayName, string $resetUrl, 
 }
 
 /**
- * Alerte admin par email.
+ * Alerte admin par email + écriture d'un log fichier (fallback si mail() échoue).
  */
 function notify_admin(string $event, string $detail): void {
     $adminEmail = defined('ADMIN_EMAIL') ? ADMIN_EMAIL : '';
-    if (!$adminEmail) return;
-    $subject = '[Light Maestro] ' . $event;
-    $body = '<!doctype html><html lang="fr"><body style="margin:0;background:#0a0a0f;color:#ede8dc;font-family:Arial,sans-serif;">'
-        . '<div style="max-width:560px;margin:0 auto;padding:32px 24px;">'
-        . '<div style="font-weight:900;letter-spacing:.18em;font-size:13px;"><span style="display:inline-block;background:#8b5cf6;color:#fff;border-radius:8px;padding:4px 8px;margin-right:8px;">LM</span>LIGHT MAESTRO — Alerte</div>'
-        . '<h2 style="margin:24px 0 8px;font-size:18px;">' . htmlspecialchars($event, ENT_QUOTES, 'UTF-8') . '</h2>'
-        . '<p style="color:#9ca3af;line-height:1.7;">' . htmlspecialchars($detail, ENT_QUOTES, 'UTF-8') . '</p>'
-        . '<p style="margin-top:16px;font-size:12px;color:#6b7280;">' . date('d/m/Y H:i:s') . ' — IP : ' . ($_SERVER['REMOTE_ADDR'] ?? '?') . '</p>'
-        . '</div></body></html>';
-    $headers = "MIME-Version: 1.0\r\n"
-        . "Content-Type: text/html; charset=UTF-8\r\n"
-        . "From: Light Maestro <contact@light-maestro.com>\r\n";
-    try {
-        if (!@mail($adminEmail, $subject, $body, $headers)) {
-            error_log('[license] alerte admin impossible vers ' . $adminEmail);
+
+    // ── 1. Tentative d'envoi email ────────────────────────────────────────
+    $sentMail = false;
+    if ($adminEmail) {
+        $subject = '[Light Maestro] ' . $event;
+        $body = '<!doctype html><html lang="fr"><body style="margin:0;background:#0a0a0f;color:#ede8dc;font-family:Arial,sans-serif;">'
+            . '<div style="max-width:560px;margin:0 auto;padding:32px 24px;">'
+            . '<div style="font-weight:900;letter-spacing:.18em;font-size:13px;"><span style="display:inline-block;background:#8b5cf6;color:#fff;border-radius:8px;padding:4px 8px;margin-right:8px;">LM</span>LIGHT MAESTRO — Alerte</div>'
+            . '<h2 style="margin:24px 0 8px;font-size:18px;">' . htmlspecialchars($event, ENT_QUOTES, 'UTF-8') . '</h2>'
+            . '<p style="color:#9ca3af;line-height:1.7;">' . htmlspecialchars($detail, ENT_QUOTES, 'UTF-8') . '</p>'
+            . '<p style="margin-top:16px;font-size:12px;color:#6b7280;">' . date('d/m/Y H:i:s') . ' — IP : ' . ($_SERVER['REMOTE_ADDR'] ?? '?') . '</p>'
+            . '</div></body></html>';
+        $headers = "MIME-Version: 1.0\r\n"
+            . "Content-Type: text/html; charset=UTF-8\r\n"
+            . "From: Light Maestro <contact@light-maestro.com>\r\n"
+            . "Reply-To: contact@light-maestro.com\r\n";
+        try {
+            if (@mail($adminEmail, $subject, $body, $headers)) {
+                $sentMail = true;
+            } else {
+                error_log('[notify_admin] mail() a retourné false pour ' . $adminEmail);
+            }
+        } catch (Throwable $e) {
+            error_log('[notify_admin] exception mail : ' . $e->getMessage());
         }
-    } catch (Throwable $e) {
-        error_log('[license] alerte admin impossible : ' . $e->getMessage());
+    }
+
+    // ── 2. Log fichier permanent (toujours présent, même si mail échoue) ──
+    $logDir = dirname(__DIR__) . '/logs';
+    if (!is_dir($logDir)) @mkdir($logDir, 0755, true);
+    $logFile = $logDir . '/events.log';
+    $logLine = sprintf(
+        "[%s] %s | %s | IP:%s | User-Agent:%s\n",
+        date('Y-m-d H:i:s'),
+        $event,
+        $detail,
+        $_SERVER['REMOTE_ADDR'] ?? '?',
+        substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 120)
+    );
+    @file_put_contents($logFile, $logLine, FILE_APPEND | LOCK_EX);
+
+    // ── 3. Rapport si le mail n'est pas parti ─────────────────────────────
+    if (!$sentMail && $adminEmail) {
+        error_log('[notify_admin] ⚠ Email NON envoyé vers ' . $adminEmail
+            . ' — vérifie la configuration mail() de PHP ou consulte site/api/logs/events.log');
     }
 }

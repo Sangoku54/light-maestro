@@ -1,10 +1,9 @@
 <?php
 /**
  * POST /track.php
- * Log un téléchargement (après login) + alerte admin.
+ * Log un téléchargement + alerte admin.
  *
  * body : { file: 'portable' | 'setup', version?: string }
- * Auth : Bearer token (optionnel — si absent, loggue en anonyme avec IP).
  * 200  : { ok: true }
  * 400  : { error: 'invalid_input' }
  */
