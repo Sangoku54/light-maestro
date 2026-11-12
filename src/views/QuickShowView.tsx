@@ -32,7 +32,7 @@ import type { StageScene } from '../stores/showStore';
 import { AutoLoopsPanel } from './AutoLoopsPanel';
 import { Stage3D } from './Stage3D';
 import TrackTimeline from './TrackTimeline';
-import type { EfxTrack, EfxTrackEntry, ColorTrack, ColorTrackEntry, StrobeTrack, StrobeTrackEntry, DimmerTrack, DimmerTrackEntry, ChaserTrack, ChaserTrackEntry, ShowTrack, ShowTrackEntry, SceneTrack, SceneTrackEntry, MatrixTrack, MatrixTrackEntry } from './TrackTimeline';
+import type { EfxTrack, EfxTrackEntry, ColorTrack, ColorTrackEntry, StrobeTrack, StrobeTrackEntry, DimmerTrack, DimmerTrackEntry, ChaserTrack, ChaserTrackEntry, ShowTrack, ShowTrackEntry, SceneTrack, SceneTrackEntry, MatrixTrack, MatrixTrackEntry, BlackoutTrack, BlackoutTrackEntry } from './TrackTimeline';
 
 type EnrichedCue = DmxCue;
 
@@ -1058,6 +1058,7 @@ async function saveProject(
   chaserTracks: ChaserTrack[],
   showTracks: ShowTrack[],
   sceneTracks: SceneTrack[],
+  blackoutTracks: BlackoutTrack[],
   disabledFixtures: Set<string>,
 ): Promise<void> {
   if (!analysis) return;
@@ -1073,6 +1074,7 @@ async function saveProject(
     chaserTracks,
     showTracks,
     sceneTracks,
+    blackoutTracks,
     fixtureTracks,
     disabledFixtures: [...disabledFixtures],
     audioFileName: analysis.fileName,
@@ -1146,6 +1148,7 @@ async function loadProject(
   setChaserTracks: (tracks: ChaserTrack[]) => void,
   setShowTracks: (tracks: ShowTrack[]) => void,
   setSceneTracks: (tracks: SceneTrack[]) => void,
+  setBlackoutTracks: (tracks: BlackoutTrack[]) => void,
   setDisabledFixtures?: (ids: Set<string>) => void,
   setFixtureDefsRef?: React.Dispatch<React.SetStateAction<Map<string, DmxFixtureDefinition>>>,
 ): Promise<void> {
@@ -1196,6 +1199,7 @@ async function loadProject(
         if (data.chaserTracks) setChaserTracks(data.chaserTracks);
         if (data.showTracks) setShowTracks(data.showTracks);
         if (data.sceneTracks) setSceneTracks(data.sceneTracks);
+        if (data.blackoutTracks) setBlackoutTracks(data.blackoutTracks);
         if (data.fixtureTracks) setFixtureTracks(data.fixtureTracks);
         if (setDisabledFixtures) setDisabledFixtures(data.disabledFixtures ? new Set(data.disabledFixtures) : new Set());
         if (data.analysis) {
@@ -1738,6 +1742,9 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [matrixTracks, setMatrixTracks] = useState<MatrixTrack[]>([]);
   const matrixTracksRef = useRef<MatrixTrack[]>([]);
   matrixTracksRef.current = matrixTracks as any;
+  const [blackoutTracks, setBlackoutTracks] = useState<BlackoutTrack[]>([]);
+  const blackoutTracksRef = useRef<BlackoutTrack[]>([]);
+  blackoutTracksRef.current = blackoutTracks as any;
   const matricesRef = useRef<any[]>([]);
   const [fixtureTracks, setFixtureTracks] = useState<FixtureTrack[]>([]);
   const fixtureTracksRef = useRef<FixtureTrack[]>([]);
@@ -1855,8 +1862,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const firedRef = useRef<Set<string>>(new Set());
 
   /* ─── Undo/redo ──────────────────────────────────── */
-  const undoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[]; chaserTracks: ChaserTrack[]; showTracks: ShowTrack[]; sceneTracks: SceneTrack[]; disabledFixtures: Set<string> }[]>([]);
-  const redoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[]; chaserTracks: ChaserTrack[]; showTracks: ShowTrack[]; sceneTracks: SceneTrack[]; disabledFixtures: Set<string> }[]>([]);
+  const undoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[]; chaserTracks: ChaserTrack[]; showTracks: ShowTrack[]; sceneTracks: SceneTrack[]; blackoutTracks: BlackoutTrack[]; disabledFixtures: Set<string> }[]>([]);
+  const redoHistoryRef = useRef<{ sections: TrackSection[]; manual: DmxCue[]; efx: EfxTrack[]; fixtureTracks: FixtureTrack[]; colorTracks: ColorTrack[]; strobeTracks: StrobeTrack[]; dimmerTracks: DimmerTrack[]; chaserTracks: ChaserTrack[]; showTracks: ShowTrack[]; sceneTracks: SceneTrack[]; blackoutTracks: BlackoutTrack[]; disabledFixtures: Set<string> }[]>([]);
   const canUndo = undoHistoryRef.current.length > 0;
   const canRedo = redoHistoryRef.current.length > 0;
 
@@ -1872,10 +1879,11 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
       chaserTracks: [...chaserTracks],
       showTracks: [...showTracks],
       sceneTracks: [...sceneTracks],
+      blackoutTracks: [...blackoutTracks],
       disabledFixtures: new Set(disabledFixtures),
     });
     redoHistoryRef.current = [];
-  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, disabledFixtures]);
+  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, blackoutTracks, disabledFixtures]);
 
     const restoreState = (state: any) => {
     setSections(state.sections);
@@ -1888,6 +1896,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     setChaserTracks(state.chaserTracks || []);
     setShowTracks(state.showTracks || []);
     setSceneTracks(state.sceneTracks || []);
+    setBlackoutTracks(state.blackoutTracks || []);
     setDisabledFixtures(state.disabledFixtures || new Set<string>());
   };
   const saveState = () => ({
@@ -1895,6 +1904,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     fixtureTracks: [...fixtureTracks], colorTracks: [...colorTracks],
     strobeTracks: [...strobeTracks], dimmerTracks: [...dimmerTracks],
     chaserTracks: [...chaserTracks], showTracks: [...showTracks], sceneTracks: [...sceneTracks],
+    blackoutTracks: [...blackoutTracks],
     disabledFixtures: new Set(disabledFixtures),
   });
 
@@ -1903,14 +1913,14 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     if (!state) return;
     redoHistoryRef.current.push(saveState());
     restoreState(state);
-  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, disabledFixtures]);
+  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, blackoutTracks, disabledFixtures]);
 
   const redo = useCallback(() => {
     const state = redoHistoryRef.current.pop();
     if (!state) return;
     undoHistoryRef.current.push(saveState());
     restoreState(state);
-  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks]);
+  }, [sections, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, blackoutTracks]);
 
   // Keyboard shortcuts: Ctrl+Z / Ctrl+Y
   useEffect(() => {
@@ -2809,6 +2819,7 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     sceneTracksRef: sceneTracksRef as any,
     matrixTracksRef: matrixTracksRef as any,
     matricesRef: matricesRef as any,
+    blackoutTracksRef: blackoutTracksRef as any,
     disabledFixturesRef: disabledFixturesRef as any,
     panTiltLimitsRef,
     fixturePositionsRef,
@@ -2988,6 +2999,10 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const [matrixInsertMenu, setMatrixInsertMenu] = useState<{ trackId: string; time: number; x: number; y: number } | null>(null);
   const [matrixEntryMenu, setMatrixEntryMenu] = useState<{ trackId: string; entry: MatrixTrackEntry; x: number; y: number } | null>(null);
   const [matrixPickModal, setMatrixPickModal] = useState<{ trackId: string; entryId?: string; atTime?: number } | null>(null);
+  const [blackoutInsertMenu, setBlackoutInsertMenu] = useState<{ trackId: string; time: number; x: number; y: number } | null>(null);
+  const [blackoutEntryMenu, setBlackoutEntryMenu] = useState<{ trackId: string; entry: BlackoutTrackEntry; x: number; y: number } | null>(null);
+  const [blackoutPickModal, setBlackoutPickModal] = useState<{ trackId: string; entryId?: string } | null>(null);
+  const [blackoutSelectedFixtures, setBlackoutSelectedFixtures] = useState<Set<string>>(new Set());
 
   // Resolve target fixture names for display + DMX filtering
   const efxTargetFixtureNames = useMemo(() => {
@@ -3827,6 +3842,77 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
     setMatrixPickModal({ trackId, entryId: entry.id });
   }, []);
 
+  /* ─── Blackout Track handlers (rend des fixtures inactives sur un intervalle) ─── */
+  const handleAddBlackoutTrack = useCallback(() => {
+    pushHistory();
+    const trackId = `blk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setBlackoutTracks(prev => [...prev, { id: trackId, name: `Blackout ${prev.length + 1}`, entries: [] }]);
+    setBlackoutPickModal({ trackId });
+  }, [pushHistory]);
+  const handleDeleteBlackoutTrack = useCallback((trackId: string) => {
+    pushHistory();
+    setBlackoutTracks(prev => prev.filter(t => t.id !== trackId));
+  }, [pushHistory]);
+  const handleInsertBlackoutToTrack = useCallback((trackId: string, time: number, fixtureIds: string[], fixtureNames: string[]) => {
+    pushHistory();
+    const defDur = 5;
+    setBlackoutTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      const entry: BlackoutTrackEntry = { id: `blk-e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, time, endTime: time + defDur, fixtureNames };
+      return { ...t, entries: [...t.entries, entry] };
+    }));
+    setBlackoutInsertMenu(null);
+  }, [pushHistory]);
+  const handleRemoveBlackoutEntry = useCallback((trackId: string, entryId: string) => {
+    pushHistory();
+    setBlackoutTracks(prev => prev.map(t => t.id === trackId ? { ...t, entries: t.entries.filter(e => e.id !== entryId) } : t));
+    setBlackoutEntryMenu(null);
+  }, [pushHistory]);
+  const handleBlackoutEntryChange = useCallback((trackId: string, entryIndex: number, newTime: number, newEndTime: number) => {
+    pushHistory();
+    setBlackoutTracks(prev => prev.map(t => {
+      if (t.id !== trackId) return t;
+      const entries = [...t.entries];
+      if (entryIndex >= 0 && entryIndex < entries.length) entries[entryIndex] = { ...entries[entryIndex], time: newTime, endTime: newEndTime };
+      return { ...t, entries };
+    }));
+  }, [pushHistory]);
+  const handleBlackoutTrackContextMenu = useCallback((trackId: string, time: number, clientX: number, clientY: number) => {
+    setBlackoutInsertMenu({ trackId, time, x: clientX, y: clientY });
+  }, []);
+  const handleBlackoutEntryClick = useCallback((trackId: string, entry: BlackoutTrackEntry) => {}, []);
+  const handleBlackoutEntryContextMenu = useCallback((trackId: string, entry: BlackoutTrackEntry, clientX: number, clientY: number) => {
+    setBlackoutEntryMenu({ trackId, entry, x: clientX, y: clientY });
+  }, []);
+  const handleToggleBlackoutFixture = useCallback((fixtureId: string) => {
+    setBlackoutSelectedFixtures(prev => {
+      const next = new Set(prev);
+      if (next.has(fixtureId)) next.delete(fixtureId);
+      else next.add(fixtureId);
+      return next;
+    });
+  }, []);
+  const handleConfirmBlackoutPick = useCallback(() => {
+    if (!blackoutPickModal) return;
+    pushHistory();
+    const fixtures = useShowStore.getState().patchedFixtures;
+    const names = [...blackoutSelectedFixtures].map(id => fixtures.find(f => f.id === id)?.name || id);
+    const trackId = blackoutPickModal.trackId;
+    // If creating new track, add it first
+    if (!blackoutPickModal.entryId) {
+      setBlackoutTracks(prev => [...prev, { id: trackId, name: `Blackout ${prev.length + 1}`, entries: [], targetFixtureIds: [...blackoutSelectedFixtures] }]);
+    } else {
+      // Update existing track's target
+      setBlackoutTracks(prev => prev.map(t => t.id === trackId ? { ...t, targetFixtureIds: [...blackoutSelectedFixtures], name: names.length > 0 ? names.slice(0, 3).join(', ') : t.name } : t));
+    }
+    setBlackoutPickModal(null);
+    setBlackoutSelectedFixtures(new Set());
+  }, [blackoutPickModal, blackoutSelectedFixtures, pushHistory]);
+  const handleSelectAllBlackoutFixtures = useCallback(() => {
+    const fixtures = useShowStore.getState().patchedFixtures;
+    setBlackoutSelectedFixtures(new Set(fixtures.map(f => f.id)));
+  }, []);
+
   /* ─── Insert entity handler ──────────────────────── */
   const handleInsertEntity = useCallback((startTime: number, endTime: number, entityType: string, entityId: string) => {
     pushHistory();
@@ -4082,12 +4168,12 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
 
         {/* Save / Load */}
         <RichTooltip content={{ title: t('quickshow.ttSaveTitle'), text: t('quickshow.ttSaveText'), example: t('quickshow.ttSaveEx'), tone: 'success' }} placement="bottom">
-          <button title={t('save') || 'Save'} onClick={() => saveProject(resolvedAnalysis, sections, qs, audioFile, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, disabledFixtures)} className="p-1 rounded text-gray-400 hover:text-white">
+          <button title={t('save') || 'Save'} onClick={() => saveProject(resolvedAnalysis, sections, qs, audioFile, manualCues, efxTracks, fixtureTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, blackoutTracks, disabledFixtures)} className="p-1 rounded text-gray-400 hover:text-white">
             <Save className="w-3.5 h-3.5" />
           </button>
         </RichTooltip>
         <RichTooltip content={{ title: t('quickshow.ttOpenTitle'), text: t('quickshow.ttOpenText'), tone: 'info' }} placement="bottom">
-          <button title={t('open') || 'Open'} onClick={() => loadProject(setQs, audioFile, setSections, setManualCues, setEfxTracks, setFixtureTracks, setColorTracks, setStrobeTracks, setDimmerTracks, setChaserTracks, setShowTracks, setSceneTracks, setDisabledFixtures, setFixtureDefs)} className="p-1 rounded text-gray-400 hover:text-white">
+          <button title={t('open') || 'Open'} onClick={() => loadProject(setQs, audioFile, setSections, setManualCues, setEfxTracks, setFixtureTracks, setColorTracks, setStrobeTracks, setDimmerTracks, setChaserTracks, setShowTracks, setSceneTracks, setBlackoutTracks, setDisabledFixtures, setFixtureDefs)} className="p-1 rounded text-gray-400 hover:text-white">
             <FolderOpen className="w-3.5 h-3.5" />
           </button>
         </RichTooltip>
@@ -4465,6 +4551,11 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
           onMatrixEntryClick={handleMatrixEntryClick}
           onMatrixEntryContextMenu={handleMatrixEntryContextMenu}
           onMatrixEntryChange={handleMatrixEntryChange}
+          blackoutTracks={blackoutTracks}
+          onBlackoutTrackContextMenu={handleBlackoutTrackContextMenu}
+          onBlackoutEntryClick={handleBlackoutEntryClick}
+          onBlackoutEntryContextMenu={handleBlackoutEntryContextMenu}
+          onBlackoutEntryChange={handleBlackoutEntryChange}
           onSectionsChange={(newSecs: TrackSection[]) => { pushHistory(); setSections(newSecs); }}
           onAutoScriptContextMenu={(time, _x, _y) => {
             pushHistory();
@@ -4719,6 +4810,14 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
         >
           <Plus className="w-3 h-3" />
           {t('quickshow.trackMatrix')}
+        </button>
+        <button
+          onClick={handleAddBlackoutTrack}
+          className="ml-1 px-2 py-0.5 rounded text-[10px] text-slate-400 border border-slate-600/50 hover:bg-slate-700/20 cursor-pointer flex items-center gap-1"
+          title={t('quickshow.blackoutTrackHint')}
+        >
+          <ZapOff className="w-3 h-3" />
+          {t('quickshow.trackBlackout')}
         </button>
         <button
           onClick={() => setFadeModal(!fadeModal)}
@@ -6260,6 +6359,125 @@ const efx = efxFilteredEffects.find((e: any) => e.id === efxCustomEffectId) || e
               <button onClick={() => handleRemoveMatrixEntry(matrixEntryMenu.trackId, matrixEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">{t('common.delete')}</button>
             </div>
             <button onClick={() => setMatrixEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">{t('common.close')}</button>
+          </div>
+        </div>
+      )}
+      {blackoutPickModal && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => { setBlackoutPickModal(null); setBlackoutSelectedFixtures(new Set()); }} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="bg-[#1a1a2e] border border-slate-700/50 rounded-xl shadow-2xl p-5 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold text-gray-200">{t('quickshow.selectBlackoutFixtures')}</span>
+                <button onClick={() => { setBlackoutPickModal(null); setBlackoutSelectedFixtures(new Set()); }} className="text-gray-500 hover:text-white">✕</button>
+              </div>
+              <p className="text-[10px] text-gray-500 leading-relaxed mb-3">
+                {t('quickshow.blackoutTrackHint')}
+              </p>
+              <div className="flex gap-2 mb-3">
+                <button onClick={handleSelectAllBlackoutFixtures} className="px-2 py-1 rounded text-[10px] bg-slate-700/50 text-slate-300 hover:bg-slate-600/50">
+                  {t('quickshow.selectAll')}
+                </button>
+                <button onClick={() => setBlackoutSelectedFixtures(new Set())} className="px-2 py-1 rounded text-[10px] bg-slate-700/50 text-slate-300 hover:bg-slate-600/50">
+                  {t('quickshow.clearAll')}
+                </button>
+              </div>
+              <div className="space-y-1">
+                {patchedFixtures.map((f) => (
+                  <label key={f.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-800/50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={blackoutSelectedFixtures.has(f.id)}
+                      onChange={() => handleToggleBlackoutFixture(f.id)}
+                      className="rounded border-gray-600 bg-gray-800 text-slate-500 focus:ring-slate-500"
+                    />
+                    <span className="text-xs text-gray-300">{f.name}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <button onClick={() => { setBlackoutPickModal(null); setBlackoutSelectedFixtures(new Set()); }} className="px-3 py-1.5 rounded-lg text-xs text-gray-400 border border-gray-700 hover:bg-gray-800">
+                  {t('common.cancel')}
+                </button>
+                <button onClick={handleConfirmBlackoutPick} className="px-3 py-1.5 rounded-lg text-xs bg-slate-600 text-white hover:bg-slate-500">
+                  {t('common.confirm')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+      {blackoutInsertMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setBlackoutInsertMenu(null)} />
+          <div
+            className="fixed z-50 bg-[#1a1a2e] border border-slate-700/50 rounded-lg shadow-xl py-1 min-w-[160px]"
+            style={{ ...clampRect(blackoutInsertMenu.x, blackoutInsertMenu.y, 200, 100, window.innerWidth, window.innerHeight) }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1.5 text-[10px] text-slate-400 uppercase tracking-wider border-b border-gray-800">
+              {t('quickshow.trackBlackout')} — {blackoutInsertMenu.time.toFixed(2)}s
+            </div>
+            <button
+              onClick={() => {
+                const tid = blackoutInsertMenu.trackId;
+                const at = blackoutInsertMenu.time;
+                setBlackoutInsertMenu(null);
+                // Select all fixtures by default for quick entry
+                const fixtures = useShowStore.getState().patchedFixtures;
+                const names = fixtures.map(f => f.name);
+                const ids = fixtures.map(f => f.id);
+                setBlackoutSelectedFixtures(new Set(ids));
+                setBlackoutPickModal({ trackId: tid });
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-gray-800"
+            >
+              {t('quickshow.addBlackoutEntry')}
+            </button>
+            <button
+              onClick={() => { handleDeleteBlackoutTrack(blackoutInsertMenu.trackId); setBlackoutInsertMenu(null); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800"
+            >
+              {t('quickshow.deleteTrack')}
+            </button>
+          </div>
+        </>
+      )}
+      {blackoutEntryMenu && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setBlackoutEntryMenu(null)}>
+          <div
+            className="bg-[#1a1a2e] border border-slate-700/50 rounded-xl shadow-2xl py-3 w-[360px] max-w-[95vw]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-1.5 text-[11px] text-slate-400 uppercase tracking-wider border-b border-gray-800">
+              Blackout Entry — {blackoutEntryMenu.entry.time.toFixed(2)}s → {blackoutEntryMenu.entry.endTime.toFixed(2)}s
+            </div>
+            <div className="px-4 pt-3">
+              <label className="text-[10px] text-gray-500">{t('quickshow.sectionName')}</label>
+              <input
+                defaultValue={blackoutEntryMenu.entry.fixtureNames.join(', ')}
+                id="__blackout_label"
+                className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3 px-4 py-3">
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionStart')}</label><input type="number" step="0.01" defaultValue={blackoutEntryMenu.entry.time} id="__blackout_start" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+              <div><label className="text-[10px] text-gray-500">{t('quickshow.sectionEnd')}</label><input type="number" step="0.01" defaultValue={blackoutEntryMenu.entry.endTime} id="__blackout_end" className="w-full mt-1 px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-200" /></div>
+            </div>
+            <div className="flex gap-2 px-4 pb-2">
+              <button onClick={() => {
+                const label = (document.getElementById('__blackout_label') as HTMLInputElement).value;
+                const st = Number((document.getElementById('__blackout_start') as HTMLInputElement).value);
+                const en = Number((document.getElementById('__blackout_end') as HTMLInputElement).value);
+                const dur = resolvedAnalysis?.duration || 9999;
+                if (!Number.isFinite(st) || !Number.isFinite(en) || en <= st || st < 0 || en > dur) return;
+                const idx = blackoutTracks.find(t => t.id === blackoutEntryMenu.trackId)?.entries.findIndex(e => e.id === blackoutEntryMenu.entry.id) ?? -1;
+                if (idx >= 0) handleBlackoutEntryChange(blackoutEntryMenu.trackId, idx, st, en);
+                setBlackoutEntryMenu(null);
+              }} className="flex-1 py-1.5 rounded bg-slate-600 text-white text-xs hover:bg-slate-500">{t('quickshow.apply')}</button>
+              <button onClick={() => handleRemoveBlackoutEntry(blackoutEntryMenu.trackId, blackoutEntryMenu.entry.id)} className="px-4 py-1.5 rounded bg-red-600/20 text-red-300 text-xs">{t('common.delete')}</button>
+            </div>
+            <button onClick={() => setBlackoutEntryMenu(null)} className="w-full text-center py-1.5 text-[11px] text-gray-500 hover:text-gray-300">{t('common.close')}</button>
           </div>
         </div>
       )}

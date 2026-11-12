@@ -249,6 +249,22 @@ export interface MatrixTrack {
   entries: MatrixTrackEntry[];
 }
 
+// ── Blackout Track types (rend des fixtures inactives sur un intervalle) ──
+
+export interface BlackoutTrackEntry {
+  id: string;
+  time: number;
+  endTime: number;
+  fixtureNames: string[]; // displayed label
+}
+
+export interface BlackoutTrack {
+  id: string;
+  name: string;
+  entries: BlackoutTrackEntry[];
+  targetFixtureIds?: string[]; // which fixtures this track controls
+}
+
 interface TrackTimelineProps {
   cues: Cue[];
   dmxCues?: DmxCue[];
@@ -331,6 +347,12 @@ interface TrackTimelineProps {
   onMatrixEntryContextMenu?: (trackId: string, entry: MatrixTrackEntry, clientX: number, clientY: number) => void;
   /** Called when user drag-resizes or drag-moves a matrix entry */
   onMatrixEntryChange?: (trackId: string, entryIndex: number, newTime: number, newEndTime: number) => void;
+  /** Blackout tracks — render below matrix tracks; entries set fixtureIds to black during interval */
+  blackoutTracks?: BlackoutTrack[];
+  onBlackoutTrackContextMenu?: (trackId: string, time: number, clientX: number, clientY: number) => void;
+  onBlackoutEntryClick?: (trackId: string, entry: BlackoutTrackEntry) => void;
+  onBlackoutEntryContextMenu?: (trackId: string, entry: BlackoutTrackEntry, clientX: number, clientY: number) => void;
+  onBlackoutEntryChange?: (trackId: string, entryIndex: number, newTime: number, newEndTime: number) => void;
   /** Show tracks — prennent le dessus sur l'autoscript (comme chaser) */
   showTracks?: ShowTrack[];
   onShowTrackContextMenu?: (trackId: string, time: number, clientX: number, clientY: number) => void;
@@ -378,6 +400,7 @@ const CHASER_TRACK_HEIGHT = 26;
 const SHOW_TRACK_HEIGHT = 26;
 const SCENE_TRACK_HEIGHT = 26;
 const MATRIX_TRACK_HEIGHT = 26;
+const BLACKOUT_TRACK_HEIGHT = 26;
 const LABEL_WIDTH = 90;
 
 const fmt = (s: number) =>
@@ -631,6 +654,26 @@ function findMatrixEntryAt(
   return best;
 }
 
+function findBlackoutEntryAt(
+  track: BlackoutTrack,
+  timeAtX: number,
+  duration: number,
+): BlackoutTrackEntry | null {
+  const threshold = Math.min(2, duration * 0.05);
+  let best: BlackoutTrackEntry | null = null;
+  let bestDist = Infinity;
+  for (const entry of track.entries) {
+    const entryMid = (entry.time + entry.endTime) / 2;
+    const halfLen = (entry.endTime - entry.time) / 2 + 0.1;
+    const d = Math.abs(entryMid - timeAtX);
+    if (d < halfLen + threshold && d < bestDist) {
+      best = entry;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
 // ─── Component ────────────────────────────────────────────
 
 const TrackTimeline: React.FC<TrackTimelineProps> = ({
@@ -683,6 +726,10 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   onMatrixEntryClick,
   onMatrixEntryContextMenu,
   onMatrixEntryChange,
+  blackoutTracks,
+  onBlackoutTrackContextMenu,
+  onBlackoutEntryContextMenu,
+  onBlackoutEntryChange,
   onSectionsChange,
   onAutoScriptContextMenu,
   fixtureTracks,
@@ -760,6 +807,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const numShowTracks = showTracks?.length ?? 0;
   const numSceneTracks = sceneTracks?.length ?? 0;
   const numMatrixTracks = matrixTracks?.length ?? 0;
+  const numBlackoutTracks = blackoutTracks?.length ?? 0;
   const TIER_ORDER: Record<string, number> = { primary: 0, secondary: 1, tertiary: 2, other: 3 };
   const [collapsedTiers, setCollapsedTiers] = useState<Set<string>>(new Set());
   // Sort fixtures by tier, compute header positions
@@ -774,7 +822,7 @@ const TrackTimeline: React.FC<TrackTimelineProps> = ({
     }
     return { sorted: sorted, list, count: list.length };
   }, [patchedFixtures, collapsedTiers]);
-  const totalHeight = HEADER_HEIGHT + tieredLayout.count * TRACK_HEIGHT + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT + numDimmerTracks * DIMMER_TRACK_HEIGHT + numChaserTracks * CHASER_TRACK_HEIGHT + numShowTracks * SHOW_TRACK_HEIGHT + numSceneTracks * SCENE_TRACK_HEIGHT + numMatrixTracks * MATRIX_TRACK_HEIGHT;
+  const totalHeight = HEADER_HEIGHT + tieredLayout.count * TRACK_HEIGHT + (energyCurve ? WAVEFORM_HEIGHT : 0) + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT + numColorTracks * COLOR_TRACK_HEIGHT + numStrobeTracks * STROBE_TRACK_HEIGHT + numDimmerTracks * DIMMER_TRACK_HEIGHT + numChaserTracks * CHASER_TRACK_HEIGHT + numShowTracks * SHOW_TRACK_HEIGHT + numSceneTracks * SCENE_TRACK_HEIGHT + numMatrixTracks * MATRIX_TRACK_HEIGHT + numBlackoutTracks * BLACKOUT_TRACK_HEIGHT;
 
   // Helper: resolve Y position to display row (header or fixture)
   const resolveDisplayRow = useCallback((y: number) => {
@@ -1904,9 +1952,27 @@ if (editBlock) { setEditBlock(null); return; }
             return;
           }
         }
+        // Check blackout tracks (below matrix)
+        const blackoutTrackBaseY = matrixTrackBaseY + mTracks.length * MATRIX_TRACK_HEIGHT;
+        const btTracks = blackoutTracks || [];
+        if (y >= blackoutTrackBaseY && btTracks.length > 0) {
+          const btIdx = Math.floor((y - blackoutTrackBaseY) / BLACKOUT_TRACK_HEIGHT);
+          if (btIdx >= 0 && btIdx < btTracks.length) {
+            e.preventDefault();
+            const timeAtX8 = (x / drawW) * duration;
+            const btTrack = btTracks[btIdx];
+            const btEntry = findBlackoutEntryAt(btTrack, timeAtX8, duration);
+            if (btEntry && onBlackoutEntryContextMenu) {
+              onBlackoutEntryContextMenu(btTrack.id, btEntry, e.clientX, e.clientY);
+            } else {
+              onBlackoutTrackContextMenu?.(btTrack.id, snapT(Math.max(0, Math.min(duration, timeAtX8))), e.clientX, e.clientY);
+            }
+            return;
+          }
+        }
       }
     },
-    [duration, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, matrixTracks, tieredLayout, energyCurve, onAutoScriptContextMenu, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu, onDimmerTrackContextMenu, onDimmerEntryContextMenu, onChaserTrackContextMenu, onChaserEntryContextMenu, onShowTrackContextMenu, onShowEntryContextMenu, onSceneTrackContextMenu, onSceneEntryContextMenu, onMatrixTrackContextMenu, onMatrixEntryContextMenu],
+    [duration, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, matrixTracks, blackoutTracks, tieredLayout, energyCurve, onAutoScriptContextMenu, onEfxTrackContextMenu, onEfxEntryContextMenu, onColorTrackContextMenu, onColorEntryContextMenu, onStrobeTrackContextMenu, onStrobeEntryContextMenu, onDimmerTrackContextMenu, onDimmerEntryContextMenu, onChaserTrackContextMenu, onChaserEntryContextMenu, onShowTrackContextMenu, onShowEntryContextMenu, onSceneTrackContextMenu, onSceneEntryContextMenu, onMatrixTrackContextMenu, onMatrixEntryContextMenu, onBlackoutTrackContextMenu, onBlackoutEntryContextMenu],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -2379,7 +2445,7 @@ if (editBlock) { setEditBlock(null); return; }
         return;
       }
     }
-  }, [sections, duration, onSectionsChange, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, matrixTracks, energyCurve, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange, onChaserEntryChange, onShowEntryChange, onSceneEntryChange, onMatrixEntryChange, fixtureAreaHeight]);
+  }, [sections, duration, onSectionsChange, efxTracks, colorTracks, strobeTracks, dimmerTracks, chaserTracks, showTracks, sceneTracks, matrixTracks, blackoutTracks, energyCurve, onEfxEntryChange, onColorEntryChange, onStrobeEntryChange, onDimmerEntryChange, onChaserEntryChange, onShowEntryChange, onSceneEntryChange, onMatrixEntryChange, onBlackoutEntryChange, fixtureAreaHeight]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Clear EFX drag
@@ -3891,6 +3957,129 @@ if (editBlock) { setEditBlock(null); return; }
       }
     }
 
+    // ── Blackout tracks (below matrix) ────────────────────────
+    if (numBlackoutTracks > 0) {
+      const eT = efxTracks || [];
+      const cT = colorTracks || [];
+      const sT = strobeTracks || [];
+      const dT = dimmerTracks || [];
+      const cChT = chaserTracks || [];
+      const shT = showTracks || [];
+      const scT = sceneTracks || [];
+      const mT = matrixTracks || [];
+      const efxBase = autoY + AUTOSCRIPT_TRACK_HEIGHT + numEfxTracks * EFX_TRACK_HEIGHT;
+      const colorBase = efxBase + cT.length * COLOR_TRACK_HEIGHT;
+      const strobeBase = colorBase + sT.length * STROBE_TRACK_HEIGHT;
+      const dimmerBase = strobeBase + dT.length * DIMMER_TRACK_HEIGHT;
+      const chaserBase = dimmerBase + cChT.length * CHASER_TRACK_HEIGHT;
+      const showTrackBaseY = chaserBase;
+      const sceneTrackBaseY = showTrackBaseY + shT.length * SHOW_TRACK_HEIGHT;
+      const matrixTrackBaseY = sceneTrackBaseY + scT.length * SCENE_TRACK_HEIGHT;
+      const blackoutTrackBaseY = matrixTrackBaseY + mT.length * MATRIX_TRACK_HEIGHT;
+      for (let bi = 0; bi < numBlackoutTracks; bi++) {
+        const bt = blackoutTracks![bi];
+        const trackY = blackoutTrackBaseY + bi * BLACKOUT_TRACK_HEIGHT;
+
+        // Track background — dark grey/red tint
+        ctx.fillStyle = bi % 2 === 0 ? 'rgba(100, 116, 139, 0.08)' : 'rgba(100, 116, 139, 0.04)';
+        ctx.fillRect(LABEL_WIDTH, trackY, drawW, BLACKOUT_TRACK_HEIGHT);
+
+        // Top separator
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY);
+        ctx.lineTo(w, trackY);
+        ctx.stroke();
+
+        // Track label
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '9px -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+        const bLabel = bt.name.length > 11 ? bt.name.substring(0, 10) + '…' : bt.name;
+        ctx.fillText('BLK: ' + bLabel, 6, trackY + 12);
+
+        // Target badge
+        let targetLabel = '';
+        if (bt.targetFixtureIds && bt.targetFixtureIds.length > 0) {
+          targetLabel = '💡 ×' + bt.targetFixtureIds.length;
+        } else if (bt.entries.length > 0 && bt.entries[0].fixtureNames.length > 0) {
+          targetLabel = '💡 ' + bt.entries[0].fixtureNames.slice(0, 2).join(', ');
+        } else {
+          targetLabel = '🌐 ' + t('common.all');
+        }
+        if (targetLabel) {
+          ctx.fillStyle = '#6b7280';
+          ctx.font = '8px -apple-system, sans-serif';
+          ctx.fillText(targetLabel, 72, trackY + 12);
+        }
+
+        // Bottom separator
+        ctx.strokeStyle = 'rgba(75, 85, 99, 0.1)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(LABEL_WIDTH, trackY + BLACKOUT_TRACK_HEIGHT);
+        ctx.lineTo(w, trackY + BLACKOUT_TRACK_HEIGHT);
+        ctx.stroke();
+
+        // Draw entries (grey blocks with X mark)
+        for (const entry of bt.entries) {
+          const ex = LABEL_WIDTH + (entry.time / duration) * drawW;
+          const endX = LABEL_WIDTH + (entry.endTime / duration) * drawW;
+          const entryW = Math.max(4, endX - ex);
+          if (ex < LABEL_WIDTH - 10 || ex > w + 10) continue;
+
+          const pad = 3;
+          const barY = trackY + pad;
+          const barH = BLACKOUT_TRACK_HEIGHT - pad * 2;
+
+          // Grey/black bar
+          ctx.fillStyle = '#475569';
+          ctx.globalAlpha = 0.7;
+          ctx.beginPath();
+          ctx.roundRect(ex, barY, entryW, barH, 3);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+
+          // Edge accents
+          ctx.fillStyle = '#94a3b8';
+          ctx.beginPath();
+          ctx.roundRect(ex, barY, 3, barH, [3, 0, 0, 3]);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.roundRect(endX - 3, barY, 3, barH, [0, 3, 3, 0]);
+          ctx.fill();
+
+          // Entry label (fixture names or "BLACKOUT")
+          if (entryW > 40) {
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = 'bold 7px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            const lbl = entry.fixtureNames.length > 0 ? entry.fixtureNames.slice(0, 2).join(',').substring(0, 10) : '×';
+            ctx.fillText(lbl, ex + entryW / 2, trackY + BLACKOUT_TRACK_HEIGHT / 2 + 3);
+          }
+
+          // Start/end diamonds
+          ctx.fillStyle = '#94a3b8';
+          const diamondSize = 3;
+          ctx.beginPath();
+          ctx.moveTo(ex, barY + barH / 2 - diamondSize);
+          ctx.lineTo(ex + diamondSize, barY + barH / 2);
+          ctx.lineTo(ex, barY + barH / 2 + diamondSize);
+          ctx.lineTo(ex - diamondSize, barY + barH / 2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(endX, barY + barH / 2 - diamondSize);
+          ctx.lineTo(endX + diamondSize, barY + barH / 2);
+          ctx.lineTo(endX, barY + barH / 2 + diamondSize);
+          ctx.lineTo(endX - diamondSize, barY + barH / 2);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
+
     // ── Section separators (vertical lines) ─────────
     // Une ligne verticale bien visible à chaque frontière de section, comme les
     // séparations de la piste audio. Halo sombre + trait coloré plein pour
@@ -3968,6 +4157,8 @@ if (editBlock) { setEditBlock(null); return; }
     numSceneTracks,
     matrixTracks,
     numMatrixTracks,
+    blackoutTracks,
+    numBlackoutTracks,
     fixtureTracks,
     disabledFixtures,
     ftSelStart,
