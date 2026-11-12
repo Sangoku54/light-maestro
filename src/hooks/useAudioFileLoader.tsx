@@ -79,7 +79,12 @@ export function useAudioFileLoader() {
     setState(s => ({ ...s, isAnalyzing: true, error: null }));
     try {
       // Use fetch to decode the data URL — handles base64 natively, no atob/corruption
-      const response = await fetch(dataUrl);
+      // Normalize: if dataUrl is raw base64 (no data: prefix), prepend the audio data URL scheme
+      let audioUrl = dataUrl;
+      if (audioUrl && !audioUrl.startsWith('data:') && !audioUrl.startsWith('http')) {
+        audioUrl = 'data:audio/mp3;base64,' + audioUrl;
+      }
+      const response = await fetch(audioUrl);
       if (!response.ok) throw new Error('Failed to fetch data URL');
       const buf = await response.arrayBuffer();
       const ctx = getAudioContext();

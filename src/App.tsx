@@ -258,6 +258,9 @@ const App: React.FC = () => {
   // Lifted to App level — audio survives ALL tab AND mode switches
   const audioFile = useAudioFileLoader();
 
+  // Licence — boutons d'upgrade en bas de page
+  const license = useLicenseStore();
+
   // RGB Matrix playback engine — runs globally, writes DMX directly
   useRgbMatrixPlayback();
   useGroupMasters();
@@ -760,6 +763,7 @@ const StatusBar: React.FC = () => {
   const blackout = useAppStore((s) => s.dmx.blackout);
   const bpm = useAppStore((s) => s.audio.bpm);
   const analyzing = useAppStore((s) => s.audio.analyzing);
+  const license = useLicenseStore();
 
   // Live DMX output status, polled from the main-process engine
   const [dmxStatus, setDmxStatus] = useState<{
@@ -837,6 +841,38 @@ const StatusBar: React.FC = () => {
       )}
       <div className="flex-1" />
       <span title={`Build ${appVersion}`}>Light Maestro v{appVersion}</span>
+      <div className="flex items-center gap-2 ml-4">
+        {license.edition === 'free' && (
+          <>
+            <button
+              onClick={() => license.checkout('standard')}
+              disabled={license.loading}
+              className="px-2 py-1 rounded text-[10px] font-semibold bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 transition-all"
+              title={t('license.checkoutStandard')}
+            >
+              Std 69€
+            </button>
+            <button
+              onClick={() => license.checkout('full')}
+              disabled={license.loading}
+              className="px-2 py-1 rounded text-[10px] font-semibold bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-40 transition-all"
+              title={t('license.checkoutFullFree')}
+            >
+              Full 99€
+            </button>
+          </>
+        )}
+        {license.edition === 'standard' && (
+          <button
+            onClick={() => license.checkout('full')}
+            disabled={license.loading}
+            className="px-2 py-1 rounded text-[10px] font-semibold bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-40 transition-all"
+            title={t('license.checkoutUpgrade')}
+          >
+            Full 30€
+          </button>
+        )}
+      </div>
     </footer>
   );
 };
