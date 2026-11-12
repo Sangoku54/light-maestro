@@ -16,7 +16,7 @@
     "start": "tsc -p tsconfig.electron.json && vite build && electron .",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder --publish never",
-    "deploy": "powershell -ExecutionPolicy Bypass -File scripts/deploy-release.ps1"
+    "release": "npm run check && npm run dist"
   },
   "dependencies": {
     "artnet": "^1.4.0",
@@ -117,9 +117,8 @@
     },
     "publish": [
       {
-        "provider": "generic",
-        "url": "https://releases.lightmaestro.app/win",
-        "channel": "latest"
+        "provider": "github",
+        "releaseType": "release"
       }
     ]
   }
