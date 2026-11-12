@@ -1,56 +1,40 @@
 <?php
 /**
- * POST /track.php
- * Log un téléchargement + alerte admin.
- * Version robuste : tolère les erreurs DB et SMTP.
- *
- * body : { file: 'portable' | 'setup', version?: string }
- * 200  : { ok: true }
- * 400  : { error: 'invalid_input' }
+ * POST /track.php — version ultra-simple pour diagnostic.
+ * Si ça marche → le problème est dans helpers.php ou la DB.
+ * Si ça plante → le problème est ailleurs.
  */
 
-require_once __DIR__ . '/helpers.php';
+// ── Copie minimale de body() et respond() ─────────────────────────────────────
+function body(): array {
+    $raw = file_get_contents('php://input');
+    $decoded = json_decode($raw ?: '', true);
+    return is_array($decoded) ? $decoded : [];
+}
 
+function respond($data, int $status = 200): void {
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// ── Log direct sans helpers.php ───────────────────────────────────────────────
 $b = body();
 $file = trim((string)($b['file'] ?? ''));
 $version = trim((string)($b['version'] ?? ''));
+
 if (!in_array($file, ['portable', 'setup'], true)) {
     respond(['error' => 'invalid_input', 'message' => 'Fichier invalide'], 400);
 }
 
-// ── Auth (optionnel) ──────────────────────────────────────────────────────────
-$email = 'anonyme';
-try {
-    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-    if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
-        $token = $m[1];
-        if ($token) {
-            $userId = verify_token($token);
-            if ($userId) {
-                try {
-                    $u = db()->query("SELECT email FROM users WHERE id = " . (int)$userId)->fetch();
-                    if ($u) $email = $u['email'];
-                } catch (Throwable $ignored) {/* DB indisponible */}
-            }
-        }
-    }
-} catch (Throwable $ignored) {/* auth ignorée */}
+// Écriture directe du log
+$logDir = __DIR__ . '/logs';
+if (!is_dir($logDir)) @mkdir($logDir, 0755, true);
+$logFile = $logDir . '/events.log';
+$label = $file === 'portable' ? 'Version portable' : 'Installeur Windows';
+$ip = $_SERVER['REMOTE_ADDR'] ?? '?';
+$logLine = "[" . date('Y-m-d H:i:s') . "] Nouveau téléchargement | $file ($label) • v$version • IP:$ip\n";
+@file_put_contents($logFile, $logLine, FILE_APPEND | LOCK_EX);
 
-// ── Insertion en base (non bloquante) ────────────────────────────────────────
-try {
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
-    db()->exec(
-        "INSERT INTO downloads (user_id, file, ip, downloaded_at) VALUES ("
-        . (intval($userId ?? 0)) . ", '" . addslashes($file) . "', '" . addslashes($ip) . "', NOW())"
-    );
-} catch (Throwable $ignored) {/* table absente ou DB indisponible */}
-
-// ── Notification admin + log fichier ──────────────────────────────────────────
-try {
-    $label = $file === 'portable' ? 'Version portable' : 'Installeur Windows';
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '?';
-    $ver = $version ?: '?';
-    notify_admin('Nouveau téléchargement', "$email • $label • v$ver • IP:$ip");
-} catch (Throwable $ignored) {/* notification ignorée */}
-
-respond(['ok' => true]);
+respond(['ok' => true, 'logged' => true]);
