@@ -166,3 +166,114 @@ export function envelopeByteLength(content: string, blobs: EnvelopeBlob[]): numb
       return acc + 4 + keyBytes + 8 + dataBytes;
     }, 0);
 }
+
+/**
+ * Unpack STREAMING : écrit chaque blob audio directement sur disque (via
+ * `writeBlob`) au lieu de les matérialiser en base64 dans un gros objet.
+ *
+ * Pourquoi : `unpackProject` renvoie tous les blobs en base64 (~75 % du
+ * fichier) d'un seul coup → le renderer reçoit 500 Mo+ en une seule string
+ * IPC → OOM sur machine peu_MEMORY (Surface) → crash au chargement d'un projet.
+ * Ici, un seul blob est en mémoire à la fois, et le renderer ne reçoit que
+ * le manifeste + la liste des CLÉS (les blobs sont déjà sur disque).
+ *
+ * Retourne le manifeste JSON + la liste des clés de blobs écrites.
+ */
+export async function unpackProjectStreaming(
+  filePath: string,
+  writeBlob: (key: string, data: Buffer) => Promise<void>,
+): Promise<{ content: string; blobKeys: string[] }> {
+  const fh = await fs.promises.open(filePath, 'r');
+  try {
+    const magic = Buffer.alloc(MAGIC_BUF.length);
+    await fh.read(magic, 0, magic.length, 0);
+
+    if (!magic.equals(MAGIC_BUF)) {
+      // Ancien .lmproj JSON pur → pas de blobs, on rend le contenu brut.
+      const content = (await fh.readFile()).toString('utf-8');
+      return { content, blobKeys: [] };
+    }
+
+    let off = MAGIC_BUF.length;
+    const readExactly = async (len: number): Promise<Buffer> => {
+      const b = Buffer.alloc(len);
+      if (len > 0) await fh.read(b, 0, len, off);
+      off += len;
+      return b;
+    };
+
+    const manifestLen = (await readExactly(4)).readUInt32BE(0);
+    const content = (await readExactly(manifestLen)).toString('utf-8');
+    const blobCount = (await readExactly(4)).readUInt32BE(0);
+
+    const blobKeys: string[] = [];
+    for (let i = 0; i < blobCount; i++) {
+      const keyLen = (await readExactly(4)).readUInt32BE(0);
+      const key = (await readExactly(keyLen)).toString('utf-8');
+      const dataLen = Number((await readExactly(8)).readBigUInt64BE(0));
+      // Un seul blob en mémoire à la fois (jamais de concaténation).
+      const data = await readExactly(dataLen);
+      await writeBlob(key, data);
+      blobKeys.push(key);
+    }
+    return { content, blobKeys };
+  } finally {
+    await fh.close();
+  }
+}
+
+/**
+ * Pack STREAMING : écrit le manifeste + les blobs lus un par un via
+ * `readBlob(key)` (jamais tous en mémoire d'un coup).
+ *
+ * Symétrique de `unpackProjectStreaming` : le renderer n'envoie jamais le
+ * base64 de l'audio via IPC — il transmet la liste des CLÉS, le main process
+ * lit les blobs sur disque (userData) et les écrit dans l'enveloppe.
+ */
+export async function packProjectStreaming(
+  filePath: string,
+  content: string,
+  blobKeys: string[],
+  readBlob: (key: string) => Promise<Buffer | null>,
+): Promise<void> {
+  const manifestBuf = Buffer.from(content, 'utf-8');
+
+  // 1) Calcul de la taille totale (2e passe sur les blobs, sans les garder).
+  let blobBytes = 0;
+  const keyLens = new Map<string, number>();
+  for (const key of blobKeys) {
+    const data = await readBlob(key);
+    if (!data) continue;
+    keyLens.set(key, Buffer.byteLength(key, 'utf-8'));
+    blobBytes += 4 + keyLens.get(key)! + 8 + data.length;
+  }
+
+  const total = MAGIC_BUF.length + 4 + manifestBuf.length + 4 + blobBytes;
+
+  const chunks: Buffer[] = [MAGIC_BUF];
+  const hdr = Buffer.alloc(4);
+  hdr.writeUInt32BE(manifestBuf.length, 0);
+  chunks.push(hdr, manifestBuf);
+
+  const countBuf = Buffer.alloc(4);
+  countBuf.writeUInt32BE(keyLens.size, 0);
+  chunks.push(countBuf);
+
+  // 2) Écriture réelle, un blob à la fois.
+  for (const key of blobKeys) {
+    if (!keyLens.has(key)) continue;
+    const data = await readBlob(key);
+    if (!data) continue;
+    const keyBuf = Buffer.from(key, 'utf-8');
+    const keyLen = Buffer.alloc(4);
+    keyLen.writeUInt32BE(keyBuf.length, 0);
+    const dataLen = Buffer.alloc(8);
+    dataLen.writeBigUInt64BE(BigInt(data.length), 0);
+    chunks.push(keyLen, keyBuf, dataLen, data);
+  }
+
+  const final = Buffer.concat(chunks, total);
+  const tmpPath = `${filePath}.tmp`;
+  await fs.promises.writeFile(tmpPath, final);
+  await fs.promises.rename(tmpPath, filePath);
+}

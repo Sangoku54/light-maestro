@@ -133,7 +133,9 @@ contextBridge.exposeInMainWorld('lightMaestro', {
 
   // Project (full-project save/load)
   project: {
-    save: (payload: { content: string; blobs?: { key: string; audioFileBase64: string }[] }) =>
+    // `blobKeys` (et non les blobs en base64) : l'audio transite par le
+    // userData local, jamais par IPC → pas d'OOM au chargement/sauvegarde.
+    save: (payload: { content: string; blobKeys?: string[] }) =>
       ipcRenderer.invoke('project:save', payload),
     open: () => ipcRenderer.invoke('project:open'),
   },

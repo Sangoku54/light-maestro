@@ -84,79 +84,91 @@ export async function resolveWidgetAudio(
   widgets: any[],
   get: (key: string) => Promise<any>,
 ): Promise<any[]> {
-  return Promise.all(
-    (widgets ?? []).map(async (w) => {
-      if (!w?.config?.audioRef) return w;
-      try {
-        const stored = await get(w.config.audioRef);
-        // Le getter peut renvoyer une string base64 brute (enveloppe .lmproj)
-        // ou un objet { audioFileBase64 } (storage userData).
-        const url = typeof stored === 'string' ? stored : stored?.audioFileBase64;
-        if (typeof url === 'string') {
-          const { audioRef: _r, ...rest } = w.config;
-          return { ...w, config: { ...rest, audioDataUrl: url } };
-        }
-      } catch { /* blob absent — widget silencieux, pas de crash */ }
-      return w;
-    }),
-  );
+  // SÉQUENTIEL (pas de Promise.all) : chaque blob fait 55 Mo, les lire en
+  // parallèle ferait monter le pic mémoire à N×55 Mo → OOM sur machine peu
+  // mémoire (Surface).
+  const out: any[] = [];
+  for (const w of widgets ?? []) {
+    if (!w?.config?.audioRef) { out.push(w); continue; }
+    try {
+      const stored = await get(w.config.audioRef);
+      // Le getter peut renvoyer une string base64 brute (enveloppe .lmproj)
+      // ou un objet { audioFileBase64 } (storage userData).
+      const url = typeof stored === 'string' ? stored : stored?.audioFileBase64;
+      if (typeof url === 'string') {
+        const { audioRef: _r, ...rest } = w.config;
+        out.push({ ...w, config: { ...rest, audioDataUrl: url } });
+        continue;
+      }
+    } catch { /* blob absent — widget silencieux, pas de crash */ }
+    out.push(w);
+  }
+  return out;
 }
 
 /**
+ * Extrait un champ audio d'une entité (preset, show, show track item).
+ * 3 cas :
+ *  1) base64 direct et gros → externalisé : audioRef calculée + blob NOUVEAU
+ *     (contenu en mémoire, à écrire dans le userData).
+ *  2) audioRef existant (audio déjà externalisé lors d'une session précédente)
+ *     → PRÉSERVÉ. Le blob est DÉJÀ dans le userData : on ne le relit pas
+ *     (le main process le lira sur disque au moment de packer l'enveloppe).
+ *  3) base64 direct et petit → gardé en clair.
+ */
+const extract = async (
+  fields: any,
+  newBlobs: Map<string, ExtractedBlob>,
+  blobKeys: Set<string>,
+): Promise<AudioFields> => {
+  const direct = fields?.audioFileBase64;
+  const ref = fields?.audioRef;
+  if (typeof direct === 'string' && direct.length >= EXTRACT_MIN_BYTES) {
+    const { value, blob } = await extractAudioField(direct);
+    if (blob) {
+      newBlobs.set(blob.key, blob);
+      blobKeys.add(blob.key);
+    }
+    return value;
+  }
+  if (typeof ref === 'string' && ref.length > 0) {
+    blobKeys.add(ref);
+    return { audioRef: ref };
+  }
+  if (typeof direct === 'string') {
+    // audio petit (ou vide) → gardé en clair, tel quel
+    return { audioFileBase64: direct };
+  }
+  return {};
+};
+
+/**
  * Externe tous les blobs audio d'un projet : songPresets[].audioFileBase64,
- * shows[].audioFileBase64 et shows[].tracks[].audioFileBase64.
- * Retourne les structures allégées (audioRef) + la liste des blobs à écrire
- * (dédupliqués par clé). Aucun effet de bord : ne touche pas aux stores.
+ * shows[].audioFileBase64 et shows[].tracks[].items[].audioFileBase64.
+ *
+ * Retourne :
+ *  - les structures allégées (audioRef) ;
+ *  - `blobs` : les blobs NOUVEAUX (contenu disponible en mémoire) ;
+ *  - `blobKeys` : TOUTES les clés à embarquer dans l'enveloppe .lmproj.
+ *
+ * Les blobs déjà externalisés (audioRef) ne sont PAS relus : leur contenu vit
+ * dans le userData, le main process le lit sur disque au pack. Cela évite de
+ * materialiser 55 Mo × N en base64 dans le renderer (OOM sur machine
+ * peu mémoire).
  */
 export async function externalizeProjectAudio(
   presets: any[],
   shows: any[],
-  getBlob?: (key: string) => Promise<string | undefined>,
-): Promise<{ presets: any[]; shows: any[]; blobs: ExtractedBlob[] }> {
-  const blobs = new Map<string, ExtractedBlob>();
-  const withBlob = async (fields: AudioFields, b?: ExtractedBlob): Promise<AudioFields> => {
-    if (b) blobs.set(b.key, b);
-    return fields;
-  };
-
-  // Extrait un champ audio d'une entité (preset, show, show track item).
-  // 3 cas :
-  //  1) base64 direct et gros → externalisé (audioRef + blob dans l'enveloppe)
-  //  2) audioRef existant (audio déjà externalisé lors d'une session précédente)
-  //     → PRÉSERVÉ + blob re-empaqueté dans l'enveloppe .lmproj, sinon il est
-  //     perdu à la sauvegarde (l'audio disparaît au rechargement du projet)
-  //  3) base64 direct et petit → gardé en clair
-  const extract = async (fields: any): Promise<AudioFields> => {
-    const direct = fields?.audioFileBase64;
-    const ref = fields?.audioRef;
-    if (typeof direct === 'string' && direct.length >= EXTRACT_MIN_BYTES) {
-      const { value, blob } = await extractAudioField(direct);
-      await withBlob(value, blob);
-      return value;
-    }
-    if (typeof ref === 'string' && ref.length > 0) {
-      let b64: string | undefined;
-      if (getBlob) {
-        try { b64 = await getBlob(ref); } catch { b64 = undefined; }
-      }
-      if (typeof b64 === 'string' && b64.length > 0) {
-        await withBlob({ audioRef: ref }, { key: ref, audioFileBase64: b64 });
-      }
-      return { audioRef: ref };
-    }
-    if (typeof direct === 'string') {
-      // audio petit (ou vide) → gardé en clair, tel quel
-      return { audioFileBase64: direct };
-    }
-    return {};
-  };
+): Promise<{ presets: any[]; shows: any[]; blobs: ExtractedBlob[]; blobKeys: string[] }> {
+  const newBlobs = new Map<string, ExtractedBlob>();
+  const blobKeys = new Set<string>();
 
   // Séquentiel (pas de Promise.all) : le hachage de 8×55 Mo en parallèle
   // pousserait le renderer à ~1 Go de RAM — l'ordre n'importe pas.
   const outPresets: any[] = [];
   for (const p of presets) {
     if (!p || typeof p !== 'object') { outPresets.push(p); continue; }
-    const value = await extract(p);
+    const value = await extract(p, newBlobs, blobKeys);
     // Supprime le champ audio d'origine (le spread ne le retire pas)
     const { audioFileBase64: _stripped, audioRef: _oldRef, ...rest } = p;
     outPresets.push({ ...rest, ...value });
@@ -165,8 +177,7 @@ export async function externalizeProjectAudio(
   const outShows: any[] = [];
   for (const s of shows) {
     if (!s || typeof s !== 'object') { outShows.push(s); continue; }
-    const sFields = await extract(s);
-    await withBlob(sFields);
+    const sFields = await extract(s, newBlobs, blobKeys);
     const tracks: any[] = [];
     for (const t of Array.isArray(s.tracks) ? s.tracks : []) {
       if (!t || typeof t !== 'object') { tracks.push(t); continue; }
@@ -175,8 +186,7 @@ export async function externalizeProjectAudio(
       const items: any[] = [];
       for (const it of Array.isArray(t.items) ? t.items : []) {
         if (!it || typeof it !== 'object') { items.push(it); continue; }
-        const iFields = await extract(it);
-        await withBlob(iFields);
+        const iFields = await extract(it, newBlobs, blobKeys);
         const { audioFileBase64: _si, audioRef: _iri, ...iRest } = it;
         items.push({ ...iRest, ...iFields });
       }
@@ -186,7 +196,12 @@ export async function externalizeProjectAudio(
     outShows.push({ ...sRest, ...sFields, tracks });
   }
 
-  return { presets: outPresets, shows: outShows, blobs: Array.from(blobs.values()) };
+  return {
+    presets: outPresets,
+    shows: outShows,
+    blobs: Array.from(newBlobs.values()),
+    blobKeys: Array.from(blobKeys),
+  };
 }
 
 /**
@@ -200,62 +215,47 @@ export async function resolveProjectAudio(
   shows: any[],
   get: (key: string) => Promise<any>,
 ): Promise<{ presets: any[]; shows: any[] }> {
-  const fetchBlob = async (key: string): Promise<string | undefined> => {
-    try {
-      const stored = await get(key);
-      // Le getter peut renvoyer :
-      //  - une string base64 brute (blobs de l'enveloppe .lmproj)
-      //  - un objet { audioFileBase64 } (storage userData)
-      if (typeof stored === 'string') return stored.length > 0 ? stored : undefined;
-      const b64 = stored?.audioFileBase64;
-      return typeof b64 === 'string' ? b64 : undefined;
-    } catch {
-      return undefined;
+  // PAS D'HYDRATATION : le base64 (55 Mo par preset) resterait resident en
+  // mémoire → OOM au chargement d'un gros projet sur machine peu.memory.
+  // On conserve la référence (`audioRef`) ; le blob est relu À LA DEMANDE
+  // au moment de la lecture (resolveAudioUrl → resolverregistre).
+  const outPresets = (presets ?? []).map((p: any) => {
+    if (!p || typeof p !== 'object') return p;
+    // v1 : blob en clair dans le manifeste → on conserve tel quel.
+    if (typeof p.audioFileBase64 === 'string') return p;
+    // v2 : référence externalisée → on garde l'audioRef, pas de base64.
+    if (typeof p.audioRef === 'string' && p.audioRef.length > 0) {
+      const { audioFileBase64: _drop, ...rest } = p;
+      return { ...rest, audioRef: p.audioRef };
     }
-  };
+    return p;
+  });
 
-  const hydrate = async (fields: AudioFields): Promise<string | undefined> => {
-    // v1 : blob en clair dans le fichier
-    if (typeof fields?.audioFileBase64 === 'string') return fields.audioFileBase64;
-    // v2 : référence vers userData
-    if (fields?.audioRef) return fetchBlob(fields.audioRef);
-    return undefined;
-  };
+  const outShows = (shows ?? []).map((s: any) => {
+    if (!s || typeof s !== 'object') return s;
+    const tracks = Array.isArray(s.tracks)
+      ? s.tracks.map((t: any) => {
+        if (!t || typeof t !== 'object') return t;
+        const items = Array.isArray(t.items)
+          ? t.items.map((it: any) => {
+            if (!it || typeof it !== 'object') return it;
+            if (typeof it.audioFileBase64 === 'string') return it;
+            if (typeof it.audioRef === 'string' && it.audioRef.length > 0) {
+              const { audioFileBase64: _drop, ...rest } = it;
+              return { ...rest, audioRef: it.audioRef };
+            }
+            return it;
+          })
+          : t.items;
+        return { ...t, items };
+      })
+      : s.tracks;
+    // L'audio de la show elle-même : référence conservée, pas de base64.
+    const { audioFileBase64: _dropShow, ...showRest } = s;
+    return { ...showRest, tracks };
+  });
 
-  const outPresets = await Promise.all(
-    (presets ?? []).map(async (p) => {
-      if (!p || typeof p !== 'object') return p;
-      const b64 = await hydrate(p);
-      return b64 === undefined ? { ...p, audioFileBase64: undefined } : { ...p, audioFileBase64: b64 };
-    }),
-  );
-
-  const outShows = await Promise.all(
-    (shows ?? []).map(async (s) => {
-      if (!s || typeof s !== 'object') return s;
-      const b64 = await hydrate(s);
-      const tracks = Array.isArray(s.tracks)
-        ? await Promise.all(
-            s.tracks.map(async (t: any) => {
-              if (!t || typeof t !== 'object') return t;
-              // items[].audioFileBase64 (ShowTrackItem) — pas la track elle-même
-              const items = await Promise.all(
-                (Array.isArray(t.items) ? t.items : []).map(async (it: any) => {
-                  if (!it || typeof it !== 'object') return it;
-                  const ib = await hydrate(it);
-                  return ib === undefined ? { ...it, audioFileBase64: undefined } : { ...it, audioFileBase64: ib };
-                }),
-              );
-              return { ...t, items };
-            }),
-          )
-        : s.tracks;
-      return b64 === undefined
-        ? { ...s, audioFileBase64: undefined, tracks }
-        : { ...s, audioFileBase64: b64, tracks };
-    }),
-  );
-
+  void get; // le getter reste dans la signature (compat) mais n'est plus utilisé ici
   return { presets: outPresets, shows: outShows };
 }
 

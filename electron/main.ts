@@ -14,7 +14,7 @@ import { MidiManager, type MidiMapping, type MidiTarget } from './midi/manager';
 import type { MtcState } from './midi/mtc';
 import { AudioAnalyzer } from './audio/analyzer';
 import { crashLogger } from './utils/crash-logger';
-import { packProject, unpackProject } from './project-envelope';
+import { packProject, unpackProject, packProjectStreaming, unpackProjectStreaming } from './project-envelope';
 import { LicenseStore } from './license/store';
 import { loginWithLicense, registerWithLicense, refreshLicense, startCheckout, requestPasswordReset, resetPassword, LicenseError, LICENSE_API_URL } from './license/server';
 
@@ -1028,14 +1028,38 @@ ipcMain.on('audio:pushBuffer', (_, buffer: Float32Array) => {
 });
 
 // ─── IPC Handlers: Project (full-project save/load) ───
-ipcMain.handle('project:save', async (_, payload: { content: string; blobs: any[] }) => {
+//
+// PROTOCOLE STREAMING : l'audio ne transite JAMAIS par IPC en base64.
+// Un projet avec 10 presets à 55 Mo ferait ~1 Go de base64 dans un seul
+// message IPC → OOM du renderer sur machine peu.memory (Surface) → écran
+// noir + projet vide au chargement.
+//   - save : le renderer envoie le manifeste + la LISTE DES CLÉS ; le main
+//     process lit les blobs sur disque (userData) et les écrit dans l'enveloppe.
+//   - open : le main process écrit les blobs de l'enveloppe sur disque et
+//     renvoie au renderer le manifeste + les clés (pas de base64).
+ipcMain.handle('project:save', async (_, payload: { content: string; blobKeys?: string[] }) => {
   const result = await dialog.showSaveDialog(mainWindow!, {
     defaultPath: `lightmaestro-project-${Date.now()}.lmproj`,
     filters: [{ name: L('filterProject'), extensions: ['lmproj'] }],
   });
   if (result.canceled || !result.filePath) return null;
-  const { content, blobs = [] } = payload ?? {};
-  await packProject(result.filePath, content ?? '', blobs ?? []);
+  const { content, blobKeys = [] } = payload ?? {};
+  const userData = app.getPath('userData');
+  // Lit un blob audio depuis le userData (fichier `<key>.json`).
+  const readBlob = async (key: string): Promise<Buffer | null> => {
+    try {
+      const p = path.join(userData, `${key}.json`);
+      if (!fs.existsSync(p)) return null;
+      const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      const b64 = parsed?.audioFileBase64;
+      if (typeof b64 !== 'string') return null;
+      const marker = ';base64,';
+      const idx = b64.indexOf(marker);
+      const raw = b64.startsWith('data:') && idx >= 0 ? b64.slice(idx + marker.length) : b64;
+      return Buffer.from(raw, 'base64');
+    } catch { return null; }
+  };
+  await packProjectStreaming(result.filePath, content ?? '', blobKeys, readBlob);
   return result.filePath;
 });
 
@@ -1047,8 +1071,19 @@ ipcMain.handle('project:open', async () => {
   });
   if (result.canceled || result.filePaths.length === 0) return null;
   const filePath = result.filePaths[0];
-  const { content, blobs } = await unpackProject(filePath);
-  return { filePath, content, blobs };
+  const userData = app.getPath('userData');
+  // Écrit chaque blob de l'enveloppe directement dans le userData (un à un,
+  // jamais tous en mémoire) → le renderer les relira à la demande.
+  const writeBlob = async (key: string, data: Buffer) => {
+    try {
+      const p = path.join(userData, `${key}.json`);
+      const tmp = `${p}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify({ audioFileBase64: data.toString('base64') }), 'utf-8');
+      fs.renameSync(tmp, p);
+    } catch (e) { console.error('Failed to write project blob:', key, e); }
+  };
+  const { content, blobKeys } = await unpackProjectStreaming(filePath, writeBlob);
+  return { filePath, content, blobKeys };
 });
 
 // ─── IPC Handlers: Song Presets (file-based, avoids localStorage quota) ──

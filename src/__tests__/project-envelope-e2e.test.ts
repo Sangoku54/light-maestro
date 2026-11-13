@@ -12,6 +12,7 @@ import { packProject, unpackProject } from '../../electron/project-envelope';
 import {
   externalizeProjectAudio,
   resolveProjectAudio,
+  resolveAudioUrl,
 } from '../utils/project-audio';
 
 const USER_DATA = path.join(
@@ -136,17 +137,28 @@ describe('E2E .lmproj autonome — cycle Export → Transport → Import', () =>
     );
 
     // 6. Vérifications finales
-    // L'enveloppe décode les data-URLs en base64 brut
-    expect(resolved.presets[0].audioFileBase64).toBeTruthy();
-    expect(resolved.presets[0].audioFileBase64!.length).toBeGreaterThan(100);
+    // Le store garde la RÉFÉRENCE (pas de base64 en mémoire → pas d'OOM au
+    // chargement d'un gros projet sur machine peu mémoire).
+    expect(resolved.presets[0].audioFileBase64).toBeUndefined();
+    expect(resolved.presets[0].audioRef).toBeTruthy();
+    expect(resolved.shows[0].audioFileBase64).toBeUndefined();
+    expect(resolved.shows[0].audioRef).toBeTruthy();
 
-    expect(resolved.shows[0].audioFileBase64).toBeTruthy();
-    expect(resolved.shows[0].audioFileBase64!.length).toBeGreaterThan(100);
-    expect(resolved.shows[0].tracks[0].items[0].audioFileBase64).toBeTruthy();
-    expect(resolved.shows[0].tracks[0].items[0].audioFileBase64!.length).toBeGreaterThan(100);
+    // La lecture paresseuse retrouve l'audio depuis les blobs du fichier.
+    const presetUrl = await resolveAudioUrl(resolved.presets[0], getFromFile);
+    expect(presetUrl).toBeTruthy();
+    expect(presetUrl!.length).toBeGreaterThan(100);
+
+    const showUrl = await resolveAudioUrl(resolved.shows[0], getFromFile);
+    expect(showUrl).toBeTruthy();
+    expect(showUrl!.length).toBeGreaterThan(100);
+    expect(resolved.shows[0].tracks[0].items[0].audioFileBase64).toBeUndefined();
+    const itemUrl = await resolveAudioUrl(resolved.shows[0].tracks[0].items[0], getFromFile);
+    expect(itemUrl).toBeTruthy();
+    expect(itemUrl!.length).toBeGreaterThan(100);
 
     // Vérifie que les données audio sont décodables en base64
-    const decoded = Buffer.from(resolved.presets[0].audioFileBase64!, 'base64');
+    const decoded = Buffer.from(presetUrl!, 'base64');
     expect(decoded.length).toBeGreaterThan(0);
     // Vérifie l'identité binaire : les octets décodés du fichier correspondent
     // exactement aux octets d'origine du blob (on extrait le base64 brut du data URL)
@@ -183,7 +195,13 @@ describe('E2E .lmproj autonome — cycle Export → Transport → Import', () =>
       [],
       getWithFallback,
     );
-    expect(resolved.presets[0].audioFileBase64).toBeTruthy();
-    expect(resolved.presets[0].audioFileBase64!.length).toBeGreaterThan(100);
+    // Le store garde la RÉFÉRENCE (pas de base64 → pas d'OOM au chargement),
+    // la lecture paresseuse retrouve le blob via resolveAudioUrl.
+    expect(resolved.presets[0].audioRef).toBeTruthy();
+    expect(resolved.presets[0].audioFileBase64).toBeUndefined();
+
+    const url = await resolveAudioUrl(resolved.presets[0], getWithFallback);
+    expect(url).toBeTruthy();
+    expect(url!.length).toBeGreaterThan(100);
   });
 });

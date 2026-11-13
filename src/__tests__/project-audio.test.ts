@@ -74,20 +74,27 @@ describe('project-audio — externalisation des blobs du .lmproj', () => {
     expect(blobs[0].audioFileBase64).toBe(audio);
   });
 
-  it('resolveProjectAudio : v1 en clair passe tel quel, audioRef résolu, ref manquante -> undefined', async () => {
+  it('resolveProjectAudio : v1 en clair passe tel quel, v2 garde l\'audioRef (résolution paresseuse)', async () => {
     const stored: Record<string, any> = { 'audio-abc': { audioFileBase64: 'QUJD' } };
     const get = async (k: string) => stored[k];
     const presets = [
       { id: 'p1', audioFileBase64: 'REVG' }, // v1
-      { id: 'p2', audioRef: 'audio-abc' }, // v2 résolu
+      { id: 'p2', audioRef: 'audio-abc' }, // v2 → référence conservée
       { id: 'p3', audioRef: 'audio-missing' }, // blob absent
     ];
     const shows = [{ id: 's1', tracks: [{ id: 'tr1', items: [{ id: 'i1', audioRef: 'audio-abc' }] }] }];
     const { presets: outP, shows: outS } = await resolveProjectAudio(presets, shows, get);
+    // v1 : base64 en clair conservé tel quel
     expect(outP[0].audioFileBase64).toBe('REVG');
-    expect(outP[1].audioFileBase64).toBe('QUJD');
-    expect(outP[2].audioFileBase64).toBeUndefined();
-    expect(outS[0].tracks[0].items[0].audioFileBase64).toBe('QUJD');
+    // v2 : PAS d'hydratation (le base64 de 55 Mo resterait en mémoire → OOM).
+    // La référence est conservée ; la lecture paresseuse la résout.
+    expect(outP[1].audioFileBase64).toBeUndefined();
+    expect(outP[1].audioRef).toBe('audio-abc');
+    expect(outP[2].audioRef).toBe('audio-missing');
+    expect(outS[0].tracks[0].items[0].audioFileBase64).toBeUndefined();
+    expect(outS[0].tracks[0].items[0].audioRef).toBe('audio-abc');
+    // …et la résolution paresseuse retrouve bien l'audio
+    expect(await resolveAudioUrl(outP[1], get)).toBe('QUJD');
   });
 
   it('data URLs réels : hash sur la partie base64, blob stocké complet (format QuickShowView/PerformanceView)', async () => {
@@ -163,9 +170,16 @@ describe('project-audio — externalisation des blobs du .lmproj', () => {
       has: async (k: string) => Object.prototype.hasOwnProperty.call(storageMap, k),
     };
     await writeAudioBlobs(blobs, storage);
-    const { presets: backP, shows: backS } = await resolveProjectAudio(slimP, slimS, async (k) => storageMap[k]);
-    expect(backP[0].audioFileBase64).toBe(audio);
-    expect(backS[0].audioFileBase64).toBe(audio);
-    expect(backS[0].tracks[0].items[0].audioFileBase64).toBe(audio);
+    const get = async (k: string) => storageMap[k];
+    const { presets: backP, shows: backS } = await resolveProjectAudio(slimP, slimS, get);
+    // Le store garde la RÉFÉRENCE (pas de base64 en mémoire → pas d'OOM) ;
+    // la lecture paresseuse (resolveAudioUrl) retrouve l'audio.
+    expect(backP[0].audioFileBase64).toBeUndefined();
+    expect(backP[0].audioRef).toBeTruthy();
+    expect(backS[0].audioFileBase64).toBeUndefined();
+    expect(backS[0].tracks[0].items[0].audioFileBase64).toBeUndefined();
+    expect(await resolveAudioUrl(backP[0], get)).toBe(audio);
+    expect(await resolveAudioUrl(backS[0], get)).toBe(audio);
+    expect(await resolveAudioUrl(backS[0].tracks[0].items[0], get)).toBe(audio);
   });
 });

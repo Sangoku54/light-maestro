@@ -229,8 +229,10 @@ interface LightMaestroAPI {
     saveFile: (filters: any[], defaultName: string, content: string) => Promise<{ filePath: string; name: string } | null>;
   };
   project: {
-    save: (payload: { content: string; blobs?: { key: string; audioFileBase64: string }[] }) => Promise<string | { filePath: string } | null | false>;
-    open: () => Promise<{ content: string; filePath: string; blobs?: { key: string; audioFileBase64: string }[] } | null>;
+    // Protocole streaming : on transmet le manifeste + la liste des CLÉS de
+    // blobs audio (jamais le base64 → pas d'OOM sur machine peu mémoire).
+    save: (payload: { content: string; blobKeys?: string[] }) => Promise<string | { filePath: string } | null | false>;
+    open: () => Promise<{ content: string; filePath: string; blobKeys?: string[] } | null>;
   };
   presets: {
     save: (presets: any[]) => Promise<void>;

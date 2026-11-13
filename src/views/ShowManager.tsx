@@ -16,6 +16,7 @@ import { generateEfxPanTilt } from '../hooks/fixture-tracks';
 import { crossfadeSceneChannels, holdMissingChannels } from '../hooks/dmx-playback';
 import { sendChannelsToHardware } from '../utils/dmx-helpers';
 import { collectCustomFixtureDefs, importCustomFixtureDefs } from '../utils/custom-fixtures';
+import { resolveAudioUrl } from '../utils/project-audio';
 import { sceneTouchesFixture } from '../utils/scene-fixtures';
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -208,6 +209,23 @@ export const ShowManager: React.FC = () => {
     const startedAudios = startedAudiosRef.current;
     startedAudios.clear();
 
+    // URLs audio résolues par item (base64 direct OU blob audioRef relu du
+    // userData). Résolu UNE fois avant la lecture (le tick RAF reste
+    // synchrone).
+    const itemAudioUrls = new Map<string, string>();
+    {
+      void (async () => {
+        for (const track of trackItems) {
+          if (track.type !== 'audio') continue;
+          for (const item of track.items) {
+            const url = (item as any).audioFileBase64
+              || ((item as any).audioRef ? await resolveAudioUrl(item as any) : null);
+            if (url) itemAudioUrls.set(item.id, url);
+          }
+        }
+      })();
+    }
+
     const tick = () => {
       const currentMs = performance.now() - playStartRef.current;
       playheadTimeRef.current = currentMs;
@@ -249,10 +267,14 @@ export const ShowManager: React.FC = () => {
           else if (elapsed > fadeOutStart && item.fadeOut > 0) intensity = 1 - (elapsed - fadeOutStart) / item.fadeOut;
 
           // ── Audio Track Item ──
-          if (track.type === 'audio' && item.audioFileBase64 && !startedAudios.has(item.id)) {
+          // L'audio peut être en base64 direct OU référencé (audioRef → userData).
+          // La résolution PARESSEUSE a été faite au preload (itemAudioUrls) :
+          // le blob n'est chargé qu'au moment où l'item est joué.
+          const itemAudioUrl = itemAudioUrls.get(item.id);
+          if (track.type === 'audio' && itemAudioUrl && !startedAudios.has(item.id)) {
             startedAudios.add(item.id);
             const audioOffsetSec = Math.max(0, elapsed) / 1000;
-            getAudioBuffer(item.audioFileBase64).then((buffer) => {
+            getAudioBuffer(itemAudioUrl).then((buffer) => {
               if (playheadTimeRef.current < itemStart || playheadTimeRef.current > itemEnd) return; // already past
               const ctx = audioCtxRef.current;
               if (!ctx || ctx.state === 'closed') return;
@@ -777,10 +799,13 @@ export const ShowManager: React.FC = () => {
     audioTracks.forEach(async (track) => {
       for (const item of track.items) {
         if (cancelled) return;
-        if (!item.audioFileBase64) continue;
+        // L'audio peut être en base64 direct OU référencé (audioRef → userData).
+        const audioUrl = (item as any).audioFileBase64
+          || ((item as any).audioRef ? await resolveAudioUrl(item as any) : null);
+        if (!audioUrl) continue;
         if (trackWaveformsRef.current.has(item.id)) continue; // already loaded
         try {
-          const buffer = await getAudioBuffer(item.audioFileBase64);
+          const buffer = await getAudioBuffer(audioUrl);
           if (cancelled) return;
           const channel = buffer.getChannelData(0);
           const bins = 500;

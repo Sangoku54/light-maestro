@@ -332,13 +332,22 @@ const VirtualConsolePanel: React.FC = () => {
     };
     void preloadDefs();
 
+    // URLs audio résolues par item (base64 direct OU blob audioRef relu du
+    // userData). Résolu UNE fois au démarrage du show (le tick RAF reste
+    // synchrone) et chargé dans le cache AudioBuffer.
+    const itemAudioUrls = new Map<string, string>();
+
     // Preload audio buffers so fetch() doesn't block the RAF loop
     const preloadAudio = async () => {
       for (const track of showData.tracks) {
         if (track.type !== 'audio') continue;
         for (const item of track.items) {
-          if (item.audioFileBase64 && !audioBuffers.has(item.audioFileBase64)) {
-            try { await getAudioBuffer(item.audioFileBase64); } catch {}
+          const url = (item as any).audioFileBase64
+            || ((item as any).audioRef ? await resolveAudioUrl(item as any) : null);
+          if (!url) continue;
+          itemAudioUrls.set(item.id, url);
+          if (!audioBuffers.has(url)) {
+            try { await getAudioBuffer(url); } catch {}
           }
         }
       }
@@ -405,9 +414,13 @@ const VirtualConsolePanel: React.FC = () => {
           else if (elapsed > fadeOutStart && item.fadeOut > 0) intensity = 1 - (elapsed - fadeOutStart) / item.fadeOut;
 
           // Audio
-          if (track.type === 'audio' && item.audioFileBase64 && !pb.startedAudios.has(item.id)) {
+          // L'audio peut être en base64 direct OU référencé (audioRef → userData).
+          // La résolution PARESSEUSE a été faite au preload (itemAudioUrls) :
+          // le blob n'est chargé qu'au moment où l'item est joué.
+          const itemAudioUrl = itemAudioUrls.get(item.id);
+          if (track.type === 'audio' && itemAudioUrl && !pb.startedAudios.has(item.id)) {
             pb.startedAudios.add(item.id);
-            getAudioBuffer(item.audioFileBase64).then((buffer) => {
+            getAudioBuffer(itemAudioUrl).then((buffer) => {
               if (!showPlaybackRef.current) return;
               // Lazy-init the AudioContext: it was never created before, so
               // show audio never played while the lights (scene/chaser/efx
@@ -1299,7 +1312,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                     <option value="">— Select Song Preset —</option>
                     {songPresets.map((sp) => (
                       <option key={sp.id} value={sp.id}>
-                        {(sp.audioFileBase64) ? '🔊' : '🔇'} {sp.name}{sp.trackAnalysis?.duration ? ` (${Math.floor(sp.trackAnalysis.duration / 60)}:${Math.floor(sp.trackAnalysis.duration % 60).toString().padStart(2, '0')})` : ''}
+                        {(sp.audioFileBase64 || sp.audioRef) ? '🔊' : '🔇'} {sp.name}{sp.trackAnalysis?.duration ? ` (${Math.floor(sp.trackAnalysis.duration / 60)}:${Math.floor(sp.trackAnalysis.duration % 60).toString().padStart(2, '0')})` : ''}
                       </option>
                     ))}
                   </select>
@@ -2182,8 +2195,7 @@ const VCButtonWidget: React.FC<{
           if (p.songPresets) s.setSongPresets(p.songPresets);
           // Restore QuickShow data from .lmproject format
           if (p.quickShow) (window as any).__lm_setQuickShow?.(p.quickShow);
-          if (p.audioFileBase64 && p.audioFileName) {
-            try {
+          if (p.audioFileBase64 && p.audioFileName) {            try {
               const resp = await fetch(p.audioFileBase64);
               const blob = await resp.blob();
               const file = new File([blob], p.audioFileName, { type: 'audio/wav' });

@@ -106,6 +106,7 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     // = data URL complète) — sinon le plafond de string V8 est déplacé, pas
     // supprimé.
     const widgetBlobs: ExtractedBlob[] = [];
+    const widgetBlobKeys: string[] = [];
     const widgets: any[] = [];
     for (const w of perfState.vcWidgets) {
       let out: any = w;
@@ -119,19 +120,14 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
         try {
           const key = await audioKeyOf(audioDataUrl);
           widgetBlobs.push({ key, audioFileBase64: audioDataUrl });
+          widgetBlobKeys.push(key);
           out = { ...out, config: { ...out.config, audioDataUrl: undefined, audioRef: key } };
         } catch { /* champ illisible → conservé tel quel */ }
       } else if (typeof existingRef === 'string' && existingRef.length > 0) {
-        // Audio déjà externalisé (session précédente) : PRÉSERVER la référence
-        // et ré-empaqueter le blob relu depuis le userData, sinon le widget
-        // perd son audio à la sauvegarde (symétrique des songPresets).
-        try {
-          const stored = await window.lightMaestro?.storage?.get?.(existingRef);
-          const b64 = typeof stored === 'string' ? stored : stored?.audioFileBase64;
-          if (typeof b64 === 'string' && b64.length > 0) {
-            widgetBlobs.push({ key: existingRef, audioFileBase64: b64 });
-          }
-        } catch { /* blob absent → la référence reste, lecture silencieuse */ }
+        // Audio déjà externalisé : le blob est dans le userData, le main
+        // process le lira sur disque au pack de l'enveloppe. On ne le relit
+        // PAS ici (55 Mo de base64 dans le renderer → OOM).
+        widgetBlobKeys.push(existingRef);
       }
       widgets.push(out);
     }
@@ -145,23 +141,13 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     // sauvegarde échoue silencieusement (plus de sauvegarde possible après
     // ~8 presets paramétrés dans des widgets).
     const storage = window.lightMaestro?.storage;
-    // Lecture d'un blob déjà externalisé dans le userData local : permet de
-    // RE-EMPAQUETER le blob dans l'enveloppe .lmproj au lieu de le perdre.
-    // (un preset dont l'audio a été externalisé lors d'une session précédente
-    //  n'a plus de base64 en mémoire : sans cette relecture, son audioRef était
-    //  supprimé à la sauvegarde et le son disparaissait au rechargement)
-    const getStoredBlob = async (key: string): Promise<string | undefined> => {
-      if (!storage?.get) return undefined;
-      try {
-        const stored = await storage.get(key);
-        const b64 = stored?.audioFileBase64;
-        return typeof b64 === 'string' && b64.length > 0 ? b64 : undefined;
-      } catch { return undefined; }
-    };
-    const { presets: songPresetsOut, shows: showsOut, blobs } = await externalizeProjectAudio(
+    // Externalise les blobs audio : le store garde des RÉFÉRENCES (audioRef),
+    // le contenu vit dans le userData et est lu à la demande par le main
+    // process au moment de packer l'enveloppe .lmproj (jamais de base64 de
+    // 55 Mo × N dans le renderer → OOM sur machine peu mémoire).
+    const { presets: songPresetsOut, shows: showsOut, blobs, blobKeys } = await externalizeProjectAudio(
       showState.songPresets ?? [],
       showState.shows ?? [],
-      getStoredBlob,
     );
     const data = {
       schemaVersion: 1,
@@ -200,10 +186,12 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     };
 
     const allBlobs = [...blobs, ...widgetBlobs];
+    // Toutes les clés à embarquer dans l'enveloppe .lmproj : les blobs neufs
+    // (contenu en mémoire) ET ceux déjà externalisés (déjà dans le userData).
+    const allBlobKeys = Array.from(new Set([...blobKeys, ...widgetBlobKeys]));
     const writeBlobs = async () => {
       if (storage?.set && storage?.has) await writeAudioBlobs(allBlobs, storage);
     };
-
     if (options.silent) {
       // No dialog: persist the full snapshot to the stable autosave slot.
       // NOTE: does NOT mark the project clean — only an explicit save (Ctrl+S /
@@ -235,7 +223,7 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     }
     const saved = await projectApi.save({
       content: json,
-      blobs: stripUncloneable(allBlobs),
+      blobKeys: allBlobKeys,
     });
     if (saved) {
       useAppStore.getState().markClean();
@@ -439,45 +427,24 @@ const App: React.FC = () => {
           useAppStore.getState().setProjectName(fileName || 'Sans titre');
         }
         const ss = useShowStore.getState();
-        // Résout les blobs audio AVANT l'hydratation des stores — les widgets
-        // sont montés ensuite et doivent trouver leurs shows/presets complets.
+        // PROTOCOLE STREAMING : le main process a écrit les blobs audio de
+        // l'enveloppe DIRECTEMENT dans le userData (un par un) et ne renvoie
+        // que le manifeste + la liste des clés. Le renderer ne materialise
+        // donc JAMAIS 55 Mo × N de base64 → pas d'OOM au chargement.
         //
-        // Depuis l'enveloppe binaire autonome, l'audio est embarqué DANS le
-        // .lmproj (result.blobs = [{key, audioFileBase64}] via le main process).
-        // Rétro-compat : un ancien .lmproj JSON pur renvoie blobs=[] → on
-        // retombe sur les blobs externalisés du userData local (même logique
-        // qu'avant). L'ordre de résolution : enveloppe d'abord, puis storage.
+        // Le store garde des RÉFÉRENCES (audioRef) ; le blob est relu à la
+        // demande au moment de la lecture (resolveAudioUrl → storage.get).
         const storageApi = window.lightMaestro?.storage;
-        const fileBlobMap = new Map<string, string>();
-        for (const b of result.blobs ?? []) {
-          if (b && typeof b.key === 'string' && typeof b.audioFileBase64 === 'string') {
-            fileBlobMap.set(b.key, b.audioFileBase64);
-          }
-        }
         const getAudio = async (key: string): Promise<string | undefined> => {
-          if (fileBlobMap.has(key)) return fileBlobMap.get(key);
           if (storageApi?.get) {
             try {
               const stored = await storageApi.get(key);
-              const b64 = stored?.audioFileBase64;
+              const b64 = typeof stored === 'string' ? stored : stored?.audioFileBase64;
               return typeof b64 === 'string' ? b64 : undefined;
             } catch { return undefined; }
           }
           return undefined;
         };
-        // Écriture traversante des blobs de l'enveloppe vers userData
-        // (skip si déjà stocké) : la résolution à la lecture (ref->hit) et
-        // les futurs rechargements retrouvent l'audio même sans le fichier.
-        if (fileBlobMap.size > 0 && storageApi?.set && storageApi?.has) {
-          void (async () => {
-            try {
-              await writeAudioBlobs(
-                Array.from(fileBlobMap.entries()).map(([key, audioFileBase64]) => ({ key, audioFileBase64 })),
-                storageApi,
-              );
-            } catch { /* cache local best-effort */ }
-          })();
-        }
 
         let resolvedShows: any[] = [];
         let resolvedPresets: any[] = [];
