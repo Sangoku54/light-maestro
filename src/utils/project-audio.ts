@@ -89,7 +89,9 @@ export async function resolveWidgetAudio(
       if (!w?.config?.audioRef) return w;
       try {
         const stored = await get(w.config.audioRef);
-        const url = stored?.audioFileBase64;
+        // Le getter peut renvoyer une string base64 brute (enveloppe .lmproj)
+        // ou un objet { audioFileBase64 } (storage userData).
+        const url = typeof stored === 'string' ? stored : stored?.audioFileBase64;
         if (typeof url === 'string') {
           const { audioRef: _r, ...rest } = w.config;
           return { ...w, config: { ...rest, audioDataUrl: url } };

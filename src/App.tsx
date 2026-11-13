@@ -113,12 +113,25 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
         const { showData, ...rest } = out.config;
         out = { ...out, config: { ...rest, showId: showData.id, showName: showData.name } };
       }
-      if (typeof out.config?.audioDataUrl === 'string' && out.config.audioDataUrl.length >= 1024) {
+      const audioDataUrl = out.config?.audioDataUrl;
+      const existingRef = out.config?.audioRef;
+      if (typeof audioDataUrl === 'string' && audioDataUrl.length >= 1024) {
         try {
-          const key = await audioKeyOf(out.config.audioDataUrl);
-          widgetBlobs.push({ key, audioFileBase64: out.config.audioDataUrl });
+          const key = await audioKeyOf(audioDataUrl);
+          widgetBlobs.push({ key, audioFileBase64: audioDataUrl });
           out = { ...out, config: { ...out.config, audioDataUrl: undefined, audioRef: key } };
         } catch { /* champ illisible → conservé tel quel */ }
+      } else if (typeof existingRef === 'string' && existingRef.length > 0) {
+        // Audio déjà externalisé (session précédente) : PRÉSERVER la référence
+        // et ré-empaqueter le blob relu depuis le userData, sinon le widget
+        // perd son audio à la sauvegarde (symétrique des songPresets).
+        try {
+          const stored = await window.lightMaestro?.storage?.get?.(existingRef);
+          const b64 = typeof stored === 'string' ? stored : stored?.audioFileBase64;
+          if (typeof b64 === 'string' && b64.length > 0) {
+            widgetBlobs.push({ key: existingRef, audioFileBase64: b64 });
+          }
+        } catch { /* blob absent → la référence reste, lecture silencieuse */ }
       }
       widgets.push(out);
     }

@@ -24,7 +24,7 @@ import { generateLoopLibrary, loopToRecipe, LOOP_KIND_ORDER, type AutoLoop, type
 import { toAutoloopFixtures } from '../engine/autoloop-runtime';
 import { buildThemedBanks, BANK_THEMES } from '../engine/autoloop-themes';
 import type { BankManager } from '../engine/autoloop-banks';
-import { preloadAudioUrl, decodeAudioUrl } from '../utils/audio-cache';
+import { preloadAudioUrl, decodeAudioUrl, normalizeAudioUrl } from '../utils/audio-cache';
 import { generateEfxPanTilt } from '../hooks/fixture-tracks';
 import { resolveAudioUrl, audioKeyOf } from '../utils/project-audio';
 import { importCustomFixtureDefs } from '../utils/custom-fixtures';
@@ -2290,7 +2290,9 @@ const VCButtonWidget: React.FC<{
           let analysis = (config as any).audioAnalysis;
           if (!analysis?.sections?.length) {
             console.log('[VC] play: re-analyzing audio');
-            const resp = await fetch(config.audioDataUrl);
+            // L'audio réhydraté depuis l'enveloppe .lmproj est du base64 NU
+            // (pas une data URL) → fetch() échouerait sans normalisation.
+            const resp = await fetch(normalizeAudioUrl(config.audioDataUrl) as string);
             const buf = await resp.arrayBuffer();
             const ctx = new AudioContext();
             const ab = await ctx.decodeAudioData(buf);
