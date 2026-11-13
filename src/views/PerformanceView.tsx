@@ -2487,9 +2487,9 @@ const VCButtonWidget: React.FC<{
         : p);
       store.setSongPresets(updated);
 
-      // Écrire immédiatement le blob dans le userData pour persistance
-      // (le flux de sauvegarde appelle writeAudioBlobs en fire-and-forget,
-      //  si on ferme l'app juste après, le blob n'est pas encore dans IndexedDB)
+      // Écrire immédiatement le blob dans userData avec la clé audio-<hash>
+      // (même clé que externalizeProjectAudio générera à la sauvegarde,
+      //  garantissant la cohérence entre écriture immédiate et save du projet)
       const storage = window.lightMaestro?.storage;
       if (storage?.set && storage?.has) {
         try {
@@ -2508,6 +2508,7 @@ const VCButtonWidget: React.FC<{
       useAppStore.getState().markDirty();
 
       setAudioStatus('ok');
+      console.warn(`[ReassignAudio] preset "${songId}" audio ré-associé depuis ${file.name}`);
     } catch (err) {
       console.error('[ReassignAudio] Échec de lecture du fichier audio:', err);
     }
