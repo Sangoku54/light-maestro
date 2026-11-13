@@ -2518,7 +2518,7 @@ const VCButtonWidget: React.FC<{
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onClick={handleClick}
-        className="w-full h-full rounded-xl border-2 font-medium text-xs flex items-center justify-center transition-all select-none"
+        className="w-full h-full rounded-xl border-2 font-medium text-xs flex items-center justify-center transition-all select-none relative"
         style={{
           backgroundColor: active ? `${color}30` : `${color}10`,
           borderColor: active ? `${color}80` : `${color}30`,
@@ -2531,14 +2531,7 @@ const VCButtonWidget: React.FC<{
             ? config.label
             : config.actionType === 'audioAutoScript' ? (config.audioFileName ? `♪ ${config.audioFileName}` : '♪ Audio Auto') :
            config.actionType === 'loadShow' ? (config.showName || '📂 Load Show') :
-           config.actionType === 'playSong' ? (
-    <>
-      {getSongLabel()}
-      {audioStatus === 'missing' && (
-        <button onClick={handleReassignAudio} className="ml-1 text-[9px] text-orange-400 hover:text-orange-300 bg-orange-600/10 rounded px-1 py-0">🔧</button>
-      )}
-    </>
-  ) :
+           config.actionType === 'playSong' ? getSongLabel() :
            config.actionType === 'blackout' ? t('perform.vc.blackoutLabel') :
            config.actionType === 'grandMaster' ? `GM ${config.grandMasterValue ?? 0}` :
            config.actionType === 'dmxChannel' ? `CH ${config.dmxAddress || '–'} → ${config.dmxValue ?? 255}` :
@@ -2549,6 +2542,9 @@ const VCButtonWidget: React.FC<{
               : '🎛 Banque pré-programmée') :
            scenes.find((s) => s.id === config.sceneId)?.name || 'Button'}
         </span>
+        {config.actionType === 'playSong' && audioStatus === 'missing' && (
+          <button onClick={handleReassignAudio} className="absolute top-1 right-1 text-[9px] text-orange-400 hover:text-orange-300 bg-orange-600/10 rounded px-1 py-0">🔧</button>
+        )}
       </button>
 
       {/* 3D view shortcut — visible when widget is active */}
