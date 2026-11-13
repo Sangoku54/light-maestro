@@ -1946,16 +1946,39 @@ const VCButtonWidget: React.FC<{
   const playIntentRef = useRef(false);
   const [songPlayer, setSongPlayer] = useState<SongPreset | null>(null);
   const unregisterAudioRef = useRef<(() => void) | null>(null);
+  const [audioStatus, setAudioStatus] = useState<'ok' | 'missing' | 'unknown'>('unknown');
+
+  const { config } = widget;
+  const color = config.color || '#a855f7';
+  const isFlash = config.flashMode === 'flash';
+  const [reassignAudio, setReassignAudio] = useState(false);
+
+  // Vérifier si l'audio du preset est réellement résolu (direct ou via audioRef → userData)
+  useEffect(() => {
+    if (config.actionType !== 'playSong' || !config.songId) {
+      setAudioStatus('unknown');
+      return;
+    }
+    const sp = findBestSongPreset(songPresets, config.songId, config.songName);
+    if (!sp) { setAudioStatus('missing'); return; }
+
+    const direct = sp.audioFileBase64;
+    if (direct) { setAudioStatus('ok'); return; }
+
+    if (sp.audioRef) {
+      resolveAudioUrl(sp).then(url => {
+        setAudioStatus(url ? 'ok' : 'missing');
+      }).catch(() => setAudioStatus('missing'));
+    } else {
+      setAudioStatus('missing');
+    }
+  }, [config.actionType, config.songId, config.songName, songPresets]);
 
   // La LED de la tuile suit l'état réel du runtime partagé (clic, MIDI,
   // fin naturelle d'une scène) — le run survit au changement de page.
   useEffect(() => vcOnRunChange((id, running) => {
     if (id === widget.id) setActive(running);
   }), [widget.id]);
-
-  const { config } = widget;
-  const color = config.color || '#a855f7';
-  const isFlash = config.flashMode === 'flash';
 
   const getChaserLabel = () => {
     if (config.actionType !== 'chaser' || !config.chaserId) return 'Chaser';
@@ -1966,7 +1989,9 @@ const VCButtonWidget: React.FC<{
   const getSongLabel = () => {
     if (config.actionType !== 'playSong' || !config.songId) return '♪ Song';
     const sp = findBestSongPreset(songPresets, config.songId, config.songName);
-    return sp ? `♪ ${sp.name}` : (config.songName ? `♪ ${config.songName}` : '♪ Song');
+    if (!sp) return '♪ Song';
+    const icon = audioStatus === 'ok' ? '🔊' : audioStatus === 'missing' ? '🔇' : '⏳';
+    return `${icon} ${sp.name}`;
   };
 
   // Pre-decode the preset's audio while the widget is idle (before any
@@ -2424,6 +2449,50 @@ const VCButtonWidget: React.FC<{
     }
   };
 
+  // ── Ré-association audio : input file caché + sélection ──
+  const reassignFileRef = useRef<HTMLInputElement | null>(null);
+
+  const readFileAsBase64 = useCallback((file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }, []);
+
+  const handleReassignAudio = useCallback(() => {
+    reassignFileRef.current?.click();
+  }, []);
+
+  const handleAudioFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await readFileAsBase64(file);
+      const marker = ';base64,';
+      const idx = dataUrl.indexOf(marker);
+      const b64 = idx >= 0 ? dataUrl.slice(idx + marker.length) : dataUrl;
+
+      const store = useShowStore.getState();
+      const songId = config.songId;
+      if (!songId) {
+        console.error('[ReassignAudio] Aucun songId sur le widget', widget.id);
+        return;
+      }
+      const presets = store.songPresets;
+      const updated = presets.map((p: any) => p.id === songId
+        ? { ...p, audioFileBase64: b64, audioFileName: file.name, audioRef: undefined }
+        : p);
+      store.setSongPresets(updated);
+      // Forcer le rafraîchissement de l'indicateur audio
+      setAudioStatus('ok');
+      console.warn(`[ReassignAudio] preset "${songId}" audio ré-associé depuis ${file.name}`);
+    } catch (err) {
+      console.error('[ReassignAudio] Échec de lecture du fichier audio:', err);
+    }
+  }, [config.songId, readFileAsBase64]);
+
   return (
     <div
       className="absolute group"
@@ -2462,7 +2531,14 @@ const VCButtonWidget: React.FC<{
             ? config.label
             : config.actionType === 'audioAutoScript' ? (config.audioFileName ? `♪ ${config.audioFileName}` : '♪ Audio Auto') :
            config.actionType === 'loadShow' ? (config.showName || '📂 Load Show') :
-           config.actionType === 'playSong' ? getSongLabel() :
+           config.actionType === 'playSong' ? (
+    <>
+      {getSongLabel()}
+      {audioStatus === 'missing' && (
+        <button onClick={handleReassignAudio} className="ml-1 text-[9px] text-orange-400 hover:text-orange-300 bg-orange-600/10 rounded px-1 py-0">🔧</button>
+      )}
+    </>
+  ) :
            config.actionType === 'blackout' ? t('perform.vc.blackoutLabel') :
            config.actionType === 'grandMaster' ? `GM ${config.grandMasterValue ?? 0}` :
            config.actionType === 'dmxChannel' ? `CH ${config.dmxAddress || '–'} → ${config.dmxValue ?? 255}` :
@@ -2497,6 +2573,15 @@ const VCButtonWidget: React.FC<{
         <div className="w-2 h-2 border-r-2 border-b-2 border-gray-600 absolute bottom-0.5 right-0.5" />
       </div>
 
+      {/* Sélecteur de fichier audio caché (ré-association preset) */}
+      <input
+        ref={reassignFileRef}
+        type="file"
+        accept="audio/*"
+        style={{ display: 'none' }}
+        onChange={handleAudioFileSelected}
+      />
+
       {/* Full live playback of the selected Song Preset */}
       {songPlayer && (
         <SongPresetPlayer
@@ -2508,6 +2593,7 @@ const VCButtonWidget: React.FC<{
           }}
         />
       )}
+
     </div>
   );
 };
