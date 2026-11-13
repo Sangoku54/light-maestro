@@ -282,42 +282,57 @@ function fetchLatestSha(): Promise<string | null> {
 
 function downloadZip(url: string, destPath: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const file = fs.createWriteStream(destPath);
-
-    const doRequest = (requestUrl: string) => {
-      https.get(
+    // Chaque redirection RECRÉE le WriteStream : le réutiliser après un
+    // close() faisait échouer l'écriture (« write after end ») → le badge
+    // « Erreur de mise à jour » alors que GitHub répondait 302.
+    const doRequest = (requestUrl: string, attempt: number) => {
+      if (attempt > 5) { resolve(false); return; }
+      const file = fs.createWriteStream(destPath);
+      const cleanup = () => {
+        try { file.close(); } catch { /* ok */ }
+        try { fs.unlinkSync(destPath); } catch { /* ok */ }
+      };
+      const req = https.get(
         requestUrl,
         {
           headers: { 'User-Agent': 'LightMaestro-OFL-Updater/1.0' },
         },
         (res) => {
           // Follow redirects
-          if (res.statusCode === 301 || res.statusCode === 302) {
+          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
             const redirectUrl = res.headers.location;
-            file.close();
-            try { fs.unlinkSync(destPath); } catch { /* ok */ }
-            if (redirectUrl) {
-              doRequest(redirectUrl);
-            } else {
-              resolve(false);
-            }
+            res.resume(); // vide la réponse pour libérer le socket
+            cleanup();
+            doRequest(redirectUrl, attempt + 1);
             return;
           }
-
+          if (res.statusCode !== 200) {
+            res.resume();
+            cleanup();
+            resolve(false);
+            return;
+          }
           res.pipe(file);
           file.on('finish', () => {
-            file.close();
+            try { file.close(); } catch { /* ok */ }
             resolve(true);
           });
+          file.on('error', () => { cleanup(); resolve(false); });
         }
       ).on('error', () => {
-        file.close();
-        try { fs.unlinkSync(destPath); } catch { /* ok */ }
+        cleanup();
+        resolve(false);
+      });
+      // Le ZIP de la bibliothèque de fixtures fait plusieurs dizaines de Mo :
+      // 60 s suffisent sur une connexion normale, au-delà on abandonne.
+      req.setTimeout(60000, () => {
+        req.destroy();
+        cleanup();
         resolve(false);
       });
     };
 
-    doRequest(url);
+    doRequest(url, 0);
   });
 }
 

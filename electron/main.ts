@@ -1273,12 +1273,27 @@ function setupAutoUpdater(): void {
   });
 
   autoUpdater.on('error', (err) => {
-    console.error('[autoUpdater] Error:', err?.message || err);
-    sendUpdateStatus({ state: 'error', message: err?.message || String(err) });
+    const msg = String(err?.message || err);
+    console.error('[autoUpdater] Error:', msg);
+    // « Aucun canal de mise à jour » n'est PAS une erreur utilisateur :
+    // repo privé sans release publiée, 404, rate limit, token absent… Dans ces
+    // cas on affiche « à jour » au lieu d'un badge d'erreur permanent que
+    // l'utilisateur ne peut pas corriger.
+    const noChannel =
+      /no published versions|404|not found|unauthorized|401|403|rate limit|ETIMEDOUT|ENOTFOUND/i.test(msg);
+    if (noChannel) {
+      sendUpdateStatus({ state: 'not-available' });
+      return;
+    }
+    sendUpdateStatus({ state: 'error', message: msg });
   });
 
   autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-    console.error('[autoUpdater] checkForUpdatesAndNotify failed:', err?.message || err);
+    const msg = String(err?.message || err);
+    console.error('[autoUpdater] checkForUpdatesAndNotify failed:', msg);
+    if (/no published versions|404|not found|unauthorized|401|403|rate limit|ETIMEDOUT|ENOTFOUND/i.test(msg)) {
+      sendUpdateStatus({ state: 'not-available' });
+    }
   });
 }
 
