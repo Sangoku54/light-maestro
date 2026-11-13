@@ -15,6 +15,34 @@ const _bufferCache = new Map<string, AudioBuffer>();
 const _pending = new Map<string, Promise<AudioBuffer>>();
 let _sharedCtx: AudioContext | null = null;
 
+/**
+ * Plafond mémoire du cache des AudioBuffers décodés.
+ *
+ * Un AudioBuffer est en float32 : une chanson de 4 min ≈ 80 Mo. Sans plafond,
+ * jouer 5 presets successivement en laissait 400 Mo en RAM → OOM du renderer
+ * sur machine peu mémoire (Surface) → crash + projet vide. On purge les plus
+ * anciens (insertion order) au-delà du plafond.
+ */
+const MAX_CACHED_BYTES = 256 * 1024 * 1024; // 256 Mo
+const MAX_CACHED_BUFFERS = 6;
+
+function cachedBytes(): number {
+  let total = 0;
+  for (const buf of _bufferCache.values()) {
+    total += buf.length * buf.numberOfChannels * 4;
+  }
+  return total;
+}
+
+/** Purge le cache pour repasser sous le plafond (les plus anciens d'abord). */
+function evictAudioCache(): void {
+  if (_bufferCache.size <= MAX_CACHED_BUFFERS && cachedBytes() <= MAX_CACHED_BYTES) return;
+  for (const [key, buf] of _bufferCache) {
+    _bufferCache.delete(key);
+    if (_bufferCache.size <= MAX_CACHED_BUFFERS && cachedBytes() <= MAX_CACHED_BYTES) break;
+  }
+}
+
 function getSharedCtx(): AudioContext {
   if (!_sharedCtx || _sharedCtx.state === 'closed') {
     _sharedCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -75,6 +103,7 @@ export async function decodeAudioUrl(url: string | undefined | null): Promise<Au
       const ctx = getSharedCtx();
       const buffer = await ctx.decodeAudioData(ab);
       _bufferCache.set(url, buffer);
+      evictAudioCache();
       return buffer;
     } catch {
       return null;

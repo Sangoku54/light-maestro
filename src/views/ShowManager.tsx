@@ -181,6 +181,14 @@ export const ShowManager: React.FC = () => {
     const arrayBuffer = await resp.arrayBuffer();
     const buffer = await ctx.decodeAudioData(arrayBuffer);
     cache.set(hashKey, buffer);
+    // Plafond mémoire : un AudioBuffer float32 ≈ 80 Mo pour une chanson de
+    // 4 min. Sans purge, le designer de show accumule tous les audios → OOM
+    // du renderer sur machine peu mémoire (Surface).
+    while (cache.size > 3) {
+      const oldest = cache.keys().next().value;
+      if (oldest === undefined) break;
+      cache.delete(oldest);
+    }
     return buffer;
   }, [getAudioCtx]);
 
@@ -793,17 +801,24 @@ export const ShowManager: React.FC = () => {
   }, []);
 
   // ── Load waveforms for all audio track items ──
+  // LIMITÉ à 8 items : chaque waveform exige un décodage complet (80 Mo
+  // d'AudioBuffer) → décoder tous les items d'un gros show chargerait
+  // plusieurs Go → OOM du renderer (écran noir + projet vide).
+  const MAX_WAVEFORM_ITEMS = 8;
   useEffect(() => {
     let cancelled = false;
     const audioTracks = trackItems.filter((t) => t.type === 'audio');
+    let budget = MAX_WAVEFORM_ITEMS;
     audioTracks.forEach(async (track) => {
       for (const item of track.items) {
         if (cancelled) return;
+        if (budget <= 0) return;
         // L'audio peut être en base64 direct OU référencé (audioRef → userData).
         const audioUrl = (item as any).audioFileBase64
           || ((item as any).audioRef ? await resolveAudioUrl(item as any) : null);
         if (!audioUrl) continue;
         if (trackWaveformsRef.current.has(item.id)) continue; // already loaded
+        budget--;
         try {
           const buffer = await getAudioBuffer(audioUrl);
           if (cancelled) return;

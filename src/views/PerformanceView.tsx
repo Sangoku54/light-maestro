@@ -251,7 +251,6 @@ const VirtualConsolePanel: React.FC = () => {
     showData: any;
     fixtureDefs: Map<string, any>;
     audioCtx: AudioContext | null;
-    audioBuffers: Map<string, AudioBuffer>;
     audioSources: AudioBufferSourceNode[];
     startedAudios: Set<string>;
   } | null>(null);
@@ -292,18 +291,15 @@ const VirtualConsolePanel: React.FC = () => {
       }
 
     const fixtureDefs = new Map<string, any>();
-    const audioBuffers = new Map<string, AudioBuffer>();
     const audioSources: AudioBufferSourceNode[] = [];
     const startedAudios = new Set<string>();
     const startTime = performance.now();
     let audioCtx: AudioContext | null = null;
 
+    // Utilise le cache global borné (audio-cache) : un Map local garderait
+    // toutes les AudioBuffers du show en RAM (N × 80 Mo) → OOM du renderer.
     const getAudioBuffer = async (b64: string): Promise<AudioBuffer> => {
-      if (audioBuffers.has(b64)) return audioBuffers.get(b64)!;
-      // Use the shared decoded-buffer cache so preloaded audio (widget idle
-      // preload) starts instantly and repeated plays are free.
       const buffer = await decodeAudioUrl(b64);
-      if (buffer) audioBuffers.set(b64, buffer);
       return buffer!;
     };
 
@@ -334,21 +330,19 @@ const VirtualConsolePanel: React.FC = () => {
 
     // URLs audio résolues par item (base64 direct OU blob audioRef relu du
     // userData). Résolu UNE fois au démarrage du show (le tick RAF reste
-    // synchrone) et chargé dans le cache AudioBuffer.
+    // synchrone).
     const itemAudioUrls = new Map<string, string>();
 
-    // Preload audio buffers so fetch() doesn't block the RAF loop
+    // Résolution des URLs (PAS de décodage ici) : décoder tous les items d'un
+    // show au démarrage chargerait N × 80 Mo d'AudioBuffer → OOM. Le décodage
+    // se fait à la lecture, via le cache global borné (audio-cache).
     const preloadAudio = async () => {
       for (const track of showData.tracks) {
         if (track.type !== 'audio') continue;
         for (const item of track.items) {
           const url = (item as any).audioFileBase64
             || ((item as any).audioRef ? await resolveAudioUrl(item as any) : null);
-          if (!url) continue;
-          itemAudioUrls.set(item.id, url);
-          if (!audioBuffers.has(url)) {
-            try { await getAudioBuffer(url); } catch {}
-          }
+          if (url) itemAudioUrls.set(item.id, url);
         }
       }
     };
@@ -546,7 +540,6 @@ const VirtualConsolePanel: React.FC = () => {
       showData,
       fixtureDefs,
       audioCtx: null,
-      audioBuffers,
       audioSources,
       startedAudios,
     };
@@ -1966,7 +1959,9 @@ const VCButtonWidget: React.FC<{
   const isFlash = config.flashMode === 'flash';
   const [reassignAudio, setReassignAudio] = useState(false);
 
-  // Vérifier si l'audio du preset est réellement résolu (direct ou via audioRef → userData)
+  // Vérifier si l'audio du preset est disponible. Pour un preset RÉFÉRENCÉ
+  // (audioRef), on interroge le DISQUE (storage.has → existsSync) au lieu de
+  // charger les 55 Mo de base64 juste pour vérifier (pic mémoire inutile).
   useEffect(() => {
     if (config.actionType !== 'playSong' || !config.songId) {
       setAudioStatus('unknown');
@@ -1978,12 +1973,16 @@ const VCButtonWidget: React.FC<{
     const direct = sp.audioFileBase64;
     if (direct) { setAudioStatus('ok'); return; }
 
-    if (sp.audioRef) {
-      resolveAudioUrl(sp).then(url => {
-        setAudioStatus(url ? 'ok' : 'missing');
-      }).catch(() => setAudioStatus('missing'));
+    const ref = (sp as any).audioRef;
+    if (!ref) { setAudioStatus('missing'); return; }
+
+    const storage = window.lightMaestro?.storage;
+    if (storage?.has) {
+      void storage.has(ref)
+        .then((exists) => setAudioStatus(exists ? 'ok' : 'missing'))
+        .catch(() => setAudioStatus('missing'));
     } else {
-      setAudioStatus('missing');
+      setAudioStatus('unknown');
     }
   }, [config.actionType, config.songId, config.songName, songPresets]);
 
@@ -2010,16 +2009,19 @@ const VCButtonWidget: React.FC<{
   // Pre-decode the preset's audio while the widget is idle (before any
   // click), so playback starts with ~zero audio latency. The decoded
   // AudioBuffer is cached module-wide and reused by SongPresetPlayer.
-  // Résout aussi audioRef (preset externalisé après sauvegarde).
+  //
+  // ATTENTION : on ne pré-décode QUE le base64 déjà en mémoire. Décoder un
+  // blob référencé (audioRef → disque) au mount de chaque widget chargerait
+  // 13 × 55 Mo de base64 ET les AudioBuffers décompressés (float32 ≈ 200 Mo
+  // chacun) → plusieurs Go → OOM du renderer → crash + projet vide.
+  // Le décodage est asynchrone (decodeAudioData) : le cliquer n'est donc pas
+  // gelé, il y a juste un petit délai la première fois.
   useEffect(() => {
     if (config.actionType !== 'playSong') return;
     const sp: any = findBestSongPreset(songPresets, config.songId, config.songName);
     if (!sp) return;
     const direct = sp.audioFileBase64 || sp.audioDataBase64;
-    if (direct) { preloadAudioUrl(direct); return; }
-    if (sp.audioRef) {
-      void resolveAudioUrl(sp).then((url) => { if (url) preloadAudioUrl(url); });
-    }
+    if (direct) { preloadAudioUrl(direct); }
   }, [config.actionType, config.songId, config.songName, songPresets]);
 
   // ─── audioAutoScript playback helper ──────────────────
