@@ -1299,7 +1299,7 @@ const WidgetConfigModal: React.FC<{ widget: ConsoleWidget; onClose: () => void }
                     <option value="">— Select Song Preset —</option>
                     {songPresets.map((sp) => (
                       <option key={sp.id} value={sp.id}>
-                        {sp.name}{sp.trackAnalysis?.duration ? ` (${Math.floor(sp.trackAnalysis.duration / 60)}:${Math.floor(sp.trackAnalysis.duration % 60).toString().padStart(2, '0')})` : ''}
+                        {(sp.audioFileBase64) ? '🔊' : '🔇'} {sp.name}{sp.trackAnalysis?.duration ? ` (${Math.floor(sp.trackAnalysis.duration / 60)}:${Math.floor(sp.trackAnalysis.duration % 60).toString().padStart(2, '0')})` : ''}
                       </option>
                     ))}
                   </select>
