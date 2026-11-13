@@ -26,7 +26,7 @@ import { buildThemedBanks, BANK_THEMES } from '../engine/autoloop-themes';
 import type { BankManager } from '../engine/autoloop-banks';
 import { preloadAudioUrl, decodeAudioUrl } from '../utils/audio-cache';
 import { generateEfxPanTilt } from '../hooks/fixture-tracks';
-import { resolveAudioUrl } from '../utils/project-audio';
+import { resolveAudioUrl, audioKeyOf } from '../utils/project-audio';
 import { importCustomFixtureDefs } from '../utils/custom-fixtures';
 import { timecodeToMs, msToTimecode, isValidTimecode } from '../engine/mtc-markers';
 import { registerMidiWidgetHandler, unregisterMidiWidgetHandler } from '../engine/midi-actions';
@@ -2486,9 +2486,28 @@ const VCButtonWidget: React.FC<{
         ? { ...p, audioFileBase64: b64, audioFileName: file.name, audioRef: undefined }
         : p);
       store.setSongPresets(updated);
-      // Forcer le rafraîchissement de l'indicateur audio
+
+      // Écrire immédiatement le blob dans le userData pour persistance
+      // (le flux de sauvegarde appelle writeAudioBlobs en fire-and-forget,
+      //  si on ferme l'app juste après, le blob n'est pas encore dans IndexedDB)
+      const storage = window.lightMaestro?.storage;
+      if (storage?.set && storage?.has) {
+        try {
+          const key = await audioKeyOf(b64);
+          const exists = await storage.has(key);
+          if (!exists) {
+            await storage.set(key, { audioFileBase64: b64 });
+            console.warn('[ReassignAudio] blob écrit dans userData:', key);
+          }
+        } catch (e) {
+          console.warn('[ReassignAudio] Échec écriture blob userData:', e);
+        }
+      }
+
+      // Marquer le projet comme modifié pour forcer la sauvegarde du fichier .lmproj
+      useAppStore.getState().markDirty();
+
       setAudioStatus('ok');
-      console.warn(`[ReassignAudio] preset "${songId}" audio ré-associé depuis ${file.name}`);
     } catch (err) {
       console.error('[ReassignAudio] Échec de lecture du fichier audio:', err);
     }
