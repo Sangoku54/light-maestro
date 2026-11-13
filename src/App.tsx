@@ -132,9 +132,23 @@ async function saveProject(options: { silent?: boolean } = {}): Promise<boolean>
     // sauvegarde échoue silencieusement (plus de sauvegarde possible après
     // ~8 presets paramétrés dans des widgets).
     const storage = window.lightMaestro?.storage;
+    // Lecture d'un blob déjà externalisé dans le userData local : permet de
+    // RE-EMPAQUETER le blob dans l'enveloppe .lmproj au lieu de le perdre.
+    // (un preset dont l'audio a été externalisé lors d'une session précédente
+    //  n'a plus de base64 en mémoire : sans cette relecture, son audioRef était
+    //  supprimé à la sauvegarde et le son disparaissait au rechargement)
+    const getStoredBlob = async (key: string): Promise<string | undefined> => {
+      if (!storage?.get) return undefined;
+      try {
+        const stored = await storage.get(key);
+        const b64 = stored?.audioFileBase64;
+        return typeof b64 === 'string' && b64.length > 0 ? b64 : undefined;
+      } catch { return undefined; }
+    };
     const { presets: songPresetsOut, shows: showsOut, blobs } = await externalizeProjectAudio(
       showState.songPresets ?? [],
       showState.shows ?? [],
+      getStoredBlob,
     );
     const data = {
       schemaVersion: 1,

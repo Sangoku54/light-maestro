@@ -109,6 +109,7 @@ export async function resolveWidgetAudio(
 export async function externalizeProjectAudio(
   presets: any[],
   shows: any[],
+  getBlob?: (key: string) => Promise<string | undefined>,
 ): Promise<{ presets: any[]; shows: any[]; blobs: ExtractedBlob[] }> {
   const blobs = new Map<string, ExtractedBlob>();
   const withBlob = async (fields: AudioFields, b?: ExtractedBlob): Promise<AudioFields> => {
@@ -116,13 +117,44 @@ export async function externalizeProjectAudio(
     return fields;
   };
 
+  // Extrait un champ audio d'une entité (preset, show, show track item).
+  // 3 cas :
+  //  1) base64 direct et gros → externalisé (audioRef + blob dans l'enveloppe)
+  //  2) audioRef existant (audio déjà externalisé lors d'une session précédente)
+  //     → PRÉSERVÉ + blob re-empaqueté dans l'enveloppe .lmproj, sinon il est
+  //     perdu à la sauvegarde (l'audio disparaît au rechargement du projet)
+  //  3) base64 direct et petit → gardé en clair
+  const extract = async (fields: any): Promise<AudioFields> => {
+    const direct = fields?.audioFileBase64;
+    const ref = fields?.audioRef;
+    if (typeof direct === 'string' && direct.length >= EXTRACT_MIN_BYTES) {
+      const { value, blob } = await extractAudioField(direct);
+      await withBlob(value, blob);
+      return value;
+    }
+    if (typeof ref === 'string' && ref.length > 0) {
+      let b64: string | undefined;
+      if (getBlob) {
+        try { b64 = await getBlob(ref); } catch { b64 = undefined; }
+      }
+      if (typeof b64 === 'string' && b64.length > 0) {
+        await withBlob({ audioRef: ref }, { key: ref, audioFileBase64: b64 });
+      }
+      return { audioRef: ref };
+    }
+    if (typeof direct === 'string') {
+      // audio petit (ou vide) → gardé en clair, tel quel
+      return { audioFileBase64: direct };
+    }
+    return {};
+  };
+
   // Séquentiel (pas de Promise.all) : le hachage de 8×55 Mo en parallèle
   // pousserait le renderer à ~1 Go de RAM — l'ordre n'importe pas.
   const outPresets: any[] = [];
   for (const p of presets) {
     if (!p || typeof p !== 'object') { outPresets.push(p); continue; }
-    const { value, blob } = await extractAudioField(p.audioFileBase64);
-    await withBlob(value, blob);
+    const value = await extract(p);
     // Supprime le champ audio d'origine (le spread ne le retire pas)
     const { audioFileBase64: _stripped, audioRef: _oldRef, ...rest } = p;
     outPresets.push({ ...rest, ...value });
@@ -131,8 +163,8 @@ export async function externalizeProjectAudio(
   const outShows: any[] = [];
   for (const s of shows) {
     if (!s || typeof s !== 'object') { outShows.push(s); continue; }
-    const { value: sFields, blob: sBlob } = await extractAudioField(s.audioFileBase64);
-    await withBlob(sFields, sBlob);
+    const sFields = await extract(s);
+    await withBlob(sFields);
     const tracks: any[] = [];
     for (const t of Array.isArray(s.tracks) ? s.tracks : []) {
       if (!t || typeof t !== 'object') { tracks.push(t); continue; }
@@ -141,8 +173,8 @@ export async function externalizeProjectAudio(
       const items: any[] = [];
       for (const it of Array.isArray(t.items) ? t.items : []) {
         if (!it || typeof it !== 'object') { items.push(it); continue; }
-        const { value: iFields, blob: iBlob } = await extractAudioField(it.audioFileBase64);
-        await withBlob(iFields, iBlob);
+        const iFields = await extract(it);
+        await withBlob(iFields);
         const { audioFileBase64: _si, audioRef: _iri, ...iRest } = it;
         items.push({ ...iRest, ...iFields });
       }
@@ -169,6 +201,10 @@ export async function resolveProjectAudio(
   const fetchBlob = async (key: string): Promise<string | undefined> => {
     try {
       const stored = await get(key);
+      // Le getter peut renvoyer :
+      //  - une string base64 brute (blobs de l'enveloppe .lmproj)
+      //  - un objet { audioFileBase64 } (storage userData)
+      if (typeof stored === 'string') return stored.length > 0 ? stored : undefined;
       const b64 = stored?.audioFileBase64;
       return typeof b64 === 'string' ? b64 : undefined;
     } catch {
@@ -245,6 +281,9 @@ export async function resolveAudioUrl(
   const getter = get || ((k: string) => (window as any).lightMaestro?.storage?.get?.(k));
   try {
     const stored = await getter(ref);
+    // Le getter peut renvoyer une string base64 brute (enveloppe .lmproj)
+    // ou un objet { audioFileBase64 } (storage userData).
+    if (typeof stored === 'string') return stored.length > 0 ? stored : null;
     const b64 = stored?.audioFileBase64;
     return typeof b64 === 'string' && b64.length > 0 ? b64 : null;
   } catch {
