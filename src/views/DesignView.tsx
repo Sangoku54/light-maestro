@@ -1294,7 +1294,6 @@ const SceneEditor: React.FC = () => {
   const [editFadeOut, setEditFadeOut] = useState(1000);
   const [editDuration, setEditDuration] = useState(5000);
   const [editChannels, setEditChannels] = useState<Record<number, number>>({});
-  const [expandedFixtures, setExpandedFixtures] = useState<Set<string>>(new Set());
   const [fixtureAnalyses, setFixtureAnalyses] = useState<Map<string, AnalyzedFixtureChannels>>(new Map());
   const [testActive, setTestActive] = useState(false);
   // Timeout de fin du test (annulable par le bouton Stop).
@@ -1606,10 +1605,8 @@ const SceneEditor: React.FC = () => {
           for (const [fid, a] of analyses) maps.set(fid, a as unknown as LookChannelMap);
           setFixtureChannelMaps(maps);
         } catch {}
-        // Auto-expand all if no scene is selected yet
-        if (!scene && analyses.size > 0) {
-          setExpandedFixtures(new Set(analyses.keys()));
-        }
+        // (L'auto-déploiement des accordéons a disparu avec la navigation
+        //  par onglets : l'effet « onglet actif » sélectionne la 1ʳᵉ fixture.)
       }
     }
     load();
@@ -1725,18 +1722,8 @@ const SceneEditor: React.FC = () => {
     }
   };
 
-  const toggleExpand = (fixtureId: string) => {
-    setExpandedFixtures((prev) => {
-      const next = new Set(prev);
-      if (next.has(fixtureId)) next.delete(fixtureId);
-      else next.add(fixtureId);
-      return next;
-    });
-  };
-
-  const expandAll = () => setExpandedFixtures(new Set(patchedFixtures.map((f) => f.id)));
-  const collapseAll = () => setExpandedFixtures(new Set());
-  const allExpanded = expandedFixtures.size === patchedFixtures.length && patchedFixtures.length > 0;
+  // (L'ancienne navigation verticale par accordéon — toggleExpand / expandAll /
+  //  collapseAll — a été remplacée par la barre d'onglets ci-dessous.)
 
   const activeChannelCount = Object.values(editChannels).filter((v) => v > 0).length;
 
@@ -1766,6 +1753,65 @@ const SceneEditor: React.FC = () => {
     other: { icon: '⚙️' },
   };
   const TIER_ORDER = TIER_KEYS;
+
+  // ── Navigation par onglets (horizontale) ────────────────────────────────
+  // Remplace la liste verticale d'accordéons : une fixture = un onglet, on
+  // passe d'une fixture à l'autre en un clic (ou Alt+← / Alt+→) sans
+  // défilement vertical.
+  const [activeFixtureId, setActiveFixtureId] = useState<string | null>(null);
+  const [fixtureSearch, setFixtureSearch] = useState('');
+
+  // Liste plate des fixtures dans l'ordre des onglets (tier par tier).
+  const tabFixtures = useMemo(() => {
+    const out: { tier: string; pf: PatchedFixture }[] = [];
+    for (const tierGroup of TIER_ORDER) {
+      for (const pf of fixturesByTier[tierGroup] || []) out.push({ tier: tierGroup, pf });
+    }
+    return out;
+  }, [fixturesByTier, TIER_ORDER]);
+
+  // Recherche : filtre la liste d'onglets (nom / fabricant / modèle).
+  const visibleTabs = useMemo(() => {
+    const q = fixtureSearch.trim().toLowerCase();
+    if (!q) return tabFixtures;
+    return tabFixtures.filter(({ pf }) =>
+      (pf.name || '').toLowerCase().includes(q) ||
+      (pf.manufacturer || '').toLowerCase().includes(q) ||
+      (pf.model || '').toLowerCase().includes(q));
+  }, [tabFixtures, fixtureSearch]);
+
+  // Onglet actif : conserve la fixture courante, sinon prend la 1ʳᵉ visible
+  // (changement de scène, recherche, fixture retirée…).
+  useEffect(() => {
+    if (visibleTabs.length === 0) { setActiveFixtureId(null); return; }
+    if (!activeFixtureId || !visibleTabs.some((t) => t.pf.id === activeFixtureId)) {
+      setActiveFixtureId(visibleTabs[0].pf.id);
+    }
+  }, [visibleTabs, activeFixtureId]);
+
+  // Navigation clavier : Alt+← / Alt+→ passent à la fixture précédente /
+  // suivante sans quitter le clavier (enchaînement rapide des fixtures).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.tagName === 'SELECT')) return;
+      if (visibleTabs.length === 0) return;
+      e.preventDefault();
+      const idx = visibleTabs.findIndex((t) => t.pf.id === activeFixtureId);
+      const next = e.key === 'ArrowRight'
+        ? (idx + 1) % visibleTabs.length
+        : (idx - 1 + visibleTabs.length) % visibleTabs.length;
+      setActiveFixtureId(visibleTabs[next].pf.id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [visibleTabs, activeFixtureId]);
+
+  const activeTabEntry = useMemo(
+    () => visibleTabs.find((t) => t.pf.id === activeFixtureId) || null,
+    [visibleTabs, activeFixtureId],
+  );
 
   // ── If no scene selected, show empty state ──
   if (!scene && patchedFixtures.length === 0) {
@@ -1870,9 +1916,6 @@ const SceneEditor: React.FC = () => {
           <Square size={14} /> {t('stopScene')}
         </button>
         <div className="flex-1" />
-        <button onClick={allExpanded ? collapseAll : expandAll} className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors">
-          {allExpanded ? 'Collapse All' : 'Expand All'}
-        </button>
       </div>
 
       {/* Fixture-based channel editor */}
@@ -1904,7 +1947,9 @@ const SceneEditor: React.FC = () => {
                   const id = e.target.value;
                   if (!id) return;
                   setInvolvedOnly(false);
-                  setExpandedFixtures((prev) => new Set(prev).add(id));
+                  // Ouvre directement l'onglet de la fixture ajoutée
+                  setActiveFixtureId(id);
+                  setFixtureSearch('');
                 }}
                 className="bg-gray-800/60 border border-gray-700 rounded text-[10px] text-gray-300 px-1.5 py-0.5 outline-none focus:border-purple-500/50"
               >
@@ -1915,24 +1960,34 @@ const SceneEditor: React.FC = () => {
               </select>
             )}
           </div>
-        {TIER_ORDER.map((tierGroup) => {
-            const tierFixtures = fixturesByTier[tierGroup] || [];
-            if (tierFixtures.length === 0) return null;
-            return (
-              <TierFixtureSection
-                key={tierGroup}
-                tier={tierGroup}
-                icon={TIER_SECTION_META[tierGroup]?.icon || '⬜'}
-                fixtures={tierFixtures}
-                fixtureAnalyses={fixtureAnalyses}
-                expandedFixtures={expandedFixtures}
-                toggleExpand={toggleExpand}
-                editChannels={editChannels}
-                handleChannelChange={handleChannelChange}
-                allFixtures={patchedFixtures}
-              />
-            );
-          })}
+        {/* ── Navigation par onglets (horizontale) ── */}
+        <FixtureTabsBar
+          tabs={visibleTabs}
+          totalCount={tabFixtures.length}
+          allFixtures={patchedFixtures}
+          tierMeta={TIER_SECTION_META}
+          activeId={activeFixtureId}
+          onSelect={setActiveFixtureId}
+          search={fixtureSearch}
+          onSearch={setFixtureSearch}
+        />
+
+        {/* ── Contrôles de la fixture active ── */}
+        {activeTabEntry && (() => {
+          const pf = activeTabEntry.pf;
+          const analysis = fixtureAnalyses.get(pf.id);
+          const cIdx = patchedFixtures.indexOf(pf);
+          const color = getFixtureColor(cIdx);
+          return (
+            <FixtureChannelPanel
+              fixture={pf}
+              analysis={analysis}
+              color={color}
+              editChannels={editChannels}
+              handleChannelChange={handleChannelChange}
+            />
+          );
+        })()}
         </div>
       )}
       </div>
@@ -1991,108 +2046,141 @@ const SceneEditor: React.FC = () => {
   );
 };
 
-// ─── Tier Fixture Section (Scene Editor) ────────────────
+// ─── Fixture Tabs Bar (navigation horizontale entre fixtures) ─────────────
+//
+// Remplace la liste verticale d'accordéons : un onglet par fixture, triés par
+// tier (séparateurs discrets entre les groupes) puis par nom. La barre est
+// scrollable horizontalement (13+ fixtures aux noms longs) et filtrable.
 
-const TierFixtureSection: React.FC<{
-  tier: string;
-  icon: string;
-  fixtures: PatchedFixture[];
-  fixtureAnalyses: Map<string, AnalyzedFixtureChannels>;
-  expandedFixtures: Set<string>;
-  toggleExpand: (id: string) => void;
-  editChannels: Record<number, number>;
-  handleChannelChange: (address: number, value: number) => void;
+const FixtureTabsBar: React.FC<{
+  tabs: { tier: string; pf: PatchedFixture }[];
+  totalCount: number;
   allFixtures: PatchedFixture[];
-}> = ({ tier, icon, fixtures, fixtureAnalyses, expandedFixtures, toggleExpand, editChannels, handleChannelChange, allFixtures }) => {
-  const [sectionExpanded, setSectionExpanded] = React.useState(true);
-  const tierBadgeColors: Record<string, string> = {
-    primary: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-    secondary: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    tertiary: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+  tierMeta: Record<string, { icon: string }>;
+  activeId: string | null;
+  onSelect: (id: string) => void;
+  search: string;
+  onSearch: (v: string) => void;
+}> = ({ tabs, totalCount, allFixtures, tierMeta, activeId, onSelect, search, onSearch }) => {
+  const activeIndex = tabs.findIndex((t) => t.pf.id === activeId);
+  // Couleur de la pastille : getFixtureColor est indexé sur la liste complète
+  // des fixtures patchées (même repère visuel que le reste de l'app).
+  const colorOf = (pf: PatchedFixture) => {
+    const idx = allFixtures.indexOf(pf);
+    return getFixtureColor(idx >= 0 ? idx : 0);
   };
 
   return (
     <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
-      <button
-        onClick={() => setSectionExpanded((v) => !v)}
-        className="w-full px-4 py-2 flex items-center gap-2 hover:bg-gray-800/10 transition-colors text-left"
-      >
-        <span className="text-sm">{icon}</span>
-        <span className="text-xs font-semibold text-gray-300">{tier.charAt(0).toUpperCase() + tier.slice(1)}</span>
-        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${tierBadgeColors[tier] || tierBadgeColors.primary}`}>
-          {fixtures.length}
-        </span>
-        <div className="flex-1" />
-        <ChevronDown
-          size={14}
-          className={`text-gray-500 transition-transform ${sectionExpanded ? '' : '-rotate-90'}`}
+      {/* Barre de recherche + position */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800/40">
+        <Search size={12} className="text-gray-600 shrink-0" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+          placeholder="Filtrer les projecteurs…"
+          className="flex-1 min-w-0 bg-transparent border-none outline-none text-xs text-gray-300 placeholder-gray-600"
         />
-      </button>
-      {sectionExpanded && (
-        <div className="px-2 pb-2 space-y-2 border-t border-gray-800/30">
-          {fixtures.map((pf) => {
-            const analysis = fixtureAnalyses.get(pf.id);
-            const isExpanded = expandedFixtures.has(pf.id);
-            const cIdx = allFixtures.indexOf(pf);
-            const color = getFixtureColor(cIdx);
+        {activeIndex >= 0 && (
+          <span className="text-[10px] text-gray-500 font-mono shrink-0">
+            {activeIndex + 1}/{tabs.length}
+          </span>
+        )}
+        {tabs.length !== totalCount && (
+          <span className="text-[10px] text-amber-400/80 shrink-0">
+            {tabs.length} sur {totalCount}
+          </span>
+        )}
+      </div>
 
-            return (
-              <div key={pf.id} className="bg-[#12121a] border border-gray-800/30 rounded-lg overflow-hidden">
-                {/* Fixture header */}
-                <button
-                  onClick={() => toggleExpand(pf.id)}
-                  className="w-full px-3 py-2 flex items-center gap-2 hover:bg-gray-800/10 transition-colors text-left"
+      {/* Onglets — scroll horizontal */}
+      <div className="flex items-stretch gap-0 overflow-x-auto px-2 py-1.5">
+        {tabs.length === 0 && (
+          <span className="text-[10px] text-gray-600 px-2 py-1">Aucune fixture ne correspond</span>
+        )}
+        {tabs.map(({ tier, pf }, i) => {
+          const isActive = pf.id === activeId;
+          const prevTier = i > 0 ? tabs[i - 1].tier : null;
+          const color = colorOf(pf);
+          return (
+            <React.Fragment key={pf.id}>
+              {/* Séparateur de groupe (tier) */}
+              {tier !== prevTier && (
+                <div
+                  className="flex items-center gap-1.5 shrink-0 pr-2 mr-1 border-r border-gray-800/60"
+                  title={tier.charAt(0).toUpperCase() + tier.slice(1)}
                 >
-                  <span
-                    className="w-2 h-2 rounded-sm shrink-0"
-                    style={{ backgroundColor: color }}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium text-gray-200 truncate flex items-center gap-1.5">
-                      {pf.name}
-                      {analysis && analysis.dimmerIdx === undefined && (
-                        <span className="text-[8px] px-1 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 shrink-0" title="Pas de canal Dimmer — intensité fixe à 100%">NO DIM</span>
-                      )}
-                      <span className={`inline-block px-1 py-0 rounded text-[8px] ${
-                        pf.tier === 'primary' ? 'bg-purple-500/20 text-purple-400' :
-                        pf.tier === 'secondary' ? 'bg-blue-500/20 text-blue-400' :
-                        pf.tier === 'other' ? 'bg-cyan-500/20 text-cyan-400' :
-                        'bg-gray-500/20 text-gray-400'
-                      }`}>{pf.tier}</span>
-                    </div>
-                    <div className="text-[10px] text-gray-500">
-                      {pf.manufacturer} {pf.model} · {pf.modeName} · @{pf.startAddress}
-                    </div>
-                  </div>
-                  <ChevronDown
-                    size={14}
-                    className={`text-gray-500 transition-transform ${isExpanded ? '' : '-rotate-90'}`}
-                  />
-                </button>
-
-                {/* Channel controls */}
-                {isExpanded && analysis && (
-                  <FixtureChannelEditor
-                    analysis={analysis}
-                    editChannels={editChannels}
-                    handleChannelChange={handleChannelChange}
-                  />
-                )}
-
-                {/* Collapsed or no analysis */}
-                {isExpanded && !analysis && (
-                  <div className="px-3 pb-2 text-xs text-gray-600 border-t border-gray-800/30 pt-2">
-                    Fixture definition not available. Patch mode may be missing.
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+                  <span className="text-[10px]">{tierMeta[tier]?.icon || '⬜'}</span>
+                  <span className="text-[9px] uppercase tracking-wider text-gray-600">{tier}</span>
+                </div>
+              )}
+              <button
+                onClick={() => onSelect(pf.id)}
+                title={`${pf.name} — ${pf.manufacturer} ${pf.model} · @${pf.startAddress}`}
+                className={`shrink-0 px-2.5 py-1.5 rounded-md text-[11px] transition-colors flex items-center gap-1.5 max-w-[190px] ${
+                  isActive
+                    ? 'bg-purple-600/25 text-purple-200 ring-1 ring-purple-500/40'
+                    : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                }`}
+              >
+                <span className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: color }} />
+                <span className="truncate">{pf.name}</span>
+              </button>
+            </React.Fragment>
+          );
+        })}
+      </div>
     </div>
   );
 };
+
+// ─── Fixture Channel Panel (contrôles de la fixture active) ───────────────
+//
+// En-tête de la fixture + ses contrôles de canaux (FixtureChannelEditor,
+// composant existant réutilisé tel quel).
+
+const FixtureChannelPanel: React.FC<{
+  fixture: PatchedFixture;
+  analysis?: AnalyzedFixtureChannels;
+  color: string;
+  editChannels: Record<number, number>;
+  handleChannelChange: (address: number, value: number) => void;
+}> = ({ fixture, analysis, color, editChannels, handleChannelChange }) => (
+  <div className="bg-[#12121a] border border-gray-800/30 rounded-lg overflow-hidden">
+    <div className="px-3 py-2 flex items-center gap-2">
+      <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: color }} />
+      <div className="flex-1 min-w-0">
+        <div className="text-xs font-medium text-gray-200 truncate flex items-center gap-1.5">
+          {fixture.name}
+          {analysis && analysis.dimmerIdx === undefined && (
+            <span className="text-[8px] px-1 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 shrink-0" title="Pas de canal Dimmer — intensité fixe à 100%">NO DIM</span>
+          )}
+          <span className={`inline-block px-1 py-0 rounded text-[8px] shrink-0 ${
+            fixture.tier === 'primary' ? 'bg-purple-500/20 text-purple-400' :
+            fixture.tier === 'secondary' ? 'bg-blue-500/20 text-blue-400' :
+            fixture.tier === 'other' ? 'bg-cyan-500/20 text-cyan-400' :
+            'bg-gray-500/20 text-gray-400'
+          }`}>{fixture.tier}</span>
+        </div>
+        <div className="text-[10px] text-gray-500 truncate">
+          {fixture.manufacturer} {fixture.model} · {fixture.modeName} · @{fixture.startAddress} · {fixture.channelCount} ch
+        </div>
+      </div>
+    </div>
+    {analysis ? (
+      <FixtureChannelEditor
+        analysis={analysis}
+        editChannels={editChannels}
+        handleChannelChange={handleChannelChange}
+      />
+    ) : (
+      <div className="px-3 pb-3 text-xs text-gray-600 border-t border-gray-800/30 pt-2">
+        Fixture definition not available. Patch mode may be missing.
+      </div>
+    )}
+  </div>
+);
 
 // ─── Fixture Channel Editor (extracted from SceneEditor) ──
 
