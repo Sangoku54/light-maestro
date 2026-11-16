@@ -877,10 +877,10 @@ export const Stage3D: React.FC<{
   }, []);
    const [showFixtureList, setShowFixtureList] = useState(false);
    const [fixtureSearch, setFixtureSearch] = useState('');
-   // Panneau fixtures ouvert par d�faut quand des fixtures existent, sinon ferm�.
-   const [leftDockCollapsed, setLeftDockCollapsed] = useState(() =>
-     useShowStore.getState().patchedFixtures.length === 0
-   );
+   // Panneau fixtures RETRACTÉ par défaut (toujours fermé au démarrage)
+   const [leftDockCollapsed, setLeftDockCollapsed] = useState(true);
+   // Affichage DMX en 3D : désactivé par défaut (fixtures éteintes au démarrage)
+   const [showDmxIn3D, setShowDmxIn3D] = useState(false);
   // Dock droit "Sc�ne & EFX" repliable (mode Sc�nes), repli� par d�faut comme
   // celui des fixtures : la sc�ne physique reste centr�e et lisible, et on
   // ne d�plie un panneau que pour s'en servir.
@@ -2836,6 +2836,7 @@ export const Stage3D: React.FC<{
 
   // -- DMX update function (called from render loop) ---
   const updateDmxState = useCallback(() => {
+        if (!showDmxIn3D) return; // DMX display disabled -> fixtures stay off
     const dmxState = useAppStore.getState().dmx;
     // Use arbitrated buffer (LTP fid�le: auto-loop LTP75 > quickshow HTP40) au lieu de channelData brut
     const bridged: Record<number, Uint8Array | number[]> = {};
@@ -4906,6 +4907,16 @@ export const Stage3D: React.FC<{
           title={t('stage3D.fixtureListTitle')}
         >
           <List size={12} /> {t('stage3D.fixtures')}
+        </button>
+
+        <button
+          onClick={() => setShowDmxIn3D(v => !v)}
+          className={`px-2 py-1 rounded text-[10px] flex items-center gap-1 transition-colors ${
+            showDmxIn3D ? 'bg-green-600/25 text-green-300 border-green-500/50' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/30'
+          }`}
+          title={showDmxIn3D ? t('stage3D.dmxOnTitle') : t('stage3D.dmxOffTitle')}
+        >
+          <Zap size={12} /> {showDmxIn3D ? t('stage3D.dmxOn') : t('stage3D.dmxOff')}
         </button>
 
         <div className="flex-1" />
