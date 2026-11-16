@@ -1,0 +1,11 @@
+# Force UTF-8 for ALL content types
+AddDefaultCharset UTF-8
+AddType text/html; charset=utf-8 .html
+AddType text/css; charset=utf-8 .css
+AddType application/javascript; charset=utf-8 .js
+AddType application/json; charset=utf-8 .json
+
+# Ensure PHP also sends UTF-8
+<FilesMatch "\.php$">
+    Header set Content-Type "text/html; charset=utf-8"
+</FilesMatch>

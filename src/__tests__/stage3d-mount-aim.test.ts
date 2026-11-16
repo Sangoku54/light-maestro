@@ -1,0 +1,182 @@
+/**
+ * Validation des directions de faisceaux :
+ * - rear / ground / hanging : visent le CENTRE de la scène
+ *   phi = atan2((0.5-x)*width, |y-0.5|*depth)
+ *   — pondère par les dimensions monde pour convergence correcte
+ *   gauche (x < 0.5)  → phi > 0 → tourne vers la droite (+X)
+ *   droite (x > 0.5)  → phi < 0 → tourne vers la gauche (-X)
+ *   centre (x = 0.5)  → phi = 0 → droit devant le public (-Z)
+ * - top : faisceau vers le bas (heading indifferent)
+ * - heading utilisateur (sans pan/tilt) respecte si != 0
+ */
+import { describe, it, expect } from 'vitest';
+import { headingRadForPos, clampPanZone, clampTiltZone } from '../views/Stage3D';
+
+// Stage carrée 12x8 pour les tests unitaires
+const DIMS = { width: 12, depth: 8 };
+// Stage étroite 2x20 (comme tuto.lmproj) pour le test d'aspect ratio
+const NARROW = { width: 2, depth: 20 };
+const TAU = Math.PI * 2;
+
+function pie(a: number): number {
+  let r = a % TAU;
+  if (r > Math.PI) r -= TAU;
+  if (r < -Math.PI) r += TAU;
+  return r;
+}
+
+function worldBeamDir(phi: number): { x: number; z: number } {
+  // dir = R_y(phi) · (0,-1,0) → (-sin(phi), 0, -cos(phi))
+  return { x: -Math.sin(phi), z: -Math.cos(phi) };
+}
+
+describe('headingRadForPos — rear/ground/hanging visent le centre de la scène', () => {
+  it('arriere gauche (x=0.2, y=0.95, DIMS 12x8) : phi = atan2(-3.6, 0.36) = -PI/4', () => {
+    const pos = { x: 0.2, y: 0.95, h: 0.6, heading: 0 };
+    for (const mode of ['hanging', 'rear', 'ground'] as const) {
+      const phi = headingRadForPos(pos as any, mode, DIMS);
+      // (0.2-0.5)*12 = -3.6, |0.95-0.5|*8 = 3.6 (floor=3.2, max prend 3.6)
+      expect(pie(phi)).toBeCloseTo(Math.atan2(-3.6, 3.6), 5);
+      const dir = worldBeamDir(phi);
+      expect(dir.x).toBeGreaterThan(0.5); // vers la droite
+      expect(dir.z).toBeLessThan(-0.7);   // vers l'avant
+    }
+  });
+
+  it('arriere droite (x=0.9, y=0.95, DIMS 12x8) : phi = atan2(4.8, 3.6) ≈ +53°', () => {
+    const pos = { x: 0.9, y: 0.95, h: 0.6, heading: 0 };
+    for (const mode of ['hanging', 'rear', 'ground'] as const) {
+      const phi = headingRadForPos(pos as any, mode, DIMS);
+      // (0.9-0.5)*12 = 4.8, |0.95-0.5|*8 = 3.6
+      expect(pie(phi)).toBeCloseTo(Math.atan2(4.8, 3.6), 5);
+      const dir = worldBeamDir(phi);
+      expect(dir.x).toBeLessThan(-0.7); // vers la gauche
+      expect(dir.z).toBeLessThan(-0.5); // vers l'avant
+    }
+  });
+
+  it('devant centre (x=0.5, y=0.1) : phi ≈ π, vers l arrière (centre de scène)', () => {
+    const pos = { x: 0.5, y: 0.1, h: 0.6, heading: 0 };
+    for (const mode of ['hanging', 'ground'] as const) {
+      const phi = headingRadForPos(pos as any, mode, DIMS);
+      // y < 0.25 et mode ground → inversé : pointe vers l'arrière
+      expect(pie(phi)).toBeCloseTo(Math.PI, 9);
+      const dir = worldBeamDir(phi);
+      expect(dir.z).toBeGreaterThan(0.99); // vers l'arrière (+Z)
+    }
+    // 'rear' ne passe pas par la branche ground (mode respecté) : reste à 0
+    const phiRear = headingRadForPos(pos as any, 'rear', DIMS);
+    expect(pie(phiRear)).toBeCloseTo(0, 9);
+    const phiTop = headingRadForPos(pos as any, 'top', DIMS);
+    expect(pie(phiTop)).toBeCloseTo(0, 9);
+  });
+
+  it('cote gauche (x=0.1, y=0.5, DIMS 12x8) : phi 被自适应 clamp 压制到 ~36° 而非 π/2', () => {
+    const pos = { x: 0.1, y: 0.5, h: 0.6, heading: 0 };
+    for (const mode of ['hanging', 'rear', 'ground'] as const) {
+      const phi = headingRadForPos(pos as any, mode, DIMS);
+      // floor = min(12,8)*0.4 = 3.2, phi_raw = atan2(4.8, 3.2) ≈ 0.983 rad
+      // clamp = atan2(12, 12/8) = atan2(12, 1.5) ≈ 1.445 rad ≈ 82.9°
+      // 0.983 < 1.445 → phi 不被 clamp，结果为 atan2(4.8, 3.2) ≈ 0.983 rad ≈ 56.3°
+      const expected = Math.atan2(-4.8, 3.2);
+      expect(pie(phi)).toBeCloseTo(expected, 5);
+      const dir = worldBeamDir(phi);
+      expect(dir.x).toBeGreaterThan(0.8); // 明显向右
+      expect(dir.z).toBeLessThan(-0.5);   // 仍向前
+    }
+  });
+
+  it('cote droit (x=0.9, y=0.5, DIMS 12x8) : phi 被自适应 clamp 压制到 ~-36° 而非 -π/2', () => {
+    const pos = { x: 0.9, y: 0.5, h: 0.6, heading: 0 };
+    for (const mode of ['hanging', 'rear', 'ground'] as const) {
+      const phi = headingRadForPos(pos as any, mode, DIMS);
+      // floor = min(12,8)*0.4 = 3.2, phi_raw = atan2(-4.8, 3.2) ≈ -0.983 rad
+      // clamp 不变，-0.983 > -1.445 → phi 不被 clamp，结果为 -0.983 rad ≈ -56.3°
+      const expected = Math.atan2(4.8, 3.2);
+      expect(pie(phi)).toBeCloseTo(expected, 5);
+      const dir = worldBeamDir(phi);
+      expect(dir.x).toBeLessThan(-0.8); // 明显向左
+      expect(dir.z).toBeLessThan(-0.5); // 仍向前
+    }
+  });
+
+  it('coins : chacun vise le centre monde', () => {
+    const posFL = { x: 0.1, y: 0.1, h: 0.6, heading: 0 };
+    const posBL = { x: 0.1, y: 0.95, h: 0.6, heading: 0 };
+    const posFR = { x: 0.9, y: 0.1, h: 0.6, heading: 0 };
+    const posBR = { x: 0.9, y: 0.95, h: 0.6, heading: 0 };
+    for (const pos of [posFL, posBL, posFR, posBR]) {
+      for (const mode of ['ground', 'rear', 'hanging'] as const) {
+        const phi = headingRadForPos(pos as any, mode, DIMS);
+        const dir = worldBeamDir(phi);
+        if (pos.x < 0.5) expect(dir.x).toBeGreaterThan(0);
+        if (pos.x > 0.5) expect(dir.x).toBeLessThan(0);
+        // ground devant (y<0.25) pointe vers l'arrière (+Z)
+        if (mode === 'ground' && pos.y < 0.25) expect(dir.z).toBeGreaterThan(0.5);
+        // rear ou ground derrière (y>0.75) pointe vers l'avant (-Z)
+        if (mode === 'rear' || (mode === 'ground' && pos.y > 0.75)) expect(dir.z).toBeLessThan(-0.5);
+      }
+    }
+  });
+
+  it('centre (x=0.5, y=0.5) : phi = 0 pour tous les modes', () => {
+    for (const mode of ['hanging', 'ground', 'rear', 'top'] as const) {
+      const pos = { x: 0.5, y: 0.5, h: 0.6, heading: 0 };
+      const phi = headingRadForPos(pos as any, mode, DIMS);
+      expect(pie(phi)).toBeCloseTo(0, 9);
+    }
+  });
+
+  it('fixture motorisee : heading herite IGNORE (regle centre gagne)', () => {
+    const pos = { x: 0.2, y: 0.95, h: 0.6, heading: 260 };
+    const phi = headingRadForPos(pos as any, 'hanging', DIMS, true);
+    expect(pie(phi)).toBeCloseTo(Math.atan2(-3.6, 3.6), 5);
+  });
+
+  it('fixture SANS pan/tilt : heading utilisateur != 0 respecte', () => {
+    const pos = { x: 0.1, y: 0.9, h: 0.6, heading: 48 };
+    for (const mode of ['top', 'ground', 'rear', 'hanging'] as const) {
+      const phi = headingRadForPos(pos as any, mode, DIMS, false);
+      expect(phi).toBeCloseTo((48 * Math.PI) / 180, 9);
+    }
+    const phi0 = headingRadForPos({ x: 0.2, y: 0.95, heading: 0 } as any, 'ground', DIMS, false);
+    expect(pie(phi0)).toBeCloseTo(Math.atan2(-3.6, 3.6), 5);
+  });
+
+  it('stage étroit 2x20 (tuto.lmproj) : phi faible, faisceaux quasi-parallèles', () => {
+    // Positions réelles de tuto.lmproj
+    const left = { x: -0.005, y: 0.056, h: 0.6, heading: 0 };
+    const right = { x: 0.988, y: 0.056, h: 0.6, heading: 0 };
+    // phi = atan2((0.5-x)*2, |y-0.5|*20)
+    const phiL = headingRadForPos(left as any, 'hanging', NARROW, true);
+    const phiR = headingRadForPos(right as any, 'hanging', NARROW, true);
+    // y=0.056 < 0.25 → mode re-dérivé en 'ground' → pointe vers l'arrière (φ ≈ π)
+    expect(pie(phiL)).toBeCloseTo(-(Math.PI - Math.atan2(1.01, 8.88)), 5);
+    expect(pie(phiR)).toBeCloseTo(Math.PI - Math.atan2(0.976, 8.88), 5);
+    // φ ≈ π → dir.x ≈ 0, dir.z ≈ +1 (vers l'arrière / centre de scène)
+    expect(Math.abs(Math.sin(phiL))).toBeLessThan(0.2);
+    expect(Math.abs(Math.sin(phiR))).toBeLessThan(0.2);
+    expect(-Math.cos(phiL)).toBeGreaterThan(0.99);
+    expect(-Math.cos(phiR)).toBeGreaterThan(0.99);
+  });
+});
+
+describe('zone d eclairage utile - clamp PAN +/-90 / TILT +/-90 (sol : jamais sous l horizon)', () => {
+  const H = Math.PI / 2;
+
+  it('PAN : balayage limite a +/-90 face a eux (jamais derriere - mur du fond)', () => {
+    expect(clampPanZone(0, 0)).toBeCloseTo(0, 9);
+    expect(clampPanZone(H * 0.6, 0)).toBeCloseTo(H * 0.6, 9);
+    expect(clampPanZone(H * 1.4, 0)).toBeCloseTo(H, 9);
+    expect(clampPanZone(-H * 1.4, 0)).toBeCloseTo(-H, 9);
+    expect(clampPanZone(Math.PI, 0)).toBeCloseTo(H, 9);
+  });
+
+  it('TILT : elevation limitee a [-90, +90], sol : pas sous l horizon', () => {
+    expect(clampTiltZone(0, 'rear')).toBeCloseTo(0, 9);
+    expect(clampTiltZone(-H * 0.5, 'rear')).toBeCloseTo(-H * 0.5, 9);
+    expect(clampTiltZone(-H, 'hanging')).toBeCloseTo(-H, 9);
+    expect(clampTiltZone(H * 1.2, 'hanging')).toBeCloseTo(H, 9);
+    expect(clampTiltZone(-H * 1.5, 'rear')).toBeCloseTo(-H, 9);
+  });
+});

@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Light Maestro — AI-powered DMX lighting control for live performances, events, and installations.">
+<title>Light Maestro — AI DMX Lighting Control</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --text: #e8e8f0;
+    --muted: #8888a0;
+    --accent: #f0a030;
+    --accent-glow: #f0a03040;
+    --purple: #8b5cf6;
+    --green: #22c55e;
+    --red: #ef4444;
+    --cyan: #22d3ee;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+  header {
+    padding: 80px 0 60px;
+    text-align: center;
+    background: linear-gradient(180deg, var(--accent-glow) 0%, transparent 70%);
+  }
+  .logo {
+    display: inline-block;
+    width: 64px; height: 64px;
+    background: var(--accent);
+    border-radius: 16px;
+    margin-bottom: 24px;
+    box-shadow: 0 0 40px var(--accent-glow);
+  }
+  h1 { font-size: 2.8rem; font-weight: 700; letter-spacing: -0.02em; }
+  .tagline { color: var(--muted); font-size: 1.25rem; margin-top: 12px; }
+  .version { color: var(--accent); font-size: 0.8rem; margin-top: 6px; font-family: monospace; }
+
+  .hero-actions { margin-top: 32px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 28px; border-radius: 10px;
+    font-size: 1rem; font-weight: 600; text-decoration: none;
+    transition: all 0.2s;
+  }
+  .btn-primary { background: var(--accent); color: #0a0a0f; }
+  .btn-primary:hover { box-shadow: 0 0 24px var(--accent-glow); transform: translateY(-1px); }
+  .btn-ghost { border: 1px solid #ffffff22; color: var(--text); }
+  .btn-ghost:hover { border-color: #ffffff44; background: #ffffff08; }
+
+  section { padding: 80px 0; }
+  section:nth-child(even) { background: var(--surface); }
+  h2 { font-size: 1.8rem; margin-bottom: 12px; text-align: center; }
+  .section-subtitle { color: var(--muted); text-align: center; margin-bottom: 40px; font-size: 0.95rem; }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 24px;
+  }
+  .feature-card {
+    background: var(--surface);
+    border: 1px solid #ffffff0a;
+    border-radius: 14px;
+    padding: 28px;
+    transition: border-color 0.2s;
+    position: relative;
+  }
+  .feature-card:hover { border-color: #ffffff18; }
+  .feature-card .new-badge {
+    position: absolute; top: 12px; right: 14px;
+    background: var(--accent); color: #0a0a0f;
+    font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 6px;
+  }
+  .feature-card h3 { font-size: 1.1rem; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .feature-card p { color: var(--muted); font-size: 0.93rem; }
+  .feature-card .icon { font-size: 1.5rem; display: inline-block; }
+
+  .capabilities { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .cap-item {
+    background: var(--bg);
+    border: 1px solid #ffffff08;
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-size: 0.92rem;
+    color: var(--muted);
+  }
+  .cap-item.new { border-color: var(--accent); color: var(--text); }
+
+  .tech-stack {
+    display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+  }
+  .tech-badge {
+    background: var(--surface);
+    border: 1px solid #ffffff0f;
+    border-radius: 8px;
+    padding: 8px 18px;
+    font-size: 0.85rem; font-family: monospace;
+    color: var(--muted);
+  }
+
+  .pricing-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 24px;
+  }
+  .plan {
+    background: var(--surface);
+    border: 1px solid #ffffff0a;
+    border-radius: 14px;
+    padding: 32px;
+    text-align: center;
+  }
+  .plan.featured { border-color: var(--accent); }
+  .plan h3 { font-size: 1.2rem; margin-bottom: 4px; }
+  .plan .price { font-size: 2.2rem; font-weight: 700; margin: 16px 0 4px; }
+  .plan .period { color: var(--muted); font-size: 0.85rem; margin-bottom: 20px; }
+  .plan ul { list-style: none; text-align: left; color: var(--muted); font-size: 0.9rem; }
+  .plan ul li { padding: 6px 0; }
+  .plan ul li::before { content: "✓ "; color: var(--accent); }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 20px;
+    text-align: center;
+  }
+  .stat .num { font-size: 2rem; font-weight: 700; color: var(--accent); }
+  .stat .label { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
+
+  footer {
+    padding: 40px 24px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+    border-top: 1px solid #ffffff08;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <div class="logo"></div>
+    <h1>Light Maestro</h1>
+    <p class="tagline">AI-powered DMX lighting. Drop a track. Get a show.</p>
+    <p class="version">v1.1.0 — Virtual Console widgets, instant DMX playback, project persistence with .lmproj</p>
+    <div class="hero-actions">
+      <a href="#download" class="btn btn-primary">Download for Windows</a>
+      <a href="#features" class="btn btn-ghost">See what's new →</a>
+    </div>
+  </div>
+</header>
+
+<section id="stats">
+  <div class="container">
+    <div class="stats-grid">
+      <div class="stat"><div class="num">23</div><div class="label">Music genres</div></div>
+      <div class="stat"><div class="num">12</div><div class="label">AI cue engines</div></div>
+      <div class="stat"><div class="num">4</div><div class="label">DMX universes</div></div>
+      <div class="stat"><div class="num">150ms</div><div class="label">Crossfade time</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="container">
+    <h2>Auto-Script Intelligence</h2>
+    <p class="section-subtitle">12 engine innovations that make every show unique</p>
+    <div class="features">
+
+      <div class="feature-card">
+        <span class="new-badge">new</span>
+        <h3><span class="icon">🎮</span> Virtual Console</h3>
+        <p>Design your own control surface with buttons, sliders, and frames. Drag-and-drop layout editor with snap-to-grid. Flash triggers, toggles, chaser loops, scene recalls, and song presets — all mapped to DMX in real time. Saved inside your project file.</p>
+      </div>
+
+      <div class="feature-card">
+        <span class="new-badge">core</span>
+        <h3><span class="icon">🎛️</span> AI Auto-Script</h3>
+        <p>Drop any audio file and Light Maestro generates a complete DMX show — colors, movements, strobes, dimmers, and blackouts — synced to the music structure in seconds.</p>
+      </div>
+
+      <div class="feature-card">
+        <span class="new-badge">core</span>
+        <h3><span class="icon">🎨</span> Dynamic Palette</h3>
+        <p>Colors adapt to energy level — saturated and warm on drops, cool and desaturated on intros. Each genre brings its own hue-shift signature.</p>
+      </div>
+
+      <div class="feature-card">
+        <span class="new-badge">new</span>
+        <h3><span class="icon">🔄</span> Smooth Crossfade</h3>
+        <p>150ms micro-blend between adjacent cues — no sudden DMX jumps. Quadratic ease-in curve for natural transitions.</p>
+      </div>
+
+      <div class="feature-card">
+        <span class="new-badge">new</span>
+        <h3><span class="icon">🌙</span> Progressive Fade Out</h3>
+        <p>1-second quadratic ease-out at song end, 200ms on pause. DMX channels dim naturally — no hard cuts.</p>
+      </div>
+
+      <div class="feature-card">
+        <span class="new-badge">new</span>
+        <h3><span class="icon">💡</span> Intelligent Strobe</h3>
+        <p>Speed adapts to section energy — 1.5× on drops, 0.5× on intros. Soft sinusoidal dimmer pulse mode for fixtures with dimmer channels.</p>
+      </div>
+
+      <div class="feature-card">
+        <span class="new-badge">new</span>
+        <h3><span class="icon">🎯</span> Parametric Movement</h3>
+        <p>Pan/tilt amplitude and speed blend smoothly across sections. 11 movement patterns: sweep, circle, figure-8, spiral, zigzag, heartbeat, and more.</p>
+      </div>
+
+      <div class="feature-card">
+        <span class="new-badge">new</span>
+        <h3><span class="icon">⚡</span> DJ Live Controls</h3>
+        <p>Freeze holds the current frame indefinitely. Drop Now forces max energy + strobe for 300ms. One-click, no menu diving.</p>
+      </div>
+
+      <div class="feature-card">
+        <span class="new-badge">new</span>
+        <h3><span class="icon">👁️</span> Dry-Run Preview</h3>
+        <p>Toggle DRY mode to preview cues in 3D without sending to hardware. Same DMX computed, zero output — safe for on-the-fly experimentation.</p>
+      </div>
+
+      <div class="feature-card">
+        <span class="new-badge">new</span>
+        <h3><span class="icon">📊</span> Waveform + Cue Overlay</h3>
+        <p>Energy curve visualized above the AutoScript track. Cue markers color-coded by section — drop (red), chorus (orange), build (cyan), verse (green).</p>
+      </div>
+
+      <div class="feature-card">
+        <span class="new-badge">new</span>
+        <h3><span class="icon">🆚</span> A/B Style Comparison</h3>
+        <p>Generate two cue sets with contrasting styles (Techno ↔ House). Toggle between them live — compare before you commit.</p>
+      </div>
+
+      <div class="feature-card">
+        <span class="new-badge">new</span>
+        <h3><span class="icon">🧠</span> Auto Section Detection</h3>
+        <p>Energy curve peak detection identifies drops, verses, builds, and choruses — no manual markers needed. Falls back to time-based partitioning.</p>
+      </div>
+
+      <div class="feature-card">
+        <span class="new-badge">new</span>
+        <h3><span class="icon">💾</span> Export Presets</h3>
+        <p>Save complete shows as .lmpreset files — all cues, tracks, analysis data, and audio embedded. Share or archive your best work.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section id="capabilities">
+  <div class="container">
+    <h2>Full Capability List</h2>
+    <p class="section-subtitle">Everything the engine can do</p>
+    <div class="capabilities">
+      <div class="cap-item new">Virtual Console — buttons, sliders, frames</div>
+      <div class="cap-item new">Project save/load with .lmproj format</div>
+      <div class="cap-item new">Floating 3D stage overlay</div>
+      <div class="cap-item new">Import .lmpreset + audio presets</div>
+      <div class="cap-item new">Keyboard shortcuts (Ctrl+S/Z/Y)</div>
+      <div class="cap-item new">Instant DMX playback</div>
+      <div class="cap-item">DMX512 over USB serial</div>
+      <div class="cap-item new">23 genre-driven cue engines</div>
+      <div class="cap-item new">Dynamic palette — energy reactive</div>
+      <div class="cap-item new">150ms crossfade blending</div>
+      <div class="cap-item new">Progressive fade out (1s) + pause (200ms)</div>
+      <div class="cap-item new">Intelligent adaptive strobe</div>
+      <div class="cap-item new">Parametric movement — 11 patterns</div>
+      <div class="cap-item new">Freeze frame + Drop Now controls</div>
+      <div class="cap-item new">Dry-run preview mode</div>
+      <div class="cap-item new">Energy waveform + cue overlay</div>
+      <div class="cap-item new">A/B style comparison</div>
+      <div class="cap-item new">Auto section detection</div>
+      <div class="cap-item new">Export to .lmpreset files</div>
+      <div class="cap-item">Audio analysis & BPM detection</div>
+      <div class="cap-item">MIDI input mapping</div>
+      <div class="cap-item">Cue timeline with snap-to-grid</div>
+      <div class="cap-item">Fixtures grouped by tier</div>
+      <div class="cap-item">3D stage with real-time DMX</div>
+      <div class="cap-item">Multi-universe support</div>
+      <div class="cap-item">Preset save, load & recall</div>
+      <div class="cap-item">Standby blackout (1s start/end)</div>
+      <div class="cap-item">Track-level overrides (color/dimmer/strobe/movement)</div>
+      <div class="cap-item">EFX tracks with drag-and-drop</div>
+    </div>
+  </div>
+</section>
+
+<section id="tech">
+  <div class="container">
+    <h2>Built with</h2>
+    <div class="tech-stack">
+      <span class="tech-badge">Electron</span>
+      <span class="tech-badge">React 18</span>
+      <span class="tech-badge">TypeScript</span>
+      <span class="tech-badge">Three.js</span>
+      <span class="tech-badge">Zustand</span>
+      <span class="tech-badge">Vite</span>
+      <span class="tech-badge">serialport</span>
+      <span class="tech-badge">Web Audio API</span>
+      <span class="tech-badge">better-sqlite3</span>
+      <span class="tech-badge">MIDI</span>
+    </div>
+  </div>
+</section>
+
+<section id="pricing">
+  <div class="container">
+    <h2>Pricing</h2>
+    <div class="pricing-grid">
+      <div class="plan">
+        <h3>Free</h3>
+        <div class="price">$0</div>
+        <div class="period">forever</div>
+        <ul>
+          <li>Unlimited tracks</li>
+          <li>All 23 music genres</li>
+          <li>Full auto-script engine</li>
+          <li>3D stage preview</li>
+          <li>1 DMX universe</li>
+          <li>Basic audio analysis</li>
+        </ul>
+      </div>
+      <div class="plan featured">
+        <h3>Pro</h3>
+        <div class="price">$49</div>
+        <div class="period">one-time</div>
+        <ul>
+          <li>Everything in Free</li>
+          <li>4 DMX universes</li>
+          <li>MIDI input & mapping</li>
+          <li>Advanced audio analysis</li>
+          <li>Preset library</li>
+          <li>Priority support</li>
+        </ul>
+      </div>
+      <div class="plan">
+        <h3>Venue</h3>
+        <div class="price">$149</div>
+        <div class="period">one-time</div>
+        <ul>
+          <li>Everything in Pro</li>
+          <li>Unlimited universes</li>
+          <li>Art-Net / sACN output</li>
+          <li>Multi-machine sync</li>
+          <li>Custom fixture profiles</li>
+          <li>API access</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>Light Maestro &copy; 2026 — AI DMX Lighting Control</p>
+    <p style="margin-top:8px">12 auto-script innovations. 23 genres. One desktop app.</p>
+  </div>
+</footer>
+
+</body>
+</html>

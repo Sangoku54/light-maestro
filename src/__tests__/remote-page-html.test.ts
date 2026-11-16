@@ -1,0 +1,148 @@
+/**
+ * Page web embarquée du Remote (GET /) — garde-fou de non-régression.
+ *
+ * Un bug passé inaperçu : une parenthèse mal fermée dans le script inline
+ * rendait TOUTE la page inerte (aucun bouton ne répondait, le téléphone ne
+ * se connectait plus). Ce test verrouille :
+ *   - le script inline est syntaxiquement valide (parsing JS réel) ;
+ *   - tous les ids DOM utilisés par le script existent dans le HTML ;
+ *   - les endpoints appelés par le script existent côté serveur ;
+ *   - aucune variable manifestement tronquée (typo type `nex`).
+ */
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import http from 'node:http';
+import { RemoteServer } from '@electron/remote/server';
+
+const PORT = 18200 + Math.floor(Math.random() * 900);
+
+let server: RemoteServer;
+let token = '';
+let html = '';
+let script = '';
+
+function get(path: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: '127.0.0.1', port: PORT, path, headers: { 'X-Auth-Token': token } },
+      (res) => {
+        let raw = '';
+        res.on('data', (c: Buffer) => (raw += c.toString('utf-8')));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: raw }));
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+beforeAll(async () => {
+  process.env.LM_REMOTE_PORT = String(PORT);
+  server = new RemoteServer();
+  server.start();
+  for (let i = 0; i < 150 && !server.getStatus().running; i++) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  if (!server.getStatus().running) {
+    throw new Error(`serveur Remote non démarré : ${server.getStatus().lastError ?? '?'}`);
+  }
+  token = server.getToken();
+  const res = await get('/');
+  expect(res.status).toBe(200);
+  html = res.body;
+  const m = html.match(/<script>([\s\S]*?)<\/script>/);
+  expect(m, 'balise <script> introuvable dans la page').toBeTruthy();
+  script = m![1];
+});
+
+afterAll(() => {
+  server.stop();
+  delete process.env.LM_REMOTE_PORT;
+});
+
+describe('page web Remote', () => {
+  it('le script inline est syntaxiquement valide', () => {
+    // `new Function` parse réellement le code : une parenthèse mal fermée
+    // (bug passé inaperçu) fait échouer ce test.
+    expect(() => new Function(script)).not.toThrow();
+  });
+
+  it('le script ne contient pas de variable tronquée', () => {
+    // Régression ciblée : `{on:nex}` (au lieu de `{on:next}`).
+    expect(script).not.toMatch(/\bnex\b/);
+  });
+
+  it('le HTML ne se coupe pas au premier </script>', () => {
+    expect(script.length).toBeGreaterThan(2000);
+    expect(script.trimEnd().endsWith('})();')).toBe(true);
+  });
+
+  it('tous les ids DOM utilisés par le script existent dans la page', () => {
+    const ids = [
+      'blackout',
+      'stopAll',
+      'gm',
+      'gmValue',
+      'scenes',
+      'chasers',
+      'status',
+      'error',
+    ];
+    for (const id of ids) {
+      expect(html, `id="${id}" absent du HTML`).toContain(`id="${id}"`);
+      expect(script, `getElementById('${id}') absent du script`).toContain(`'${id}'`);
+    }
+  });
+
+  it('le script appelle uniquement des endpoints existants', () => {
+    const called = new Set<string>();
+    const re = /post\(\s*'(api\/[a-z]+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(script)) !== null) called.add(m[1]);
+    expect(called.size).toBeGreaterThan(0);
+    for (const ep of called) {
+      expect(ep).toMatch(/^api\/(blackout|grandmaster|stopall|scene|chaser|widget)$/);
+    }
+  });
+
+  it('la page expose les onglets + la console virtuelle', () => {
+    // Onglets
+    for (const tab of ['scenes', 'chasers', 'console']) {
+      expect(html).toContain(`data-tab="${tab}"`);
+    }
+    // Sections
+    for (const id of ['panel-scenes', 'panel-chasers', 'panel-console']) {
+      expect(html).toContain(`id="${id}"`);
+    }
+    // Console : pages + widgets + faders
+    expect(html).toContain('id="vcPages"');
+    expect(html).toContain('id="vcWidgets"');
+    expect(script).toContain('state.widgets');
+    expect(script).toContain("'api/widget/'");
+    // Le contrôle permanent (blackout / stop all / GM) est HORS des onglets :
+    // il doit rester accessible quelle que soit l'onglet affiché.
+    const blackoutIdx = html.indexOf('id="blackout"');
+    const tabsIdx = html.indexOf('class="tabs"');
+    expect(blackoutIdx).toBeGreaterThan(-1);
+    expect(tabsIdx).toBeGreaterThan(blackoutIdx);
+  });
+
+  it('le script interroge /api/state (synchronisation)', () => {
+    expect(script).toContain("api('api/state')");
+  });
+
+  it('le token de l\'URL prime sur le sessionStorage (évite les 401)', () => {
+    // Ordre critique : si le sessionStorage était lu en premier, un token
+    // périmé resterait prioritaire après un redémarrage du PC → 401 partout.
+    const urlIdx = script.indexOf("window.location.search).get('token')");
+    const storageIdx = script.indexOf("sessionStorage.getItem('lmToken')");
+    expect(urlIdx).toBeGreaterThan(-1);
+    expect(storageIdx).toBeGreaterThan(-1);
+    expect(urlIdx).toBeLessThan(storageIdx);
+    expect(script).toContain("var token = urlToken || sessionStorage.getItem('lmToken')");
+  });
+
+  it('un 401 purge le token cached et invite à rescanner le QR code', () => {
+    expect(script).toContain("sessionStorage.removeItem('lmToken')");
+    expect(script).toMatch(/re-?scannez/i);
+  });
+});

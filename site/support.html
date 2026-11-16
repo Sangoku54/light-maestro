@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Support & FAQ — Light Maestro | Aide, contact, mentions légales</title>
+<meta name="description" content="Support Light Maestro : FAQ DMX, audio, MIDI, 3D, projets, contact, mentions légales et confidentialité."/>
+<link rel="icon" type="image/png" href="./assets/favicon-32.png"/>
+<link rel="stylesheet" href="./assets/site.css"/>
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="./index.html"><img src="./assets/logo.svg" alt="Light Maestro" style="width:34px;height:34px;border-radius:10px;box-shadow:0 8px 24px rgba(168,85,247,.35)"/><span class="brand-word">LIGHT <span>MAESTRO</span></span></a>
+    <nav class="nav-links"><a href="./index.html">Accueil</a><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a><a class="active" href="./support.html">Support</a></nav>
+    <div style="display:flex; gap:10px; align-items:center"><a class="nav-cta" href="./telecharger.html">⬇ Télécharger</a><a href="./support-en.html" style="font-size:12px; font-weight:700; color:#9ca3af; text-decoration:none" title="English version">🇬🇧 EN</a><button class="hamburger" data-menu>≡</button></div>
+  </div>
+  <div data-menu-panel style="display:none; border-top:1px solid #1f1f2e; background: rgba(6,6,10,.88)"><div class="wrap" style="padding:12px 20px; display:flex; flex-wrap:wrap; gap:10px"><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a><a href="./support.html">Support</a></div></div>
+</header>
+
+<section class="hero" style="padding:28px 0 18px">
+  <div class="wrap">
+    <span class="kicker">Aide • FAQ • Contact</span>
+    <h1 class="h1">On vous aide à passer le show — pas à lire un manuel de 300 pages.</h1>
+    <p class="lead">FAQ terrain, contact direct, et infos légales claires. Si vous ne trouvez pas, écrivez-nous — réponse sous 24–48h (Standard/Complète : prioritaire).</p>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px"><a class="btn btn-primary" href="#contact">✉ Contacter l'équipe</a><a class="btn btn-ghost" href="#faq">Parcourir la FAQ ↓</a></div>
+  </div>
+</section>
+
+<section id="faq" class="section">
+  <div class="wrap">
+    <h2 class="h2">FAQ — les vraies questions de régie</h2>
+    <div class="grid grid-2" style="margin-top:16px">
+      <div class="card">
+        <h3 class="h3">DMX & réseau</h3>
+        <details open style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">Mon interface USB n'est pas détectée</summary><p style="margin-top:8px">Vérifiez : driver FTDI installé, bon port COM dans Univers → Type USB-DMX, un seul logiciel DMX ouvert à la fois, testez Blackout ON/OFF. Journal DMX dans l'app pour débug.</p></details>
+        <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">ArtNet / sACN : broadcast ou unicast ?</summary><p style="margin-top:8px">Unicast recommandé en prod (IP de votre node). sACN : vérifiez univers & priorité (HIGHEST gagne). ArtNet : subnet 0 par défaut, node en 2.x.x.x ou 10.x.x.x.</p></details>
+        <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">HTP/LTP : qui gagne ?</summary><p style="margin-top:8px">HTP = Highest Takes Precedence (intensités), LTP = Latest Takes Precedence (positions/couleurs). Light Maestro merge automatiquement par canal selon son type.</p></details>
+      </div>
+      <div class="card">
+        <h3 class="h3">Audio & Quick Show</h3>
+        <details open style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">La détection de BPM est fausse</summary><p style="margin-top:8px">Re-analysez après avoir coupé les silences / intros longues, ou forcez le BPM (tap tempo). L'algo est adaptatif mais un morceau à tempo variable reste un challenge.</p></details>
+        <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">Strobe trop agressif</summary><p style="margin-top:8px">Safety limiter ON dans Quick Show (max flash/s), et piste Strobe dédiée avec plafond. En live : Grand Master ou Blackout instantané.</p></details>
+        <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">Fichiers .lmpreset / .lmshow / .lmproj ?</summary><p style="margin-top:8px"><b>.lmpreset</b> = preset audio+DMX, <b>.lmshow</b> = show réutilisable, <b>.lmproj</b> = projet complet (JSON ouvert).</p></details>
+      </div>
+    </div>
+    <div class="grid grid-2" style="margin-top:16px">
+      <div class="card">
+        <h3 class="h3">MIDI / OSC / MTC / 3D</h3>
+        <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">MIDI Learn ne capte rien</summary><p style="margin-top:8px">Fermez les autres apps MIDI, sélectionnez le bon port d'entrée dans Préférences → MIDI, puis Learn. Feedback LED = sortie MIDI configurée.</p></details>
+        <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">La vue 3D ne persiste pas par preset ?</summary><p style="margin-top:8px">Corrigé en v1.0.29 : caméra + toggles sont désormais sérialisés dans <span class="mono">.lmpreset</span> (<span class="mono">view3D</span>). Mettez à jour et re-sauvegardez vos presets.</p></details>
+        <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">Web Remote LAN</summary><p style="margin-top:8px">Activez le serveur dans Perform → Web Remote, ouvrez l'URL affichée sur votre téléphone/tablette du même réseau. Push d'état temps réel.</p></details>
+      </div>
+      <div class="card">
+        <h3 class="h3">Projets & sauvegarde</h3>
+        <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">J'ai fermé sans sauvegarder</summary><p style="margin-top:8px">Garde-fou “Save & Quit / Discard” à la fermeture. Si dirty, l'app vous demande.</p></details>
+        <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">Projet illisible sur une autre machine</summary><p style="margin-top:8px">Les fixtures customs sont embarquées dans le .lmproj depuis la v1.0.25 — plus de “fixture manquante”. Assurez-vous d'être en ≥1.0.25 des deux côtés.</p></details>
+        <details style="margin-top:10px; border:1px solid #1f1f2e; border-radius:12px; padding:12px; background: rgba(255,255,255,.03)"><summary style="font-weight:800; cursor:pointer">Où sont mes fichiers ?</summary><p style="margin-top:8px"><span class="mono">%APPDATA%/Light Maestro</span> (Windows) — projets, presets, logs. Sauvegardez ce dossier pour backup complet.</p></details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="contact" class="section" style="background: linear-gradient(180deg, #07070b, #0a0a12); border-top:1px solid #1f1f2e; border-bottom:1px solid #1f1f2e">
+  <div class="wrap">
+    <div class="grid grid-2" style="align-items:start">
+      <div>
+        <span class="kicker">Contact</span>
+        <h2 class="h2" style="margin-top:10px">Parlons de votre show.</h2>
+        <p class="lead">Bug terrain, demande fixture, question licence — on répond.</p>
+        <div style="display:grid; gap:10px; margin-top:14px">
+          <div class="card" style="padding:14px; display:flex; gap:12px; align-items:center"><span class="ico">✉</span><div><div style="font-weight:800">Email</div><a href="mailto:contact@light-maestro.com" style="color:#c084fc; font-weight:700">contact@light-maestro.com</a><div class="meta">Réponse 24–48h (Standard/Complète : prioritaire)</div></div></div>
+          <div class="card" style="padding:14px; display:flex; gap:12px; align-items:center"><span class="ico cyan">💬</span><div><div style="font-weight:800">Signaler un bug</div><div class="meta">Écrivez-nous avec un .lmproj + log + capture si possible</div></div></div>
+        </div>
+      </div>
+      <form class="card" id="contact-form">
+        <h3 class="h3">Envoyer un message</h3>
+        <p style="margin-top:6px">Réponse sous 24–48h ouvrées, directement par email.</p>
+        <div style="display:grid; gap:10px; margin-top:12px">
+          <label style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#9ca3af">Nom</label><input id="cf-name" required placeholder="Votre nom" style="padding:10px 12px; border-radius:12px; border:1px solid #2a2a3e; background: #0a0a12; color:white"/>
+          <label style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#9ca3af">Email</label><input id="cf-email" required type="email" placeholder="vous@exemple.fr" style="padding:10px 12px; border-radius:12px; border:1px solid #2a2a3e; background: #0a0a12; color:white"/>
+          <label style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#9ca3af">Sujet</label><select id="cf-subject" style="padding:10px 12px; border-radius:12px; border:1px solid #2a2a3e; background: #0a0a12; color:white"><option>Question générale</option><option>Bug / Support</option><option>Fixture manquante</option></select>
+          <label style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#9ca3af">Message</label><textarea id="cf-message" required rows="4" placeholder="Décrivez votre besoin, votre setup (fixtures, univers, OS)..." style="padding:10px 12px; border-radius:12px; border:1px solid #2a2a3e; background: #0a0a12; color:white"></textarea>
+          <label style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#9ca3af">Capture d'écran (optionnel, 5 Mo max)</label><input id="cf-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="font-size:12px; color:#9ca3af"/>
+          <input id="cf-company" type="text" tabindex="-1" autocomplete="off" style="position:absolute; left:-9999px; opacity:0; height:0" aria-hidden="true"/>
+          <button class="btn btn-primary" type="submit" id="cf-send">Envoyer →</button>
+          <div class="meta" id="cf-status">En envoyant, vous acceptez notre <a href="#confidentialite" style="color:#c084fc">politique de confidentialité</a>.</div>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="grid grid-2">
+      <div id="mentions" class="card">
+        <h3 class="h3">Mentions légales</h3>
+        <p style="margin-top:10px">Éditeur, hébergement LWS, licence MIT, paiements Stripe, données personnelles, photosensibilité, droit applicable.</p>
+        <a class="btn btn-ghost" style="margin-top:12px" href="./mentions-legales.html">Lire les mentions légales →</a>
+      </div>
+      <div id="confidentialite" class="card">
+        <h3 class="h3">Confidentialité</h3>
+        <p style="margin-top:10px">Le site vitrine ne dépose aucun cookie traceur. Aucune donnée perso n'est collectée sans votre action (formulaire / email). Les projets .lmproj restent locaux — aucun upload cloud par défaut. Si vous activez le Web Remote LAN, le serveur reste sur votre réseau local.</p>
+        <p class="mono" style="margin-top:10px; font-size:11px; color:#6b7280">Dernière mise à jour : 02/09/2026</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div><div style="display:flex; align-items:center; gap:10px; font-weight:900; letter-spacing:.18em; font-size:12px"><img src="./assets/logo.svg" alt="Light Maestro" style="width:28px;height:28px;border-radius:8px"/> LIGHT MAESTRO</div><p style="margin:10px 0 0; max-width:360px">Support humain, pas de chatbot — on connaît la régie.</p><p class="mono" style="margin-top:10px; font-size:11px; color:#6b7280">© <span data-year></span> Light Maestro</p></div>
+      <div><div style="font-weight:800; color:white; margin-bottom:8px">Site</div><div style="display:grid; gap:8px"><a href="./index.html">Accueil</a><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a></div></div>
+      <div><div style="font-weight:800; color:white; margin-bottom:8px">Produit</div><div style="display:grid; gap:8px"><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a></div></div>
+      <div><div style="font-weight:800; color:white; margin-bottom:8px">Aide</div><div style="display:grid; gap:8px"><a href="#faq">FAQ</a><a href="#contact">Contact</a><a href="#mentions">Mentions</a></div></div>
+    </div>
+  </div>
+</footer>
+<script src="./assets/site.js"></script>
+<script>
+(function(){
+  var form = document.getElementById('contact-form');
+  if (!form) return;
+  var status = document.getElementById('cf-status');
+  var send = document.getElementById('cf-send');
+  function say(msg, ok){
+    status.textContent = msg;
+    status.style.color = ok ? '#6ee7b7' : '#fca5a5';
+  }
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    var payload = {
+      name: document.getElementById('cf-name').value.trim(),
+      email: document.getElementById('cf-email').value.trim(),
+      subject: document.getElementById('cf-subject').value,
+      message: document.getElementById('cf-message').value.trim(),
+      company: document.getElementById('cf-company').value
+    };
+    if (!payload.name || !payload.email || !payload.message) { say('Nom, email et message sont requis.', false); return; }
+    var fileInput = document.getElementById('cf-file');
+    var file = fileInput && fileInput.files && fileInput.files[0];
+    function sendPayload(extra){
+      var body = {
+        name: payload.name, email: payload.email, subject: payload.subject,
+        message: payload.message, company: payload.company
+      };
+      if (extra) { body.filename = extra.name; body.filedata = extra.data; }
+      send.disabled = true;
+      send.textContent = 'Envoi…';
+      fetch('/api/contact.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return { ok: r.ok, d: d }; }); })
+      .then(function(res){
+        if (res.ok && res.d && res.d.ok) {
+          say('Message envoyé — on vous répond sous 24–48h ouvrées.', true);
+          form.reset();
+        } else {
+          say((res.d && res.d.message) || 'Envoi impossible. Écrivez-nous à contact@light-maestro.com', false);
+        }
+      }).catch(function(){
+        say('Envoi impossible. Écrivez-nous à contact@light-maestro.com', false);
+      }).finally(function(){
+        send.disabled = false;
+        send.textContent = 'Envoyer →';
+      });
+    }
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) { say('Image trop lourde : 5 Mo maximum.', false); return; }
+      if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) { say('Images uniquement (PNG, JPG, WebP, GIF).', false); return; }
+      var reader = new FileReader();
+      reader.onload = function(){ sendPayload({ name: file.name, data: String(reader.result).split(',')[1] || '' }); };
+      reader.onerror = function(){ say('Lecture du fichier impossible.', false); };
+      reader.readAsDataURL(file);
+    } else {
+      sendPayload(null);
+    }
+  });
+})();
+</script>
+</body>
+</html>

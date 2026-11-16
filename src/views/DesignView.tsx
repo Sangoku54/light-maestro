@@ -1,0 +1,8997 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { clampRect } from '../components/clampedpopup';
+import { generateAllThumbnails, getVariantsForCategory, type ThumbnailVariant } from '../utils/fixtureThumbnails';
+import { useTranslation } from 'react-i18next';
+import { Plus, Play, Pause, Square, Trash2, GripVertical, Search, X, Edit2, Check, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Zap, Save, FolderPlus, Maximize2, Type, Copy } from 'lucide-react';
+import { useAppStore } from '../stores/appStore';
+import { useShowStore, getFixtureColor, type PatchedFixture, type FixtureGroup, type SavedScene, type SavedChaser, type ChaserStep, type SavedCueList, type CueListCue, type ShowUniverse, type StageScene } from '../stores/showStore';
+import { normalizeRoster, rosterFromBandConfig, type MusicianRoster } from '../utils/musicians';
+import { ShowManager } from './ShowManager';
+import { Stage2DEditor } from './Stage2DEditor';
+import { Stage3D } from './Stage3D';
+import { useFixtureTest } from '../hooks/useFixtureTest';
+import { LicenseLimitPopup } from '../components/license/LicenseLimitPopup';
+import { loadFixtureDefinitions, type DmxFixtureDefinition, clearFixtureDefCache } from '../hooks/dmx-cues';
+import { analyzeFixtureChannels as analyzeEngine, displayTypeForChannel } from '../engine/fixture-analyzer';
+import { auditFixtureCoverage, formatCoverageWarning } from '../engine/fixture-coverage';
+import { AUTO_LOOP_FOLDER } from '../engine/auto-loops';
+import { groupByTier, TIER_KEYS } from '../engine/tier-utils';
+import { getPatternColor } from '../engine/rgb-matrix-patterns';
+import { findIncompatibleFixtures } from '../hooks/rgb-matrix-playback';
+import { applyPalette, replaceColorEverywhere } from '../utils/color-palettes';
+import { sendChannelsToHardware, sendToUniverse, sendFixtureOn, sendFixtureOff, sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
+import { dmxBridge } from '../utils/dmx-bridge';
+import { outputArbiter } from '../engine/output-arbiter';
+import { fixtureTestState } from '../utils/fixture-test-state';
+import { useRgbMatrixStore } from '../stores/rgbmatrixStore';
+import { buildSceneFixtureIndex, collectFolderNames, normalizeFolderName, scenesWithoutFixture, sceneTouchesFixture } from '../utils/scene-fixtures';
+import { isHomogeneousGroup, resolveGroupChannels } from '../utils/fixture-group';
+import {
+  analyzeFixtureChannels,
+  type AnalyzedChannel,
+  type AnalyzedFixtureChannels,
+} from '../utils/ui-fixture-channels';
+import { setFixtureChannelMaps, type LookChannelMap } from '../utils/scene-look';
+import { useProgrammerStore } from '../stores/programmerStore';
+import { useProgrammerSync } from '../hooks/useProgrammerSync';
+import { evalEfxNormalized, generateEfxPanTilt } from '../hooks/fixture-tracks';
+import { crossfadeSceneChannels, holdMissingChannels } from '../hooks/dmx-playback';
+import { ProgrammerBar } from '../components/ProgrammerBar';
+
+/**
+ * Design View — QLC+ Full Editor
+ * 
+ * Sidebar tabs control which editor section is shown.
+ * Each section has its own sub-layout: list + editor panel.
+ */
+
+type EditorTab = 'fixtures' | 'groups' | 'scenes' | 'chasers' | 'show' | 'cuelists' | 'rgbmatrix' | 'efx' | 'stage' | 'settings';
+
+/** True when a serial port looks like a DMX adapter (FTDI/Enttec/clones). */
+function isDmxPort(p: any): boolean {
+  const m = (p.manufacturer || '').toLowerCase();
+  const fn = (p.friendlyName || '').toLowerCase();
+  const pnp = (p.pnpId || '').toLowerCase();
+  const vid = (p.vendorId || '').toLowerCase();
+  const pid = (p.productId || '').toLowerCase();
+  const isFtdi = vid === '0403';
+  const isDmxName = m.includes('enttec') || m.includes('ftdi') || m.includes('dmx') ||
+    m.includes('opto') || m.includes('usb serial') || m.includes('usb-serial') ||
+    fn.includes('enttec') || fn.includes('ftdi') || fn.includes('dmx') ||
+    fn.includes('opto') || fn.includes('usb serial') || fn.includes('usb-serial') ||
+    pnp.includes('ftdi') || pnp.includes('dmx') || pnp.includes('enttec') ||
+    pnp.includes('opto') || pnp.includes('0403');
+  return isFtdi || isDmxName;
+}
+
+/** Full universe config payload for the DMX engine. */
+function universeToEngineConfig(u: any): any {
+  return {
+    id: u.id,
+    name: u.name,
+    type: u.type,
+    output: true,
+    input: false,
+    channels: u.channels,
+    serialPort: u.serialPort || '',
+    artnetIP: u.artnetIP || '',
+    artnetSubnet: u.artnetSubnet ?? 0,
+    artnetUniverse: u.artnetUniverse ?? 0,
+    sacnUniverse: u.sacnUniverse ?? 1,
+    sacnPriority: u.sacnPriority ?? 100,
+    sacnReceive: u.sacnReceive,
+    sacnMergeOutput: u.sacnMergeOutput,
+  };
+}
+
+export const DesignView: React.FC = () => {
+  const { t } = useTranslation();
+  const activeTab = useAppStore((s) => s.designSidebarTab) as EditorTab;
+  const [showFixtureEditor, setShowFixtureEditor] = useState(false);
+  const [editFixtureData, setEditFixtureData] = useState<any>(null);
+
+  useProgrammerSync();
+
+  // Clear all programmer state (violet) when DesignView unmounts.
+  // Note: programmer channels written via handleChannelChange are LTP and
+  // should survive. Only reset when leaving the view entirely.
+  useEffect(() => {
+    return () => {
+      useProgrammerStore.getState().clear();
+      // Also release the programmer source from the bridge so it stops
+      // dominating the HTP mix when no one is writing anymore.
+      try { dmxBridge.release('programmer'); } catch {}
+    };
+  }, []);
+
+  return (
+    <div className="h-full flex flex-col bg-[#0a0a0f]">
+      <ProgrammerBar />
+      {/* Sub-tab bar */}
+      <div className="px-4 pt-3 pb-0 flex items-center gap-1 border-b border-gray-800/50 overflow-x-auto">
+        {([
+          { key: 'fixtures', label: t('design.tabs.fixtures') },
+          { key: 'stage', label: 'Vue 2D' },
+          { key: 'groups', label: t('design.tabs.groups') },
+          { key: 'scenes', label: t('design.tabs.scenes') },
+          { key: 'chasers', label: t('design.tabs.chasers') },
+          { key: 'show', label: t('design.tabs.show') },
+          { key: 'cuelists', label: t('design.tabs.cueLists') },
+          { key: 'rgbmatrix', label: t('design.tabs.rgbMatrix') },
+          { key: 'efx', label: t('design.tabs.efx') },
+          { key: 'settings', label: t('common.settings') },
+        ] as const).map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => useAppStore.getState().setDesignSidebarTab(tab.key)}
+            className={`${cnEditorTab(activeTab === tab.key)} shrink-0`}
+          >
+            {tab.label}
+          </button>
+        ))}
+        <div className="flex-1 border-b border-gray-800" />
+      </div>
+
+      {/* Show Manager & Stage — full screen */}
+      {activeTab === 'show' ? (
+        <ShowWith3D />
+      ) : activeTab === 'stage' ? (
+        <div className="flex-1 flex overflow-hidden">
+          <Stage2DEditor />
+        </div>
+      ) : (
+      <>
+      {/* Editor Content */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left: Item List (wide tile area on tile-based tabs: ~3/5 of the width) */}
+        <div className={`${['scenes', 'efx', 'chasers', 'cuelists', 'groups'].includes(activeTab) ? 'flex-[3] min-w-0' : 'w-64 shrink-0'} border-r border-gray-800/50 flex flex-col`}>
+          {['fixtures', 'scenes', 'chasers', 'cuelists', 'efx', 'groups'].includes(activeTab) && (
+          <div className="p-3 border-b border-gray-800/50">
+            <button
+              onClick={() => {
+                if (activeTab === 'fixtures') setShowFixtureEditor(true);
+                else if (activeTab === 'scenes') {
+                  const id = useShowStore.getState().createScene('New Scene');
+                  (window as any).__lm_selectedSceneId = id;
+                } else if (activeTab === 'chasers') {
+                  const id = useShowStore.getState().createChaser('New Chaser');
+                  (window as any).__lm_selectedChaserId = id;
+                } else if (activeTab === 'cuelists') {
+                  const id = useShowStore.getState().createCueList('New Cue List');
+                  (window as any).__lm_selectedCueListId = id;
+                } else if (activeTab === 'efx') {
+                  const id = useShowStore.getState().createEffect('New EFX');
+                  (window as any).__lm_selectedEffectId = id;
+                } else if (activeTab === 'groups') {
+                  window.dispatchEvent(new Event('lm-open-group-create'));
+                }
+              }}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-lg text-xs font-medium transition-colors"
+            >
+              <Plus size={14} />
+              New {activeTab.slice(0, -1)}
+            </button>
+          </div>
+          )}
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            <ItemList mode={activeTab} />
+          </div>
+        </div>
+
+        {/* Right: Editor Panel (narrowed to ~2/5 on tile-based tabs) */}
+        <div className={`${['scenes', 'efx', 'chasers', 'cuelists', 'groups'].includes(activeTab) ? 'flex-[2]' : 'flex-1'} overflow-y-auto p-4 min-w-0`}>
+          <EditorPanel mode={activeTab} onEditFixture={(f) => { setEditFixtureData(f); setShowFixtureEditor(true); }} />
+        </div>
+      </div>
+      { showFixtureEditor && <FixtureEditorModal onClose={() => { setShowFixtureEditor(false); setEditFixtureData(null); }} preloadedFixture={editFixtureData} /> }
+      </>
+      )}
+    </div>
+  );
+};
+
+// ─── Show tab with integrated 3D (comme autoscript) ─────────
+const ShowWith3D: React.FC = () => {
+  const { t } = useTranslation();
+  const [show3D, setShow3D] = useState(false);
+  const [showFloating3D, setShowFloating3D] = useState(false);
+  const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
+  const [float3DSize, setFloat3DSize] = useState({ w: 960, h: 540 });
+  // 3D config par show — fallback RÉACTIF sur le store projet (persistant entre
+  // pages + sessions) : un changement fait dans l'onglet Scène se propage ici.
+  const [showMusicians, setShowMusicians] = useState<MusicianRoster>({});
+  const [showStageScene, setShowStageScene] = useState<StageScene>('empty');
+  const shows = useShowStore((s) => s.shows);
+  const updateShowStore = useShowStore((s) => s.updateShow);
+  const storeMusicians = useShowStore((s) => s.musicians);
+  const storeStageScene = useShowStore((s) => s.stageScene);
+  // Sync depuis le show sélectionné (window.__lm_selectedShowId publié par ShowManager)
+  const [selectedShowIdSync, setSelectedShowIdSync] = useState<string | null>(null);
+  useEffect(() => {
+    const check = () => {
+      const id = (window as any).__lm_selectedShowId ?? null;
+      if (id !== selectedShowIdSync) setSelectedShowIdSync(id);
+    };
+    const iv = setInterval(check, 200);
+    return () => clearInterval(iv);
+  }, [selectedShowIdSync]);
+  useEffect(() => {
+    const sc = shows.find((s) => s.id === selectedShowIdSync);
+    if (sc) {
+      // Valeur propre du show prioritaire ; sinon store projet (réactif).
+      setShowMusicians(normalizeRoster((sc as any).musicians ?? storeMusicians ?? {}));
+      setShowStageScene((sc as any).stageScene ?? storeStageScene ?? 'empty');
+    } else {
+      setShowMusicians(storeMusicians ?? {});
+      setShowStageScene(storeStageScene ?? 'empty');
+    }
+  }, [selectedShowIdSync, shows, storeMusicians, storeStageScene]);
+  const handleShowMusiciansChange = useCallback((roster: MusicianRoster) => {
+    const nr = normalizeRoster(roster);
+    setShowMusicians(nr);
+    const id = (window as any).__lm_selectedShowId;
+    if (id) updateShowStore(id, { musicians: nr } as any);
+  }, [updateShowStore]);
+const handleShowStageSceneChange = useCallback((cfg: StageScene) => {
+    setShowStageScene(cfg);
+    // ⚠️ NE PAS réinitialiser musicians ici — les musiciens du roster
+    // appartiennent au show en cours et doivent persister d'une page à l'autre,
+    // tout comme les positions de fixtures. La valeur actuelle du roster
+    // sera conservée par le store et réinjectée au prochain rendu.
+    const id = (window as any).__lm_selectedShowId;
+    if (id) updateShowStore(id, { stageScene: cfg } as any);
+}, [updateShowStore]);
+  const float3DDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
+  const float3DResizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const handleFloat3DDragStart = useCallback((e: React.MouseEvent) => {
+    float3DDragRef.current = { startX: e.clientX, startY: e.clientY, startLeft: float3DPos.x, startTop: float3DPos.y };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DDragRef.current) return;
+      setFloat3DPos({ x: Math.max(0, Math.min(float3DDragRef.current.startLeft + ev.clientX - float3DDragRef.current.startX, window.innerWidth - 120)), y: Math.max(0, Math.min(float3DDragRef.current.startTop + ev.clientY - float3DDragRef.current.startY, window.innerHeight - 40)) });
+    };
+    const onUp = () => { float3DDragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DPos]);
+  const handleFloat3DResizeStart = useCallback((e: React.MouseEvent) => {
+    float3DResizeRef.current = { startX: e.clientX, startY: e.clientY, startW: float3DSize.w, startH: float3DSize.h };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DResizeRef.current) return;
+      setFloat3DSize({ w: Math.max(320, float3DResizeRef.current.startW + ev.clientX - float3DResizeRef.current.startX), h: Math.max(200, float3DResizeRef.current.startH + ev.clientY - float3DResizeRef.current.startY) });
+    };
+    const onUp = () => { float3DResizeRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DSize]);
+  return (
+    <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex overflow-hidden min-w-0">
+        <ShowManager />
+      </div>
+      {show3D && showFloating3D && (
+        <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}>
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
+            <span className="text-[11px] text-purple-400 font-medium">{t('design.live3dShow')}</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => { setFloat3DSize({ w: 640, h: 360 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
+              <button onClick={() => { setShowFloating3D(false); setShow3D(false); }} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 relative"><Stage3D hideFixturePanel musicians={showMusicians} stageScene={showStageScene} onMusiciansChange={handleShowMusiciansChange} onStageSceneChange={handleShowStageSceneChange} /><div className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize" onMouseDown={handleFloat3DResizeStart} style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }} /></div>
+        </div>
+      )}
+      {!showFloating3D && (
+        <button onClick={() => { setShow3D(true); setShowFloating3D(true); }} className="fixed bottom-4 right-4 z-40 bg-purple-600/80 hover:bg-purple-500 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg transition-all">
+          🎥 3D View
+        </button>
+      )}
+    </div>
+  );
+};
+
+// ─── Helpers ───────────────────────────────────────────────
+
+const cnEditorTab = (active: boolean) =>
+  `flex items-center gap-1.5 px-3 py-2 rounded-t-lg text-xs font-medium transition-all ${
+    active ? 'bg-[#12121a] text-purple-300 border-t border-l border-r border-gray-800' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/20'
+  }`;
+
+// ─── Item Lists ────────────────────────────────────────────
+
+const ItemList: React.FC<{ mode: EditorTab }> = ({ mode }) => {
+  switch (mode) {
+    case 'show':
+      return (
+        <div className="text-xs text-gray-600 text-center py-8">
+          Show Manager uses its own interface
+        </div>
+      );
+    case 'scenes':
+      return <SceneList />;
+    case 'chasers':
+      return <ChaserList />;
+    case 'cuelists':
+      return <CueListList />;
+    case 'fixtures':
+      return <PatchedFixtureList />;
+    case 'groups':
+      return <GroupsList />;
+    case 'rgbmatrix':
+      return <RgbMatrixList />;
+    case 'efx':
+      return <EFXList />;
+    default:
+      return (
+        <div className="text-xs text-gray-600 text-center py-8">
+          No {mode} created yet
+        </div>
+      );
+  }
+};
+
+// ─── Editor Panels ─────────────────────────────────────────
+
+const EditorPanel: React.FC<{ mode: EditorTab; onEditFixture?: (f: any) => void }> = ({ mode, onEditFixture }) => {
+  switch (mode) {
+    case 'show': return <div />;
+    case 'scenes': return <SceneEditor />;
+    case 'chasers': return <ChaserEditor />;
+    case 'cuelists': return <CueListEditor />;
+    case 'rgbmatrix': return <RGBMatrixEditor />;
+    case 'efx': return <EFXEditor />;
+    case 'fixtures': return <FixturePatcher onEditFixture={onEditFixture} />;
+    case 'groups': return <GroupsEditor />;
+    case 'settings': return <DesignSettingsPanel />;
+    case 'stage': return <Stage2DEditor />;
+    default: return <EmptyPanel />;
+  }
+};
+
+const EmptyPanel: React.FC = () => (
+  <div className="flex items-center justify-center h-full text-gray-600 text-sm">
+    Select an item from the list to edit
+  </div>
+);
+
+// ─── Scene Editor ──────────────────────────────────────────
+
+// L'analyse des canaux (types, adresses DMX, repérage Dimmer/Pan/Tilt/RGB)
+// vit dans `src/utils/ui-fixture-channels.ts` — partagée avec les tests pour
+// que le probe teste réellement le code exécuté par l'application.
+
+// ─── Palette Bar (palettes de couleur réutilisables) ─────────
+
+const PaletteBar: React.FC = () => {
+  const { t } = useTranslation();
+  const palettes = useShowStore((s) => s.colorPalettes);
+  const addColorPalette = useShowStore((s) => s.addColorPalette);
+  const removeColorPalette = useShowStore((s) => s.removeColorPalette);
+  const updateColorPalette = useShowStore((s) => s.updateColorPalette);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newHex, setNewHex] = useState('#ff0000');
+  const [busy, setBusy] = useState(false);
+
+  const sel = palettes.find((p) => p.id === selected) || null;
+
+  const handleAdd = (): void => {
+    if (!/^#[0-9a-fA-F]{6}$/.test(newHex)) return;
+    const id = addColorPalette(newName.trim() || 'Palette', newHex);
+    setSelected(id);
+    setAdding(false);
+    setNewName('');
+  };
+
+  const handleApply = (): void => {
+    if (!sel || busy) return;
+    setBusy(true);
+    try {
+      applyPalette(sel.hex, sel.groupIds ?? []);
+      try { (window as any).__lm_toast?.(t('design.paletteApplied', { name: sel.name }), 'ok'); } catch {}
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleReplace = (): void => {
+    if (!sel || busy) return;
+    const old = window.prompt(t('design.paletteReplaceOldPrompt'), sel.hex);
+    if (!old || !/^#[0-9a-fA-F]{6}$/.test(old)) return;
+    setBusy(true);
+    try {
+      const n = replaceColorEverywhere(old, sel.hex, sel.groupIds ?? []);
+      try { (window as any).__lm_toast?.(t('design.paletteReplaced', { n }), n > 0 ? 'ok' : 'info'); } catch {}
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-gray-800/50 bg-[#0d0d14]/60 p-2.5 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">{t('design.palettes')}</span>
+        <div className="flex-1" />
+        <button onClick={() => setAdding((v) => !v)} className="px-2 py-0.5 rounded text-[10px] bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 border border-purple-500/30">
+          + {t('design.paletteAdd')}
+        </button>
+      </div>
+
+      {adding && (
+        <div className="flex items-center gap-1.5">
+          <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={t('design.paletteName')}
+            className="w-28 bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-[10px] text-gray-200 outline-none focus:border-purple-500/50" />
+          <input type="color" value={newHex} onChange={(e) => setNewHex(e.target.value)}
+            className="w-8 h-7 rounded cursor-pointer bg-transparent border border-gray-700" />
+          <button onClick={handleAdd} className="px-2 py-1 rounded text-[10px] bg-purple-600 text-white hover:bg-purple-500">{t('common.ok')}</button>
+        </div>
+      )}
+
+      {palettes.length === 0 && !adding && (
+        <p className="text-[10px] text-gray-600">{t('design.paletteEmpty')}</p>
+      )}
+
+      {palettes.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {palettes.map((p) => (
+            <div key={p.id} className={`group relative flex items-center gap-1 pl-1 pr-1.5 py-1 rounded border cursor-pointer transition-all ${
+              selected === p.id ? 'border-purple-400/70 bg-purple-600/10' : 'border-gray-700/40 hover:border-gray-600'
+            }`} onClick={() => setSelected(p.id)}>
+              <span className="w-4 h-4 rounded-full border border-white/20 shrink-0" style={{ backgroundColor: p.hex }} />
+              <span className="text-[10px] text-gray-300 max-w-[90px] truncate">{p.name}</span>
+              <button onClick={(e) => { e.stopPropagation(); removeColorPalette(p.id); if (selected === p.id) setSelected(null); }}
+                className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 text-[9px] px-0.5" title={t('common.delete')}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {sel && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button onClick={handleApply} disabled={busy}
+            className="px-2 py-1 rounded text-[10px] bg-purple-600/30 text-purple-200 hover:bg-purple-600/50 border border-purple-500/30 disabled:opacity-40">
+            ▶ {t('design.paletteApply')}
+          </button>
+          <input type="color" value={sel.hex} onChange={(e) => updateColorPalette(sel.id, { hex: e.target.value })}
+            className="w-8 h-7 rounded cursor-pointer bg-transparent border border-gray-700" title={t('design.paletteChangeColor')} />
+          <input type="text" value={sel.name} onChange={(e) => updateColorPalette(sel.id, { name: e.target.value })}
+            className="w-28 bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-[10px] text-gray-200 outline-none focus:border-purple-500/50" />
+          <button onClick={handleReplace} disabled={busy}
+            className="px-2 py-1 rounded text-[10px] bg-amber-600/20 text-amber-300 hover:bg-amber-600/40 border border-amber-500/30 disabled:opacity-40"
+            title={t('design.paletteReplaceTitle')}>
+            ↻ {t('design.paletteReplace')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const SceneList: React.FC = () => {
+  const { t } = useTranslation();
+  const scenes = useShowStore((s) => s.scenes);
+  const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const universes = useShowStore((s) => s.universes);
+  const createScene = useShowStore((s) => s.createScene);
+  const updateScene = useShowStore((s) => s.updateScene);
+  const deleteScene = useShowStore((s) => s.deleteScene);
+  const sceneFolders = useShowStore((s) => s.sceneFolders);
+  const createFolder = useShowStore((s) => s.createFolder);
+  const renameFolder = useShowStore((s) => s.renameFolder);
+  const clearFolder = useShowStore((s) => s.clearFolder);
+  const deleteFolder = useShowStore((s) => s.deleteFolder);
+  const setDesignSidebarTab = useAppStore((s) => s.setDesignSidebarTab);
+
+  // Scene classification: computed fixture filter + user folders + name search
+  // Filter values: '' = all | 'unassigned' (no fixture) | 'uncategorized' (no folder)
+  // | `folder:<name>` (user folder, prefixed to avoid colliding with fixture ids) | fixtureId
+  const [sceneFilter, setSceneFilter] = useState('');
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  // Scene to auto-move into a folder created from the context menu
+  // ("Nouveau dossier…" → create → scene lands in it directly).
+  const [pendingMoveSceneId, setPendingMoveSceneId] = useState<string | null>(null);
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
+  const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<string | null>(null);
+  const [sceneSearch, setSceneSearch] = useState('');
+
+  // Two-way scene ↔ fixture index, rebuilt in one pass when patch or scenes change.
+  // Predicate identical to the playback engine (dmx-helpers / dmx-playback):
+  // ∃ channel address inside [startAddress, startAddress+channelCount), value ignored.
+  const { byFixture, byScene } = useMemo(
+    () => buildSceneFixtureIndex(scenes, patchedFixtures),
+    [scenes, patchedFixtures],
+  );
+  const unassignedIds = useMemo(() => new Set(scenesWithoutFixture(scenes, byScene).map((s) => s.id)), [scenes, byScene]);
+
+  // User folders = declared entities ∪ folders derived from scene.folder:
+  // A→Z with live counts (declared-but-empty folders show count 0).
+  const folderOptions = useMemo(() => {
+    const names = collectFolderNames(sceneFolders, scenes);
+    const m = new Map<string, number>();
+    for (const s of scenes) {
+      const n = normalizeFolderName(s.folder || '');
+      if (n) m.set(n, (m.get(n) || 0) + 1);
+    }
+    return names.map((name) => ({ value: `folder:${name}`, name, count: m.get(name) || 0 }));
+  }, [sceneFolders, scenes]);
+  const uncategorizedCount = useMemo(
+    () => scenes.filter((s) => !normalizeFolderName(s.folder || '')).length,
+    [scenes],
+  );
+  const activeFolderName = sceneFilter.startsWith('folder:') ? sceneFilter.slice('folder:'.length) : null;
+
+  // Fixtures sorted by universe name then start address for the <select>
+  const sortedFixtures = useMemo(() => {
+    const uniName = new Map(universes.map((u) => [u.id, u.name]));
+    return [...patchedFixtures].sort((a, b) => {
+      const ua = uniName.get(a.universeId) || '';
+      const ub = uniName.get(b.universeId) || '';
+      if (ua !== ub) return ua.localeCompare(ub);
+      return a.startAddress - b.startAddress;
+    });
+  }, [patchedFixtures, universes]);
+
+  const filteredScenes = useMemo(() => {
+    const q = sceneSearch.trim().toLowerCase();
+    return scenes.filter((s) => {
+      if (sceneFilter === 'unassigned') {
+        if (!unassignedIds.has(s.id)) return false;
+      } else if (sceneFilter === 'uncategorized') {
+        if (normalizeFolderName(s.folder || '')) return false;
+      } else if (sceneFilter.startsWith('folder:')) {
+        if (normalizeFolderName(s.folder || '') !== sceneFilter.slice('folder:'.length)) return false;
+      } else if (sceneFilter) {
+        if (!(byFixture.get(sceneFilter) || []).includes(s.id)) return false;
+      }
+      if (q && !s.name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [scenes, sceneFilter, sceneSearch, byFixture, unassignedIds]);
+
+  // Drop a dragged scene into a folder ('' = remove from any folder).
+  const handleDropOnFolder = (folder: string) => {
+    const id = dragSceneId;
+    if (id) {
+      const sc = scenes.find((s) => s.id === id);
+      const target = normalizeFolderName(folder) || '';
+      if (sc && normalizeFolderName(sc.folder || '') !== target) {
+        updateScene(id, target ? { folder: target } : { folder: undefined });
+      }
+    }
+    setDragSceneId(null);
+    setDragOverFolder(null);
+  };
+
+  const [ctxMenu, setCtxMenu] = useState<{ visible: boolean; x: number; y: number; sceneId: string; sceneName: string }>(
+    { visible: false, x: 0, y: 0, sceneId: '', sceneName: '' }
+  );
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  // Init depuis window : Store/Rec posent l'id AVANT le montage de la grille
+  // (bascule onglet Scènes) — un useState(null) écrasait la sélection au mount.
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(
+    () => ((window as any).__lm_selectedSceneId as string | null | undefined) ?? null
+  );
+  // Drag & drop: scene currently dragged (source) + folder chip hovered (target).
+  const [dragSceneId, setDragSceneId] = useState<string | null>(null);
+  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ctxMenu.visible) return;
+    const dismiss = () => setCtxMenu((c) => ({ ...c, visible: false }));
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') dismiss();
+    };
+    window.addEventListener('click', dismiss);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', dismiss);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [ctxMenu.visible]);
+
+  // Scene targeted by the context menu (for the “move to folder” section).
+  const ctxScene = ctxMenu.visible ? scenes.find((s) => s.id === ctxMenu.sceneId) : null;
+  const ctxSceneFolder = normalizeFolderName(ctxScene?.folder || '');
+
+  const handleCreate = () => {
+    const id = createScene('New Scene');
+    setSelectedSceneId(id);
+  };
+
+  // Expose selected scene ID for the editor panel
+  useEffect(() => {
+    (window as any).__lm_selectedSceneId = selectedSceneId;
+  }, [selectedSceneId]);
+
+  // Sync depuis l'extérieur (Store ProgrammerBar / Rec Scène 3D) : la grille
+  // n'écrivait que le window hack, jamais ne le relisait → tuile non
+  // sélectionnée après validation de la modale.
+  useEffect(() => {
+    const check = () => {
+      const id = (window as any).__lm_selectedSceneId as string | null | undefined;
+      const next = id ?? null;
+      if (next !== selectedSceneId) setSelectedSceneId(next);
+    };
+    check();
+    const iv = setInterval(check, 100);
+    return () => clearInterval(iv);
+  }, [selectedSceneId]);
+
+  // Révèle la tuile : si un filtre/recherche la masque après un select
+  // externe, on relâche les filtres plutôt que « rien ne s'affiche ».
+  useEffect(() => {
+    if (!selectedSceneId) return;
+    if (filteredScenes.some((s) => s.id === selectedSceneId)) return;
+    if (sceneFilter) setSceneFilter('');
+    if (sceneSearch) setSceneSearch('');
+  }, [selectedSceneId, filteredScenes, sceneFilter, sceneSearch]);
+
+  if (scenes.length === 0 && sceneFolders.length === 0) {
+    // Empty project: the filter bar is skipped, but folder creation must
+    // still be reachable (declared folders are entities, even with 0 scenes).
+    if (creatingFolder) {
+      return (
+        <div className="px-2 py-1.5">
+          <input
+            autoFocus
+            placeholder={t('design.scenes.folderNamePlaceholder')}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const n = createFolder((e.target as HTMLInputElement).value);
+                if (n) setSceneFilter(`folder:${n}`);
+                setPendingMoveSceneId(null);
+                setCreatingFolder(false);
+              }
+              if (e.key === 'Escape') {
+                setPendingMoveSceneId(null);
+                setCreatingFolder(false);
+              }
+            }}
+            className="w-full px-2 py-1.5 bg-gray-800/50 border border-purple-500/50 rounded-md text-xs text-gray-300 outline-none"
+          />
+        </div>
+      );
+    }
+    return (
+      <div className="text-xs text-gray-600 text-center py-8 space-y-2">
+        <div>{t('design.noScenesYet')}</div>
+        <button
+          onClick={() => setCreatingFolder(true)}
+          className="mx-auto flex items-center gap-1 px-2 py-1 rounded-md bg-gray-800/50 border border-gray-700 text-gray-400 hover:text-purple-300 hover:border-purple-500/50 transition-colors"
+        >
+          <FolderPlus size={12} /> {t('design.scenes.createFolder')}
+        </button>
+      </div>
+    );
+  }
+
+  const showEmptyFixture = sceneFilter && sceneFilter !== 'unassigned' && sceneFilter !== 'uncategorized' && !sceneFilter.startsWith('folder:') && filteredScenes.length === 0;
+  const showEmptyFolder = activeFolderName !== null && filteredScenes.length === 0;
+
+  return (
+    <>
+      {/* Folder/fixture filter + folder creation + name search (computed) */}
+      <div className="space-y-1.5 mb-2">
+        {creatingFolder ? (
+          <div className="flex items-center gap-1">
+            <input
+              autoFocus
+              placeholder={t('design.scenes.folderNamePlaceholder')}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const n = createFolder((e.target as HTMLInputElement).value);
+                  if (n) {
+                    setSceneFilter(`folder:${n}`);
+                    // Created from the context menu → move the target scene in.
+                    if (pendingMoveSceneId) updateScene(pendingMoveSceneId, { folder: n });
+                  }
+                  setPendingMoveSceneId(null);
+                  setCreatingFolder(false);
+                }
+                if (e.key === 'Escape') {
+                  setPendingMoveSceneId(null);
+                  setCreatingFolder(false);
+                }
+              }}
+              onBlur={() => {
+                setPendingMoveSceneId(null);
+                setCreatingFolder(false);
+              }}
+              className="flex-1 px-2 py-1.5 bg-gray-800/50 border border-purple-500/50 rounded-md text-xs text-gray-300 outline-none"
+            />
+            <button
+              onClick={() => {
+                setPendingMoveSceneId(null);
+                setCreatingFolder(false);
+              }}
+              className="p-1.5 text-gray-500 hover:text-gray-300"
+              title={t('design.scenes.cancel')}
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1">
+            <select
+              value={sceneFilter}
+              onChange={(e) => setSceneFilter(e.target.value)}
+              className="flex-1 min-w-0 px-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded-md text-xs text-gray-300 outline-none focus:border-purple-500/50"
+            >
+              <option value="">{t('design.scenes.allScenes', { count: scenes.length })}</option>
+              {folderOptions.length > 0 && (
+                <optgroup label={t('design.scenes.folders')}>
+                  {folderOptions.map((fo) => (
+                    <option key={fo.value} value={fo.value}>📁 {fo.name} ({fo.count})</option>
+                  ))}
+                  {uncategorizedCount > 0 && (
+                    <option value="uncategorized">{t('design.scenes.uncategorized', { count: uncategorizedCount })}</option>
+                  )}
+                </optgroup>
+              )}
+              {(sortedFixtures.length > 0 || unassignedIds.size > 0) && (
+                <optgroup label={t('design.patchedFixtures')}>
+                  {sortedFixtures.map((pf) => {
+                    const uniName = universes.find((u) => u.id === pf.universeId)?.name;
+                    const count = (byFixture.get(pf.id) || []).length;
+                    return (
+                      <option key={pf.id} value={pf.id}>
+                        {uniName ? `${uniName} · ` : ''}{pf.name} @{pf.startAddress} ({count})
+                      </option>
+                    );
+                  })}
+                  {unassignedIds.size > 0 && (
+                    <option value="unassigned">{t('design.scenes.unassigned', { count: unassignedIds.size })}</option>
+                  )}
+                </optgroup>
+              )}
+            </select>
+            <button
+              onClick={() => setCreatingFolder(true)}
+              title={t('design.scenes.createFolder')}
+              className="p-1.5 rounded-md bg-gray-800/50 border border-gray-700 text-gray-400 hover:text-purple-300 hover:border-purple-500/50 transition-colors shrink-0"
+            >
+              <FolderPlus size={12} />
+            </button>
+          </div>
+        )}
+        {/* Active folder toolbar: rename (all scenes in the folder) / unassign / delete */}
+        {activeFolderName !== null && (
+          <div className="flex items-center gap-1">
+            {confirmDeleteFolder === activeFolderName ? (
+              <>
+                <span className="text-[10px] text-red-300 truncate flex-1">
+                  {t('design.scenes.confirmDeleteFolder', { name: activeFolderName })}
+                </span>
+                <button
+                  onClick={() => { deleteFolder(activeFolderName); setSceneFilter(''); setConfirmDeleteFolder(null); }}
+                  className="px-1.5 py-0.5 rounded bg-red-600/20 text-red-300 text-[10px] hover:bg-red-600/40"
+                >
+                  {t('design.scenes.confirm')}
+                </button>
+                <button
+                  onClick={() => setConfirmDeleteFolder(null)}
+                  className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 text-[10px] hover:bg-gray-700"
+                >
+                  {t('design.scenes.cancel')}
+                </button>
+              </>
+            ) : renamingFolder === activeFolderName ? (
+              <input
+                autoFocus
+                defaultValue={activeFolderName}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const v = normalizeFolderName((e.target as HTMLInputElement).value);
+                    if (v && v !== activeFolderName) {
+                      renameFolder(activeFolderName, v);
+                      // Keep the filter on the folder under its new name.
+                      setSceneFilter(`folder:${v}`);
+                    }
+                    setRenamingFolder(null);
+                  }
+                  if (e.key === 'Escape') setRenamingFolder(null);
+                }}
+                onBlur={() => setRenamingFolder(null)}
+                className="flex-1 px-2 py-1 bg-gray-800/50 border border-purple-500/50 rounded-md text-xs text-gray-300 outline-none"
+              />
+            ) : (
+              <>
+                <span className="text-[10px] text-purple-300 truncate flex-1">📁 {activeFolderName}</span>
+                <button
+                  onClick={() => setRenamingFolder(activeFolderName)}
+                  title={t('design.scenes.renameFolder')}
+                  className="p-1 text-gray-500 hover:text-purple-300"
+                >
+                  <Edit2 size={11} />
+                </button>
+                <button
+                  onClick={() => { clearFolder(activeFolderName); setSceneFilter(''); }}
+                  title={t('design.scenes.clearFolder')}
+                  className="p-1 text-gray-500 hover:text-yellow-300"
+                >
+                  <X size={11} />
+                </button>
+                {activeFolderName !== AUTO_LOOP_FOLDER && (
+                  <button
+                    onClick={() => setConfirmDeleteFolder(activeFolderName)}
+                    title={t('design.scenes.deleteFolder')}
+                    className="p-1 text-gray-500 hover:text-red-400"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
+        <div className="relative">
+          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-600" />
+          <input
+            type="text"
+            value={sceneSearch}
+            onChange={(e) => setSceneSearch(e.target.value)}
+            placeholder={t('design.searchScenes')}
+            className="w-full pl-7 pr-2 py-1.5 bg-gray-800/50 border border-gray-700 rounded-md text-xs text-gray-300 outline-none focus:border-purple-500/50"
+          />
+        </div>
+        {/* Folder chips: click to filter, drag a scene onto one to move it */}
+        {folderOptions.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {folderOptions.map((fo) => (
+              <div
+                key={fo.value}
+                onDragOver={(e) => {
+                  if (!dragSceneId) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  setDragOverFolder(fo.name);
+                }}
+                onDragLeave={() => setDragOverFolder((cur) => (cur === fo.name ? null : cur))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleDropOnFolder(fo.name);
+                }}
+                className={`group inline-flex items-center text-[10px] rounded border transition-colors ${
+                  dragOverFolder === fo.name
+                    ? 'border-purple-400 bg-purple-600/30 text-purple-200'
+                    : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:text-purple-300 hover:border-purple-500/50'
+                }`}
+              >
+                <button
+                  onClick={() => setSceneFilter(fo.value)}
+                  title={t('design.scenes.dropSceneHint')}
+                  className="px-1.5 py-0.5"
+                >
+                  📁 {fo.name}
+                </button>
+                {fo.name !== AUTO_LOOP_FOLDER && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSceneFilter(fo.value);
+                      setConfirmDeleteFolder(fo.name);
+                    }}
+                    title={t('design.scenes.deleteFolder')}
+                    className="px-1 py-0.5 text-gray-500 hover:text-red-400 opacity-60 group-hover:opacity-100 transition-opacity"
+                  >
+                    <Trash2 size={10} />
+                  </button>
+                )}
+              </div>
+            ))}
+            {uncategorizedCount < scenes.length && (
+              <button
+                onClick={() => setSceneFilter('uncategorized')}
+                onDragOver={(e) => {
+                  if (!dragSceneId) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  setDragOverFolder('');
+                }}
+                onDragLeave={() => setDragOverFolder((cur) => (cur === '' ? null : cur))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleDropOnFolder('');
+                }}
+                title={t('design.scenes.dropSceneHint')}
+                className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                  dragOverFolder === ''
+                    ? 'border-yellow-400 bg-yellow-600/20 text-yellow-200'
+                    : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:text-yellow-300 hover:border-yellow-500/50'
+                }`}
+              >
+                🚫 {t('design.scenes.dropUncategorized')}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {filteredScenes.length === 0 ? (
+        <div className="text-xs text-gray-600 text-center py-8">
+          {showEmptyFolder
+            ? t('design.scenes.noScenesInFolder')
+            : showEmptyFixture
+              ? t('design.scenes.noScenesForFixture')
+              : t('design.noScenesMatch', { query: sceneSearch })}
+        </div>
+      ) : (
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+        {filteredScenes.map((scene) => {
+          const activeChannels = Object.entries(scene.channels).filter(([, v]) => v > 0);
+          const isSelected = selectedSceneId === scene.id;
+          const touchedFixtures = byScene.get(scene.id) || [];
+          const folderName = normalizeFolderName(scene.folder || '');
+          return (
+            <div
+              key={scene.id}
+              draggable
+              onClick={() => {
+                // Clic = sélectionner + jouer. Re-clic sur la tuile ACTIVE
+                // = stopper (désélection → l'effet preview éteint en
+                // zéros transient, sans blocage persistant). Re-cliquer
+                // une fois éteint rejoue depuis le début (= replay).
+                if (isSelected) {
+                  setSelectedSceneId(null);
+                  // Écriture synchrone (même motif qu'à la sélection) : la
+                  // boucle EFX lit window et s'arrête à la frame suivante.
+                  (window as any).__lm_selectedSceneId = null;
+                } else {
+                  setSelectedSceneId(scene.id);
+                  // Écriture synchrone : l'éditeur lit window via poll — ne pas
+                  // attendre l'effet React (1 frame) pour que la scène joue.
+                  (window as any).__lm_selectedSceneId = scene.id;
+                }
+              }}
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', scene.id);
+                setDragSceneId(scene.id);
+              }}
+              onDragEnd={() => {
+                setDragSceneId(null);
+                setDragOverFolder(null);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setCtxMenu({
+                  visible: true,
+                          x: e.clientX,
+        y: e.clientY,
+                  sceneId: scene.id,
+                  sceneName: scene.name,
+                });
+              }}
+              title={t('design.scenes.contextMenuHint')}
+              className={`rounded-lg border px-2 py-1.5 cursor-pointer group transition-all ${
+                dragSceneId === scene.id ? 'opacity-40' : ''
+              } ${
+                isSelected
+                  ? 'bg-purple-600/15 border-purple-500/50 shadow-[0_0_14px_rgba(168,85,247,0.25)]'
+                  : 'bg-[#0d0d14] border-gray-700 hover:border-purple-500/40 hover:bg-gray-800/20'
+              }`}
+              style={isSelected ? undefined : { borderLeft: '3px solid rgba(107,114,128,0.5)' }}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{
+                    background: isSelected
+                      ? 'linear-gradient(135deg, #a855f7, #6366f1)'
+                      : 'linear-gradient(135deg, #4b5563, #1f2937)',
+                    boxShadow: isSelected ? '0 0 6px rgba(168,85,247,0.8)' : 'none',
+                  }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className={`text-xs truncate ${isSelected ? 'text-purple-100 font-semibold' : 'text-gray-200 font-medium'}`}>{scene.name}</div>
+                  <div className="text-[10px] text-gray-500 truncate">
+                    {activeChannels.length} ch · {scene.duration > 0 ? `${(scene.duration / 1000).toFixed(1)}s` : '∞'}{touchedFixtures.length > 1 ? ` · ${t('design.scenes.fixtureCount', { count: touchedFixtures.length })}` : ''}
+                  </div>
+                </div>
+                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setConfirmDelete(scene.id); }}
+                    className="p-1 text-gray-500 hover:text-red-400"
+                    title={t('design.scenes.deleteScene')}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              </div>
+              {(folderName || activeChannels.length > 0) && (
+                <div className="flex gap-1 mt-1.5 flex-wrap">
+                  {folderName && (
+                    <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-purple-600/15 border border-purple-500/25 text-purple-300/90 shrink-0 max-w-[110px] truncate" title={t('design.scenes.folder')}>
+                      📁 {folderName}
+                    </span>
+                  )}
+                  {activeChannels.slice(0, 2).map(([addr, val]) => (
+                    <span key={addr} className="text-[8px] px-1.5 py-0.5 rounded-full bg-gray-800/80 border border-gray-700/50 text-gray-400 font-mono">
+                      @{addr}:{val}
+                    </span>
+                  ))}
+                  {activeChannels.length > 2 && (
+                    <span className="text-[8px] text-gray-600 self-center">+{activeChannels.length - 2}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      )}
+
+      {/* Context menu */}
+      {ctxMenu.visible && (
+        <div
+          className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px] max-h-[80vh] overflow-y-auto"
+          data-context-menu="fixture-test"
+          style={{ ...clampRect(ctxMenu.x, ctxMenu.y, 240, 320, window.innerWidth, window.innerHeight) }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider truncate">
+            {ctxMenu.sceneName}
+          </div>
+          <button
+            onClick={() => {
+              (window as any).__lm_renameScene = true;
+              setSelectedSceneId(ctxMenu.sceneId);
+              // Écriture synchrone + replay : comme le clic tuile — si la
+              // scène est déjà sélectionnée, l'éditeur doit quand même
+              // re-pusher ses canaux (faisceaux allumés pour modifier).
+              (window as any).__lm_selectedSceneId = ctxMenu.sceneId;
+              (window as any).__lm_sceneReplayAt = Date.now();
+              setCtxMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-200 transition-colors flex items-center gap-2"
+          >
+            <Type size={12} /> {t('design.scenes.rename')}
+          </button>
+          <button
+            onClick={() => {
+              setSelectedSceneId(ctxMenu.sceneId);
+              // Écriture synchrone + replay : comme le clic tuile — « Modifier »
+              // doit ALLUMER les faisceaux (push des canaux vers le moteur),
+              // même si la scène est déjà sélectionnée (sinon rien ne se passe
+              // et on modifie dans le noir).
+              (window as any).__lm_selectedSceneId = ctxMenu.sceneId;
+              (window as any).__lm_sceneReplayAt = Date.now();
+              setCtxMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-200 transition-colors flex items-center gap-2"
+          >
+            <Edit2 size={12} /> {t('design.scenes.editScene')}
+          </button>
+          <button
+            onClick={() => {
+              const newId = useShowStore.getState().duplicateScene(ctxMenu.sceneId);
+              if (newId) setSelectedSceneId(newId);
+              setCtxMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-200 transition-colors flex items-center gap-2"
+          >
+            <Copy size={12} /> {t('design.scenes.duplicateScene')}
+          </button>
+          <div className="my-1 border-t border-gray-800" />
+          <div className="px-3 py-1 text-[10px] text-gray-600">{t('design.scenes.moveToFolder')}</div>
+          {folderOptions.map((fo) => (
+            <button
+              key={fo.value}
+              onClick={() => {
+                updateScene(ctxMenu.sceneId, { folder: fo.name });
+                setCtxMenu((c) => ({ ...c, visible: false }));
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-200 transition-colors flex items-center gap-2"
+            >
+              <span className="truncate flex-1">📁 {fo.name}</span>
+              {ctxSceneFolder === fo.name && <Check size={12} className="text-purple-300 shrink-0" />}
+            </button>
+          ))}
+          <button
+            onClick={() => {
+              setCtxMenu((c) => ({ ...c, visible: false }));
+              setPendingMoveSceneId(ctxMenu.sceneId);
+              setCreatingFolder(true);
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:text-purple-200 hover:bg-purple-600/20 transition-colors flex items-center gap-2"
+          >
+            <FolderPlus size={12} className="shrink-0" /> {t('design.scenes.newFolderOption')}
+          </button>
+          {ctxSceneFolder && (
+            <button
+              onClick={() => {
+                updateScene(ctxMenu.sceneId, { folder: undefined });
+                setCtxMenu((c) => ({ ...c, visible: false }));
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:text-yellow-200 hover:bg-yellow-600/15 transition-colors"
+            >
+              {t('design.scenes.noFolderOption')}
+            </button>
+          )}
+          <div className="my-1 border-t border-gray-800" />
+          <button
+            onClick={() => {
+              setConfirmDelete(ctxMenu.sceneId);
+              setCtxMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-red-300 hover:bg-red-600/20 hover:text-red-200 transition-colors flex items-center gap-2"
+          >
+            <Trash2 size={12} /> {t('design.scenes.deleteScene')}
+          </button>
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setConfirmDelete(null)}>
+          <div className="bg-[#12121a] border border-gray-700 rounded-xl p-5 shadow-2xl w-80" onClick={(e) => e.stopPropagation()}>
+            <h4 className="text-sm font-bold text-white mb-2">{t('design.scenes.deleteSceneTitle')}</h4>
+            <p className="text-xs text-gray-400 mb-4">
+              {t('design.scenes.deleteSceneBody')}
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setConfirmDelete(null)} className="px-3 py-1.5 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300 hover:bg-gray-700/50">
+                {t('design.scenes.cancel')}
+              </button>
+              <button
+                onClick={() => {
+                  deleteScene(confirmDelete);
+                  setConfirmDelete(null);
+                  if (selectedSceneId === confirmDelete) setSelectedSceneId(null);
+                }}
+                className="px-3 py-1.5 bg-red-600/20 border border-red-500/30 rounded-lg text-xs text-red-300 hover:bg-red-600/30"
+              >
+                {t('design.scenes.confirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+const SceneEditor: React.FC = () => {
+  const { t } = useTranslation();
+  const scenes = useShowStore((s) => s.scenes);
+  const updateScene = useShowStore((s) => s.updateScene);
+  const createScene = useShowStore((s) => s.createScene);
+  const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const universes = useShowStore((s) => s.universes);
+
+  // Refs to avoid stale closures in DMX handlers
+  const patchedFixturesRef = useRef(patchedFixtures);
+  patchedFixturesRef.current = patchedFixtures;
+  const universesRef = useRef(universes);
+  universesRef.current = universes;
+
+  // Get selected scene ID from the SceneList via window hack — init from
+  // window so a Store that selected before mount plays on the first frame
+  // (no 100ms scene=null window that would push 512 zeros).
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(
+    () => ((window as any).__lm_selectedSceneId as string | null | undefined) ?? null
+  );
+
+  // Ref for auto-focus on the scene name input when renaming via context menu
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // Listen for scene selection + replay (re-clic tuile déjà sélectionnée)
+  const lastSceneKeyRef = useRef<string | null>(null);
+  const [replayTick, setReplayTick] = useState(0);
+  const lastReplayAtRef = useRef(0);
+  useEffect(() => {
+    const check = () => {
+      const id = (window as any).__lm_selectedSceneId;
+      if (id !== selectedSceneId) setSelectedSceneId(id);
+      const replayAt = Number((window as any).__lm_sceneReplayAt) || 0;
+      if (replayAt > lastReplayAtRef.current) {
+        lastReplayAtRef.current = replayAt;
+        setReplayTick((t) => t + 1);
+      }
+    };
+    check(); // immédiat au mount (sinon 100 ms de scene=null → blackout)
+    const interval = setInterval(check, 100);
+    return () => clearInterval(interval);
+  }, [selectedSceneId]);
+
+  // Auto-focus the scene name input when a rename is triggered from the context menu
+  useEffect(() => {
+    if ((window as any).__lm_renameScene) {
+      (window as any).__lm_renameScene = false;
+      const timer = setTimeout(() => renameInputRef.current?.focus(), 100);
+      return () => clearTimeout(timer);
+    }
+  });
+
+  const scene = scenes.find((s) => s.id === selectedSceneId) || null;
+  const sceneFolders = useShowStore((s) => s.sceneFolders);
+
+  // Existing folder names for the datalist suggestions (declared ∪ derived, A→Z)
+  const folderSuggestions = useMemo(() => collectFolderNames(sceneFolders, scenes), [sceneFolders, scenes]);
+
+  // Local editing state
+  const [editName, setEditName] = useState('');
+  const [editFolder, setEditFolder] = useState('');
+  const [editFadeIn, setEditFadeIn] = useState(1000);
+  const [editFadeOut, setEditFadeOut] = useState(1000);
+  const [editDuration, setEditDuration] = useState(5000);
+  const [editChannels, setEditChannels] = useState<Record<number, number>>({});
+  const [fixtureAnalyses, setFixtureAnalyses] = useState<Map<string, AnalyzedFixtureChannels>>(new Map());
+  const [testActive, setTestActive] = useState(false);
+  // Timeout de fin du test (annulable par le bouton Stop).
+  const testTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Initialisation depuis le store projet (persiste entre pages + réouverture)
+  const storeMusicians = useShowStore((s) => s.musicians);
+  const storeView3D = useShowStore((s) => s.view3D);
+  const storeStageScene = useShowStore((s) => s.stageScene);
+  const [musicians, setMusicians] = useState<MusicianRoster>(storeMusicians ?? {});
+  const [stageScene, setStageScene] = useState<StageScene>(storeStageScene ?? 'empty');
+  const [showFloating3D, setShowFloating3D] = useState(false);
+  const [show3D, setShow3D] = useState(false);
+  const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
+  const [float3DSize, setFloat3DSize] = useState({ w: 960, h: 540 });
+  const float3DDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
+  const float3DResizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const handleFloat3DDragStart = useCallback((e: React.MouseEvent) => {
+    float3DDragRef.current = { startX: e.clientX, startY: e.clientY, startLeft: float3DPos.x, startTop: float3DPos.y };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DDragRef.current) return;
+      setFloat3DPos({ x: Math.max(0, Math.min(float3DDragRef.current.startLeft + ev.clientX - float3DDragRef.current.startX, window.innerWidth - 120)), y: Math.max(0, Math.min(float3DDragRef.current.startTop + ev.clientY - float3DDragRef.current.startY, window.innerHeight - 40)) });
+    };
+    const onUp = () => { float3DDragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DPos]);
+  const handleFloat3DResizeStart = useCallback((e: React.MouseEvent) => {
+    float3DResizeRef.current = { startX: e.clientX, startY: e.clientY, startW: float3DSize.w, startH: float3DSize.h };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DResizeRef.current) return;
+      setFloat3DSize({ w: Math.max(320, float3DResizeRef.current.startW + ev.clientX - float3DResizeRef.current.startX), h: Math.max(200, float3DResizeRef.current.startH + ev.clientY - float3DResizeRef.current.startY) });
+    };
+    const onUp = () => { float3DResizeRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DSize]);
+  const dmxPushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestChannelsRef = useRef<Record<number, number>>({});
+
+  // EFX lié à la scène — loop continu pendant la durée de la scène (sinon l'EFX ne bouge pas)
+  const sceneEfxLoopRef = useRef<number | null>(null);
+  const lastSceneEfxRef = useRef<{ efxId: string; fixtureIds: string[] } | null>(null);
+  const stopSceneEfxLoop = useCallback((opts?: { blackout?: boolean }) => {
+    if (sceneEfxLoopRef.current) {
+      cancelAnimationFrame(sceneEfxLoopRef.current);
+      sceneEfxLoopRef.current = null;
+    }
+    if (opts?.blackout === false) { lastSceneEfxRef.current = null; return; }
+    // Blackout l'EFX précédent (sinon ses pan/tilt restent en l'air quand on change de scène)
+    if (lastSceneEfxRef.current) {
+      const { fixtureIds } = lastSceneEfxRef.current;
+      (async () => {
+        const byUniverse = new Map<string, Record<number, number>>();
+        for (const fid of fixtureIds) {
+          const pf = useShowStore.getState().patchedFixtures.find((f) => f.id === fid);
+          if (!pf) continue;
+          try {
+            const def = await (window as any).lightMaestro?.fixtures?.getDefinition?.(pf.fixtureDefId);
+            const mode = def?.modes?.[pf.modeIndex];
+            if (!mode) continue;
+            for (let ci = 0; ci < mode.channels.length; ci++) {
+              const ch = mode.channels[ci];
+              const addr = pf.startAddress + ci;
+              if (ch.type === 'Pan' || ch.type === 'Tilt' || ch.type === 'Intensity') {
+                let vals = byUniverse.get(pf.universeId);
+                if (!vals) { vals = {}; byUniverse.set(pf.universeId, vals); }
+                vals[addr] = ch.type === 'Intensity' ? 0 : 128;
+              }
+            }
+          } catch {}
+        }
+        for (const [uniId, vals] of byUniverse) {
+          const uniNum = Math.max(0, (parseInt(uniId.replace(/\D/g, ''), 10) || 1) - 1);
+          try { dmxBridge.writeTransient('scene-efx', uniNum, vals); } catch {}
+        }
+      })();
+      lastSceneEfxRef.current = null;
+    }
+  }, []);
+  // La boucle EFX de scène ne doit tourner que quand son aperçu est visible.
+  // DesignView reste montée en display:none au changement de mode : sans cette
+  // garde, la source LTP scene-efx (prio 75) survivrait en QuickShow et écraserait
+  // la lecture (HTP 40) — les fixtures suivraient l'EFX au lieu du chaser fixe.
+  const appMode = useAppStore((s) => s.mode);
+  const designTab = useAppStore((s) => (s as any).designSidebarTab);
+  const isScenePreviewVisible = appMode === 'design' && designTab === 'scenes';
+  // Sync local state from selected scene + push to DMX engine — garantit qu'une scène précédente s'éteint
+  useEffect(() => {
+    // Cancel any pending DMX push from previous scene edits + stop EFX loop précédent
+    if (dmxPushRef.current) { clearTimeout(dmxPushRef.current); dmxPushRef.current = null; }
+    if (!isScenePreviewVisible) {
+      // Preview masqué : coupe la boucle sans blackout (pas de transient qui
+      // re-pinnerait les canaux) et relâche la source pour la lecture live.
+      console.debug(`[ScenePreview] preview masquée (mode/onglet) — pas de push (mode=${appMode} tab=${designTab})`);
+      stopSceneEfxLoop({ blackout: false });
+      try { dmxBridge.release('scene-efx'); } catch {}
+      // Le menu scène écrit aussi via la source 'default' (LTP 50) au clic sur
+      // une scène : la relâcher aussi, sinon l'autoscript (HTP 40) reste écrasé.
+      try { dmxBridge.release('default'); } catch {}
+      return () => stopSceneEfxLoop({ blackout: false });
+    }
+    stopSceneEfxLoop();
+    // Musiciens / ponts (stageScene) ne se rechargent QUE si l'identité de la
+    // scène change. Un apply/cancel EFX ne touche que efxId/channels : sans
+    // cette garde, l'effet re-tirait scene.musicians (undefined → {}) et
+    // scene.stageScene (undefined → 'empty') : pas de ponts par défaut,
+    // l'utilisateur les active manuellement si besoin via le sélecteur 3D.
+    const sceneId = scene?.id ?? null;
+    const sceneChanged = lastSceneKeyRef.current !== sceneId;
+    if (sceneChanged) lastSceneKeyRef.current = sceneId;
+    if (scene) {
+      // Le programmeur (LTP 85) garde ses valeurs parkées (Target/faders) et
+      // masque la preview design-test (LTP 60) sur pan/tilt/couleur/dimmer :
+      // la scène sélectionnée semblerait ne pas jouer (ni hardware ni 3D,
+      // qui lit le buffer arbitré). Même traitement qu'au lancement audio.
+      try {
+        if (!(window as any).__lm_storeOpen) {
+          const prog = useProgrammerStore.getState();
+          if (Object.keys(prog.channels).length > 0) {
+            console.warn('[ScenePreview] programmeur vidé (il masquait la scène)');
+            prog.clear();
+          }
+        }
+      } catch {}
+      setEditName(scene.name);
+      setEditFolder(scene.folder || '');
+      setEditFadeIn(scene.fadeIn);
+      setEditFadeOut(scene.fadeOut);
+      setEditDuration(scene.duration);
+      if (sceneChanged) {
+        // Valeur propre de la scène prioritaire ; sinon fallback sur le store
+        // projet (RÉACTIF : ce qui est configuré dans un autre onglet/page
+        // de la vue 3D s'applique aussi ici) puis legacy bandConfig.
+        const ownRoster = scene.musicians
+          ? normalizeRoster(scene.musicians)
+          : (scene.bandConfig ? rosterFromBandConfig(scene.bandConfig) : undefined);
+        setMusicians(ownRoster ?? storeMusicians ?? {});
+        setStageScene(scene.stageScene ?? storeStageScene ?? 'empty');
+      }
+      setEditChannels({ ...scene.channels });
+      // Changement de scène : on sort de l'édition groupée (la sélection de
+      // fixtures est contextuelle à la scène affichée).
+      setGroupedFixtureIds(new Set());
+      // Éteint les canaux de la scène précédente qui ne sont pas dans la nouvelle (sinon scène précédente reste allumée)
+      const prev = latestChannelsRef.current;
+      const toClear: Record<number, number> = {};
+      for (const k of Object.keys(prev)) {
+        const a = Number(k);
+        if (!(a in scene.channels)) toClear[a] = 0;
+      }
+      const toSend = Object.keys(toClear).length > 0 ? { ...toClear, ...scene.channels } : scene.channels;
+      latestChannelsRef.current = { ...scene.channels };
+      // Push scene channels to DMX engine immédiatement (avec clear des anciens)
+      if (Object.keys(toSend).length > 0) {
+        console.debug(`[ScenePreview] push "${scene.name}" (${Object.keys(toSend).length} ch, source design-test)`);
+        sendChannelsToHardwareAndStore(toSend, patchedFixtures, universes, 'design-test').catch(() => {});
+      } else {
+        console.debug(`[ScenePreview] RIEN à pousser pour "${scene.name}" (0 canal)`);
+      }
+      // PREVIEW ÉDITION = tenue infinie : pas de blackout à la fin de la durée
+      // programmée (sinon la scène s'éteint pendant qu'on la modifie). Le live
+      // (chaser/tuiles) garde sa propre fin de durée ; ici on édite.
+      // La désélection éteint toujours (chemin scene=null ci-dessous).
+      // Si la scène a un EFX lié, démarre son loop continu (comme l'aperçu EFX) — il dure `duration` (0 = infini)
+      const efxId = (scene as any).efxId as string | undefined;
+      if (!efxId) {
+        // Scène statique (Store Target…) : rien ne doit masquer design-test
+        // (LTP 60) via des résidus scene-efx (LTP 75) OU design-efx (LTP 70)
+        // d'un aperçu EFX précédent.
+        try { dmxBridge.release('scene-efx'); } catch {}
+        try { dmxBridge.release('design-efx'); } catch {}
+      }
+      if (efxId) {
+        const efx = useShowStore.getState().effects.find((e) => e.id === efxId);
+        if (efx && efx.fixtureIds.length > 0) {
+          lastSceneEfxRef.current = { efxId, fixtureIds: [...efx.fixtureIds] };
+          // Prépare les fixtures cibles avec leurs offsets pan/tilt
+          const startTime = performance.now();
+          let raf = 0;
+          // Boucle blindée : une frame en échec (def illisible, NaN…)
+          // ne doit JAMAIS tuer la chaîne rAF — sinon l'EFX fige en cours
+          // de lecture, faisceaux allumés, sans aucune erreur visible.
+          const tick = async () => {
+            let alive = false;
+            try {
+              // Vérifie que la scène est toujours sélectionnée, sinon stoppe (évite de tourner en arrière-plan)
+              const stillSelected = (window as any).__lm_selectedSceneId === scene.id;
+              if (!stillSelected) {
+                stopSceneEfxLoop();
+                return;
+              }
+            // PREVIEW ÉDITION : pas de fin sur durée — la boucle EFX tourne
+            // tant que la scène est sélectionnée (tenue pour modification).
+            // L'arrêt + blackout ont lieu à la désélection (garde
+            // stillSelected ci-dessus, chemin scene=null).
+            const elapsed = (performance.now() - startTime) / 1000;
+            // Math EXACTE du moteur (fixture-tracks.ts) : tous les patterns,
+            // même amplitude/offsets/rotation que le preview et le show.
+            const tBase = (elapsed * efx.speed * 2) / (Math.PI * 2);
+            const sceneSpread = (efx as any).spread ?? 0;
+            const byUniverse = new Map<string, Record<number, number>>();
+            for (let sfi = 0; sfi < efx.fixtureIds.length; sfi++) {
+              const fid = efx.fixtureIds[sfi];
+              const tCycles = efx.fixtureIds.length > 1 && sceneSpread > 0 ? tBase + (sfi * sceneSpread) / efx.fixtureIds.length : tBase;
+              const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
+                efx.pattern, tCycles, efx.width, efx.height, efx.rotation, efx.xOffset, efx.yOffset,
+              );
+              // Frame dégénérée (NaN) : on la saute mais la boucle survit.
+              if (!Number.isFinite(dmxPan) || !Number.isFinite(dmxTilt)) continue;
+              const pf = useShowStore.getState().patchedFixtures.find((f) => f.id === fid);
+              if (!pf) continue;
+              try {
+                const def = await (window as any).lightMaestro?.fixtures?.getDefinition?.(pf.fixtureDefId);
+                const mode = def?.modes?.[pf.modeIndex];
+                if (!mode) continue;
+                for (let ci = 0; ci < mode.channels.length; ci++) {
+                  const ch = mode.channels[ci];
+                  const addr = pf.startAddress + ci;
+                  if (ch.type === 'Pan') byUniverse.set(pf.universeId, { ...(byUniverse.get(pf.universeId) || {}), [addr]: dmxPan });
+                  else if (ch.type === 'Tilt') byUniverse.set(pf.universeId, { ...(byUniverse.get(pf.universeId) || {}), [addr]: dmxTilt });
+                  else if (ch.type === 'Intensity') byUniverse.set(pf.universeId, { ...(byUniverse.get(pf.universeId) || {}), [addr]: 255 });
+                }
+              } catch {}
+            }
+            for (const [uniId, vals] of byUniverse) {
+              const uniNum = Math.max(0, (parseInt(uniId.replace(/\D/g, ''), 10) || 1) - 1);
+              try { dmxBridge.write('scene-efx', uniNum, vals); } catch {}
+            }
+            alive = true;
+            } catch {
+              // Frame ratée : on ré-arme quand même (voir commentaire en tête).
+              alive = true;
+            }
+            if (alive) {
+              raf = requestAnimationFrame(tick);
+              sceneEfxLoopRef.current = raf;
+            }
+          };
+          raf = requestAnimationFrame(tick);
+          sceneEfxLoopRef.current = raf;
+        }
+      }
+    } else {
+      // Sélection déjà posée sur window par Store/Rec mais pas encore
+      // consommée par le poll (100 ms) : NE PAS blackout — sinon les zéros
+      // transient écrasent le handoff design-test (« rien ne lance »).
+      const pendingId = (window as any).__lm_selectedSceneId as string | null | undefined;
+      if (pendingId) {
+        setSelectedSceneId(pendingId);
+        return; // re-run de l'effet avec scene trouvée → push
+      }
+      setEditName('');
+      setEditFolder('');
+      setEditFadeIn(1000);
+      setEditFadeOut(1000);
+      setEditDuration(5000);
+      setEditChannels({});
+      // Musiciens/ponts : on NE les efface pas à la désélection (notamment
+      // annulation EFX d'une scène créée → sélection nulle). Ils ne se
+      // rechargent qu'au changement d'identité de scène (ci-dessus).
+      latestChannelsRef.current = {};
+      // Blackout — clear entire DMX universe. Transient (2 s): the zeros
+      // flush the hardware, then the design-test source is released so the
+      // playback engine regains control (a persistent LTP zero block would
+      // keep the show dark forever after deselecting the scene).
+      const zeros: Record<number, number> = {};
+      for (let i = 1; i <= 512; i++) zeros[i] = 0;
+      sendChannelsToHardwareAndStore(zeros, patchedFixtures, universes, 'design-test', 2000).catch(() => {});
+    }
+    return () => stopSceneEfxLoop();
+  }, [scene?.id, (scene as any)?.efxId, scene?.duration, scene?.channels, isScenePreviewVisible, replayTick]);
+
+  // Keep the folder field in sync when the scene's folder changes from
+  // elsewhere (e.g. the scene list context menu) — without touching the DMX
+  // channels (the big [scene?.id] effect above pushes channels too).
+  useEffect(() => {
+    setEditFolder(normalizeFolderName(scene?.folder || ''));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scene?.folder]);
+
+  // Load fixture definitions for all patched fixtures
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const analyses = new Map<string, AnalyzedFixtureChannels>();
+      for (const pf of patchedFixtures) {
+        try {
+          const def = await window.lightMaestro.fixtures.getDefinition(pf.fixtureDefId);
+          if (cancelled) return;
+          const mode = def?.modes?.[pf.modeIndex];
+          if (mode?.channels) {
+            analyses.set(pf.id, analyzeFixtureChannels(pf, mode.channels));
+          }
+          // Règle projet : à chaque patch, vérifier que chaque canal parlant de
+          // la fixture sera bien piloté par le moteur (aucun mutisme, aucune
+          // roue dégénérée) — alerte immédiate dans la console du DevTools.
+          if (def?.modes?.[pf.modeIndex]) {
+            const report = auditFixtureCoverage(pf, def, analyzeEngine(pf, def));
+            const warn = formatCoverageWarning(report);
+            if (warn) console.warn(warn);
+          }
+        } catch {
+          // Fixture def not loadable — skip
+        }
+      }
+      if (!cancelled) {
+        setFixtureAnalyses(analyses);
+        // Publie les channelMaps pour ensureFixtureLook (Store ProgrammerBar)
+        // même quand la vue 3D n'est pas ouverte.
+        try {
+          const maps = new Map<string, LookChannelMap>();
+          for (const [fid, a] of analyses) maps.set(fid, a as unknown as LookChannelMap);
+          setFixtureChannelMaps(maps);
+        } catch {}
+        // (L'auto-déploiement des accordéons a disparu avec la navigation
+        //  par onglets : l'effet « onglet actif » sélectionne la 1ʳᵉ fixture.)
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [patchedFixtures.map(p => `${p.id}:${p.fixtureDefId}:${p.modeIndex}:${p.startAddress}:${p.universeId}`).join('|'), scene?.id, universes.map(u => u.id).join('|')]);
+
+  // Cleanup DMX push timer on unmount
+  useEffect(() => {
+    return () => { if (dmxPushRef.current) clearTimeout(dmxPushRef.current); };
+  }, []);
+
+  const handleChannelChange = (address: number, value: number) => {
+    const clamped = Math.round(Math.max(0, Math.min(255, value)));
+    // Programmer : la valeur part en live (violet) sans toucher editChannels/scene
+    useProgrammerStore.getState().setChannel(address, clamped);
+    // Garde aussi editChannels pour l'aperçu local du panneau (non persistant)
+    setEditChannels((prev) => ({ ...prev, [address]: clamped }));
+  };
+
+  const handleSave = () => {
+    const prog = useProgrammerStore.getState().channels;
+    const backupRaw = (globalThis as any).__lm_programmerBackup as Record<number, number> | undefined;
+    // Sanitizer : ne garder que des adresses DMX numériques (évite Number('at')=NaN).
+    const backup: Record<number, number> | undefined = backupRaw
+      ? Object.fromEntries(Object.entries(backupRaw).filter(([k]) => /^\d+$/.test(k)).map(([k, v]) => [Number(k), v]))
+      : undefined;
+    // Si la preview a vidé le programmeur pendant la Target, on retombe sur
+    // le backup (sinon pan/tilt Target est perdu silencieusement).
+    const progMerged: Record<number, number> = Object.keys(prog).length > 0
+      ? prog
+      : (backup && Object.keys(backup).length > 0 ? backup : {});
+    const hasProg = Object.keys(progMerged).length > 0;
+    const baseChannels = hasProg ? (() => {
+      const merged: Record<number, number> = { ...(scene ? scene.channels : editChannels) };
+      for (const [k, v] of Object.entries(progMerged)) merged[Number(k)] = v;
+      return merged;
+    })() : editChannels;
+    if (!scene) {
+      const newId = createScene(editName || 'New Scene');
+      updateScene(newId, {
+        name: editName || 'New Scene',
+        channels: baseChannels,
+        fadeIn: editFadeIn,
+        fadeOut: editFadeOut,
+        duration: editDuration,
+        folder: editFolder || undefined,
+        musicians,
+        stageScene,
+      });
+      setSelectedSceneId(newId);
+      (window as any).__lm_selectedSceneId = newId;
+    } else {
+      updateScene(scene.id, {
+        name: editName,
+        channels: baseChannels,
+        fadeIn: editFadeIn,
+        fadeOut: editFadeOut,
+        duration: editDuration,
+        musicians,
+        stageScene,
+      });
+    }
+    if (hasProg) {
+      useProgrammerStore.getState().clear();
+      (globalThis as any).__lm_programmerBackup = undefined;
+      try { (window as any).__lm_toast?.('Scène enregistrée (programmeur fusionné)', 'ok'); } catch {}
+    } else {
+      try { (window as any).__lm_toast?.('Scène enregistrée', 'ok'); } catch {}
+    }
+  };
+
+  const handleTest = async () => {
+    if (testActive) return;
+    setTestActive(true);
+    try {
+      await sendChannelsToHardwareAndStore(editChannels, patchedFixtures, universes);
+      testTimeoutRef.current = setTimeout(async () => {
+        testTimeoutRef.current = null;
+        // Reset all channels to 0 — TRANSIENT (2 s): the zeros flush the
+        // hardware, then the design-test source is released so the engine
+        // regains control (a persistent LTP zero block would keep the
+        // tested scene's channels dark forever).
+        const zeros: Record<number, number> = {};
+        for (const addr of Object.keys(editChannels)) {
+          zeros[Number(addr)] = 0;
+        }
+        try { await sendChannelsToHardwareAndStore(zeros, patchedFixtures, universes, 'design-test', 2000); } catch {}
+        setTestActive(false);
+      }, 3000);
+    } catch {
+      setTestActive(false);
+    }
+  };
+
+  // Stop : coupe le test en cours (zéros immédiats) ou, à défaut,
+  // stoppe la preview en désélectionnant la scène (même chemin que
+  // le re-clic sur la tuile active).
+  const handleStop = async () => {
+    if (testTimeoutRef.current) {
+      clearTimeout(testTimeoutRef.current);
+      testTimeoutRef.current = null;
+    }
+    if (testActive) {
+      setTestActive(false);
+      const zeros: Record<number, number> = {};
+      for (const addr of Object.keys(editChannels)) {
+        zeros[Number(addr)] = 0;
+      }
+      try { await sendChannelsToHardwareAndStore(zeros, patchedFixtures, universes, 'design-test', 2000); } catch {}
+    } else if (scene) {
+      setSelectedSceneId(null);
+      (window as any).__lm_selectedSceneId = null;
+    }
+  };
+
+  // (L'ancienne navigation verticale par accordéon — toggleExpand / expandAll /
+  //  collapseAll — a été remplacée par la barre d'onglets ci-dessous.)
+
+  const activeChannelCount = Object.values(editChannels).filter((v) => v > 0).length;
+
+  // Project avec 150 fixtures : n'afficher que les fixtures de la scène par
+  // défaut (involvedOnly), avec un bouton pour tout montrer quand on veut en
+  // ajouter une.
+  const [involvedOnly, setInvolvedOnly] = useState(true);
+  const touchedSet = useMemo(() => {
+    if (!scene) return new Set<string>();
+    return new Set<string>(patchedFixtures.filter((pf) => sceneTouchesFixture(scene, pf)).map((f) => f.id));
+  }, [scene, patchedFixtures]);
+
+  // Group fixtures by tier, sorted by name
+  const fixturesByTier = React.useMemo(() => {
+    const base = (involvedOnly && scene && touchedSet.size > 0) ? patchedFixtures.filter((f) => touchedSet.has(f.id)) : patchedFixtures;
+    const map = groupByTier(base);
+    for (const tierGroup of Object.keys(map)) {
+      map[tierGroup].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return map;
+  }, [patchedFixtures, involvedOnly, scene, touchedSet]);
+
+  const TIER_SECTION_META: Record<string, { icon: string }> = {
+    primary: { icon: '🎯' },
+    secondary: { icon: '🔹' },
+    tertiary: { icon: '⬜' },
+    other: { icon: '⚙️' },
+  };
+  const TIER_ORDER = TIER_KEYS;
+
+  // ── Navigation par onglets (horizontale) ────────────────────────────────
+  // Remplace la liste verticale d'accordéons : une fixture = un onglet, on
+  // passe d'une fixture à l'autre en un clic (ou Alt+← / Alt+→) sans
+  // défilement vertical.
+  const [activeFixtureId, setActiveFixtureId] = useState<string | null>(null);
+  const [groupedFixtureIds, setGroupedFixtureIds] = useState<Set<string>>(new Set());
+  const [fixtureSearch, setFixtureSearch] = useState('');
+
+  // Liste plate des fixtures dans l'ordre des onglets (tier par tier).
+  const tabFixtures = useMemo(() => {
+    const out: { tier: string; pf: PatchedFixture }[] = [];
+    for (const tierGroup of TIER_ORDER) {
+      for (const pf of fixturesByTier[tierGroup] || []) out.push({ tier: tierGroup, pf });
+    }
+    return out;
+  }, [fixturesByTier, TIER_ORDER]);
+
+  // Recherche : filtre la liste d'onglets (nom / fabricant / modèle).
+  const visibleTabs = useMemo(() => {
+    const q = fixtureSearch.trim().toLowerCase();
+    if (!q) return tabFixtures;
+    return tabFixtures.filter(({ pf }) =>
+      (pf.name || '').toLowerCase().includes(q) ||
+      (pf.manufacturer || '').toLowerCase().includes(q) ||
+      (pf.model || '').toLowerCase().includes(q));
+  }, [tabFixtures, fixtureSearch]);
+
+  // Onglet actif : conserve la fixture courante, sinon prend la 1ʳᵉ visible
+  // (changement de scène, recherche, fixture retirée…).
+  useEffect(() => {
+    if (visibleTabs.length === 0) { setActiveFixtureId(null); return; }
+    if (!activeFixtureId || !visibleTabs.some((t) => t.pf.id === activeFixtureId)) {
+      setActiveFixtureId(visibleTabs[0].pf.id);
+    }
+  }, [visibleTabs, activeFixtureId]);
+
+  // Navigation clavier : Alt+← / Alt+→ passent à la fixture précédente /
+  // suivante sans quitter le clavier (enchaînement rapide des fixtures).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.tagName === 'SELECT')) return;
+      if (visibleTabs.length === 0) return;
+      e.preventDefault();
+      const idx = visibleTabs.findIndex((t) => t.pf.id === activeFixtureId);
+      const next = e.key === 'ArrowRight'
+        ? (idx + 1) % visibleTabs.length
+        : (idx - 1 + visibleTabs.length) % visibleTabs.length;
+      setActiveFixtureId(visibleTabs[next].pf.id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [visibleTabs, activeFixtureId]);
+
+  const activeTabEntry = useMemo(
+    () => visibleTabs.find((t) => t.pf.id === activeFixtureId) || null,
+    [visibleTabs, activeFixtureId],
+  );
+
+  // ── If no scene selected, show empty state ──
+  if (!scene && patchedFixtures.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-gray-600">
+        <div className="text-4xl mb-3 opacity-30">🎬</div>
+        <div className="text-sm mb-1">No scene selected</div>
+        <div className="text-xs mb-4">{t('design.createToEdit')}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-4 h-full min-h-0 relative">
+      <div className="flex-1 min-w-0 space-y-5 overflow-y-auto">
+      {/* Scene name */}
+      <div className="flex items-center gap-3">
+        <input
+          type="text"
+          ref={renameInputRef}
+          value={editName}
+          onChange={(e) => { setEditName(e.target.value); if (scene) updateScene(scene.id, { name: e.target.value }); }}
+          className="flex-1 bg-transparent text-xl font-bold text-white outline-none border-b border-transparent hover:border-gray-700 focus:border-purple-500/50 transition-colors pb-0.5"
+          placeholder="Scene Name"
+        />
+        <span className="text-[10px] text-gray-600">{activeChannelCount} ch active</span>
+        {/* Folder classification (free text + datalist of existing folders) */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <label className="text-[10px] text-gray-600">{t('design.scenes.folder')}</label>
+          <input
+            type="text"
+            value={editFolder}
+            list="scene-folder-options"
+            onChange={(e) => {
+              const v = normalizeFolderName(e.target.value);
+              setEditFolder(v);
+              if (scene) updateScene(scene.id, { folder: v || undefined });
+            }}
+            placeholder={t('design.scenes.folderPlaceholder')}
+            className="w-32 px-2 py-1 bg-gray-800/50 border border-gray-700 rounded-md text-xs text-gray-300 outline-none focus:border-purple-500/50"
+          />
+          <datalist id="scene-folder-options">
+            {folderSuggestions.map((f) => (
+              <option key={f} value={f} />
+            ))}
+          </datalist>
+        </div>
+      </div>
+
+      {/* Touched fixtures (read-only, same index as the SceneList filter) */}
+      {scene && (
+        <div className="text-[10px] text-gray-500">
+          {(() => {
+            const touched = patchedFixtures.filter((pf) => sceneTouchesFixture(scene, pf));
+            if (touched.length === 0) return t('design.scenes.unassigned', { count: 0 });
+            const list = touched
+              .slice()
+              .sort((a, b) => a.startAddress - b.startAddress)
+              .map((pf) => pf.name)
+              .join(', ');
+            return t('design.scenes.touches', { list: `${list} (${touched.length})` });
+          })()}
+        </div>
+      )}
+
+      {/* Timing params */}
+      <div className="flex gap-4">
+        <ParamField label="Fade In" value={editFadeIn} unit="ms" onChange={(v) => { setEditFadeIn(v); if (scene) updateScene(scene.id, { fadeIn: v }); }} />
+        <ParamField label="Fade Out" value={editFadeOut} unit="ms" onChange={(v) => { setEditFadeOut(v); if (scene) updateScene(scene.id, { fadeOut: v }); }} />
+        <ParamField label="Duration" value={editDuration} unit="ms" onChange={(v) => { setEditDuration(v); if (scene) updateScene(scene.id, { duration: v }); }} />
+      </div>
+      <p className="text-[9px] text-gray-500 -mt-3">{t('design.durationHint')}</p>
+
+      {/* ── Palettes de couleur réutilisables ── */}
+      <PaletteBar />
+
+      {/* Action buttons */}
+      <div className="flex gap-2">
+        <button
+          onClick={handleSave}
+          className="px-4 py-2 bg-purple-600/30 text-purple-200 rounded-lg text-xs font-semibold hover:bg-purple-600/50 active:bg-purple-600/60 flex items-center gap-1.5 transition-all border border-purple-500/30 hover:border-purple-400/60"
+        >
+          <SaveIcon size={14} /> Save Scene
+        </button>
+        <button
+          onClick={handleTest}
+          disabled={testActive}
+          className={`px-4 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border ${
+            testActive
+              ? 'bg-green-600/20 text-green-300 border-green-500/30'
+              : 'bg-green-600/10 text-green-400 border-green-500/20 hover:bg-green-600/20'
+          }`}
+        >
+          <Play size={14} /> {testActive ? t('testing') : t('testScene')}
+        </button>
+        <button
+          onClick={handleStop}
+          disabled={!testActive && !scene}
+          title={t('stopScene')}
+          className="px-4 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border bg-red-600/10 text-red-400 border-red-500/20 hover:bg-red-600/20 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Square size={14} /> {t('stopScene')}
+        </button>
+        <div className="flex-1" />
+      </div>
+
+      {/* Fixture-based channel editor */}
+      {patchedFixtures.length === 0 ? (
+        <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-8 text-center">
+          <div className="text-3xl mb-2 opacity-30">💡</div>
+          <div className="text-sm text-gray-400 mb-1">No fixtures patched</div>
+          <div className="text-xs text-gray-600">
+            Switch to the Fixtures tab to patch fixtures before editing scenes.
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Filter: only the scene's fixtures, or everything (to add one) */}
+          <div className="flex items-center gap-2 text-[10px] text-gray-500">
+            <span>Fixtures de la scène : {touchedSet.size}/{patchedFixtures.length}</span>
+            <button
+              onClick={() => setInvolvedOnly((v) => !v)}
+              className={`px-2 py-0.5 rounded border transition-colors ${
+                involvedOnly ? 'bg-purple-600/20 border-purple-500/40 text-purple-300' : 'bg-gray-800/50 border-gray-700 text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              {involvedOnly ? 'Scène seule' : 'Toutes'}
+            </button>
+            {involvedOnly && scene && (
+              <select
+                value=""
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (!id) return;
+                  setInvolvedOnly(false);
+                  // Ouvre directement l'onglet de la fixture ajoutée
+                  setActiveFixtureId(id);
+                  setFixtureSearch('');
+                }}
+                className="bg-gray-800/60 border border-gray-700 rounded text-[10px] text-gray-300 px-1.5 py-0.5 outline-none focus:border-purple-500/50"
+              >
+                <option value="" disabled>+ Ajouter une fixture…</option>
+                {patchedFixtures.filter((pf) => !touchedSet.has(pf.id)).sort((a, b) => a.name.localeCompare(b.name)).map((pf) => (
+                  <option key={pf.id} value={pf.id}>{pf.name}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        {/* ── Navigation par onglets (horizontale) ── */}
+        <FixtureTabsBar
+          tabs={visibleTabs}
+          totalCount={tabFixtures.length}
+          allFixtures={patchedFixtures}
+          tierMeta={TIER_SECTION_META}
+          activeId={activeFixtureId}
+          onSelect={setActiveFixtureId}
+          search={fixtureSearch}
+          onSearch={setFixtureSearch}
+          selectedIds={groupedFixtureIds}
+          onToggleFixture={(id) => {
+            setGroupedFixtureIds((prev) => {
+              const next = new Set(prev);
+              if (next.has(id)) next.delete(id); else next.add(id);
+              return next;
+            });
+          }}
+        />
+
+        {/* ── Contrôles de la fixture active ── */}
+        {(() => {
+          // Mode groupe : prioritaire et INDEPENDANT de l'onglet actif, sinon
+          // un filtre de recherche masquant la fixture active faisait
+          // disparaître le panneau alors que la sélection restait active
+          // (état orphelin : impossible de décocher les fixtures filtrées).
+          if (groupedFixtureIds.size > 1) {
+            const grouped = Array.from(groupedFixtureIds)
+              .map((id) => patchedFixtures.find((f) => f.id === id))
+              .filter(Boolean) as PatchedFixture[];
+            const groupAnalyses = grouped
+              .map((f) => fixtureAnalyses.get(f.id))
+              .filter(Boolean) as AnalyzedFixtureChannels[];
+            return (
+              <FixtureChannelGroupPanel
+                fixtures={grouped}
+                groupAnalyses={groupAnalyses}
+                color={getFixtureColor(patchedFixtures.indexOf(grouped[0]))}
+                editChannels={editChannels}
+                handleChannelChange={handleChannelChange}
+                onClose={() => setGroupedFixtureIds(new Set())}
+                onRemoveFixture={(id) => {
+                  setGroupedFixtureIds((prev) => {
+                    const next = new Set(prev);
+                    next.delete(id);
+                    return next;
+                  });
+                }}
+              />
+            );
+          }
+
+          if (!activeTabEntry) return null;
+          const pf = activeTabEntry.pf;
+          const analysis = fixtureAnalyses.get(pf.id);
+          const cIdx = patchedFixtures.indexOf(pf);
+          const color = getFixtureColor(cIdx);
+          return (
+            <FixtureChannelPanel
+              fixture={pf}
+              analysis={analysis}
+              color={color}
+              editChannels={editChannels}
+              handleChannelChange={handleChannelChange}
+            />
+          );
+        })()}
+        </div>
+      )}
+      </div>
+      {/* Floating 3D view (opened directly, like the AutoScript window) */}
+      {show3D && showFloating3D && (
+        <div
+          className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col"
+          style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}
+        >
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
+            <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D View</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => { const w = 640; setFloat3DSize({ w, h: 360 }); setFloat3DPos({ x: Math.max(10, window.innerWidth - w - 20), y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
+              <button onClick={() => { setShowFloating3D(false); setShow3D(false); }} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 relative">
+            <Stage3D
+              enableEfxApply
+              hideFixturePanel
+              musicians={musicians}
+              stageScene={stageScene}
+              onMusiciansChange={(roster) => {
+                setMusicians(roster);
+                if (scene) updateScene(scene.id, { musicians: roster });
+              }}
+              onStageSceneChange={(cfg) => {
+                setStageScene(cfg);
+                if (scene) updateScene(scene.id, { stageScene: cfg });
+              }}
+            />
+            <div
+              className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
+              onMouseDown={handleFloat3DResizeStart}
+              style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Open 3D button — identical to the QuickShow AutoScript floating pill.
+          Ouvre à DROITE : la liste des scènes est à gauche (z-index sous le
+          fixed z-40) — x≤100 la couvrait et interceptait les clics sur les tuiles. */}
+      {!showFloating3D && (
+        <button onClick={() => {
+          const W = Math.max(420, Math.min(960, window.innerWidth - 60));
+          const H = Math.max(320, Math.min(540, window.innerHeight - 60));
+          setFloat3DSize({ w: W, h: H });
+          setFloat3DPos({ x: Math.max(10, window.innerWidth - W - 20), y: Math.max(10, Math.min(80, window.innerHeight - H - 20)) });
+          setShow3D(true); setShowFloating3D(true);
+        }} className="fixed bottom-4 right-4 z-40 bg-purple-600/80 hover:bg-purple-500 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg transition-all">
+          🎥 3D View
+        </button>
+      )}
+    </div>
+  );
+};
+
+// ─── Fixture Tabs Bar (navigation horizontale entre fixtures) ─────────────
+//
+// Remplace la liste verticale d'accordéons : un onglet par fixture, triés par
+// tier (séparateurs discrets entre les groupes) puis par nom. La barre est
+// scrollable horizontalement (13+ fixtures aux noms longs) et filtrable.
+
+const FixtureTabsBar: React.FC<{
+  tabs: { tier: string; pf: PatchedFixture }[];
+  totalCount: number;
+  allFixtures: PatchedFixture[];
+  tierMeta: Record<string, { icon: string }>;
+  activeId: string | null;
+  onSelect: (id: string) => void;
+  search: string;
+  onSearch: (v: string) => void;
+  selectedIds: Set<string>;
+  onToggleFixture: (id: string) => void;
+}> = ({ tabs, totalCount, allFixtures, tierMeta, activeId, onSelect, search, onSearch, selectedIds, onToggleFixture }) => {
+  const activeIndex = tabs.findIndex((t) => t.pf.id === activeId);
+  // Couleur de la pastille : getFixtureColor est indexé sur la liste complète
+  // des fixtures patchées (même repère visuel que le reste de l'app).
+  const colorOf = (pf: PatchedFixture) => {
+    const idx = allFixtures.indexOf(pf);
+    return getFixtureColor(idx >= 0 ? idx : 0);
+  };
+
+  return (
+    <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
+      {/* Barre de recherche + position */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800/40">
+        <Search size={12} className="text-gray-600 shrink-0" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+          placeholder="Filtrer les projecteurs…"
+          className="flex-1 min-w-0 bg-transparent border-none outline-none text-xs text-gray-300 placeholder-gray-600"
+        />
+        {activeIndex >= 0 && (
+          <span className="text-[10px] text-gray-500 font-mono shrink-0">
+            {activeIndex + 1}/{tabs.length}
+          </span>
+        )}
+        {tabs.length !== totalCount && (
+          <span className="text-[10px] text-amber-400/80 shrink-0">
+            {tabs.length} sur {totalCount}
+          </span>
+        )}
+      </div>
+
+      {/* Onglets — scroll horizontal */}
+      <div className="flex items-stretch gap-0 overflow-x-auto px-2 py-1.5">
+        {tabs.length === 0 && (
+          <span className="text-[10px] text-gray-600 px-2 py-1">Aucune fixture ne correspond</span>
+        )}
+        {tabs.map(({ tier, pf }, i) => {
+          const isActive = pf.id === activeId;
+          const prevTier = i > 0 ? tabs[i - 1].tier : null;
+          const color = colorOf(pf);
+          return (
+            <React.Fragment key={pf.id}>
+              {/* Séparateur de groupe (tier) */}
+              {tier !== prevTier && (
+                <div
+                  className="flex items-center gap-1.5 shrink-0 pr-2 mr-1 border-r border-gray-800/60"
+                  title={tier.charAt(0).toUpperCase() + tier.slice(1)}
+                >
+                  <span className="text-[10px]">{tierMeta[tier]?.icon || '⬜'}</span>
+                  <span className="text-[9px] uppercase tracking-wider text-gray-600">{tier}</span>
+                </div>
+              )}
+              <div className="flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(pf.id)}
+                  onChange={() => onToggleFixture(pf.id)}
+                  className="shrink-0 w-3 h-3 text-purple-600 bg-gray-700 border-gray-600 rounded focus:ring-purple-500"
+                />
+                <button
+                  onClick={(e) => { e.stopPropagation(); onSelect(pf.id); }}
+                  title={`${pf.name} — ${pf.manufacturer} ${pf.model} · @${pf.startAddress}`}
+                  className={`shrink-0 px-2.5 py-1.5 rounded-md text-[11px] transition-colors flex items-center gap-1.5 max-w-[190px] ${
+                    isActive
+                      ? 'bg-purple-600/25 text-purple-200 ring-1 ring-purple-500/40'
+                      : selectedIds.has(pf.id)
+                      ? 'bg-slate-600/40 text-white'
+                      : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: color }} />
+                  <span className="truncate">{pf.name}</span>
+                </button>
+              </div>
+            </React.Fragment>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ─── Fixture Channel Panel (contrôles de la fixture active) ───────────────
+//
+// En-tête de la fixture + ses contrôles de canaux (FixtureChannelEditor,
+// composant existant réutilisé tel quel).
+
+const FixtureChannelPanel: React.FC<{
+  fixture: PatchedFixture;
+  analysis?: AnalyzedFixtureChannels;
+  color: string;
+  editChannels: Record<number, number>;
+  handleChannelChange: (address: number, value: number) => void;
+}> = ({ fixture, analysis, color, editChannels, handleChannelChange }) => (
+  <div className="bg-[#12121a] border border-gray-800/30 rounded-lg overflow-hidden">
+    <div className="px-3 py-2 flex items-center gap-2">
+      <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: color }} />
+      <div className="flex-1 min-w-0">
+        <div className="text-xs font-medium text-gray-200 truncate flex items-center gap-1.5">
+          {fixture.name}
+          {analysis && analysis.dimmerIdx === undefined && (
+            <span className="text-[8px] px-1 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 shrink-0" title="Pas de canal Dimmer — intensité fixe à 100%">NO DIM</span>
+          )}
+          <span className={`inline-block px-1 py-0 rounded text-[8px] shrink-0 ${
+            fixture.tier === 'primary' ? 'bg-purple-500/20 text-purple-400' :
+            fixture.tier === 'secondary' ? 'bg-blue-500/20 text-blue-400' :
+            fixture.tier === 'other' ? 'bg-cyan-500/20 text-cyan-400' :
+            'bg-gray-500/20 text-gray-400'
+          }`}>{fixture.tier}</span>
+        </div>
+        <div className="text-[10px] text-gray-500 truncate">
+          {fixture.manufacturer} {fixture.model} · {fixture.modeName} · @{fixture.startAddress} · {fixture.channelCount} ch
+        </div>
+      </div>
+    </div>
+    {analysis ? (
+      <FixtureChannelEditor
+        analyses={[analysis]}
+        editChannels={editChannels}
+        handleChannelChange={handleChannelChange}
+      />
+    ) : (
+      <div className="px-3 pb-3 text-xs text-gray-600 border-t border-gray-800/30 pt-2">
+        Fixture definition not available. Patch mode may be missing.
+      </div>
+    )}
+  </div>
+);
+
+// ─── Fixture Channel Group Panel (édition groupée de plusieurs fixtures) ───
+// Réutilise FixtureChannelEditor en mode groupe : seuls les canaux présents
+// à la même position ET avec le même type dans toutes les fixtures sont
+// proposés. Une commande s'applique à toutes les fixtures du groupe.
+
+const FixtureChannelGroupPanel: React.FC<{
+  fixtures: PatchedFixture[];
+  groupAnalyses: AnalyzedFixtureChannels[];
+  color: string;
+  editChannels: Record<number, number>;
+  handleChannelChange: (address: number, value: number) => void;
+  onClose: () => void;
+  /** Retirer une fixture du groupe (décoche sa case dans l'onglet) */
+  onRemoveFixture?: (id: string) => void;
+}> = ({ fixtures, groupAnalyses, color, editChannels, handleChannelChange, onClose, onRemoveFixture }) => {
+  // Fixtures de modèles/modes différents : les canaux proposés se limitent
+  // alors à ceux qui existent à la même position ET avec le même type.
+  const heterogeneous = !isHomogeneousGroup(fixtures);
+
+  if (groupAnalyses.length === 0) {
+    return (
+      <div className="bg-[#12121a] border border-gray-800/50 rounded-lg overflow-hidden">
+        <div className="px-3 py-2 flex items-center gap-2 border-b border-gray-800/30">
+          <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: color }} />
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-medium text-gray-200 truncate">
+              Groupe — {fixtures.length} fixture{fixtures.length > 1 ? 's' : ''}
+            </div>
+          </div>
+          <button onClick={onClose} className="text-[10px] text-gray-500 hover:text-red-400 px-1 py-1 rounded" title="Quitter l'édition groupée">✕</button>
+        </div>
+        <div className="px-3 py-3 text-xs text-gray-600">
+          Définition de fixture introuvable pour une des fixtures sélectionnées.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-[#12121a] border border-gray-800/50 rounded-lg overflow-hidden">
+      <div className="px-3 py-2 flex items-center gap-2 border-b border-gray-800/30">
+        <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: color }} />
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-medium text-gray-200 truncate flex items-center gap-1.5">
+            Groupe — {fixtures.length} fixture{fixtures.length > 1 ? 's' : ''}
+            <span className="text-[9px] px-1 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/25 shrink-0">
+              ÉDITION GROUPÉE
+            </span>
+          </div>
+          {/* Liste des fixtures avec bouton de retrait par item */}
+          <div className="flex flex-wrap gap-1 mt-1">
+            {fixtures.map((f) => (
+              <span
+                key={f.id}
+                className="inline-flex items-center gap-1 text-[10px] text-gray-400 bg-gray-800/60 rounded px-1.5 py-0.5 group/item"
+              >
+                <span className="max-w-[120px] truncate" title={f.name}>{f.name}</span>
+                {onRemoveFixture && (
+                  <button
+                    onClick={() => onRemoveFixture(f.id)}
+                    className="opacity-0 group-hover/item:opacity-100 text-gray-500 hover:text-red-400 transition-opacity shrink-0 leading-none"
+                    title="Retirer cette fixture du groupe"
+                  >✕</button>
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
+        <button onClick={onClose} className="text-[10px] text-gray-500 hover:text-red-400 px-1 py-1 rounded" title="Quitter l'édition groupée">✕</button>
+      </div>
+
+      {heterogeneous && (
+        <div className="px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-[10px] text-amber-300">
+          ⚠ Modèles ou modes différents — seuls les canaux identiques (même position, même type) sont proposés.
+        </div>
+      )}
+      {groupAnalyses.length < fixtures.length && (
+        <div className="px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-[10px] text-amber-300">
+          ⚠ {fixtures.length - groupAnalyses.length} fixture(s) sans définition lisible — exclue(s) du groupe.
+        </div>
+      )}
+
+      <FixtureChannelEditor
+        analyses={groupAnalyses}
+        editChannels={editChannels}
+        handleChannelChange={handleChannelChange}
+        fixtures={fixtures}
+      />
+    </div>
+  );
+};
+
+// ─── Fixture Channel Editor (extracted from SceneEditor) ──────────────────
+//
+// Nativement GROUP-AWARE : `analyses` contient 1 entrée (édition simple) ou
+// N entrées (édition groupée de fixtures identiques). Toutes les commandes
+// sont indexées par POSITION de canal dans le mode.
+//
+// Contrat de groupe : un canal n'est proposé que s'il existe à la même
+// position ET avec le même type dans TOUTES les fixtures du groupe — sinon
+// il est masqué (fail-safe : jamais de commande qui n'existerait pas partout).
+
+const FixtureChannelEditor: React.FC<{
+  analyses: AnalyzedFixtureChannels[];
+  editChannels: Record<number, number>;
+  handleChannelChange: (address: number, value: number) => void;
+  /** Fixtures du groupe (optionnel) — si fourni et groupe homogène, on fait confiance aux canaux de la fixture primaire */
+  fixtures?: PatchedFixture[];
+}> = ({ analyses, editChannels, handleChannelChange, fixtures }) => {
+  const primary = analyses[0];
+  if (!primary) return null;
+
+  // Détecte si le groupe est homogène (même fabricant, modèle, mode)
+  // Mode groupé uniquement si fixtures fourni avec >1 élément
+  const isGrouped = !!(fixtures && fixtures.length > 1);
+  const isHomogeneous = isGrouped && fixtures!.every((f) => 
+    f.manufacturer === fixtures![0].manufacturer &&
+    f.model === fixtures![0].model &&
+    f.modeName === fixtures![0].modeName
+  );
+
+  // Canaux résolus pour le groupe
+  const groupChannels = resolveGroupChannels(analyses);
+  const slotAt = (pos: number) => groupChannels.find((g) => g.pos === pos);
+  
+  // Canal à la position `pos`, valide pour tout le groupe
+  // Si groupe homogène : tous les canaux de la fixture primaire sont accessibles
+  // Si groupe hétérogène : seul les canaux "common" (fail-safe)
+  const chanAt = (pos: number): AnalyzedChannel | null => {
+    const s = slotAt(pos);
+    if (s && s.common) return primary.channels[pos] ?? null;
+    // Mode homogène : accède à TOUS les canaux de la fixture primaire
+    if (isHomogeneous) return primary.channels[pos] ?? null;
+    return null;
+  };
+  
+  // Adresses DMX absolues du canal `pos` — une par fixture du groupe
+  const addrsAt = (pos: number): number[] => slotAt(pos)?.addresses ?? [];
+  
+  // Valeur courante (celle de la 1ʳᵉ fixture — l'affichage est unitaire)
+  const valAt = (pos: number): number => {
+    const ch = primary.channels[pos];
+    return editChannels[ch.dmxAddress] ?? ch.defaultValue ?? 0;
+  };
+  
+  // Écrit la valeur sur TOUTES les fixtures du groupe
+  const setAt = (pos: number, v: number) => {
+    for (const addr of addrsAt(pos)) handleChannelChange(addr, v);
+  };
+  
+  const groupCount = analyses.length > 1 ? analyses.length : undefined;
+
+  // 重置所有 fader 到默认值（0 或 defaultValue）
+  const handleResetAll = () => {
+    for (let pos = 0; pos < primary.channels.length; pos++) {
+      const ch = primary.channels[pos];
+      if (!ch) continue;
+      const defaultValue = ch.defaultValue ?? 0;
+      setAt(pos, defaultValue);
+    }
+  };
+
+  return (
+    <div className="px-3 pb-3 space-y-2 border-t border-gray-800/30">
+    {/* Bouton Réinitialiser tout */}
+    <div className="flex justify-end">
+      <button
+        onClick={handleResetAll}
+        className="px-2 py-1 text-[10px] text-gray-400 hover:text-gray-200 hover:bg-gray-800/50 rounded transition-all"
+        title={`Remettre tous les ${primary.channels.length} canaux à leur valeur par défaut`}
+      >
+        ⟳ Réinitialiser tout ({primary.channels.length})
+      </button>
+    </div>
+    {/* Dimmer */}
+    {primary.dimmerIdx !== undefined && (() => {
+      const pos = primary.dimmerIdx;
+      const ch = chanAt(pos);
+      if (!ch) return null;
+      return (
+        <ChannelSlider
+          icon="🔅"
+          label={ch.name}
+          address={ch.dmxAddress}
+          value={valAt(pos)}
+          onChange={(v) => setAt(pos, v)}
+          color="bg-yellow-500"
+          groupCount={groupCount}
+        />
+      );
+    })()}
+
+    {/* RGB Group */}
+    {primary.rgbGroup && (() => {
+      const r = primary.rgbGroup.r, g = primary.rgbGroup.g, b = primary.rgbGroup.b;
+      const rc = chanAt(r), gc = chanAt(g), bc = chanAt(b);
+      if (!rc || !gc || !bc) return null;
+      const rv = valAt(r), gv = valAt(g), bv = valAt(b);
+      return (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-gray-400">🎨 Color (RGB)</span>
+            <span
+              className="w-5 h-5 rounded border border-gray-600 shrink-0"
+              style={{ backgroundColor: `rgb(${rv},${gv},${bv})` }}
+            />
+          </div>
+          <ChannelSlider
+            icon="R"
+            label={rc.name}
+            address={rc.dmxAddress}
+            value={rv}
+            onChange={(v) => setAt(r, v)}
+            color="bg-red-500"
+            groupCount={groupCount}
+          />
+          <ChannelSlider
+            icon="G"
+            label={gc.name}
+            address={gc.dmxAddress}
+            value={gv}
+            onChange={(v) => setAt(g, v)}
+            color="bg-green-500"
+            groupCount={groupCount}
+          />
+          <ChannelSlider
+            icon="B"
+            label={bc.name}
+            address={bc.dmxAddress}
+            value={bv}
+            onChange={(v) => setAt(b, v)}
+            color="bg-blue-500"
+            groupCount={groupCount}
+          />
+        </div>
+      );
+    })()}
+
+    {/* Color Wheel */}
+    {primary.colorWheelIdx !== undefined && (() => {
+      const pos = primary.colorWheelIdx;
+      const ch = chanAt(pos);
+      if (!ch) return null;
+      const caps = ch.capabilities?.filter((c: any) => c.color) || [];
+      const currentVal = valAt(pos);
+      return (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-gray-400">🎨 {ch.name}</span>
+            {caps.length > 0 && (
+              <span className="text-[10px] text-gray-500">{caps.length} named colors</span>
+            )}
+          </div>
+          {caps.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {caps.map((cap: any, ci: number) => {
+                const isActive = currentVal >= cap.min && currentVal <= cap.max;
+                return (
+                  <button
+                    key={ci}
+                    onClick={() => setAt(pos, cap.min)}
+                    className={`px-2 py-1 rounded text-[10px] transition-all flex items-center gap-1 ${
+                      isActive
+                        ? 'ring-1 ring-purple-400/50 bg-gray-800/80'
+                        : 'bg-gray-800/30 hover:bg-gray-800/50'
+                    }`}
+                    title={`${cap.name} (${cap.min}–${cap.max})`}
+                  >
+                    {cap.color && (
+                      <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: cap.color }} />
+                    )}
+                    <span className={isActive ? 'text-purple-300' : 'text-gray-400'}>{cap.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          <ChannelSlider
+            icon="🎨"
+            label="Value"
+            address={ch.dmxAddress}
+            value={currentVal}
+            onChange={(v) => setAt(pos, v)}
+            color="bg-pink-500"
+            groupCount={groupCount}
+          />
+        </div>
+      );
+    })()}
+
+    {/* Pan / Tilt */}
+    {(primary.panIdx !== undefined || primary.tiltIdx !== undefined) && (() => {
+      const panPos = primary.panIdx;
+      const tiltPos = primary.tiltIdx;
+      const panCh = panPos !== undefined ? chanAt(panPos) : null;
+      const tiltCh = tiltPos !== undefined ? chanAt(tiltPos) : null;
+      if (!panCh && !tiltCh) return null;
+      return (
+        <div className="space-y-1.5">
+          <span className="text-xs font-medium text-gray-400">📍 Pan / Tilt</span>
+          <div className="flex items-start gap-3">
+            <div className="relative w-16 h-16 bg-gray-800/40 border border-gray-700 rounded-lg shrink-0 overflow-hidden">
+              <div className="absolute top-1/2 left-0 right-0 h-px bg-gray-700/50" />
+              <div className="absolute left-1/2 top-0 bottom-0 w-px bg-gray-700/50" />
+              <div
+                className="absolute w-2 h-2 rounded-full bg-purple-400 shadow-md shadow-purple-500/50 transition-all duration-100"
+                style={{
+                  left: `${((panPos !== undefined ? valAt(panPos) : 128) / 255) * 100}%`,
+                  top: `${((tiltPos !== undefined ? valAt(tiltPos) : 128) / 255) * 100}%`,
+                  transform: 'translate(-50%, -50%)',
+                }}
+              />
+            </div>
+            <div className="flex-1 space-y-1.5">
+              {panCh && panPos !== undefined && (
+                <ChannelSlider
+                  icon="↔"
+                  label={panCh.name}
+                  address={panCh.dmxAddress}
+                  value={valAt(panPos)}
+                  onChange={(v) => setAt(panPos, v)}
+                  color="bg-blue-500"
+                  groupCount={groupCount}
+                />
+              )}
+              {tiltCh && tiltPos !== undefined && (
+                <ChannelSlider
+                  icon="↕"
+                  label={tiltCh.name}
+                  address={tiltCh.dmxAddress}
+                  value={valAt(tiltPos)}
+                  onChange={(v) => setAt(tiltPos, v)}
+                  color="bg-cyan-500"
+                  groupCount={groupCount}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    })()}
+
+    {/* Shutter / Strobe */}
+    {primary.shutterIdx !== undefined && (() => {
+      const pos = primary.shutterIdx;
+      const ch = chanAt(pos);
+      if (!ch) return null;
+      const val = valAt(pos);
+      let zoneLabel = '';
+      if (val <= 31) zoneLabel = 'Closed';
+      else if (val <= 63) zoneLabel = 'Open';
+      else if (val <= 95) zoneLabel = 'Strobe slow';
+      else if (val <= 127) zoneLabel = 'Strobe med';
+      else if (val <= 159) zoneLabel = 'Strobe fast';
+      else if (val <= 191) zoneLabel = 'Pulse';
+      else if (val <= 223) zoneLabel = 'Random';
+      else zoneLabel = 'Open';
+      return (
+        <div className="space-y-1">
+          <ChannelSlider
+            icon="⚡"
+            label={`${ch.name} — ${zoneLabel}`}
+            address={ch.dmxAddress}
+            value={val}
+            onChange={(v) => setAt(pos, v)}
+            color="bg-purple-500"
+            groupCount={groupCount}
+          />
+          <div className="flex gap-1 text-[8px] text-gray-600">
+            <span className="px-1 border-r border-gray-700">0-31 Closed</span>
+            <span className="px-1 border-r border-gray-700">32-63 Open</span>
+            <span className="px-1 border-r border-gray-700">64-95 Slow</span>
+            <span className="px-1 border-r border-gray-700">96-127 Med</span>
+            <span className="px-1 border-r border-gray-700">128-159 Fast</span>
+            <span className="px-1">160+ FX</span>
+          </div>
+        </div>
+      );
+    })()}
+
+    {/* Gobo */}
+    {primary.goboIdx !== undefined && (() => {
+      const pos = primary.goboIdx;
+      const ch = chanAt(pos);
+      if (!ch) return null;
+      const caps = ch.capabilities || [];
+      const currentVal = valAt(pos);
+      return (
+        <div className="space-y-1.5">
+          <span className="text-xs font-medium text-gray-400">❄️ {ch.name}</span>
+          {caps.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {caps.map((cap: any, ci: number) => {
+                const isActive = currentVal >= cap.min && currentVal <= cap.max;
+                return (
+                  <button
+                    key={ci}
+                    onClick={() => setAt(pos, cap.min)}
+                    className={`px-2 py-1 rounded text-[10px] transition-all ${
+                      isActive
+                        ? 'ring-1 ring-cyan-400/50 bg-gray-800/80 text-cyan-300'
+                        : 'bg-gray-800/30 hover:bg-gray-800/50 text-gray-400'
+                    }`}
+                  >
+                    {cap.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <ChannelSlider
+            icon="❄️"
+            label="Value"
+            address={ch.dmxAddress}
+            value={currentVal}
+            onChange={(v) => setAt(pos, v)}
+            color="bg-cyan-500"
+            groupCount={groupCount}
+          />
+        </div>
+      );
+    })()}
+
+    {/* Other channels */}
+    {primary.channels
+      .map((ch, pos) => ({ ch, pos }))
+      .filter(({ pos }) => {
+        // On masque les canaux déjà traités par une section dédiée
+        if (pos === primary.dimmerIdx) return false;
+        if (pos === primary.panIdx) return false;
+        if (pos === primary.tiltIdx) return false;
+        if (pos === primary.shutterIdx) return false;
+        if (pos === primary.goboIdx) return false;
+        if (pos === primary.colorWheelIdx) return false;
+        if (primary.rgbGroup) {
+          if (pos === primary.rgbGroup.r) return false;
+          if (pos === primary.rgbGroup.g) return false;
+          if (pos === primary.rgbGroup.b) return false;
+        }
+        return true;
+      })
+      .map(({ ch, pos }) => {
+        // Canal non commun au groupe → masqué (fail-safe)
+        const common = chanAt(pos);
+        if (!common) return null;
+        const iconMap: Record<string, string> = {
+          Intensity: '🔅', Pan: '↔️', Tilt: '↕️', Colour: '🎨',
+          Gobo: '❄️', Shutter: '⚡', Speed: '⏱️', Prism: '💠',
+          Effect: '✨', Beam: '🔦', Maintenance: '🔧', Nothing: '⬜',
+          Strobe: '💫', Zoom: '🔍', Focus: '🎯', Iris: '👁️',
+          Frost: '🌫️', Macro: '🎛️', ColorWheel: '🎨', MultiColor: '🌈',
+        };
+        const icon = iconMap[ch.type] || '•';
+        return (
+          <ChannelSlider
+            key={ch.dmxAddress}
+            icon={icon}
+            label={`${ch.name} (${ch.type})`}
+            address={ch.dmxAddress}
+            value={valAt(pos)}
+            onChange={(v) => setAt(pos, v)}
+            color="bg-gray-500"
+            groupCount={groupCount}
+          />
+        );
+      })}
+    </div>
+  );
+};
+
+// ─── Channel Slider Component ──────────────────────────────
+
+const clamp255 = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+
+// Couleur d'accent effective des sliders de canaux. La classe Tailwind
+// `accent-*` ne peut pas être construite dynamiquement (le scanner JIT ne
+// verrait pas la classe) — d'où la table explicite.
+const ACCENT_CSS: Record<string, string> = {
+  'bg-yellow-500': '#eab308',
+  'bg-red-500': '#ef4444',
+  'bg-green-500': '#22c55e',
+  'bg-blue-500': '#3b82f6',
+  'bg-cyan-500': '#06b6d4',
+  'bg-pink-500': '#ec4899',
+  'bg-purple-500': '#a855f7',
+  'bg-purple-600': '#9333ea',
+  'bg-gray-500': '#6b7280',
+};
+
+const NumberField: React.FC<{ value: number; min: number; max: number; onChange: (v: number) => void }> = ({ value, min, max, onChange }) => {
+  const [text, setText] = useState(String(value));
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (!editing) setText(String(value));
+  }, [value, editing]);
+  const commit = () => {
+    const n = Number(text);
+    const clamped = clamp255(Number.isNaN(n) ? min : n);
+    setText(String(clamped));
+    if (!Number.isNaN(n)) onChange(clamped);
+    setEditing(false);
+  };
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      value={text}
+      onFocus={() => setEditing(true)}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); }}
+      className="w-12 shrink-0 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-200 font-mono text-right outline-none focus:border-purple-500/50"
+    />
+  );
+};
+
+const ChannelSlider: React.FC<{
+  icon: string;
+  label: string;
+  address: number;
+  value: number;
+  onChange: (v: number) => void;
+  color: string;
+  /** Nombre de fixtures pilotées (édition groupée) — affiché après @adresse */
+  groupCount?: number;
+}> = ({ icon, label, address, value, onChange, color, groupCount }) => {
+  const step = (delta: number) => onChange(clamp255(value + delta));
+  return (
+    <div className="flex items-center gap-2 group">
+      <span className="text-xs w-5 text-center shrink-0" title={icon.length > 1 ? icon : ''}>{icon}</span>
+      <div className="flex-1 min-w-0 flex items-center gap-1.5">
+        <span className="text-[10px] text-gray-400 truncate w-24 shrink-0" title={label}>
+          {label}
+        </span>
+        <button
+          onClick={() => step(-1)}
+          title="-1"
+          className="w-5 h-5 shrink-0 rounded bg-gray-800/80 border border-gray-700 hover:bg-gray-700 text-gray-300 text-xs leading-none flex items-center justify-center"
+        >−</button>
+        <input
+          type="range"
+          min={0}
+          max={255}
+          value={value}
+          onChange={(e) => onChange(clamp255(Number(e.target.value)))}
+          className="flex-1 h-1 cursor-pointer accent-purple-500"
+          style={{ accentColor: ACCENT_CSS[color] }}
+        />
+        <button
+          onClick={() => step(1)}
+          title="+1"
+          className="w-5 h-5 shrink-0 rounded bg-gray-800/80 border border-gray-700 hover:bg-gray-700 text-gray-300 text-xs leading-none flex items-center justify-center"
+        >+</button>
+        <NumberField value={value} min={0} max={255} onChange={onChange} />
+        <span className="text-[8px] text-gray-600 w-8 text-right shrink-0 opacity-0 group-hover:opacity-100 transition-opacity select-none">
+          @{address}{groupCount ? ` ×${groupCount}` : ''}
+        </span>
+      </div>
+    </div>
+  );
+};
+
+// ─── Save Icon (minimal inline SVG since lucide doesn't have Save) ──
+
+const SaveIcon: React.FC<{ size?: number }> = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+    <polyline points="17,21 17,13 7,13 7,21" />
+    <polyline points="7,3 7,8 15,8" />
+  </svg>
+);
+
+// ─── Chaser List (Left Panel) ──────────────────────────────
+
+const ChaserList: React.FC = () => {
+  const { t } = useTranslation();
+  const chasers = useShowStore((s) => s.chasers);
+  const createChaser = useShowStore((s) => s.createChaser);
+  const deleteChaser = useShowStore((s) => s.deleteChaser);
+
+  const [ctxMenu, setCtxMenu] = useState<{ visible: boolean; x: number; y: number; id: string; name: string }>(
+    { visible: false, x: 0, y: 0, id: '', name: '' }
+  );
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ctxMenu.visible) return;
+    const dismiss = () => setCtxMenu((c) => ({ ...c, visible: false }));
+    window.addEventListener('click', dismiss);
+    return () => window.removeEventListener('click', dismiss);
+  }, [ctxMenu.visible]);
+
+  useEffect(() => {
+    (window as any).__lm_selectedChaserId = selectedId;
+  }, [selectedId]);
+
+  const handleCreate = () => {
+    const id = createChaser('New Chaser');
+    setSelectedId(id);
+  };
+
+  if (chasers.length === 0) {
+    return (
+      <div className="text-xs text-gray-600 text-center py-8">
+        No chasers yet. Click "New Chaser" to create one.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+        {chasers.map((chaser) => {
+          const isSelected = selectedId === chaser.id;
+          return (
+            <div
+              key={chaser.id}
+              onClick={() => setSelectedId(chaser.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setCtxMenu({ visible: true, x: e.clientX, y: e.clientY, id: chaser.id, name: chaser.name });
+              }}
+              className={`rounded-lg border px-2 py-1.5 cursor-pointer group transition-all ${
+                isSelected
+                  ? 'bg-purple-600/15 border-purple-500/50 shadow-[0_0_14px_rgba(168,85,247,0.25)]'
+                  : 'bg-[#0d0d14] border-gray-700 hover:border-purple-500/40 hover:bg-gray-800/20'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{
+                    background: isSelected
+                      ? 'linear-gradient(135deg, #a855f7, #6366f1)'
+                      : 'linear-gradient(135deg, #4b5563, #1f2937)',
+                    boxShadow: isSelected ? '0 0 6px rgba(168,85,247,0.8)' : 'none',
+                  }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className={`text-xs truncate ${isSelected ? 'text-purple-100 font-semibold' : 'text-gray-200 font-medium'}`}>{chaser.name}</div>
+                  <div className="text-[10px] text-gray-500 truncate">
+                    {chaser.steps.length} st. · {chaser.speed} BPM · {chaser.direction}
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setConfirmDelete(chaser.id); }}
+                  className="p-1 text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                  title={t('design.deleteChaserTitle')}
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Context menu */}
+      {ctxMenu.visible && (
+        <div
+          className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
+          style={{ ...clampRect(ctxMenu.x, ctxMenu.y, 240, 240, window.innerWidth, window.innerHeight) }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider">{ctxMenu.name}</div>
+          <button
+            onClick={() => {
+              setConfirmDelete(ctxMenu.id);
+              setCtxMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-red-300 hover:bg-red-600/20 hover:text-red-200 transition-colors flex items-center gap-2"
+          >
+            <Trash2 size={12} /> {t('common.delete')} Chaser
+          </button>
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setConfirmDelete(null)}>
+          <div className="bg-[#12121a] border border-gray-700 rounded-xl p-5 shadow-2xl w-80" onClick={(e) => e.stopPropagation()}>
+            <h4 className="text-sm font-bold text-white mb-2">{t('design.deleteChaserTitle')}</h4>
+            <p className="text-xs text-gray-400 mb-4">{t('design.deleteChaserText')}</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setConfirmDelete(null)} className="px-3 py-1.5 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300 hover:bg-gray-700/50">{t('common.cancel')}</button>
+              <button
+                onClick={() => {
+                  deleteChaser(confirmDelete);
+                  setConfirmDelete(null);
+                  if (selectedId === confirmDelete) setSelectedId(null);
+                }}
+                className="px-3 py-1.5 bg-red-600/20 border border-red-500/30 rounded-lg text-xs text-red-300 hover:bg-red-600/30"
+              >{t('common.delete')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+// ─── Chaser Editor ─────────────────────────────────────────
+
+const STEP_COLORS = [
+  '#ff0064', '#6400ff', '#00c8ff', '#ffc800',
+  '#00ff88', '#ff6600', '#ff00cc', '#00ffcc',
+  '#cc00ff', '#ffcc00', '#0064ff', '#ff0099',
+  '#ff8800', '#8800ff', '#00e5ff', '#ff0044',
+];
+
+const ChaserEditor: React.FC = () => {
+  const { t } = useTranslation();
+  const chasers = useShowStore((s) => s.chasers);
+  const scenes = useShowStore((s) => s.scenes);
+  const updateChaser = useShowStore((s) => s.updateChaser);
+  const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const universes = useShowStore((s) => s.universes);
+
+  // Get selected chaser ID from list
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  useEffect(() => {
+    const check = () => {
+      const id = (window as any).__lm_selectedChaserId;
+      if (id !== selectedId) setSelectedId(id);
+    };
+    const interval = setInterval(check, 100);
+    return () => clearInterval(interval);
+  }, [selectedId]);
+
+  const chaser = chasers.find((c) => c.id === selectedId) || null;
+
+  // Local edit state
+  const [editName, setEditName] = useState('');
+  const [editSteps, setEditSteps] = useState<ChaserStep[]>([]);
+  const [editDirection, setEditDirection] = useState<SavedChaser['direction']>('forward');
+  const [editSpeed, setEditSpeed] = useState(120);
+
+  // Add step popover
+  const [showAddStep, setShowAddStep] = useState(false);
+  const [stepSearch, setStepSearch] = useState('');
+  const addStepRef = useRef<HTMLDivElement>(null);
+
+  // Close Add Step popover on outside click
+  useEffect(() => {
+    if (!showAddStep) return;
+    const handler = (e: MouseEvent) => {
+      if (addStepRef.current && !addStepRef.current.contains(e.target as Node)) {
+        setShowAddStep(false);
+        setStepSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showAddStep]);
+
+  // Editing step values inline
+  const [editingStepIdx, setEditingStepIdx] = useState<number | null>(null);
+
+  // Playback state
+  const [playState, setPlayState] = useState<'stopped' | 'playing' | 'paused'>('stopped');
+  const [activeStepIdx, setActiveStepIdx] = useState(-1);
+  const [stepProgress, setStepProgress] = useState(0); // 0-1 for current step
+  const playRef = useRef<{ timer: number | null; paused: boolean; currentIdx: number; bouncingForward: boolean; phase: 'fadeIn' | 'hold' | 'fadeOut'; phaseStart: number; phaseDuration: number; startChannelValues: Record<number, number>; lastProgress: number }>({
+    timer: null, paused: false, currentIdx: 0, bouncingForward: true,
+    phase: 'fadeIn', phaseStart: 0, phaseDuration: 0, startChannelValues: {}, lastProgress: -1,
+  });
+  // Dernières valeurs brutes envoyées (anti-saccade : un canal absent d'une
+  // scène garde sa valeur au lieu de plonger à 0 — cas tuto : scènes qui ne
+  // couvrent pas toutes les fixtures).
+  const lastSentRef = useRef<Record<number, number>>({});
+
+  // Floating 3D view (same pill pattern as scenes/EFX tabs)
+  const [showFloating3D, setShowFloating3D] = useState(false);
+  const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
+  const [float3DSize, setFloat3DSize] = useState({ w: 960, h: 540 });
+  const float3DDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
+  const float3DResizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const handleFloat3DDragStart = useCallback((e: React.MouseEvent) => {
+    float3DDragRef.current = { startX: e.clientX, startY: e.clientY, startLeft: float3DPos.x, startTop: float3DPos.y };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DDragRef.current) return;
+      setFloat3DPos({ x: Math.max(0, Math.min(float3DDragRef.current.startLeft + ev.clientX - float3DDragRef.current.startX, window.innerWidth - 120)), y: Math.max(0, Math.min(float3DDragRef.current.startTop + ev.clientY - float3DDragRef.current.startY, window.innerHeight - 40)) });
+    };
+    const onUp = () => { float3DDragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DPos]);
+  const handleFloat3DResizeStart = useCallback((e: React.MouseEvent) => {
+    float3DResizeRef.current = { startX: e.clientX, startY: e.clientY, startW: float3DSize.w, startH: float3DSize.h };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DResizeRef.current) return;
+      setFloat3DSize({ w: Math.max(320, float3DResizeRef.current.startW + ev.clientX - float3DResizeRef.current.startX), h: Math.max(200, float3DResizeRef.current.startH + ev.clientY - float3DResizeRef.current.startY) });
+    };
+    const onUp = () => { float3DResizeRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DSize]);
+
+  // Sync local state from selected chaser
+  useEffect(() => {
+    if (chaser) {
+      setEditName(chaser.name);
+      setEditSteps([...chaser.steps]);
+      setEditDirection(chaser.direction);
+      setEditSpeed(chaser.speed);
+      setPlayState('stopped');
+      setActiveStepIdx(-1);
+      setStepProgress(0);
+      stopPlayback();
+    } else {
+      setEditName('');
+      setEditSteps([]);
+      setEditDirection('forward');
+      setEditSpeed(120);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chaser?.id]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => stopPlayback();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Helpers ──
+  const persistChanges = useCallback((steps: ChaserStep[], dir?: SavedChaser['direction'], spd?: number) => {
+    if (!chaser) return;
+    const updates: any = {};
+    if (steps !== undefined) updates.steps = steps;
+    if (dir !== undefined) updates.direction = dir;
+    if (spd !== undefined) updates.speed = spd;
+    updateChaser(chaser.id, updates);
+  }, [chaser, updateChaser]);
+
+  const sceneById = useCallback((sceneId: string) => scenes.find((s) => s.id === sceneId), [scenes]);
+
+  const getSceneName = useCallback((sceneId: string) => {
+    const s = sceneById(sceneId);
+    return s ? s.name : '(missing scene)';
+  }, [sceneById]);
+
+  const getStepDuration = (step: ChaserStep) => step.fadeIn + step.hold + step.fadeOut;
+
+  const getChaserSequence = useCallback((): ChaserStep[] => {
+    if (editDirection === 'backward') return [...editSteps].reverse();
+    return editSteps;
+  }, [editSteps, editDirection]);
+
+  // ── Playback ──
+  const stopPlayback = useCallback(() => {
+    if (playRef.current.timer !== null) {
+      cancelAnimationFrame(playRef.current.timer);
+      playRef.current.timer = null;
+    }
+    // Blackout (scènes + valeurs tenues, sinon un canal absent des scènes reste allumé)
+    const zeros: Record<number, number> = {};
+    for (const step of editSteps) {
+      const scn = sceneById(step.sceneId);
+      if (scn) {
+        for (const addr of Object.keys(scn.channels)) {
+          zeros[Number(addr)] = 0;
+        }
+      }
+    }
+    for (const addr of Object.keys(lastSentRef.current)) {
+      zeros[Number(addr)] = 0;
+    }
+    lastSentRef.current = {};
+    if (Object.keys(zeros).length > 0) {
+      // TRANSIENT (2 s): the zeros flush the hardware, then the design-test
+      // source is released so the engine regains control after stopping the
+      // chaser playback (a persistent LTP zero block would keep those
+      // channels dark forever).
+      try { sendChannelsToHardware(zeros, patchedFixtures, universes, 'design-test', 2000); } catch {}
+    }
+  }, [editSteps, sceneById]);
+
+  const startPlayback = useCallback(() => {
+    if (editSteps.length === 0) return;
+    stopPlayback();
+
+    let currentIdx = 0;
+    let bouncingForward = true;
+    let phase: 'fadeIn' | 'hold' | 'fadeOut' = 'fadeIn';
+    let phaseStart = Date.now();
+    const seq = editDirection === 'backward' ? [...editSteps].reverse() : editSteps;
+
+    if (seq.length === 0) return;
+
+    const step = seq[0];
+    // Tempo = pure speed multiplier, normalized so 120 BPM (default) = exact ms durations
+    const speedMultiplier = editSpeed / 120;
+    const fadeInScaled = (step.fadeIn ?? 0) * speedMultiplier;
+    let phaseDuration = fadeInScaled || 100;
+
+    // Get initial scene channels
+    const initScene = sceneById(step.sceneId);
+    if (initScene) {
+      try { sendChannelsToHardware({}, patchedFixtures, universes, 'design-test'); } catch {}
+    }
+
+    const tick = () => {
+      const now = Date.now();
+      const elapsed = now - phaseStart;
+      const progress = Math.min(1, elapsed / phaseDuration);
+
+      const currentStep = seq[currentIdx];
+      if (!currentStep) {
+        if (playRef.current.timer !== null) playRef.current.timer = requestAnimationFrame(tick);
+        return;
+      }
+
+      const scn = sceneById(currentStep.sceneId);
+      if (!scn) {
+        // Skip missing scene
+        advanceStep();
+        if (playRef.current.timer !== null) playRef.current.timer = requestAnimationFrame(tick);
+        return;
+      }
+
+      // Index de l'étape qui suivra (miroir de advanceStep, sans mutation) —
+      // la cible du crossfade. Clampé par sécurité.
+      const peekNextIdx = () => {
+        if (seq.length <= 1) return 0;
+        if (editDirection === 'bounce') {
+          if (bouncingForward && currentIdx >= seq.length - 1) return Math.max(0, currentIdx - 1);
+          if (!bouncingForward && currentIdx <= 0) return Math.min(seq.length - 1, currentIdx + 1);
+          return Math.max(0, Math.min(seq.length - 1, bouncingForward ? currentIdx + 1 : currentIdx - 1));
+        }
+        const n = getNextStepIndex(currentIdx);
+        return Math.max(0, Math.min(seq.length - 1, n));
+      };
+
+      // Calculate target values for this phase
+      let targetValues: Record<number, number> = {};
+      if (phase === 'fadeIn') {
+        // Fade from 0 to full (première étape uniquement — démarrage depuis le noir)
+        for (const [addrStr, val] of Object.entries(scn.channels)) {
+          targetValues[Number(addrStr)] = Math.round(val * progress);
+        }
+      } else if (phase === 'hold') {
+        // Tient aussi les canaux connus absents de cette scène (sinon la
+        // source les lâche et les fixtures concernées freezent puis snappent).
+        targetValues = holdMissingChannels(scn.channels, lastSentRef.current);
+      } else if (phase === 'fadeOut') {
+        // CROSSFADE vers l'étape suivante (pas de passage par 0 : l'ancien
+        // code éteignait tout — dip noir + shutter en zone strobe + pan/tilt
+        // en butée — d'où le « clignotement stroboscope » à chaque transition).
+        // Un canal absent d'un côté garde sa dernière valeur envoyée (pas de
+        // plongeon à 0). Scène suivante manquante : repli sur l'ancien fade.
+        const nextScn = sceneById(seq[peekNextIdx()]?.sceneId);
+        if (!nextScn) {
+          for (const [addrStr, val] of Object.entries(scn.channels)) {
+            targetValues[Number(addrStr)] = Math.round(val * (1 - progress));
+          }
+        } else {
+          targetValues = crossfadeSceneChannels(
+            scn.channels, nextScn.channels, progress, 1, lastSentRef.current,
+          );
+        }
+      }
+
+      lastSentRef.current = { ...targetValues };
+      try { sendChannelsToHardware(targetValues, patchedFixtures, universes, 'design-test'); } catch {}
+
+      // Mise à jour UI allégée : setStepProgress à 60 fps re-rendait tout
+      // DesignView (dont le wrapper Stage3D) 60×/s → mouvements 3D saccadés.
+      // Index seulement si changé, progression par pas visibles (~2 %).
+      setActiveStepIdx((prev) => (prev === currentIdx ? prev : currentIdx));
+      const lastProg = playRef.current?.lastProgress ?? -1;
+      if (Math.abs(progress - lastProg) >= 0.02 || progress >= 1) {
+        if (playRef.current) playRef.current.lastProgress = progress;
+        setStepProgress(progress);
+      }
+
+      if (progress >= 1) {
+        advanceStep();
+      }
+      // Boucle RAF (vsync) plutôt que setInterval : pas de dérive ni de
+      // paquets de ticks, les mouvements restent réguliers. La progression
+      // reste pilotée par Date.now(), donc le tempo est inchangé.
+      if (playRef.current.timer !== null) {
+        playRef.current.timer = requestAnimationFrame(tick);
+      }
+    };
+
+    const advanceStep = () => {
+      phaseStart = Date.now();
+      const speedMultiplier = editSpeed / 120;
+      const cur = seq[currentIdx];
+
+      // Phase machine: fadeIn → hold → fadeOut → next step (exact ms durations at default tempo)
+      if (phase === 'fadeIn' && cur) {
+        phase = 'hold';
+        phaseDuration = ((cur.hold ?? 0) * speedMultiplier) || 1;
+        return;
+      }
+      if (phase === 'hold' && cur) {
+        phase = 'fadeOut';
+        phaseDuration = ((cur.fadeOut ?? 0) * speedMultiplier) || 1;
+        return;
+      }
+
+      // fadeOut done → advance to next step. Le fadeOut était un crossfade :
+      // les valeurs sont déjà pleines → reprise en hold, jamais en fadeIn
+      // (repasser par fadeIn redescendrait par 0 = re-dip noir/strobe).
+      if (seq.length <= 1) {
+        currentIdx = 0;
+        const s = seq[0];
+        phase = 'hold';
+        phaseDuration = ((s?.hold ?? 0) * speedMultiplier) || 1;
+        return;
+      }
+      const nextIdx = getNextStepIndex(currentIdx);
+
+      if (editDirection === 'bounce') {
+        if (bouncingForward && currentIdx >= seq.length - 1) {
+          bouncingForward = false;
+        } else if (!bouncingForward && currentIdx <= 0) {
+          bouncingForward = true;
+        }
+        currentIdx = bouncingForward ? currentIdx + 1 : currentIdx - 1;
+        if (currentIdx >= seq.length) currentIdx = seq.length - 2;
+        if (currentIdx < 0) currentIdx = 1;
+      } else {
+        currentIdx = nextIdx;
+      }
+
+      if (currentIdx >= seq.length || currentIdx < 0) currentIdx = 0;
+
+      const step = seq[currentIdx];
+      if (!step) { currentIdx = 0; return; }
+
+      // Le fadeOut précédent était un crossfade vers cette étape : valeurs
+      // déjà pleines → démarrage en hold (voir commentaire ci-dessus).
+      phase = 'hold';
+      phaseDuration = ((step.hold ?? 0) * speedMultiplier) || 1;
+    };
+
+    const getNextStepIndex = (idx: number) => {
+      if (editDirection === 'forward') return idx + 1 >= seq.length ? 0 : idx + 1;
+      if (editDirection === 'backward') return idx + 1 >= seq.length ? 0 : idx + 1;
+      return idx + 1;
+    };
+
+    // Start tick (RAF, synchronisé au rafraîchissement écran)
+    playRef.current = {
+      timer: requestAnimationFrame(tick),
+      paused: false,
+      currentIdx: 0,
+      bouncingForward: true,
+      phase: 'fadeIn',
+      phaseStart,
+      phaseDuration,
+      startChannelValues: {},
+      lastProgress: -1,
+    };
+
+    setPlayState('playing');
+    setActiveStepIdx(0);
+    setStepProgress(0);
+  }, [editSteps, editDirection, editSpeed, stopPlayback, sceneById]);
+
+  const pausePlayback = useCallback(() => {
+    if (playRef.current.timer !== null) {
+      cancelAnimationFrame(playRef.current.timer);
+      playRef.current.timer = null;
+      playRef.current.paused = true;
+    }
+    setPlayState('paused');
+  }, []);
+
+  const resumePlayback = useCallback(() => {
+    if (!playRef.current.paused) return;
+    // For simplicity, restart from current step
+    stopPlayback();
+    startPlayback();
+  }, [stopPlayback, startPlayback]);
+
+  const handleStop = useCallback(() => {
+    stopPlayback();
+    setPlayState('stopped');
+    setActiveStepIdx(-1);
+    setStepProgress(0);
+  }, [stopPlayback]);
+
+  // ── Step actions ──
+  const handleAddStep = (sceneId: string) => {
+    // Prefill step timing from the scene (duration = total window incl fades)
+    const sc = scenes.find((s) => s.id === sceneId);
+    const fadeIn = sc?.fadeIn ?? 1000;
+    const fadeOut = sc?.fadeOut ?? 1000;
+    const hold = sc && sc.duration > 0 ? Math.max(0, sc.duration - fadeIn - fadeOut) : 2000;
+    const newSteps = [...editSteps, { sceneId, fadeIn, hold, fadeOut }];
+    setEditSteps(newSteps);
+    persistChanges(newSteps);
+    setShowAddStep(false);
+    setStepSearch('');
+  };
+
+  const handleRemoveStep = (idx: number) => {
+    const newSteps = editSteps.filter((_, i) => i !== idx);
+    setEditSteps(newSteps);
+    persistChanges(newSteps);
+  };
+
+  const handleMoveStep = (idx: number, dir: -1 | 1) => {
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= editSteps.length) return;
+    const newSteps = [...editSteps];
+    [newSteps[idx], newSteps[newIdx]] = [newSteps[newIdx], newSteps[idx]];
+    setEditSteps(newSteps);
+    persistChanges(newSteps);
+  };
+
+  const handleUpdateStep = (idx: number, updates: Partial<ChaserStep>) => {
+    const newSteps = editSteps.map((s, i) => i === idx ? { ...s, ...updates } : s);
+    setEditSteps(newSteps);
+    persistChanges(newSteps);
+  };
+
+  // ── Step search filter ──
+  const filteredScenes = stepSearch.trim()
+    ? scenes.filter((s) => (s.name || '').toLowerCase().includes(stepSearch.toLowerCase()))
+    : scenes;
+
+  // ── If no chaser selected ──
+  if (!chaser) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-gray-600">
+        <div className="text-4xl mb-3 opacity-30">🎞️</div>
+        <div className="text-sm mb-1">No chaser selected</div>
+        <div className="text-xs mb-4">{t('design.noChasersYet')}</div>
+      </div>
+    );
+  }
+
+  const seq = getChaserSequence();
+  const totalDuration = seq.reduce((sum, s) => sum + getStepDuration(s), 0);
+
+  return (
+    <div className="space-y-5">
+      {/* Name + Playback Controls */}
+      <div className="flex items-center gap-3">
+        <input
+          type="text"
+          value={editName}
+          onChange={(e) => {
+            setEditName(e.target.value);
+            if (chaser) updateChaser(chaser.id, { name: e.target.value });
+          }}
+          className="flex-1 bg-transparent text-xl font-bold text-white outline-none border-b border-transparent hover:border-gray-700 focus:border-purple-500/50 transition-colors pb-0.5"
+          placeholder="Chaser Name"
+        />
+        <span className="text-[10px] text-gray-600">{editSteps.length} step{editSteps.length !== 1 ? 's' : ''}</span>
+        <div className="flex gap-1.5">
+          {playState === 'stopped' && (
+            <button onClick={startPlayback} disabled={editSteps.length === 0}
+              className="p-2 rounded-lg bg-green-600/20 text-green-400 hover:bg-green-600/30 disabled:opacity-30 transition-colors" title={t('common.play')}>
+              <Play size={16} />
+            </button>
+          )}
+          {playState === 'playing' && (
+            <button onClick={pausePlayback}
+              className="p-2 rounded-lg bg-yellow-600/20 text-yellow-400 hover:bg-yellow-600/30 transition-colors" title="Pause">
+              <Pause size={16} />
+            </button>
+          )}
+          {playState === 'paused' && (
+            <button onClick={resumePlayback}
+              className="p-2 rounded-lg bg-green-600/20 text-green-400 hover:bg-green-600/30 transition-colors" title="Resume">
+              <Play size={16} />
+            </button>
+          )}
+          <button onClick={handleStop}
+            className="p-2 rounded-lg bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-colors" title={t('common.stop')}>
+            <Square size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* Direction + Speed */}
+      <div className="flex items-center gap-6">
+        {/* Direction */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-gray-500 uppercase tracking-wider">Direction</span>
+          <div className="flex bg-gray-800/40 rounded-lg p-0.5">
+            {(['forward', 'backward', 'bounce'] as const).map((d) => (
+              <button
+                key={d}
+                onClick={() => {
+                  setEditDirection(d);
+                  persistChanges(editSteps, d);
+                }}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  editDirection === d
+                    ? 'bg-purple-600/40 text-purple-200'
+                    : 'text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {d.charAt(0).toUpperCase() + d.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Speed */}
+        <div className="flex items-center gap-2 flex-1">
+          <span className="text-[10px] text-gray-500 uppercase tracking-wider">Tempo</span>
+          <button onClick={() => { const v = Math.max(20, Math.min(300, editSpeed - 1)); setEditSpeed(v); persistChanges(editSteps, undefined, v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+          <input
+            type="range"
+            min={20}
+            max={300}
+            value={editSpeed}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setEditSpeed(v);
+              persistChanges(editSteps, undefined, v);
+            }}
+            className="flex-1 h-1 accent-purple-500"
+          />
+          <button onClick={() => { const v = Math.max(20, Math.min(300, editSpeed + 1)); setEditSpeed(v); persistChanges(editSteps, undefined, v); }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+          <span className="text-xs text-gray-300 font-mono w-10 text-right">{editSpeed}</span>
+          <span className="text-[10px] text-gray-600">BPM</span>
+          <span className="text-[9px] text-gray-700">{t('design.realtimeHint')}</span>
+        </div>
+      </div>
+
+      {/* Playback indicator */}
+      {playState !== 'stopped' && activeStepIdx >= 0 && (
+        <div className="bg-[#0d0d14] border border-purple-500/20 rounded-lg px-3 py-2 flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            <span className="text-[10px] text-green-400 font-medium uppercase tracking-wider">Playing</span>
+          </div>
+          <span className="text-xs text-gray-300">
+            Step {activeStepIdx + 1}/{seq.length}
+            {seq[activeStepIdx] && <span className="text-gray-500 ml-1">— {getSceneName(seq[activeStepIdx].sceneId)}</span>}
+          </span>
+          <div className="flex-1 mx-2">
+            <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-75"
+                style={{ width: `${stepProgress * 100}%` }}
+              />
+            </div>
+          </div>
+          <span className="text-[10px] text-gray-500">{Math.round(stepProgress * 100)}%</span>
+        </div>
+      )}
+
+      {/* Step Sequencer */}
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl">
+        <div className="px-4 py-2.5 border-b border-gray-800/50 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-medium text-gray-400">Steps ({editSteps.length})</span>
+            {totalDuration > 0 && (
+              <span className="text-[10px] text-gray-600">
+                Total: {(totalDuration / 1000).toFixed(1)}s
+              </span>
+            )}
+          </div>
+          <div className="relative">
+            <button
+              onClick={() => setShowAddStep(!showAddStep)}
+              className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1 px-2 py-1 rounded hover:bg-purple-600/10 transition-colors"
+            >
+              <Plus size={12} /> Add Step
+            </button>
+            {/* Scene popover */}
+            {showAddStep && (
+              <div ref={addStepRef} className="absolute right-0 top-full mt-1 z-50 bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl w-64 overflow-hidden">
+                <div className="p-2 border-b border-gray-800/50">
+                  <div className="relative">
+                    <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <input
+                      type="text"
+                      value={stepSearch}
+                      onChange={(e) => setStepSearch(e.target.value)}
+                      placeholder={t('design.searchScenes')}
+                      className="w-full bg-gray-800/50 border border-gray-700 rounded pl-7 pr-2 py-1.5 text-xs text-gray-300 placeholder-gray-600 outline-none focus:border-purple-500/50"
+                      autoFocus
+                    />
+                  </div>
+                </div>
+                <div className="max-h-48 overflow-y-auto">
+                  {scenes.length === 0 ? (
+                    <div className="text-xs text-gray-600 text-center py-6 px-3">
+                      No scenes created yet. Create scenes first.
+                    </div>
+                  ) : filteredScenes.length === 0 ? (
+                    <div className="text-xs text-gray-600 text-center py-6">
+                      No scenes match "{stepSearch}"
+                    </div>
+                  ) : (
+                    filteredScenes.map((scene) => {
+                      const activeCh = Object.values(scene.channels).filter((v) => v > 0).length;
+                      return (
+                        <button
+                          key={scene.id}
+                          onClick={() => handleAddStep(scene.id)}
+                          className="w-full text-left px-3 py-2 hover:bg-gray-800/30 transition-colors flex items-center justify-between group"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs text-gray-300 truncate">{scene.name}</div>
+                            <div className="text-[10px] text-gray-600">{activeCh} active ch · {(scene.duration / 1000).toFixed(1)}s</div>
+                          </div>
+                          <Plus size={12} className="text-gray-600 group-hover:text-purple-400 shrink-0 ml-2" />
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Step cards */}
+        {editSteps.length === 0 ? (
+          <div className="p-8 text-center">
+            <div className="text-3xl mb-2 opacity-30">🎞️</div>
+            <div className="text-xs text-gray-500 mb-3">No steps yet</div>
+            <button
+              onClick={() => setShowAddStep(true)}
+              className="px-3 py-1.5 bg-purple-600/20 text-purple-300 rounded-lg text-xs hover:bg-purple-600/30 transition-colors"
+            >
+              <Plus size={12} className="inline mr-1" /> Add your first step
+            </button>
+          </div>
+        ) : (
+          <div className="p-3">
+            {/* Horizontal timeline */}
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {editSteps.map((step, idx) => {
+                const scn = sceneById(step.sceneId);
+                const stepColor = STEP_COLORS[idx % STEP_COLORS.length];
+                const isActive = playState !== 'stopped' && idx === activeStepIdx;
+                const isEditing = editingStepIdx === idx;
+                const duration = getStepDuration(step);
+                const pctFadeIn = duration > 0 ? (step.fadeIn / duration) * 100 : 33;
+                const pctHold = duration > 0 ? (step.hold / duration) * 100 : 34;
+                const pctFadeOut = duration > 0 ? (step.fadeOut / duration) * 100 : 33;
+
+                return (
+                  <div
+                    key={idx}
+                    className={`shrink-0 rounded-lg overflow-hidden transition-all cursor-pointer ${
+                      isActive
+                        ? 'ring-2 ring-purple-400 shadow-lg shadow-purple-500/30 scale-105'
+                        : 'hover:ring-1 hover:ring-gray-600'
+                    }`}
+                    style={{ width: 180 }}
+                    onClick={() => setEditingStepIdx(isEditing ? null : idx)}
+                  >
+                    {/* Step header */}
+                    <div className="px-3 py-2 flex items-center gap-2" style={{ backgroundColor: stepColor + '20', borderBottom: `2px solid ${stepColor}40` }}>
+                      <span className="text-[10px] text-gray-500 font-mono w-5 shrink-0">{idx + 1}</span>
+                      <span className="text-xs text-gray-200 truncate flex-1 min-w-0" title={scn?.name || 'N/A'}>
+                        {scn?.name || '(no scene)'}
+                      </span>
+                      <span className="text-[9px] text-gray-500 shrink-0" title={t('design.fixturesInSceneTitle')}>
+                        {scn ? patchedFixtures.filter((pf) => sceneTouchesFixture(scn, pf)).length : 0} fx
+                      </span>
+                      <div className="flex gap-0.5 shrink-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleMoveStep(idx, -1); }}
+                          disabled={idx === 0}
+                          className="p-0.5 text-gray-600 hover:text-gray-300 disabled:opacity-20"
+                          title={t('design.moveLeft')}
+                        >
+                          <ChevronLeft size={14} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleMoveStep(idx, 1); }}
+                          disabled={idx === editSteps.length - 1}
+                          className="p-0.5 text-gray-600 hover:text-gray-300 disabled:opacity-20"
+                          title={t('design.moveRight')}
+                        >
+                          <ChevronRight size={14} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleRemoveStep(idx); }}
+                          className="p-0.5 text-gray-600 hover:text-red-400"
+                          title={t('design.removeStep')}
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Colored bar */}
+                    <div className="h-2 flex" style={{ backgroundColor: '#1a1a2e' }}>
+                      <div
+                        className="h-full"
+                        style={{
+                          width: `${pctFadeIn}%`,
+                          background: `linear-gradient(to right, transparent, ${stepColor}80)`,
+                        }}
+                        title={`Fade In: ${step.fadeIn}ms`}
+                      />
+                      <div
+                        className="h-full"
+                        style={{
+                          width: `${pctHold}%`,
+                          backgroundColor: stepColor,
+                        }}
+                        title={`Hold: ${step.hold}ms`}
+                      />
+                      <div
+                        className="h-full"
+                        style={{
+                          width: `${pctFadeOut}%`,
+                          background: `linear-gradient(to left, transparent, ${stepColor}80)`,
+                        }}
+                        title={`Fade Out: ${step.fadeOut}ms`}
+                      />
+                    </div>
+
+                    {/* Timing values */}
+                    <div className="px-3 py-1.5 bg-gray-800/20">
+                      {isEditing ? (
+                        <div className="flex items-center gap-1 text-[10px]">
+                          <div className="flex-1 text-center">
+                            <div className="text-gray-500">In</div>
+                            <input
+                              type="number"
+                              value={step.fadeIn}
+                              onChange={(e) => handleUpdateStep(idx, { fadeIn: Number(e.target.value) || 0 })}
+                              className="w-full bg-gray-800/50 border border-gray-700 rounded px-1 py-0.5 text-gray-300 text-center outline-none focus:border-purple-500/50"
+                              onClick={(e) => e.stopPropagation()}
+                              min={0}
+                            />
+                            <div className="text-gray-600">ms</div>
+                          </div>
+                          <div className="flex-1 text-center">
+                            <div className="text-gray-500">Hold</div>
+                            <input
+                              type="number"
+                              value={step.hold}
+                              onChange={(e) => handleUpdateStep(idx, { hold: Number(e.target.value) || 0 })}
+                              className="w-full bg-gray-800/50 border border-gray-700 rounded px-1 py-0.5 text-gray-300 text-center outline-none focus:border-purple-500/50"
+                              onClick={(e) => e.stopPropagation()}
+                              min={0}
+                            />
+                            <div className="text-gray-600">ms</div>
+                          </div>
+                          <div className="flex-1 text-center">
+                            <div className="text-gray-500">Out</div>
+                            <input
+                              type="number"
+                              value={step.fadeOut}
+                              onChange={(e) => handleUpdateStep(idx, { fadeOut: Number(e.target.value) || 0 })}
+                              className="w-full bg-gray-800/50 border border-gray-700 rounded px-1 py-0.5 text-gray-300 text-center outline-none focus:border-purple-500/50"
+                              onClick={(e) => e.stopPropagation()}
+                              min={0}
+                            />
+                            <div className="text-gray-600">ms</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-[10px]">
+                          <span className="text-gray-500">In: <span className="text-gray-300">{step.fadeIn}ms</span></span>
+                          <span className="text-gray-500">Hold: <span className="text-gray-300">{step.hold}ms</span></span>
+                          <span className="text-gray-500">Out: <span className="text-gray-300">{step.fadeOut}ms</span></span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Progress bar showing full chaser loop */}
+      {playState !== 'stopped' && seq.length > 0 && (
+        <div className="bg-[#0d0d14] border border-gray-800/50 rounded-lg p-3">
+          <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Timeline</div>
+          <div className="h-3 bg-gray-800/50 rounded-full overflow-hidden flex">
+            {seq.map((step, idx) => {
+              const dur = getStepDuration(step);
+              const pct = totalDuration > 0 ? (dur / totalDuration) * 100 : 0;
+              const col = STEP_COLORS[idx % STEP_COLORS.length];
+              return (
+                <div
+                  key={idx}
+                  className={`h-full transition-all ${idx === activeStepIdx ? 'brightness-150' : 'opacity-60'}`}
+                  style={{
+                    width: `${pct}%`,
+                    backgroundColor: col,
+                    borderLeft: idx > 0 ? '1px solid #0d0d14' : 'none',
+                  }}
+                  title={`Step ${idx + 1}: ${getSceneName(step.sceneId)} (${(dur / 1000).toFixed(1)}s)`}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {showFloating3D && (
+        <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}>
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
+            <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D — Chaser</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => { setFloat3DSize({ w: 640, h: 360 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
+              <button onClick={() => setShowFloating3D(false)} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 relative"><Stage3D hideFixturePanel /><div className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize" onMouseDown={handleFloat3DResizeStart} style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }} /></div>
+        </div>
+      )}
+      {!showFloating3D && (
+        <button onClick={() => setShowFloating3D(true)} className="fixed bottom-4 right-4 z-40 bg-purple-600/80 hover:bg-purple-500 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg transition-all">
+          🎥 3D View
+        </button>
+      )}
+    </div>
+  );
+};
+
+// ─── RGB Matrix Editor ─────────────────────────────────────
+
+const PATTERNS: { value: string; label: string; icon: string }[] = [
+  { value: 'solid', label: 'Solid', icon: '⬛' },
+  { value: 'chase', label: 'Chase', icon: '🏃' },
+  { value: 'wave', label: 'Wave', icon: '🌊' },
+  { value: 'burst', label: 'Burst', icon: '💥' },
+  { value: 'gradient', label: 'Gradient', icon: '🎨' },
+  { value: 'rainbow', label: 'Rainbow', icon: '🌈' },
+  { value: 'random', label: 'Random', icon: '🎲' },
+  { value: 'pulse', label: 'Pulse', icon: '💓' },
+  { value: 'strobe', label: 'Strobe', icon: '⚡' },
+];
+
+/** `#rrggbb` → [r,g,b] robuste (hex invalide/mal formé → blanc). */
+function hexToRgbSafe(hex: string): [number, number, number] {
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex || '')) return [255, 255, 255];
+  return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+}
+
+const DIRECTIONS = [
+  { value: 'forward', label: '→' },
+  { value: 'backward', label: '←' },
+  { value: 'bounce', label: '⇄' },
+];
+
+const RgbMatrixList: React.FC = () => {
+  const { t } = useTranslation();
+  const { matrices, activeMatrixId, setActiveMatrix, createMatrix, deleteMatrix, toggleMatrix } = useRgbMatrixStore();
+  const fixtureGroups = useShowStore(s => s.fixtureGroups);
+  const [showNew, setShowNew] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newGroupId, setNewGroupId] = useState(fixtureGroups[0]?.id || '');
+
+  useEffect(() => {
+    if (fixtureGroups.length > 0 && !newGroupId) setNewGroupId(fixtureGroups[0].id);
+  }, [fixtureGroups, newGroupId]);
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between px-1">
+        <span className="text-[10px] text-gray-500 uppercase tracking-wider">RGB Matrices</span>
+      </div>
+      {!showNew ? (
+        <button onClick={() => setShowNew(true)} className="w-full px-3 py-1.5 rounded text-xs bg-purple-600/20 border border-purple-500/30 text-purple-300 hover:bg-purple-600/30 flex items-center gap-2 justify-center">
+          <Plus className="w-3 h-3" /> New Matrix
+        </button>
+      ) : (
+        <div className="space-y-1.5 p-2 bg-gray-800/30 rounded">
+          <input autoFocus placeholder="Matrix name" value={newName} onChange={e => setNewName(e.target.value)}
+            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200" />
+          <select value={newGroupId} onChange={e => setNewGroupId(e.target.value)}
+            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">
+            {fixtureGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+          <div className="flex gap-1">
+            <button onClick={() => { if (newName.trim()) { createMatrix(newName.trim(), newGroupId); setNewName(''); setShowNew(false); } }}
+              className="flex-1 px-2 py-1 rounded text-xs bg-purple-600 text-white">{t('common.create')}</button>
+            <button onClick={() => setShowNew(false)} className="px-2 py-1 rounded text-xs bg-gray-700 text-gray-400">{t('common.cancel')}</button>
+          </div>
+        </div>
+      )}
+      {matrices.length === 0 ? (
+        <div className="text-xs text-gray-600 text-center py-4">No RGB matrices yet.</div>
+      ) : (
+        matrices.map(m => (
+          <div key={m.id} onClick={() => setActiveMatrix(m.id)}
+            className={`px-3 py-1.5 cursor-pointer hover:bg-gray-800/50 flex items-center justify-between ${
+              m.id === activeMatrixId ? 'bg-purple-600/10 border-l-2 border-l-purple-500' : ''}`}>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs truncate">{m.name}</div>
+              <div className="text-[9px] text-gray-500">{m.pattern} · {m.cols}×{m.rows}</div>
+            </div>
+            <div className="flex items-center gap-0.5">
+              <button onClick={(e) => { e.stopPropagation(); toggleMatrix(m.id); }}
+                className={`p-0.5 rounded ${m.enabled ? 'text-green-400 bg-green-400/10' : 'text-gray-600 hover:text-gray-400'}`}>
+                {m.enabled ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); deleteMatrix(m.id); }}
+                className="p-0.5 rounded text-gray-600 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+};
+
+const RGBMatrixEditor: React.FC = () => {
+  const { t } = useTranslation();
+  const { matrices, activeMatrixId, updateMatrix } = useRgbMatrixStore();
+  const matrixStats = useRgbMatrixStore(s => s.stats);
+  const fixtureGroups = useShowStore(s => s.fixtureGroups);
+  const patchedFixtures = useShowStore(s => s.patchedFixtures);
+  const universes = useShowStore(s => s.universes);
+  const [livePhase, setLivePhase] = useState(0);
+
+  // Fenêtre 3D flottante (même modèle que l'éditeur EFX)
+  const [show3D, setShow3D] = useState(false);
+  const [showFloating3D, setShowFloating3D] = useState(false);
+  const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
+  const [float3DSize, setFloat3DSize] = useState({ w: 960, h: 540 });
+  const float3DDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
+  const float3DResizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const handleFloat3DDragStart = useCallback((e: React.MouseEvent) => {
+    float3DDragRef.current = { startX: e.clientX, startY: e.clientY, startLeft: float3DPos.x, startTop: float3DPos.y };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DDragRef.current) return;
+      setFloat3DPos({ x: Math.max(0, Math.min(float3DDragRef.current.startLeft + ev.clientX - float3DDragRef.current.startX, window.innerWidth - 120)), y: Math.max(0, Math.min(float3DDragRef.current.startTop + ev.clientY - float3DDragRef.current.startY, window.innerHeight - 40)) });
+    };
+    const onUp = () => { float3DDragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DPos]);
+  const handleFloat3DResizeStart = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    float3DResizeRef.current = { startX: e.clientX, startY: e.clientY, startW: float3DSize.w, startH: float3DSize.h };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DResizeRef.current) return;
+      setFloat3DSize({ w: Math.max(320, float3DResizeRef.current.startW + ev.clientX - float3DResizeRef.current.startX), h: Math.max(200, float3DResizeRef.current.startH + ev.clientY - float3DResizeRef.current.startY) });
+    };
+    const onUp = () => { float3DResizeRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DSize]);
+
+  const active = matrices.find(m => m.id === activeMatrixId);
+
+  // ── Compatibilité des fixtures du groupe (alerte très visuelle) ──
+  // Une fixture sans canal RGB ni roue couleur ne rendra JAMAIS la matrice.
+  const [groupDefs, setGroupDefs] = useState<Map<string, unknown>>(new Map());
+  useEffect(() => {
+    if (!active) return;
+    const grp = fixtureGroups.find(g => g.id === active.groupId);
+    if (!grp) { setGroupDefs(new Map()); return; }
+    const ids = [...new Set(
+      patchedFixtures.filter(f => grp.fixtureIds.includes(f.id)).map(f => f.fixtureDefId),
+    )];
+    if (ids.length === 0) { setGroupDefs(new Map()); return; }
+    loadFixtureDefinitions(ids).then(m => setGroupDefs(new Map(m))).catch(() => {});
+  }, [active?.id, active?.groupId, patchedFixtures, fixtureGroups]);
+
+  const incompatibleFixtures = useMemo(() => {
+    if (!active) return [];
+    const grp = fixtureGroups.find(g => g.id === active.groupId);
+    if (!grp) return [];
+    const byId = new Map(patchedFixtures.map(f => [f.id, f]));
+    const groupFixtures = grp.fixtureIds.map(id => byId.get(id)).filter(Boolean) as any[];
+    return findIncompatibleFixtures(groupFixtures, (id) => groupDefs.get(id));
+  }, [active?.id, active?.groupId, patchedFixtures, fixtureGroups, groupDefs]);
+
+  // Live preview animation
+  useEffect(() => {
+    if (!active?.enabled) return;
+    const start = performance.now();
+    let raf = 0;
+    const tick = () => {
+      setLivePhase(((performance.now() - start) / 1000) * active.speed);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [active?.id, active?.enabled, active?.speed]);
+
+  if (!active) {
+    return <div className="text-xs text-gray-600 text-center py-8">{t('design.selectOrCreateMatrix')}</div>;
+  }
+
+  const startRgb = parseInt(active.startColor.slice(1, 3), 16) || 255;
+  const startG = parseInt(active.startColor.slice(3, 5), 16) || 0;
+  const startB = parseInt(active.startColor.slice(5, 7), 16) || 0;
+
+  const groupName = fixtureGroups.find(g => g.id === active.groupId)?.name || '?';
+
+  return (
+    <div className="space-y-4">
+      {incompatibleFixtures.length > 0 && (
+        <div className="rounded-lg border-2 border-red-500/60 bg-red-950/50 px-3 py-2.5 shadow-lg shadow-red-900/40 animate-pulse">
+          <div className="flex items-start gap-2">
+            <span className="text-lg leading-none">⚠️</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-red-300">
+                {incompatibleFixtures.length === 1
+                  ? 'Fixture incompatible avec la matrice RGB'
+                  : `${incompatibleFixtures.length} fixtures incompatibles avec la matrice RGB`}
+              </p>
+              <p className="text-[10px] text-red-200/90 mt-0.5">
+                {incompatibleFixtures.map(f => f.name).join(' · ')}
+              </p>
+              <p className="text-[10px] text-red-200/70 mt-0.5">
+                Ces fixtures resteront NOIRES : elles n'ont ni canal RGB ni roue couleur.
+                Remplace-les par des fixtures RGB / à roue dans ce groupe.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      <input type="text" value={active.name}
+        onChange={e => updateMatrix(active.id, { name: e.target.value })}
+        className="bg-transparent text-xl font-bold text-white outline-none block w-full" />
+      <div className="text-[10px] text-gray-500">
+        Group: <span className="text-gray-300">{groupName}</span> · {active.cols}×{active.rows}
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        {/* Left column: patterns + direction */}
+        <div className="space-y-3">
+          <label className="block text-[10px] text-gray-500 uppercase tracking-wider">Pattern</label>
+          <div className="grid grid-cols-3 gap-1">
+            {PATTERNS.map(p => (
+              <button key={p.value} onClick={() => updateMatrix(active.id, { pattern: p.value as any })}
+                className={`px-2 py-1.5 rounded text-[10px] text-center ${
+                  active.pattern === p.value
+                    ? 'bg-purple-600/30 border border-purple-500/40 text-purple-300'
+                    : 'bg-gray-800/50 border border-gray-700/30 text-gray-400 hover:bg-gray-700/50'}`}>
+                {p.icon} {p.label}
+              </button>
+            ))}
+          </div>
+
+          <label className="block text-[10px] text-gray-500 uppercase tracking-wider mt-3">Direction</label>
+          <div className="flex gap-1">
+            {DIRECTIONS.map(d => (
+              <button key={d.value} onClick={() => updateMatrix(active.id, { direction: d.value as any })}
+                className={`flex-1 px-2 py-1.5 rounded text-xs ${
+                  active.direction === d.value
+                    ? 'bg-purple-600/30 border border-purple-500/40 text-purple-300'
+                    : 'bg-gray-800/50 border border-gray-700/30 text-gray-400'}`}>{d.label}</button>
+            ))}
+          </div>
+
+          <label className="block text-[10px] text-gray-500 uppercase tracking-wider mt-3">Grid</label>
+          <div className="flex gap-2 mt-1">
+            <div className="flex-1">
+              <span className="text-[9px] text-gray-600">Cols: {active.cols}</span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => updateMatrix(active.id, { cols: Math.max(1, Math.min(16, active.cols - 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                <input type="range" min={1} max={16} value={active.cols}
+                  onChange={e => updateMatrix(active.id, { cols: Number(e.target.value) })}
+                  className="flex-1 accent-purple-500" />
+                <button onClick={() => updateMatrix(active.id, { cols: Math.max(1, Math.min(16, active.cols + 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+              </div>
+            </div>
+            <div className="flex-1">
+              <span className="text-[9px] text-gray-600">Rows: {active.rows}</span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => updateMatrix(active.id, { rows: Math.max(1, Math.min(16, active.rows - 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                <input type="range" min={1} max={16} value={active.rows}
+                  onChange={e => updateMatrix(active.id, { rows: Number(e.target.value) })}
+                  className="flex-1 accent-purple-500" />
+                <button onClick={() => updateMatrix(active.id, { rows: Math.max(1, Math.min(16, active.rows + 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right column: params */}
+        <div className="space-y-3">
+          <label className="block text-[10px] text-gray-500 uppercase tracking-wider">
+            Speed: {active.speed.toFixed(1)} Hz
+          </label>
+          <div className="flex items-center gap-1">
+            <button onClick={() => updateMatrix(active.id, { speed: Math.max(0.1, Math.min(10, Number((active.speed - 0.1).toFixed(1)))) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+            <input type="range" min={0.1} max={10} step={0.1} value={active.speed}
+              onChange={e => updateMatrix(active.id, { speed: Number(e.target.value) })}
+              className="flex-1 accent-purple-500" />
+            <button onClick={() => updateMatrix(active.id, { speed: Math.max(0.1, Math.min(10, Number((active.speed + 0.1).toFixed(1)))) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+          </div>
+
+          <label className="block text-[10px] text-gray-500 uppercase tracking-wider mt-3">
+            Width: {active.width}%
+          </label>
+          <div className="flex items-center gap-1">
+            <button onClick={() => updateMatrix(active.id, { width: Math.max(5, Math.min(100, active.width - 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+            <input type="range" min={5} max={100} value={active.width}
+              onChange={e => updateMatrix(active.id, { width: Number(e.target.value) })}
+              className="flex-1 accent-purple-500" />
+            <button onClick={() => updateMatrix(active.id, { width: Math.max(5, Math.min(100, active.width + 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+          </div>
+
+          <div className="flex gap-3 mt-3">
+            <div className="flex-1">
+              <label className="text-[9px] text-gray-600 block">Start</label>
+              <div className="flex items-center gap-1">
+                <input type="color" value={active.startColor}
+                  onChange={e => updateMatrix(active.id, { startColor: e.target.value })}
+                  className="w-7 h-6 rounded border border-gray-700 cursor-pointer" />
+                <span className="text-[9px] text-gray-500">{active.startColor}</span>
+              </div>
+            </div>
+            {active.pattern !== 'rainbow' && active.pattern !== 'random' && active.pattern !== 'pulse' && active.pattern !== 'strobe' && (
+              <div className="flex-1">
+                <label className="text-[9px] text-gray-600 block">End</label>
+                <div className="flex items-center gap-1">
+                  <input type="color" value={active.endColor}
+                    onChange={e => updateMatrix(active.id, { endColor: e.target.value })}
+                    className="w-7 h-6 rounded border border-gray-700 cursor-pointer" />
+                  <span className="text-[9px] text-gray-500">{active.endColor}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Live preview grid */}
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-3">
+        <div className="text-[10px] text-gray-500 mb-2">Live Preview</div>
+        <div className="mx-auto" style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${active.cols}, 1fr)`,
+          width: Math.min(180, 36 * active.cols),
+          height: Math.min(180, 36 * active.rows),
+          gap: 2,
+        }}>
+          {Array.from({ length: active.cols * active.rows }, (_, i) => {
+            const col = i % active.cols;
+            const row = Math.floor(i / active.cols);
+            // Source de vérité UNIQUE : getPatternColor (moteur de rendu DMX).
+            // L'ancien switch dupliqué n'implémentait que 4 motifs sur 9
+            // (wave/burst/random/strobe s'affichaient en couleur solide) et
+            // ignorait direction/offset.
+            const [r, g, b] = getPatternColor(
+              active.pattern, col, row, active.cols, active.rows,
+              active.enabled ? livePhase : 0,
+              [startRgb, startG, startB],
+              hexToRgbSafe(active.endColor),
+              active.width,
+              active.direction,
+              active.offset,
+            );
+            const color = `rgb(${r},${g},${b})`;
+
+            return (
+              <div key={i} className="rounded-sm transition-colors duration-75"
+                style={{ backgroundColor: color, width: '100%', height: '100%' }} />
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Diagnostic moteur → sortie : prouve ce que la matrice écrit et ce qui sort réellement */}
+      {(() => {
+        const stats = matrixStats[active.id];
+        const groupFixtures = patchedFixtures.filter(f => (fixtureGroups.find(g => g.id === active.groupId)?.fixtureIds ?? []).includes(f.id));
+        let overriddenBy: string | null = null;
+        let outNonZero = false;
+        if (active.enabled && stats && stats.resolved > 0) {
+          const checked = groupFixtures.slice(0, 8);
+          for (const pf of checked) {
+            const uniIdx = universes.findIndex(u => u.id === pf.universeId);
+            if (uniIdx < 0) continue;
+            const mine = outputArbiter.getSourceValues('rgb-matrix', uniIdx) ?? {};
+            const out = dmxBridge.getChannels(uniIdx) ?? {};
+            const from = pf.startAddress, to = pf.startAddress + (pf.channelCount || 16);
+            let mineLit = false, outLit = false;
+            for (let a = from; a < to; a++) {
+              if ((mine[a] ?? 0) > 0) mineLit = true;
+              if ((out[a] ?? 0) > 0) outLit = true;
+            }
+            if (mineLit) outNonZero = outNonZero || outLit;
+            if (mineLit && !outLit && !overriddenBy) {
+              for (const src of ['simple-desk', 'fixture-test', 'efx-highlight', 'vc', 'scene-efx', 'design-efx', 'design-test', 'fixture-onoff', 'default']) {
+                const sv = outputArbiter.getSourceValues(src, uniIdx) ?? {};
+                if (Object.keys(sv).some(k => Number(k) >= from && Number(k) < to)) { overriddenBy = src; break; }
+              }
+              if (!overriddenBy) overriddenBy = '?';
+            }
+          }
+        }
+        return (
+          <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-3 text-[11px] space-y-1">
+            <div className="text-gray-400">
+              Moteur : {stats ? <span className={stats.resolved > 0 ? 'text-green-400' : 'text-red-400'}>{t('design.matrixEngines', { resolved: stats.resolved, total: stats.total })}</span> : t('design.matrixWaiting')}
+              {stats && stats.total === 0 && <span className="text-amber-400">{t('design.groupEmpty')}</span>}
+              {stats && stats.total > 0 && stats.resolved === 0 && <span className="text-amber-400">{t('design.groupUnresolved')}</span>}
+            </div>
+            {active.enabled && stats && stats.resolved > 0 && (
+              outNonZero
+                ? <div className="text-green-400">{t('design.matrixOutAuto')}</div>
+                : <div className="text-red-400">{t('design.matrixOutMuted')}{overriddenBy && overriddenBy !== '?' ? <> — {t('design.matrixOverridden', { by: overriddenBy })} <button onClick={() => dmxBridge.release(overriddenBy!)} className="ml-1 px-2 py-0.5 rounded bg-red-600/30 border border-red-500/40 text-red-200 hover:bg-red-600/50">{t('design.matrixRelease')}</button></> : t('design.matrixNoLtp')}.</div>
+            )}
+          </div>
+        );
+      })()}
+      {show3D && showFloating3D && (
+        <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}>
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
+            <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D — RGB Matrix{active.enabled ? '' : ' (matrice coupée : activez ▶ pour voir les couleurs)'}</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => { setFloat3DSize({ w: 480, h: 270 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
+              <button onClick={() => { setShowFloating3D(false); setShow3D(false); }} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 relative"><Stage3D hideFixturePanel /><div className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize" onMouseDown={handleFloat3DResizeStart} style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }} /></div>
+        </div>
+      )}
+      {!showFloating3D && (
+        <button onClick={() => { setShow3D(true); setShowFloating3D(true); }} className="fixed bottom-4 right-4 z-40 bg-purple-600/80 hover:bg-purple-500 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg transition-all">
+          🎥 3D View
+        </button>
+      )}
+    </div>
+  );
+};
+
+// ─── Cue List Editor (Design mode — theater-style sequential playback) ──
+
+const CueListList: React.FC = () => {
+  const { t } = useTranslation();
+  const cueLists = useShowStore((s) => s.cueLists);
+  const deleteCueList = useShowStore((s) => s.deleteCueList);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ visible: boolean; x: number; y: number; id: string; name: string }>(
+    { visible: false, x: 0, y: 0, id: '', name: '' }
+  );
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  useEffect(() => {
+    (window as any).__lm_selectedCueListId = selectedId;
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!ctxMenu.visible) return;
+    const dismiss = () => setCtxMenu((c) => ({ ...c, visible: false }));
+    window.addEventListener('click', dismiss);
+    return () => window.removeEventListener('click', dismiss);
+  }, [ctxMenu.visible]);
+
+  if (cueLists.length === 0) {
+    return (
+      <div className="text-xs text-gray-600 text-center py-8">
+        No cue lists yet. Click "New Cue List" to create one.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+        {cueLists.map((cl) => {
+          const isSelected = selectedId === cl.id;
+          return (
+            <div
+              key={cl.id}
+              onClick={() => setSelectedId(cl.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setCtxMenu({ visible: true, x: e.clientX, y: e.clientY, id: cl.id, name: cl.name });
+              }}
+              className={`rounded-lg border px-2 py-1.5 cursor-pointer group transition-all ${
+                isSelected
+                  ? 'bg-purple-600/15 border-purple-500/50 shadow-[0_0_14px_rgba(168,85,247,0.25)]'
+                  : 'bg-[#0d0d14] border-gray-700 hover:border-purple-500/40 hover:bg-gray-800/20'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{
+                    background: isSelected
+                      ? 'linear-gradient(135deg, #a855f7, #6366f1)'
+                      : 'linear-gradient(135deg, #4b5563, #1f2937)',
+                    boxShadow: isSelected ? '0 0 6px rgba(168,85,247,0.8)' : 'none',
+                  }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className={`text-xs truncate ${isSelected ? 'text-purple-100 font-semibold' : 'text-gray-200 font-medium'}`}>{cl.name}</div>
+                  <div className="text-[10px] text-gray-500 truncate">
+                    {cl.cues.length} cues · #{cl.currentCueIndex + 1}
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setConfirmDelete(cl.id); }}
+                  className="p-1 text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {ctxMenu.visible && (
+        <div className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
+          style={{ ...clampRect(ctxMenu.x, ctxMenu.y, 240, 240, window.innerWidth, window.innerHeight) }} onClick={(e) => e.stopPropagation()}>
+          <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider">{ctxMenu.name}</div>
+          <button onClick={() => { setConfirmDelete(ctxMenu.id); setCtxMenu((c) => ({ ...c, visible: false })); }}
+            className="w-full text-left px-3 py-1.5 text-xs text-red-300 hover:bg-red-600/20 flex items-center gap-2">
+            <Trash2 size={12} /> {t('common.delete')} Cue List
+          </button>
+        </div>
+      )}
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setConfirmDelete(null)}>
+          <div className="bg-[#12121a] border border-gray-700 rounded-xl p-5 shadow-2xl w-80" onClick={(e) => e.stopPropagation()}>
+            <h4 className="text-sm font-bold text-white mb-2">{t('design.deleteCueTitle')}</h4>
+            <p className="text-xs text-gray-400 mb-4">{t('design.deleteCueText')}</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setConfirmDelete(null)} className="px-3 py-1.5 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300">{t('common.cancel')}</button>
+              <button onClick={() => { deleteCueList(confirmDelete); setConfirmDelete(null); if (selectedId === confirmDelete) setSelectedId(null); }}
+                className="px-3 py-1.5 bg-red-600/20 border border-red-500/30 rounded-lg text-xs text-red-300">{t('common.delete')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+const CueListEditor: React.FC = () => {
+  const { t } = useTranslation();
+  const cueLists = useShowStore((s) => s.cueLists);
+  const scenes = useShowStore((s) => s.scenes);
+  const updateCueList = useShowStore((s) => s.updateCueList);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const check = () => {
+      const id = (window as any).__lm_selectedCueListId;
+      if (id !== selectedId) setSelectedId(id);
+    };
+    const interval = setInterval(check, 100);
+    return () => clearInterval(interval);
+  }, [selectedId]);
+
+  const cueList = cueLists.find((cl) => cl.id === selectedId) || null;
+  const [editName, setEditName] = useState('');
+  const [showAddScene, setShowAddScene] = useState(false);
+
+  useEffect(() => {
+    if (cueList) {
+      setEditName(cueList.name);
+    }
+  }, [cueList?.id]);
+
+  if (!cueList) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-gray-600">
+        <div className="text-4xl mb-3 opacity-30">📋</div>
+        <div className="text-sm mb-1">No cue list selected</div>
+        <div className="text-xs">{t('design.noCueListsYet')}</div>
+      </div>
+    );
+  }
+
+  const handleAddCue = (sceneId: string) => {
+    const newCues = [
+      ...cueList.cues,
+      {
+        id: `cue-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        sceneId,
+        fadeIn: 1000,
+        hold: 3000,
+        fadeOut: 1000,
+      } as CueListCue,
+    ];
+    updateCueList(cueList.id, { cues: newCues });
+    setShowAddScene(false);
+  };
+
+  const handleRemoveCue = (cueId: string) => {
+    updateCueList(cueList.id, { cues: cueList.cues.filter((c) => c.id !== cueId) });
+  };
+
+  const handleUpdateCue = (cueId: string, updates: Partial<CueListCue>) => {
+    updateCueList(cueList.id, {
+      cues: cueList.cues.map((c) => (c.id === cueId ? { ...c, ...updates } : c)),
+    });
+  };
+
+  const handleMoveCue = (idx: number, dir: -1 | 1) => {
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= cueList.cues.length) return;
+    const newCues = [...cueList.cues];
+    [newCues[idx], newCues[newIdx]] = [newCues[newIdx], newCues[idx]];
+    updateCueList(cueList.id, { cues: newCues });
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center gap-3">
+        <input
+          type="text"
+          value={editName}
+          onChange={(e) => { setEditName(e.target.value); updateCueList(cueList.id, { name: e.target.value }); }}
+          className="flex-1 bg-transparent text-xl font-bold text-white outline-none border-b border-transparent hover:border-gray-700 focus:border-purple-500/50 pb-0.5"
+          placeholder="Cue List Name"
+        />
+        <span className="text-[10px] text-gray-600">{cueList.cues.length} cue{cueList.cues.length !== 1 ? 's' : ''}</span>
+      </div>
+
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-4">
+        <p className="text-xs text-gray-400 leading-relaxed">
+          Cue Lists are for <span className="text-purple-300 font-medium">theater-style sequential playback</span> — press "Go"
+          to manually advance through each cue. Unlike Chasers (which loop automatically), Cue Lists
+          give you frame-by-frame control ideal for theater, live events, and scripted shows.
+        </p>
+      </div>
+
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl">
+        <div className="px-4 py-2.5 border-b border-gray-800/50 flex items-center justify-between">
+          <span className="text-xs font-medium text-gray-400">Cues ({cueList.cues.length})</span>
+          <div className="relative">
+            <button
+              onClick={() => setShowAddScene(!showAddScene)}
+              className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1 px-2 py-1 rounded hover:bg-purple-600/10"
+            >
+              <Plus size={12} /> Add Cue
+            </button>
+            {showAddScene && (
+              <div className="absolute right-0 top-full mt-1 z-50 bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl w-56 max-h-48 overflow-y-auto">
+                {scenes.length === 0 ? (
+                  <div className="text-xs text-gray-600 text-center py-4 px-3">No scenes created yet</div>
+                ) : (
+                  scenes.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => handleAddCue(s.id)}
+                      className="w-full text-left px-3 py-2 hover:bg-gray-800/30 text-xs text-gray-300 flex items-center justify-between"
+                    >
+                      <span className="truncate">{s.name}</span>
+                      <span className="text-[10px] text-gray-600">{Object.values(s.channels).filter((v) => v > 0).length}ch</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {cueList.cues.length === 0 ? (
+          <div className="p-8 text-center">
+            <div className="text-3xl mb-2 opacity-30">📋</div>
+            <div className="text-xs text-gray-500">No cues yet — add scenes above</div>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-800/20">
+            {cueList.cues.map((cue, idx) => {
+              const scene = scenes.find((s) => s.id === cue.sceneId);
+              const isCurrent = cueList.currentCueIndex === idx;
+              return (
+                <div
+                  key={cue.id}
+                  className={`px-4 py-2.5 flex items-center gap-3 transition-colors ${
+                    isCurrent ? 'bg-purple-600/10 border-l-2 border-l-purple-500' : ''
+                  }`}
+                >
+                  <span className="text-[10px] text-gray-600 font-mono w-6 shrink-0">{idx + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-gray-300 truncate">{scene?.name || '(missing scene)'}</div>
+                    <div className="flex gap-2 text-[10px] text-gray-600 mt-0.5">
+                      <span>In: {cue.fadeIn}ms</span>
+                      <span>Hold: {cue.hold}ms</span>
+                      <span>Out: {cue.fadeOut}ms</span>
+                      {(cue as any).follow && <span className="text-amber-400">Follow</span>}
+                      {(cue as any).linkTo !== undefined && <span className="text-cyan-400">→{((cue as any).linkTo ?? 0)+1}</span>}
+                    </div>
+                  </div>
+                  <div className="flex gap-0.5 shrink-0">
+                    <button
+                      onClick={() => handleMoveCue(idx, -1)}
+                      disabled={idx === 0}
+                      className="p-0.5 text-gray-600 hover:text-gray-300 disabled:opacity-20"
+                    >
+                      <ChevronLeft size={12} />
+                    </button>
+                    <button
+                      onClick={() => handleMoveCue(idx, 1)}
+                      disabled={idx === cueList.cues.length - 1}
+                      className="p-0.5 text-gray-600 hover:text-gray-300 disabled:opacity-20"
+                    >
+                      <ChevronRight size={12} />
+                    </button>
+                    <button
+                      onClick={() => handleRemoveCue(cue.id)}
+                      className="p-0.5 text-gray-600 hover:text-red-400"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─── EFX List (Left Panel) ─────────────────────────────────
+
+const EFXList: React.FC = () => {
+  const { t } = useTranslation();
+  const effects = useShowStore((s) => s.effects);
+  const deleteEffect = useShowStore((s) => s.deleteEffect);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  useEffect(() => {
+    (window as any).__lm_selectedEffectId = selectedId;
+  }, [selectedId]);
+
+  if (effects.length === 0) {
+    return (
+      <div className="text-xs text-gray-600 text-center py-8">
+        No EFX yet. Click "New EFX" to create one.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+        {effects.map((efx) => {
+          const isSelected = selectedId === efx.id;
+          return (
+            <div
+              key={efx.id}
+              onClick={() => setSelectedId(efx.id)}
+              className={`rounded-lg border px-2 py-1.5 cursor-pointer group transition-all ${
+                isSelected
+                  ? 'bg-purple-600/15 border-purple-500/50 shadow-[0_0_14px_rgba(168,85,247,0.25)]'
+                  : 'bg-[#0d0d14] border-gray-700 hover:border-purple-500/40 hover:bg-gray-800/20'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{
+                    background: isSelected
+                      ? 'linear-gradient(135deg, #a855f7, #6366f1)'
+                      : 'linear-gradient(135deg, #4b5563, #1f2937)',
+                    boxShadow: isSelected ? '0 0 6px rgba(168,85,247,0.8)' : 'none',
+                  }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className={`text-xs truncate ${isSelected ? 'text-purple-100 font-semibold' : 'text-gray-200 font-medium'}`}>{efx.name}</div>
+                  <div className="text-[10px] text-gray-500 truncate">
+                    {efx.pattern} · {efx.fixtureIds.length} fx
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setConfirmDelete(efx.id); }}
+                  className="p-1 text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                  title="Delete EFX"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setConfirmDelete(null)}>
+          <div className="bg-[#12121a] border border-gray-700 rounded-xl p-5 shadow-2xl w-80" onClick={(e) => e.stopPropagation()}>
+            <h4 className="text-sm font-bold text-white mb-2">{t('design.deleteEfxTitle')}</h4>
+            <p className="text-xs text-gray-400 mb-4">{t('design.deleteEfxText')}</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setConfirmDelete(null)} className="px-3 py-1.5 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300 hover:bg-gray-700/50">{t('common.cancel')}
+              </button>
+              <button
+                onClick={() => {
+                  deleteEffect(confirmDelete);
+                  if (selectedId === confirmDelete) setSelectedId(null);
+                  setConfirmDelete(null);
+                }}
+                className="px-3 py-1.5 bg-red-600/20 border border-red-500/30 rounded-lg text-xs text-red-300 hover:bg-red-600/30"
+              >{t('common.delete')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+// ─── EFX Editor ────────────────────────────────────────────
+
+const EFX_PATTERNS = ['Circle', 'Line', 'Eight', 'Square', 'Triangle', 'Zigzag', 'Spiral', 'DoubleCircle', 'Heart', 'Wave', 'Bounce', 'Cross'] as const;
+// 'Infinity' retiré du sélecteur (doublon de 'Eight') mais gardé dans le type
+// pour charger les anciens effets sauvegardés (rendu identique, moteur inchangé).
+type EfxPattern = typeof EFX_PATTERNS[number] | 'Infinity';
+
+const EFXEditor: React.FC = () => {
+  const { t } = useTranslation();
+  const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const effects = useShowStore((s) => s.effects);
+  const createEffect = useShowStore((s) => s.createEffect);
+  const updateEffect = useShowStore((s) => s.updateEffect);
+  const fixtureGroups = useShowStore((s) => s.fixtureGroups);
+
+  const [pattern, setPattern] = useState<EfxPattern>('Circle');
+  const [width, setWidth] = useState(1.0);
+  const [height, setHeight] = useState(1.0);
+  const [rotation, setRotation] = useState(0);
+  const [speed, setSpeed] = useState(0.5);
+  const [xOffset, setXOffset] = useState(0);
+  const [yOffset, setYOffset] = useState(0);
+  const [spread, setSpread] = useState(0);
+  const [target] = useState({ x: 0, y: 1.5, z: 0 });
+  const [efxName, setEfxName] = useState('EFX 1');
+  const [selectedFixtureIds, setSelectedFixtureIds] = useState<Set<string>>(new Set());
+  const [groupsMenuOpen, setGroupsMenuOpen] = useState(false);
+  const [editingEffectId, setEditingEffectId] = useState<string | null>(null);
+  const [stopped, setStopped] = useState(false);
+  const stoppedRef = useRef(false);
+  useEffect(() => { stoppedRef.current = stopped; }, [stopped]);
+  const [show3D, setShow3D] = useState(false);
+  const [showFloating3D, setShowFloating3D] = useState(false);
+  const [float3DPos, setFloat3DPos] = useState({ x: 100, y: 80 });
+  const [float3DSize, setFloat3DSize] = useState({ w: 960, h: 540 });
+  const float3DDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
+  const float3DResizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const handleFloat3DDragStart = useCallback((e: React.MouseEvent) => {
+    float3DDragRef.current = { startX: e.clientX, startY: e.clientY, startLeft: float3DPos.x, startTop: float3DPos.y };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DDragRef.current) return;
+      setFloat3DPos({ x: Math.max(0, Math.min(float3DDragRef.current.startLeft + ev.clientX - float3DDragRef.current.startX, window.innerWidth - 120)), y: Math.max(0, Math.min(float3DDragRef.current.startTop + ev.clientY - float3DDragRef.current.startY, window.innerHeight - 40)) });
+    };
+    const onUp = () => { float3DDragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DPos]);
+  const handleFloat3DResizeStart = useCallback((e: React.MouseEvent) => {
+    float3DResizeRef.current = { startX: e.clientX, startY: e.clientY, startW: float3DSize.w, startH: float3DSize.h };
+    const onMove = (ev: MouseEvent) => {
+      if (!float3DResizeRef.current) return;
+      setFloat3DSize({ w: Math.max(320, float3DResizeRef.current.startW + ev.clientX - float3DResizeRef.current.startX), h: Math.max(200, float3DResizeRef.current.startH + ev.clientY - float3DResizeRef.current.startY) });
+    };
+    const onUp = () => { float3DResizeRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [float3DSize]);
+
+  // Listen for EFX selection from sidebar
+  useEffect(() => {
+    const check = () => {
+      const id = (window as any).__lm_selectedEffectId;
+      if (id !== editingEffectId) setEditingEffectId(id);
+    };
+    const interval = setInterval(check, 100);
+    return () => clearInterval(interval);
+  }, [editingEffectId]);
+
+  // Load effect into editor when editing
+  useEffect(() => {
+    if (editingEffectId) {
+      const efx = effects.find((e) => e.id === editingEffectId);
+      if (efx) {
+        setEfxName(efx.name);
+        setPattern(efx.pattern);
+        setWidth(efx.width);
+        setHeight(efx.height);
+        setRotation(efx.rotation);
+        setSpeed(efx.speed);
+        setXOffset(efx.xOffset);
+        setYOffset(efx.yOffset);
+        setSpread(efx.spread ?? 0);
+        setSelectedFixtureIds(new Set(efx.fixtureIds));
+      }
+    }
+  }, [editingEffectId, effects]);
+
+  const toggleFixture = (fixtureId: string) => {
+    setSelectedFixtureIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(fixtureId)) next.delete(fixtureId);
+      else next.add(fixtureId);
+      return next;
+    });
+  };
+
+  const handleSave = () => {
+    const fixtureIds = Array.from(selectedFixtureIds);
+    if (editingEffectId) {
+      updateEffect(editingEffectId, {
+        name: efxName,
+        pattern,
+        width,
+        height,
+        rotation,
+        speed,
+        xOffset,
+        yOffset,
+        spread,
+        fixtureIds,
+      });
+    } else {
+      const newId = createEffect(efxName);
+      updateEffect(newId, {
+        pattern,
+        width,
+        height,
+        rotation,
+        speed,
+        xOffset,
+        yOffset,
+        spread,
+        fixtureIds,
+      });
+      setEditingEffectId(newId);
+    }
+  };
+
+  const handleNew = () => {
+    setEditingEffectId(null);
+    setEfxName(`EFX ${effects.length + 1}`);
+    setPattern('Circle');
+    setWidth(1.0);
+    setHeight(1.0);
+    setRotation(0);
+    setSpeed(0.5);
+    setXOffset(0);
+    setYOffset(0);
+    setSpread(0);
+    setSelectedFixtureIds(new Set());
+  };
+
+  // Animated phase
+  const [phase, setPhase] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      const dt = (now - last) / 1000;
+      last = now;
+      setPhase((p) => (p + dt * speed * 2) % (Math.PI * 2));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [speed]);
+
+  // ── Live DMX output for EFX preview ──
+  const [fixtureDefs, setFixtureDefs] = useState<Map<string, DmxFixtureDefinition>>(new Map());
+
+  // ── Pan/Tilt eligibility filter ──
+  const [efxEligibleFixtureIds, setEfxEligibleFixtureIds] = useState<Set<string>>(new Set());
+  const [efxDefsLoaded, setEfxDefsLoaded] = useState(false);
+  useEffect(() => {
+    const allIds = patchedFixtures.map((f) => f.fixtureDefId).filter(Boolean);
+    if (allIds.length === 0) {
+      setEfxEligibleFixtureIds(new Set());
+      setEfxDefsLoaded(false);
+      return;
+    }
+    loadFixtureDefinitions(allIds).then((defs) => {
+      const eligible = new Set<string>();
+      for (const pf of patchedFixtures) {
+        const def = defs.get(pf.fixtureDefId);
+        if (!def) continue;
+        const analysed = analyzeEngine(pf, def);
+        if (analysed.panOffsets.length > 0 || analysed.tiltOffsets.length > 0) {
+          eligible.add(pf.id);
+        }
+      }
+      setEfxEligibleFixtureIds(eligible);
+      setEfxDefsLoaded(true);
+    }).catch(() => {
+      setEfxDefsLoaded(true); // Still mark as loaded on error to avoid infinite spinner
+    });
+  }, [patchedFixtures]);
+
+  // Load fixture definitions for selected fixtures
+  useEffect(() => {
+    const ids = patchedFixtures
+      .filter((f) => selectedFixtureIds.has(f.id))
+      .map((f) => f.fixtureDefId)
+      .filter(Boolean);
+    if (ids.length === 0) return;
+    loadFixtureDefinitions(ids)
+      .then((defs) => {
+        if (defs.size > 0) setFixtureDefs(defs);
+      })
+      .catch(() => {});
+  }, [patchedFixtures, selectedFixtureIds]);
+
+  // Live DMX RAF loop — ne tourne que si l'onglet EFX est visible (sinon fuite design-efx → QuickShow)
+  const appMode = useAppStore((s) => s.mode);
+  const designTab = useAppStore((s) => (s as any).designSidebarTab);
+  const isPreviewVisible = appMode === 'design' && designTab === 'efx';
+  useEffect(() => {
+    if (!isPreviewVisible) {
+      // Quitte l'onglet / mode → purge design-efx immédiatement (sinon LTP 70 masque quickshow HTP 40)
+      try { dmxBridge.release('design-efx'); } catch {}
+      return;
+    }
+    if (selectedFixtureIds.size === 0 || fixtureDefs.size === 0) return;
+
+    let raf = 0;
+    let startTime = performance.now();
+    const patchedWithDefs = patchedFixtures
+      .filter((f) => selectedFixtureIds.has(f.id))
+      .map((f) => {
+        const def = fixtureDefs.get(f.fixtureDefId);
+        const mode = def?.modes[f.modeIndex];
+        let panOff: number | null = null;
+        let tiltOff: number | null = null;
+        let panFineOff: number | null = null;
+        let tiltFineOff: number | null = null;
+        let dimmerOff: number | null = null;
+        let shutterOff: number | null = null;
+        let strobeOff: number | null = null;
+        let strobeCaps: any = null;
+        if (mode) {
+          for (let ci = 0; ci < mode.channels.length; ci++) {
+            const ch = mode.channels[ci];
+            if (ch.type === 'Pan') {
+              if (ch.name?.toLowerCase().includes('fine')) panFineOff = ci;
+              else panOff = ci;
+            }
+            if (ch.type === 'Tilt') {
+              if (ch.name?.toLowerCase().includes('fine')) tiltFineOff = ci;
+              else tiltOff = ci;
+            }
+            if (ch.type === 'Intensity') dimmerOff = ci;
+            // Hybride Dimmer/Strobe typé Shutter (ex: Stage Wash Dimmer / Strobe) — sinon wash reste éteint
+            if (ch.type === 'Shutter' && /dimmer/i.test(ch.name ?? '') && dimmerOff === null) dimmerOff = ci;
+            if (ch.type === 'Shutter' && !/dimmer/i.test(ch.name ?? '')) shutterOff = ci;
+            if (ch.type === 'Strobe' || (ch.type === 'Shutter' && /strobe/i.test(ch.name ?? ''))) { strobeOff = ci; strobeCaps = (ch as any).capabilities ?? null; }
+          }
+        }
+        // Shutter sûr à ouvrir (analyseur : exclut les canaux strobe —
+        // écrire 255 sur un strobe donnerait un flash permanent, pas une ouverture).
+        let safeShutterOff: number | null = null;
+        try {
+          const fa = def ? analyzeEngine(f, def) : null;
+          if (fa && fa.shutterOffset !== null && fa.shutterOffset !== undefined) safeShutterOff = fa.shutterOffset;
+        } catch {}
+        return { fixture: f, panOff, tiltOff, panFineOff, tiltFineOff, dimmerOff, shutterOff, strobeOff, strobeCaps, safeShutterOff };
+      })
+      .filter((f) => f.panOff !== null || f.tiltOff !== null);
+
+    if (patchedWithDefs.length === 0) return;
+
+    const animate = () => {
+      if (stoppedRef.current) {
+        // Stopped: send center + dimmer=0 to freeze fixtures
+        const byUniverse = new Map<string, Record<number, number>>();
+        for (const f of patchedWithDefs) {
+          const uniId = f.fixture.universeId;
+          let vals = byUniverse.get(uniId);
+          if (!vals) { vals = {}; byUniverse.set(uniId, vals); }
+          if (f.dimmerOff !== null) vals[f.fixture.startAddress + f.dimmerOff] = 0;
+          if (f.panOff !== null) vals[f.fixture.startAddress + f.panOff] = 128;
+          if (f.tiltOff !== null) vals[f.fixture.startAddress + f.tiltOff] = 128;
+        }
+        for (const [uniId, vals] of byUniverse) {
+          const uniNum = Math.max(0, (parseInt(uniId.replace(/\D/g, ''), 10) || 1) - 1);
+          dmxBridge.write('design-efx', uniNum, vals);
+        }
+        raf = requestAnimationFrame(animate);
+        return;
+      }
+      const elapsed = (performance.now() - startTime) / 1000;
+      // Math EXACTE du moteur du show (fixture-tracks.ts) : le test live envoie
+      // rigoureusement les mêmes octets DMX que la lecture du preset.
+      const tCycles = (elapsed * speed * 2) / (Math.PI * 2);
+      // Décalage « vague » : même formule que computeEfxOverrides.
+      const nSel = patchedWithDefs.length;
+
+      // Send DMX for each selected fixture grouped by universe
+      const byUniverse = new Map<string, Record<number, number>>();
+      for (let fi = 0; fi < nSel; fi++) {
+        const f = patchedWithDefs[fi];
+        const t = nSel > 1 && spread > 0 ? tCycles + (fi * spread) / nSel : tCycles;
+        const { pan: dmxPan, tilt: dmxTilt } = generateEfxPanTilt(
+          pattern, t, width, height, rotation, xOffset, yOffset,
+        );
+        const uniId = f.fixture.universeId;
+        let vals = byUniverse.get(uniId);
+        if (!vals) {
+          vals = {};
+          byUniverse.set(uniId, vals);
+        }
+        // Toujours allumer : dimmer + RGB wash en blanc (sinon les wash restent éteints en Target)
+        // + ouverture du shutter (sans ça, un spot au shutter fermé reste noir malgré dimmer=255).
+        if (f.dimmerOff !== null) vals[f.fixture.startAddress + f.dimmerOff] = 255;
+        const openShutter = (f as any).safeShutterOff;
+        if (openShutter !== null && openShutter !== undefined) vals[f.fixture.startAddress + openShutter] = 255;
+        // Pour les wash/pars sans dimmer mais avec RGB, allumer en blanc
+        const def = fixtureDefs.get(f.fixture.fixtureDefId);
+        const mode = def?.modes[f.fixture.modeIndex];
+        if (mode) {
+          for (let ci = 0; ci < mode.channels.length; ci++) {
+            const ch = mode.channels[ci];
+            if (ch.type === 'Colour' || ch.type === 'Intensity') {
+              const addr = f.fixture.startAddress + ci;
+              if (!(addr in vals)) vals[addr] = 255;
+            }
+          }
+        }
+        {
+          if (f.panOff !== null) vals[f.fixture.startAddress + f.panOff] = dmxPan;
+          if (f.tiltOff !== null) vals[f.fixture.startAddress + f.tiltOff] = dmxTilt;
+          if (f.panFineOff !== null) vals[f.fixture.startAddress + f.panFineOff] = dmxPan;
+          if (f.tiltFineOff !== null) vals[f.fixture.startAddress + f.tiltFineOff] = dmxTilt;
+        }
+      }
+      for (const [uniId, vals] of byUniverse) {
+        const uniNum = Math.max(0, (parseInt(uniId.replace(/\D/g, ''), 10) || 1) - 1);
+        dmxBridge.write('design-efx', uniNum, vals);
+      }
+      raf = requestAnimationFrame(animate);
+    };
+    raf = requestAnimationFrame(animate);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      // Blackout — sauf si snapshot très récent (<500ms) ET on reste en Design (sinon fuite design-efx → QuickShow)
+      const snap = (window as any).__lm_efxSnapshotApplied as { sceneId: string; efxId: string; at: number } | undefined;
+      const isRecentSnapshot = !!snap && Date.now() - snap.at < 500 && useAppStore.getState().mode === 'design';
+      if (isRecentSnapshot) {
+        // Laisse le temps au scene-efx (LTP 75) de prendre le relais, puis purge le flag
+        setTimeout(() => { if ((window as any).__lm_efxSnapshotApplied?.at === snap.at) delete (window as any).__lm_efxSnapshotApplied; }, 600);
+        return;
+      }
+      // Blackout selected fixtures on unmount. TRANSIENT: the home/zero
+      // values flush the hardware, then the design-efx source is released
+      // after 2 s so the playback engine regains control (a plain write
+      // would re-pin pan/tilt/dimmer of these fixtures forever).
+      const byUniverse = new Map<string, Record<number, number>>();
+      for (const f of patchedWithDefs) {
+        const uniId = f.fixture.universeId;
+        let vals = byUniverse.get(uniId);
+        if (!vals) {
+          vals = {};
+          byUniverse.set(uniId, vals);
+        }
+        if (f.dimmerOff !== null) vals[f.fixture.startAddress + f.dimmerOff] = 0;
+        if (f.panOff !== null) vals[f.fixture.startAddress + f.panOff] = 128;
+        if (f.tiltOff !== null) vals[f.fixture.startAddress + f.tiltOff] = 128;
+      }
+      for (const [uniId, vals] of byUniverse) {
+        const uniNum = Math.max(0, (parseInt(uniId.replace(/\D/g, ''), 10) || 1) - 1);
+        dmxBridge.writeTransient('design-efx', uniNum, vals);
+      }
+    };
+  }, [isPreviewVisible, selectedFixtureIds, fixtureDefs, patchedFixtures, pattern, width, height, rotation, speed, xOffset, yOffset, spread, target]);
+
+  // Compute preview path points based on pattern
+  const previewPoints = React.useMemo(() => {
+    const points: { x: number; y: number }[] = [];
+    const steps = 120;
+    // Math EXACTE du moteur du show (fixture-tracks.ts) : le tracé SVG est la
+    // trajectoire réelle des projecteurs (coordonnées normalisées).
+    const phaseCycles = phase / (Math.PI * 2);
+    for (let i = 0; i <= steps; i++) {
+      points.push(evalEfxNormalized(pattern, i / steps + phaseCycles, width, height, rotation, xOffset, yOffset));
+    }
+    return points;
+  }, [pattern, width, height, rotation, speed, xOffset, yOffset, phase]);
+
+  // Demi-étendue du tracé : le viewBox zoome juste assez pour tout montrer
+  // (width/height > 1 ou gros offsets dépassent ±1) sans déformer la forme.
+  const previewRange = React.useMemo(() => {
+    let r = 1;
+    for (const p of previewPoints) r = Math.max(r, Math.abs(p.x), Math.abs(p.y));
+    return r;
+  }, [previewPoints]);
+
+  const pathD = React.useMemo(() => {
+    if (previewPoints.length === 0) return '';
+    return previewPoints
+      .map((p, i) => {
+        const cmd = i === 0 ? 'M' : 'L';
+        return `${cmd} ${p.x.toFixed(3)} ${p.y.toFixed(3)}`;
+      })
+      .join(' ');
+  }, [previewPoints]);
+
+  const trailPoints = React.useMemo<{ x: number; y: number; alpha?: number }[]>(() => {
+    if (previewPoints.length < 10) return previewPoints;
+    const currentIdx = Math.floor((phase / (Math.PI * 2)) * previewPoints.length) % previewPoints.length;
+    const trail: { x: number; y: number; alpha: number }[] = [];
+    for (let i = 0; i < 12; i++) {
+      const idx = (currentIdx - i + previewPoints.length) % previewPoints.length;
+      trail.push({ ...previewPoints[idx], alpha: 1 - i / 12 });
+    }
+    return trail;
+  }, [previewPoints, phase]);
+
+  return (
+    <div className="flex gap-4 h-full min-h-0 relative">
+      <div className="flex-1 min-w-0 space-y-6 overflow-y-auto">
+      <div className="flex items-center gap-3">
+        <input
+          type="text"
+          value={efxName}
+          onChange={(e) => setEfxName(e.target.value)}
+          className="flex-1 bg-transparent text-xl font-bold text-white outline-none border-b border-transparent hover:border-gray-700 focus:border-purple-500/50 transition-colors pb-0.5"
+          placeholder="EFX Name"
+        />
+        {editingEffectId && (
+          <span className="text-[10px] text-purple-400 px-2 py-0.5 rounded bg-purple-600/10 border border-purple-500/20">Editing</span>
+        )}
+      </div>
+
+      <div className="space-y-6">
+        {/* Live animated preview — on top, capped so controls stay visible */}
+        <div className="space-y-3 max-w-[220px]">
+          <label className="block text-xs font-medium text-gray-400">Live Preview — {pattern}</label>
+          <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
+            <svg
+              viewBox={`${-previewRange} ${-previewRange} ${previewRange * 2} ${previewRange * 2}`}
+              className="w-full aspect-square"
+              style={{ background: '#0a0a0f' }}
+            >
+              {/* Grid */}
+              <circle cx={0} cy={0} r={0.8} fill="none" stroke="#1a1a2e" strokeWidth={0.01} />
+              <line x1={-1} y1={0} x2={1} y2={0} stroke="#1a1a2e" strokeWidth={0.005} />
+              <line x1={0} y1={-1} x2={0} y2={1} stroke="#1a1a2e" strokeWidth={0.005} />
+
+              {/* Path trail */}
+              {trailPoints.map((tp, i) => {
+                if (!tp) return null;
+                return (
+                <circle
+                  key={i}
+                  cx={tp.x}
+                  cy={tp.y}
+                  r={0.03 * (1 - i * 0.06)}
+                  fill="#a855f7"
+                  opacity={tp.alpha * 0.5}
+                />
+              );
+              })}
+
+              {/* Path outline */}
+              <path
+                d={pathD}
+                fill="none"
+                stroke="#a855f7"
+                strokeWidth={0.015}
+                opacity={0.3}
+              />
+
+              {/* Current position */}
+              {previewPoints.length > 0 && (() => {
+                const currentIdx = Math.floor((phase / (Math.PI * 2)) * (previewPoints.length - 1)) % previewPoints.length;
+                const cp = previewPoints[currentIdx];
+                if (!cp) return null;
+                return (
+                  <circle
+                    cx={cp.x}
+                    cy={cp.y}
+                    r={0.06}
+                    fill="#c084fc"
+                    stroke="#ffffff"
+                    strokeWidth={0.02}
+                    style={{ filter: 'drop-shadow(0 0 3px #a855f7)' }}
+                  />
+                );
+              })()}
+            </svg>
+          </div>
+          <div className="flex gap-2 text-[10px] text-gray-600 justify-center">
+            <span>{pattern}</span>
+            <span>·</span>
+            <span>{(speed / Math.PI).toFixed(1)} Hz</span>
+            <span>·</span>
+            <span>{previewPoints.length > 0 ? `${Math.round((phase / (Math.PI * 2) * 100) % 100)}%` : 'idle'}</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-3">
+          <label className="block text-xs font-medium text-gray-400">Pattern</label>
+          <div className="flex flex-wrap gap-1.5">
+            {EFX_PATTERNS.map((p) => (
+              <button
+                key={p}
+                onClick={() => setPattern(p)}
+                className={`px-3 py-2 rounded-md text-xs capitalize transition-all ${
+                  pattern === p
+                    ? 'bg-purple-600/30 text-purple-300 border border-purple-500/30'
+                    : 'bg-gray-800/30 text-gray-500 hover:bg-gray-700/30'
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="block text-[10px] text-gray-500">Speed: {(speed / Math.PI).toFixed(2)} Hz</label>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setSpeed(v => Math.max(0.3, Math.min(0.8, Number((v - 0.01).toFixed(2)))))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                <input
+                  type="range"
+                  min={0.3}
+                  max={0.8}
+                  step={0.01}
+                  value={speed}
+                  onChange={(e) => setSpeed(parseFloat(e.target.value))}
+                  className="flex-1 min-w-0 accent-purple-500"
+                />
+                <button onClick={() => setSpeed(v => Math.max(0.3, Math.min(0.8, Number((v + 0.01).toFixed(2)))))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="block text-[10px] text-gray-500">Rotation: {rotation}°</label>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setRotation(v => Math.max(0, Math.min(360, v - 1)))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                <input
+                  type="range"
+                min={0}
+                max={360}
+                value={rotation}
+                onChange={(e) => setRotation(Number(e.target.value))}
+                className="flex-1 min-w-0 accent-purple-500"
+              />
+                <button onClick={() => setRotation(v => Math.max(0, Math.min(360, v + 1)))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-[10px] text-gray-500">Vague (décalage entre fixtures): {Math.round(spread * 100)}%</label>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setSpread(0)} className="h-6 px-2 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">0</button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={spread}
+                onChange={(e) => setSpread(parseFloat(e.target.value))}
+                className="flex-1 min-w-0 accent-purple-500"
+              />
+              <button onClick={() => setSpread(1)} className="h-6 px-2 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">100%</button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="block text-[10px] text-gray-500">Width: {width.toFixed(2)}</label>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setWidth(v => Math.max(0.01, Math.min(2, Number((v - 0.01).toFixed(2)))))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                <input
+                  type="range"
+                  min={0.01}
+                  max={2}
+                step={0.01}
+                value={width}
+                onChange={(e) => setWidth(parseFloat(e.target.value))}
+                className="flex-1 min-w-0 accent-purple-500"
+              />
+                <button onClick={() => setWidth(v => Math.max(0.01, Math.min(2, Number((v + 0.01).toFixed(2)))))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="block text-[10px] text-gray-500">Height: {height.toFixed(2)}</label>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setHeight(v => Math.max(0.01, Math.min(2, Number((v - 0.01).toFixed(2)))))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                <input
+                  type="range"
+                  min={0.01}
+                  max={2}
+                  step={0.01}
+                value={height}
+                onChange={(e) => setHeight(parseFloat(e.target.value))}
+                className="flex-1 min-w-0 accent-purple-500"
+                />
+                <button onClick={() => setHeight(v => Math.max(0.01, Math.min(2, Number((v + 0.01).toFixed(2)))))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="block text-[10px] text-gray-500">X Offset: {xOffset}</label>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setXOffset(v => Math.max(-400, Math.min(400, v - 1)))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                <input
+                  type="range"
+                  min={-400}
+                  max={400}
+                value={xOffset}
+                onChange={(e) => setXOffset(Number(e.target.value))}
+                className="flex-1 min-w-0 accent-purple-500"
+                />
+                <button onClick={() => setXOffset(v => Math.max(-400, Math.min(400, v + 1)))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="block text-[10px] text-gray-500">Y Offset: {yOffset}</label>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setYOffset(v => Math.max(-400, Math.min(400, v - 1)))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">−</button>
+                <input
+                  type="range"
+                min={-400}
+                max={400}
+                value={yOffset}
+                onChange={(e) => setYOffset(Number(e.target.value))}
+                className="flex-1 min-w-0 accent-purple-500"
+              />
+                <button onClick={() => setYOffset(v => Math.max(-400, Math.min(400, v + 1)))} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div className="space-y-4">
+        {/* Fixture multi-select */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-gray-400">
+              Fixtures ({selectedFixtureIds.size} selected)
+            </label>
+            {/* ── Sélection par lots : tout / rien / groupes ── */}
+            <div className="flex items-center gap-1.5 flex-wrap relative">
+              <button
+                type="button"
+                onClick={() => {
+                  // Coche toutes les fixtures visibles (filtrées par éligibilité pan/tilt)
+                  const visible = patchedFixtures.filter((pf) => !efxDefsLoaded || efxEligibleFixtureIds.has(pf.id));
+                  setSelectedFixtureIds(new Set(visible.map((f) => f.id)));
+                }}
+                className="px-2 py-0.5 rounded bg-gray-800/60 text-[10px] text-gray-300 border border-gray-700/60 hover:bg-purple-600/30 hover:text-purple-100 hover:border-purple-500/40 transition-all"
+              >
+                {t('design.efxSelectAll')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedFixtureIds(new Set())}
+                className="px-2 py-0.5 rounded bg-gray-800/60 text-[10px] text-gray-300 border border-gray-700/60 hover:bg-red-600/30 hover:text-red-100 hover:border-red-500/40 transition-all"
+              >
+                {t('design.efxSelectNone')}
+              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setGroupsMenuOpen((v) => !v)}
+                  className={`px-2 py-0.5 rounded text-[10px] border transition-all ${groupsMenuOpen ? 'bg-purple-600/40 text-purple-100 border-purple-500/50' : 'bg-gray-800/60 text-gray-300 border-gray-700/60 hover:bg-purple-600/30 hover:border-purple-500/40'}`}
+                >
+                  {t('design.efxByGroup')} ▾
+                </button>
+                {groupsMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setGroupsMenuOpen(false)} />
+                    <div className="absolute left-0 top-full mt-1 z-30 w-64 max-h-56 overflow-y-auto bg-[#12121a] border border-gray-700 rounded-lg shadow-xl p-1 space-y-0.5">
+                      {fixtureGroups.length === 0 ? (
+                        <div className="px-2 py-1.5 text-[10px] text-gray-500 italic">{t('design.efxNoGroups')}</div>
+                      ) : fixtureGroups.map((g) => {
+                        // Compte uniquement les fixtures du groupe cochables (éligibles)
+                        const eligibleCount = g.fixtureIds.filter((fid) => !efxDefsLoaded || efxEligibleFixtureIds.has(fid)).length;
+                        return (
+                          <div key={g.id} className="flex items-center gap-1 px-1.5 py-1 rounded hover:bg-gray-800/40">
+                            <span className="flex-1 truncate text-[10px]" style={{ color: g.color || '#d1d5db' }}>
+                              {g.name} <span className="text-gray-600">({eligibleCount})</span>
+                            </span>
+                            <button
+                              type="button"
+                              disabled={eligibleCount === 0}
+                              onClick={() => {
+                                // Ajoute toutes les fixtures éligibles du groupe à la sélection
+                                const next = new Set(selectedFixtureIds);
+                                for (const fid of g.fixtureIds) {
+                                  if (!efxDefsLoaded || efxEligibleFixtureIds.has(fid)) next.add(fid);
+                                }
+                                setSelectedFixtureIds(next);
+                              }}
+                              className="px-1.5 py-0.5 rounded text-[9px] bg-green-600/20 text-green-300 border border-green-500/30 hover:bg-green-600/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                              title={t('design.efxGroupSelect')}
+                            >
+                              ✓
+                            </button>
+                            <button
+                              type="button"
+                              disabled={g.fixtureIds.every((fid) => !selectedFixtureIds.has(fid))}
+                              onClick={() => {
+                                // Retire toutes les fixtures du groupe de la sélection
+                                const next = new Set(selectedFixtureIds);
+                                for (const fid of g.fixtureIds) next.delete(fid);
+                                setSelectedFixtureIds(next);
+                              }}
+                              className="px-1.5 py-0.5 rounded text-[9px] bg-red-600/20 text-red-300 border border-red-500/30 hover:bg-red-600/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                              title={t('design.efxGroupDeselect')}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+            {patchedFixtures.length === 0 ? (
+              <div className="text-[10px] text-gray-600 italic py-1">
+                No fixtures patched. Switch to the Fixtures tab first.
+              </div>
+            ) : !efxDefsLoaded ? (
+              <div className="max-h-32 overflow-y-auto bg-gray-800/20 border border-gray-700/50 rounded-md p-1.5 space-y-0.5">
+                {patchedFixtures.map((pf) => {
+                  const isChecked = selectedFixtureIds.has(pf.id);
+                  return (
+                    <label
+                      key={pf.id}
+                      className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-gray-800/30 cursor-pointer text-[11px] text-gray-300"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleFixture(pf.id)}
+                        className="accent-purple-500"
+                      />
+                      <span className="truncate flex-1">{pf.name}</span>
+                      <span className="text-[9px] text-gray-600 font-mono">@{pf.startAddress}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : efxEligibleFixtureIds.size === 0 ? (
+              <div className="text-[10px] text-gray-600 italic py-1">
+                No fixtures with Pan/Tilt channels. Patch a moving head or scanner first.
+              </div>
+            ) : (
+              <div className="max-h-32 overflow-y-auto bg-gray-800/20 border border-gray-700/50 rounded-md p-1.5 space-y-0.5">
+                {patchedFixtures.filter((pf) => efxEligibleFixtureIds.has(pf.id)).map((pf) => {
+                  const isChecked = selectedFixtureIds.has(pf.id);
+                  return (
+                    <label
+                      key={pf.id}
+                      className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-gray-800/30 cursor-pointer text-[11px] text-gray-300"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleFixture(pf.id)}
+                        className="accent-purple-500"
+                      />
+                      <span className="truncate flex-1">{pf.name}</span>
+                      <span className="text-[9px] text-gray-600 font-mono">@{pf.startAddress}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Action buttons — centered under the fixture list */}
+          <div className="flex gap-2 pt-1 justify-center">
+            <button
+              onClick={handleSave}
+              className="px-4 py-2 bg-purple-600/30 text-purple-200 rounded-lg text-xs font-semibold hover:bg-purple-600/50 active:bg-purple-600/60 flex items-center gap-1.5 transition-all border border-purple-500/30 hover:border-purple-400/60"
+            >
+              <SaveIcon size={14} /> {editingEffectId ? 'Update EFX' : 'Save EFX'}
+            </button>
+            <button
+              onClick={() => setStopped((s) => !s)}
+              className={`px-3 py-2 rounded-lg text-xs transition-all border ${
+                stopped
+                  ? 'bg-amber-600/20 text-amber-300 border-amber-500/30 hover:bg-amber-600/30'
+                  : 'bg-red-600/20 text-red-300 border-red-500/30 hover:bg-red-600/30'
+              }`}
+            >
+              {stopped ? '▶ Play' : '■ Stop'}
+            </button>
+            <button
+              onClick={handleNew}
+              className="px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-400 hover:text-gray-300 hover:bg-gray-700/50 transition-colors"
+            >
+              New
+            </button>
+          </div>
+        </div>
+        </div>
+      </div>
+      </div>
+      {show3D && showFloating3D && (
+        <div className="fixed z-40 bg-black/90 rounded-xl border border-purple-700/40 shadow-2xl flex flex-col" style={{ left: float3DPos.x, top: float3DPos.y, width: float3DSize.w, height: float3DSize.h, minWidth: 320, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh', overflow: 'hidden' }}>
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d18] border-b border-gray-800 cursor-move shrink-0" onMouseDown={handleFloat3DDragStart}>
+            <span className="text-[11px] text-purple-400 font-medium">🎥 Live 3D — EFX</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => { setFloat3DSize({ w: 480, h: 270 }); setFloat3DPos({ x: 100, y: 80 }); }} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded">◲</button>
+              <button onClick={() => { setShowFloating3D(false); setShow3D(false); }} className="text-[10px] text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded">✕</button>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 relative"><Stage3D hideFixturePanel /><div className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize" onMouseDown={handleFloat3DResizeStart} style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.4) 50%)', borderBottomRightRadius: '0.75rem' }} /></div>
+        </div>
+      )}
+      {!showFloating3D && (
+        <button onClick={() => { setShow3D(true); setShowFloating3D(true); }} className="fixed bottom-4 right-4 z-40 bg-purple-600/80 hover:bg-purple-500 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg transition-all">
+          🎥 3D View
+        </button>
+      )}
+    </div>
+  );
+};
+
+// ─── Fixture Patcher ───────────────────────────────────────
+// Real DMX fixture patching with address map, search, and validation
+
+interface FixtureDefResult {
+  id: string;
+  manufacturer: string;
+  model: string;
+  type: string;
+  modes: Array<{ name: string; channels: Array<{ name: string; type: string }> }>;
+}
+
+// ─── Classements de la liste de patch (fabricant / type / capacités) ────────
+
+type FixtureBrowseMode = 'manufacturer' | 'type' | 'capability';
+type FixtureListGrouping = 'none' | 'type' | 'capability';
+
+/** Capacités détectables d'une définition (depuis les canaux de TOUS ses modes). */
+function fixtureCapsOf(def: FixtureDefResult): Set<string> {
+  const chTypes = new Set<string>();
+  for (const m of def.modes) for (const ch of m.channels) chTypes.add(ch.type);
+  const caps = new Set<string>();
+  if (chTypes.has('Pan') || chTypes.has('Tilt')) caps.add('moving');
+  if (chTypes.has('ColorIntensity')) caps.add('rgb');
+  if (chTypes.has('ColorWheel') || chTypes.has('MultiColor')) caps.add('wheel');
+  if (chTypes.has('Strobe')) caps.add('strobe');
+  if (chTypes.has('Gobo')) caps.add('gobo');
+  if (/laser/i.test(def.type)) caps.add('laser');
+  if (!caps.has('moving')) caps.add('static');
+  return caps;
+}
+
+/** Seaux de capacités (ordre d'affichage) avec libellés FR. */
+const FIXTURE_CAP_BUCKETS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: 'moving', label: 'Mobiles (Pan/Tilt)' },
+  { id: 'rgb', label: 'RGB (couleur additive)' },
+  { id: 'wheel', label: 'Roue couleur' },
+  { id: 'strobe', label: 'Strobe' },
+  { id: 'gobo', label: 'Gobo' },
+  { id: 'laser', label: 'Laser' },
+  { id: 'static', label: 'Statiques' },
+];
+
+/** Regroupe des définitions selon le mode demandé (retourne [['', defs]] si sans regroupement). */
+function groupFixtureDefs(
+  defs: FixtureDefResult[],
+  grouping: FixtureListGrouping,
+): Array<[string, FixtureDefResult[]]> {
+  if (grouping === 'none' || defs.length === 0) return [['', defs]];
+  const map = new Map<string, FixtureDefResult[]>();
+  for (const def of defs) {
+    const key =
+      grouping === 'type'
+        ? (def.type || 'Autre')
+        : FIXTURE_CAP_BUCKETS.filter((b) => fixtureCapsOf(def).has(b.id)).map((b) => b.label).join(' · ') || 'Statiques';
+    const arr = map.get(key);
+    if (arr) arr.push(def);
+    else map.set(key, [def]);
+  }
+  return [...map.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+}
+
+
+type PatchStep = 'idle' | 'browse' | 'manufacturer' | 'searching' | 'modeSelect' | 'addressSet';
+
+const FixturePatcher: React.FC<{ onEditFixture?: (f: any) => void }> = ({ onEditFixture }) => {
+  const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const universes = useShowStore((s) => s.universes);
+  const patchFixture = useShowStore((s) => s.patchFixture);
+   const unpatchFixture = useShowStore((s) => s.unpatchFixture);
+   const updateFixtureTier = useShowStore((s) => s.updateFixtureTier);
+   const duplicateFixture = useShowStore((s) => s.duplicateFixture);
+  const setFixtureName = useShowStore((s) => s.setFixtureName);
+  const addShowUniverse = useShowStore((s) => s.addShowUniverse);
+  const getNextFreeAddress = useShowStore((s) => s.getNextFreeAddress);
+  const getUniverseMap = useShowStore((s) => s.getUniverseMap);
+
+  // Multi-selection state
+  const [selectedFixtureIds, setSelectedFixtureIds] = useState<Set<string>>(new Set());
+
+  // Fixtures currently lit by the test button (for visual feedback in the table)
+  const [litSet, setLitSet] = useState<Set<string>>(new Set());
+
+  // Toggle a patched fixture ON (dimmer max + white) / OFF to verify hardware wiring
+  const handleTestLight = async (pf: PatchedFixture) => {
+    if (fixtureTestState.has(pf.id)) {
+      setLitSet((prev) => { const n = new Set(prev); n.delete(pf.id); return n; });
+      try { await sendFixtureOff(pf, patchedFixtures, universes); } catch { /* hardware not available */ }
+    } else {
+      setLitSet((prev) => new Set(prev).add(pf.id));
+      try {
+        const def = await (window as any).lightMaestro?.fixtures?.getDefinition(pf.fixtureDefId);
+        const channels = def?.modes?.[pf.modeIndex]?.channels ?? [];
+        await sendFixtureOn(pf, channels, patchedFixtures, universes);
+      } catch { /* hardware not available */ }
+    }
+  };
+
+  const [selectedUniverseId, setSelectedUniverseId] = useState<string>('');
+  const [hoveredFixtureId, setHoveredFixtureId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string | null>(null);
+  const [editNameValue, setEditNameValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  // Add fixture modal
+  const [showAdd, setShowAdd] = useState(false);
+  const [step, setStep] = useState<PatchStep>('idle');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<FixtureDefResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selectedDef, setSelectedDef] = useState<FixtureDefResult | null>(null);
+  const [selectedModeIdx, setSelectedModeIdx] = useState(0);
+  const [startAddress, setStartAddress] = useState(1);
+  const [quantity, setQuantity] = useState(1);
+  const [addTier, setAddTier] = useState<'primary' | 'secondary' | 'tertiary' | 'other'>('primary');
+  const [addThumbnailId, setAddThumbnailId] = useState<string>('');
+  const [addError, setAddError] = useState<string | null>(null);
+  const [detailFixture, setDetailFixture] = useState<any>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  // Browse by manufacturer
+  const [allFixtures, setAllFixtures] = useState<FixtureDefResult[]>([]);
+  const [manufacturers, setManufacturers] = useState<{ name: string; count: number }[]>([]);
+  // Library loading flag: shows a loader in the browse step instead of an
+  // empty shell (avoids the "flashing modal" impression on open).
+  const [libLoading, setLibLoading] = useState(false);
+  const [selectedManufacturer, setSelectedManufacturer] = useState<string>('');
+  const [manufacturerFixtures, setManufacturerFixtures] = useState<FixtureDefResult[]>([]);
+
+  // Right-click context menu
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    fixtureId: string;
+    fixtureName: string;
+  }>({ visible: false, x: 0, y: 0, fixtureId: '', fixtureName: '' });
+
+  // Dismiss context menu on any click outside
+  useEffect(() => {
+    if (!contextMenu.visible) return;
+    const dismiss = (e: MouseEvent) => {
+      const menuEl = document.querySelector('[data-context-menu="fixture"]') as HTMLElement | null;
+      if (menuEl && menuEl.contains(e.target as Node)) return;
+      setContextMenu((c) => ({ ...c, visible: false }));
+    };
+    window.addEventListener('mousedown', dismiss);
+    return () => window.removeEventListener('mousedown', dismiss);
+  }, [contextMenu.visible]);
+
+  // Auto-create default universe
+  useEffect(() => {
+    async function ensureUniverse() {
+      const currentUniverses = useShowStore.getState().universes;
+      if (currentUniverses.length > 0) {
+        setSelectedUniverseId(currentUniverses[0].id);
+        return;
+      }
+
+      try {
+        // Try fetching from DMX engine via preload
+        const dmxUniverses = await window.lightMaestro.dmx.getUniverses();
+        if (dmxUniverses && dmxUniverses.length > 0) {
+          const u = dmxUniverses[0];
+          const showUniverse = {
+            id: u.id || 'dmx-u-0',
+            name: u.name || 'Universe 1',
+            type: u.type || 'virtual',
+            channels: u.channels || 512,
+          };
+          useShowStore.getState().addShowUniverse(showUniverse);
+          setSelectedUniverseId(showUniverse.id);
+          return;
+        }
+      } catch {
+        // DMX engine not available, create default
+      }
+
+      // Create default USB-DMX universe
+      const id = 'universe-1';
+      useShowStore.getState().addShowUniverse({
+        id,
+        name: 'Universe 1',
+        type: 'usb-dmx',
+        channels: 512,
+        serialPort: '',
+      });
+      // Sync to DMX engine
+      try {
+        await window.lightMaestro.dmx.addUniverse({ id, name: 'Universe 1', type: 'usb-dmx', output: true, input: false, channels: 512, serialPort: '' });
+      } catch {
+        // Engine might not be running — that's fine
+      }
+      setSelectedUniverseId(id);
+    }
+    ensureUniverse();
+  }, []);
+
+  // Filter fixtures for selected universe
+  const universeFixtures = patchedFixtures.filter(
+    (f) => f.universeId === selectedUniverseId
+  );
+
+  // Build channel map
+  const handleBuildMap = useCallback(() => {
+    if (!selectedUniverseId) return new Map<number, PatchedFixture>();
+    return getUniverseMap(selectedUniverseId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedUniverseId, patchedFixtures]);
+
+  const getMap = handleBuildMap;
+
+  // Fixture index for coloring
+  const fixtureColorIndex = new Map<string, number>();
+  universeFixtures.forEach((f, i) => fixtureColorIndex.set(f.id, i));
+
+  // ── Browse: load all fixtures & group by manufacturer ──
+  const handleBrowse = async () => {
+    setAddError(null);
+    setLibLoading(true);
+    try {
+      const all = await (window.lightMaestro.fixtures as any).getAll();
+      const fixtureDefs: FixtureDefResult[] = (all || []).map((d: any) => ({
+        id: d.id,
+        manufacturer: d.manufacturer,
+        model: d.model,
+        type: d.type,
+        modes: d.modes || [],
+      }));
+      setAllFixtures(fixtureDefs);
+
+      // Group by manufacturer
+      const counts: Record<string, number> = {};
+      for (const f of fixtureDefs) {
+        counts[f.manufacturer] = (counts[f.manufacturer] || 0) + 1;
+      }
+      const mfgs = Object.entries(counts)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setManufacturers(mfgs);
+    } catch (e) {
+      setAddError('Failed to load fixture library');
+    } finally {
+      setLibLoading(false);
+    }
+  };
+
+  // ── Select manufacturer from browse ──
+  const handleSelectManufacturer = (name: string) => {
+    setSelectedManufacturer(name);
+    setManufacturerFixtures(
+      allFixtures
+        .filter((f) => f.manufacturer === name)
+        .sort((a, b) => a.model.localeCompare(b.model))
+    );
+    setStep('manufacturer');
+  };
+
+  // ── Manufacturer: go back to browse ──
+  const handleBackToBrowse = () => {
+    setStep('browse');
+    setSelectedManufacturer('');
+    setManufacturerFixtures([]);
+  };
+
+  // ── Manufacturer: select fixture (same as search result) ──
+  const handleSelectFromManufacturer = (def: FixtureDefResult) => {
+    setSelectedDef(def);
+    setSelectedModeIdx(0);
+    setStep('modeSelect');
+    setAddError(null);
+  };
+
+  // ── Search handler ──
+  const handleSearch = async (query: string) => {
+    setSearchQuery(query);
+    if (query.length < 1) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
+    setAddError(null);
+    try {
+      const results = await window.lightMaestro.fixtures.search(query);
+      setSearchResults(Array.isArray(results) ? results : []);
+    } catch (e: any) {
+      setSearchResults([]);
+      setAddError(`Search failed: ${e?.message || 'Unknown error'}`);
+    }
+    setSearching(false);
+  };
+
+  // ── Switch from browse to search ──
+  const handleOpenSearch = (query: string) => {
+    setStep('searching');
+    handleSearch(query);
+  };
+
+  // ── Select fixture definition ──
+  const handleSelectDef = (def: FixtureDefResult) => {
+    setSelectedDef(def);
+    setSelectedModeIdx(0);
+    setStep('modeSelect');
+    setAddError(null);
+  };
+
+  // ── Go to address step ──
+  const handleSelectMode = (modeIdx: number) => {
+    setSelectedModeIdx(modeIdx);
+    const def = selectedDef;
+    if (!def) return;
+    const mode = def.modes[modeIdx];
+    if (!mode) return;
+    const free = getNextFreeAddress(selectedUniverseId, mode.channels.length, quantity);
+    setStartAddress(free > 0 ? free : 1);
+    setStep('addressSet');
+    setAddError(null);
+  };
+
+  // ── Confirm patch (batch) ──
+  const handleConfirmPatch = () => {
+    if (!selectedDef) return;
+    const mode = selectedDef.modes[selectedModeIdx];
+    if (!mode) return;
+
+    const channels = mode.channels.length;
+    const lastAddress = startAddress + channels * quantity - 1;
+
+    // Validate last address fits in universe
+    if (lastAddress > 512) {
+      setAddError(
+        `Batch of ${quantity} × ${channels}ch exceeds universe (${startAddress}–${lastAddress}, max 512)`
+      );
+      return;
+    }
+
+    // Pre-validate no overlaps with existing fixtures on this universe
+    const existingFixtures = patchedFixtures.filter(
+      (f) => f.universeId === selectedUniverseId
+    );
+    for (let i = 0; i < quantity; i++) {
+      const addr = startAddress + i * channels;
+      const end = addr + channels - 1;
+      for (const pf of existingFixtures) {
+        const pfEnd = pf.startAddress + pf.channelCount - 1;
+        if (addr <= pfEnd && end >= pf.startAddress) {
+          setAddError(
+            `Address overlap: "${pf.name}" occupies ${pf.startAddress}–${pfEnd}, conflicts with fixture #${i + 1} at ${addr}–${end}`
+          );
+          return;
+        }
+      }
+    }
+
+    // Patch each fixture in sequence
+    const baseName = `${selectedDef.manufacturer} ${selectedDef.model}`;
+    for (let i = 0; i < quantity; i++) {
+      const addr = startAddress + i * channels;
+      const name =
+        quantity > 1 ? `${baseName} #${i + 1}` : baseName;
+      const result = patchFixture({
+        fixtureDefId: selectedDef.id,
+        manufacturer: selectedDef.manufacturer,
+        model: selectedDef.model,
+        fixtureType: selectedDef.type,
+        modeIndex: selectedModeIdx,
+        modeName: mode.name,
+        universeId: selectedUniverseId,
+        startAddress: addr,
+        channelCount: channels,
+        name,
+        tier: addTier,
+        thumbnailId: addThumbnailId || undefined,
+      });
+
+      if ('error' in result) {
+        setAddError(result.error);
+        return;
+      }
+    }
+
+    resetAddModal();
+  };
+
+  const resetAddModal = () => {
+    setShowAdd(false);
+    setStep('idle');
+    setLibLoading(false);
+    setSearchQuery('');
+    setSearchResults([]);
+    setSelectedDef(null);
+    setSelectedModeIdx(0);
+    setStartAddress(1);
+    setQuantity(1);
+    setAddError(null);
+    setAllFixtures([]);
+    setManufacturers([]);
+    setSelectedManufacturer('');
+    setManufacturerFixtures([]);
+    setAddTier('primary');
+    setAddThumbnailId('');
+  };
+
+  const handleBack = () => {
+    if (step === 'modeSelect') {
+      setStep(selectedDef?.manufacturer && allFixtures.length > 0 ? 'manufacturer' : 'searching');
+      setAddError(null);
+    } else if (step === 'addressSet') {
+      setStep('modeSelect');
+      setAddError(null);
+    } else if (step === 'searching') {
+      setStep('browse');
+      setSearchQuery('');
+      setSearchResults([]);
+      setAddError(null);
+    } else if (step === 'manufacturer') {
+      handleBackToBrowse();
+    }
+  };
+
+  // ── Rename ──
+  const handleStartRename = (f: PatchedFixture) => {
+    setEditingName(f.id);
+    setEditNameValue(f.name);
+  };
+
+  const handleConfirmRename = () => {
+    if (editingName && editNameValue.trim()) {
+      setFixtureName(editingName, editNameValue.trim());
+    }
+    setEditingName(null);
+  };
+
+  // ── Error auto-dismiss ──
+  useEffect(() => {
+    if (error) {
+      const t = setTimeout(() => setError(null), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [error]);
+
+  // ── Show fixture detail ──
+  const handleShowDetail = async (def: FixtureDefResult) => {
+    setLoadingDetail(true);
+    setDetailFixture(null);
+    try {
+      const full = await window.lightMaestro.fixtures.getDefinition(def.id);
+      setDetailFixture(full);
+    } catch {
+      setDetailFixture(def); // fallback: show what we have
+    }
+    setLoadingDetail(false);
+  };
+
+  // Marquee selection for fixture table
+  const containerRef = useRef<HTMLDivElement>(null);
+  const marqueeRef = useRef<{ startX: number; startY: number; currentX: number; currentY: number; active: boolean } | null>(null);
+
+  const handleTableMouseDown = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    // Don't start marquee if clicking on interactive elements
+    if (target.closest('button, input, select')) return;
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const startX = e.clientX - rect.left;
+    const startY = e.clientY - rect.top;
+    marqueeRef.current = { startX, startY, currentX: startX, currentY: startY, active: true };
+    e.preventDefault();
+  }, []);
+
+  const handleTableMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!marqueeRef.current?.active) return;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    marqueeRef.current.currentX = e.clientX - rect.left;
+    marqueeRef.current.currentY = e.clientY - rect.top;
+  }, []);
+
+  const handleTableMouseUp = useCallback(() => {
+    if (!marqueeRef.current?.active) {
+      marqueeRef.current = null;
+      return;
+    }
+
+    const m = marqueeRef.current;
+    const minX = Math.min(m.startX, m.currentX);
+    const maxX = Math.max(m.startX, m.currentX);
+    const minY = Math.min(m.startY, m.currentY);
+    const maxY = Math.max(m.startY, m.currentY);
+
+    const containerRect = containerRef.current?.getBoundingClientRect();
+    if (!containerRect) {
+      marqueeRef.current = null;
+      return;
+    }
+
+    // Check which rows are in the marquee rectangle
+    const newSelection = new Set(selectedFixtureIds);
+    const rows = containerRef.current?.querySelectorAll('tbody tr');
+    if (rows) {
+      rows.forEach((row) => {
+        const rowRect = row.getBoundingClientRect();
+        const rowCenterX = (rowRect.left + rowRect.right) / 2 - containerRect.left;
+        const rowCenterY = (rowRect.top + rowRect.bottom) / 2 - containerRect.top;
+        if (rowCenterX >= minX && rowCenterX <= maxX && rowCenterY >= minY && rowCenterY <= maxY) {
+          const fid = row.getAttribute('data-fixture-id');
+          if (fid) newSelection.add(fid);
+        }
+      });
+    }
+
+    setSelectedFixtureIds(newSelection);
+    marqueeRef.current = null;
+  }, [selectedFixtureIds]);
+
+  const handleTableMouseLeave = useCallback(() => {
+    marqueeRef.current = null;
+  }, []);
+
+  // ── Render ──
+  return (
+    <div className="space-y-5">
+      {/* Error banner */}
+      {error && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-red-900/20 border border-red-800/40 rounded-lg text-xs text-red-300">
+          <AlertTriangle size={14} className="shrink-0" />
+          <span className="flex-1">{error}</span>
+          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Header + Universe Selector */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h2 className="text-xl font-bold text-white">Fixture Patch</h2>
+          <select
+            value={selectedUniverseId}
+            onChange={(e) => setSelectedUniverseId(e.target.value)}
+            className="bg-gray-800/50 border border-gray-700 rounded-md px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-purple-500/50"
+          >
+            {universes.length === 0 && (
+              <option value="">No universes</option>
+            )}
+            {universes.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name} ({u.type})
+              </option>
+            ))}
+          </select>
+        </div>
+        <button
+          onClick={() => {
+            setShowAdd(true);
+            setStep('browse');
+            setSearchQuery('');
+            setSearchResults([]);
+            setAddError(null);
+            setSelectedDef(null);
+            setSelectedModeIdx(0);
+            setStartAddress(1);
+            setManufacturerFixtures([]);
+            setSelectedManufacturer('');
+            handleBrowse();
+          }}
+          className="px-4 py-2 bg-purple-600/30 text-purple-200 rounded-lg text-xs font-semibold hover:bg-purple-600/50 active:bg-purple-600/60 flex items-center gap-1.5 transition-all border border-purple-500/30 hover:border-purple-400/60 cursor-pointer"
+        >
+          <Plus size={14} /> Add Fixture
+        </button>
+      </div>
+
+      {/* Réseau sACN — monitoring de ce qui part / arrive + toggle réception */}
+      <NetworkMonitor />
+
+      {/* DMX Address Map */}
+      <DmxAddressMap
+        universeId={selectedUniverseId}
+        fixtures={universeFixtures}
+        colorIndex={fixtureColorIndex}
+        hoveredId={hoveredFixtureId}
+        onHover={setHoveredFixtureId}
+        onContextMenu={(e, fixtureId, fixtureName) => {
+          e.preventDefault();
+          setContextMenu({ visible: true, x: e.clientX, y: e.clientY, fixtureId, fixtureName });
+        }}
+      />
+
+      {/* Patched Fixtures Table */}
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
+        <div className="px-4 py-2 border-b border-gray-800/50 text-xs font-medium text-gray-400">
+          Patched Fixtures ({universeFixtures.length})
+        </div>
+        {universeFixtures.length === 0 ? (
+          <div className="p-6 text-center text-xs text-gray-600">
+            No fixtures patched on this universe. Click "Add Fixture" to start.
+          </div>
+        ) : (
+          <div ref={containerRef} className="overflow-x-auto relative"
+              onMouseDown={handleTableMouseDown}
+              onMouseMove={handleTableMouseMove}
+              onMouseUp={handleTableMouseUp}
+              onMouseLeave={handleTableMouseLeave}
+              style={{ cursor: marqueeRef.current?.active ? 'crosshair' : 'default' }}
+            >
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-gray-800/30 text-[10px] text-gray-500 uppercase tracking-wider">
+                  <th className="text-left px-4 py-2 font-medium">Name</th>
+                  <th className="text-left px-4 py-2 font-medium">Tier</th>
+                  <th className="text-left px-4 py-2 font-medium">Manufacturer</th>
+                  <th className="text-left px-4 py-2 font-medium">Model</th>
+                  <th className="text-left px-4 py-2 font-medium">Mode</th>
+                  <th className="text-left px-4 py-2 font-medium">Address</th>
+                  <th className="text-left px-4 py-2 font-medium">Ch</th>
+                  <th className="text-right px-4 py-2 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800/20">
+                {universeFixtures.map((f) => {
+                  const cIdx = fixtureColorIndex.get(f.id) ?? 0;
+                  const color = getFixtureColor(cIdx);
+                  const isSelected = selectedFixtureIds.has(f.id);
+                  return (
+                    <tr
+                      key={f.id}
+                      data-fixture-id={f.id}
+                      className={`hover:bg-gray-800/20 transition-colors ${isSelected ? 'bg-purple-600/15' : ''}`}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setContextMenu({ visible: true, x: e.clientX, y: e.clientY, fixtureId: f.id, fixtureName: f.name });
+                      }}
+                      onDoubleClick={() => handleStartRename(f)}
+                      onMouseEnter={() => setHoveredFixtureId(f.id)}
+                      onMouseLeave={() => setHoveredFixtureId(null)}
+                    >
+                      <td className="px-4 py-2">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className="inline-block w-2.5 h-2.5 rounded-sm shrink-0"
+                            style={{ backgroundColor: color }}
+                          />
+                          {editingName === f.id ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                value={editNameValue}
+                                onChange={(e) => setEditNameValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleConfirmRename();
+                                  if (e.key === 'Escape') setEditingName(null);
+                                }}
+                                className="w-28 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none"
+                                autoFocus
+                              />
+                              <button onClick={handleConfirmRename} className="text-green-400 hover:text-green-300">
+                                <Check size={12} />
+                              </button>
+                              <button onClick={() => setEditingName(null)} className="text-gray-500 hover:text-gray-300">
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-gray-200 truncate max-w-[120px]">{f.name}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2">
+                        <span className={`inline-block px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                          f.tier === 'primary' ? 'bg-purple-500/20 text-purple-400' :
+                          f.tier === 'secondary' ? 'bg-blue-500/20 text-blue-400' :
+                          f.tier === 'other' ? 'bg-cyan-500/20 text-cyan-400' :
+                          'bg-gray-500/20 text-gray-400'
+                        }`}>
+                          {f.tier}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-gray-400">{f.manufacturer}</td>
+                      <td className="px-4 py-2 text-gray-400">{f.model}</td>
+                      <td className="px-4 py-2 text-gray-500">{f.modeName}</td>
+                      <td className="px-4 py-2 text-gray-300 font-mono">{f.startAddress}</td>
+                      <td className="px-4 py-2 text-gray-500 font-mono">{f.channelCount}</td>
+                      <td className="px-4 py-2 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleStartRename(f); }}
+                            className="p-1 text-gray-600 hover:text-purple-400 transition-colors"
+                            title="Renommer"
+                          >
+                            <Edit2 size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleTestLight(f); }}
+                            className={`p-1 transition-colors ${litSet.has(f.id) ? 'text-green-400' : 'text-gray-600 hover:text-green-400'}`}
+                            title={litSet.has(f.id) ? 'Éteindre' : 'Allumer (dimmer max + blanc)'}
+                          >
+                            <Zap size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); unpatchFixture(f.id); }}
+                            className="p-1 text-gray-600 hover:text-red-400 transition-colors"
+                            title="Retirer"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {/* Marquee selection rectangle */}
+            {marqueeRef.current?.active && (() => {
+              const m = marqueeRef.current;
+              const minX = Math.min(m.startX, m.currentX);
+              const maxX = Math.max(m.startX, m.currentX);
+              const minY = Math.min(m.startY, m.currentY);
+              const maxY = Math.max(m.startY, m.currentY);
+              return (
+                <div
+                  className="absolute pointer-events-none"
+                  style={{
+                    left: minX,
+                    top: minY,
+                    width: maxX - minX,
+                    height: maxY - minY,
+                    border: '2px dashed #a855f7',
+                    backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                  }}
+                />
+              );
+            })()}
+          </div>
+        )}
+      </div>
+
+      {/* Unpatch selected button — appears when multiple fixtures selected */}
+      {selectedFixtureIds.size > 1 && (
+        <div className="mt-2 flex justify-end">
+          <button
+            onClick={() => {
+              selectedFixtureIds.forEach(id => unpatchFixture(id));
+              setSelectedFixtureIds(new Set());
+            }}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600/30 hover:border-red-500/50 transition-colors flex items-center gap-1.5"
+            title="Retirer les fixtures sélectionnées"
+          >
+            <Trash2 size={12} /> Unpatch {selectedFixtureIds.size} fixtures
+          </button>
+        </div>
+      )}
+
+      {/* ── Add Fixture Modal ── */}
+      {showAdd && (
+        <AddFixtureModal
+          step={step}
+          searchQuery={searchQuery}
+          searchResults={step === 'searching' ? searchResults : []}
+          searching={searching}
+          selectedDef={selectedDef}
+          selectedModeIdx={selectedModeIdx}
+          startAddress={startAddress}
+          quantity={quantity}
+          error={addError}
+          universeId={selectedUniverseId}
+          manufacturers={manufacturers}
+          libLoading={libLoading}
+          selectedManufacturer={selectedManufacturer}
+          manufacturerFixtures={manufacturerFixtures}
+          allFixtures={allFixtures}
+          tier={addTier}
+          onSetTier={setAddTier}
+          thumbnailId={addThumbnailId}
+          onSetThumbnail={setAddThumbnailId}
+          fixtureType={selectedDef?.type || ''}
+          onSearch={handleSearch}
+          onSelectDef={handleSelectDef}
+          onSelectMode={handleSelectMode}
+          onSetAddress={setStartAddress}
+          onSetQuantity={setQuantity}
+          onConfirm={handleConfirmPatch}
+          onCancel={resetAddModal}
+          onBack={handleBack}
+          onSelectManufacturer={handleSelectManufacturer}
+          onBackToBrowse={handleBackToBrowse}
+          onSelectFromManufacturer={handleSelectFromManufacturer}
+          onSwitchToSearch={handleOpenSearch}
+          onShowDetail={handleShowDetail}
+          getNextFree={getNextFreeAddress}
+        />
+      )}
+
+      {/* Right-click context menu — rétabli : Rename + Unpatch + Tier, ne se ferme pas au clic dedans */}
+      {contextMenu.visible && (
+        <div
+          className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px] max-h-[80vh] overflow-y-auto"
+          data-context-menu="fixture"
+          style={{ ...clampRect(contextMenu.x, contextMenu.y, 240, 320, window.innerWidth, window.innerHeight) }}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider truncate">
+            {contextMenu.fixtureName}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const target = patchedFixtures.find(f => f.id === contextMenu.fixtureId);
+              if (target) handleStartRename(target);
+              else handleStartRename({ id: contextMenu.fixtureId, name: contextMenu.fixtureName } as any);
+              setContextMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-300 transition-colors flex items-center gap-2"
+           >
+             <Edit2 size={12} />
+             Renommer
+           </button>
+           <button
+             type="button"
+              onClick={() => {
+                const result = duplicateFixture(contextMenu.fixtureId);
+                setContextMenu((c) => ({ ...c, visible: false }));
+                if ('id' in result) {
+                  try { (window as any).__lm_toast?.('Dupliqué', 'info'); } catch {}
+                }
+              }}
+             className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-300 transition-colors flex items-center gap-2"
+           >
+             <Copy size={12} />
+             Dupliquer
+           </button>
+           <div className="my-1 border-t border-gray-800/60" />
+          <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">Groupe</div>
+          {(['primary', 'secondary', 'tertiary', 'other'] as const).map((tier) => {
+            const isCurrent = patchedFixtures.find((f) => f.id === contextMenu.fixtureId)?.tier === tier;
+            return (
+              <button
+                key={tier}
+                onClick={() => {
+                  updateFixtureTier(contextMenu.fixtureId, tier);
+                  setContextMenu((c) => ({ ...c, visible: false }));
+                }}
+                className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                  isCurrent ? 'text-purple-300' : 'text-gray-300 hover:bg-purple-600/20 hover:text-purple-300'
+                }`}
+              >
+                <span className={`w-2.5 h-2.5 rounded-full ${
+                  tier === 'primary' ? 'bg-purple-400' : tier === 'secondary' ? 'bg-blue-400' : tier === 'other' ? 'bg-cyan-400' : 'bg-gray-400'
+                }`} />
+                {tier.charAt(0).toUpperCase() + tier.slice(1)}
+                {isCurrent && <Check size={12} className="ml-auto" />}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => {
+              unpatchFixture(contextMenu.fixtureId);
+              setContextMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-red-300 hover:bg-red-600/20 hover:text-red-200 transition-colors flex items-center gap-2"
+          >
+            <Trash2 size={12} />
+            Retirer
+          </button>
+        </div>
+      )}
+
+      {/* Fixture detail modal */}
+      {detailFixture && (
+        <FixtureDetailModal
+          fixture={detailFixture}
+          onClose={() => setDetailFixture(null)}
+          onEdit={onEditFixture}
+        />
+      )}
+    </div>
+  );
+};
+
+// ─── Channel type icon + color helpers ─────────────────────
+
+const CHANNEL_ICONS: Record<string, string> = {
+  Intensity: '🔅', Pan: '↔️', Tilt: '↕️', Colour: '🎨',
+  Gobo: '❄️', Shutter: '⚡', Speed: '⏱️', Prism: '💠',
+  Effect: '✨', Beam: '🔦', Maintenance: '🔧', Nothing: '⬜',
+  Strobe: '💫', Zoom: '🔍', Focus: '🎯', Iris: '👁️',
+  Frost: '🌫️', Macro: '🎛️', ColorWheel: '🎨', MultiColor: '🌈',
+};
+
+function channelTypeLabel(type: string): string {
+  return (CHANNEL_ICONS[type] || '•') + ' ' + type;
+}
+
+function capabilityColorDots(capabilities: any[]): string {
+  if (!capabilities?.length) return '';
+  return capabilities
+    .filter((c: any) => c.color)
+    .map((c: any) => c.color)
+    .filter((v: string, i: number, a: string[]) => a.indexOf(v) === i)
+    .slice(0, 8)
+    .map((hex: string) => `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${hex};border:1px solid rgba(255,255,255,0.2);margin-left:2px" title="${hex}"></span>`)
+    .join('');
+}
+
+// ─── Fixture Detail Modal ─────────────────────────────────
+
+const FixtureDetailModal: React.FC<{
+  fixture: any;
+  onClose: () => void;
+  onEdit?: (f: any) => void;
+}> = ({ fixture, onClose, onEdit }) => {
+  if (!fixture) return null;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[560px] max-w-[95vw] max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-3 border-b border-gray-800/50 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-white">{fixture.manufacturer} {fixture.model}</h3>
+            <p className="text-[10px] text-gray-500">{fixture.type} · {fixture.modes?.length || 0} mode{fixture.modes?.length !== 1 ? 's' : ''}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {onEdit && (
+              <button
+                onClick={() => { onClose(); onEdit(fixture); }}
+                className="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded text-xs font-medium flex items-center gap-1.5 transition-colors"
+              >
+                <Edit2 size={12} /> Edit
+              </button>
+            )}
+            <button onClick={onClose} className="text-gray-500 hover:text-gray-300"><X size={18} /></button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {fixture.modes?.map((mode: any, mi: number) => (
+            <div key={mi} className="bg-[#0d0d14] border border-gray-800/50 rounded-lg overflow-hidden">
+              <div className="px-3 py-2 border-b border-gray-800/30 flex items-center justify-between">
+                <span className="text-xs font-semibold text-purple-300">{mode.name}</span>
+                <span className="text-[10px] text-gray-600">{mode.channels?.length || 0} channels</span>
+              </div>
+              <div className="divide-y divide-gray-800/20">
+                {mode.channels?.map((ch: any, ci: number) => {
+                  const hasCaps = ch.capabilities?.some((c: any) => c.color);
+                  const colorCaps = ch.capabilities?.filter((c: any) => c.color) || [];
+                  return (
+                  <div key={ci} className="px-3 py-2 flex items-center gap-2 text-xs">
+                    <span className="text-gray-600 font-mono w-5 shrink-0">{ci + 1}</span>
+                    <span className="text-gray-500 w-5 shrink-0 text-center">{CHANNEL_ICONS[ch.type] || '•'}</span>
+                    <span className="text-gray-300 flex-1 min-w-0 truncate">{ch.name}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
+                      ch.type === 'Intensity' ? 'bg-yellow-500/15 text-yellow-400' :
+                      ch.type === 'Colour' ? 'bg-pink-500/15 text-pink-400' :
+                      ch.type === 'Pan' || ch.type === 'Tilt' ? 'bg-blue-500/15 text-blue-400' :
+                      ch.type === 'Shutter' ? 'bg-purple-500/15 text-purple-400' :
+                      ch.type === 'Gobo' ? 'bg-cyan-500/15 text-cyan-400' :
+                      'bg-gray-800/50 text-gray-500'
+                    }`}>{ch.type}</span>
+                    {hasCaps && (
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        {colorCaps.slice(0, 6).map((cap: any, cci: number) => (
+                          <span key={cci} className="w-3 h-3 rounded-full border border-white/20 inline-block"
+                            style={{ backgroundColor: cap.color || '#666' }}
+                            title={cap.name} />
+                        ))}
+                      </div>
+                    )}
+                    {ch.defaultValue != null && ch.defaultValue !== 0 && (
+                      <span className="text-[10px] text-gray-600 shrink-0 w-10 text-right">{ch.defaultValue}</span>
+                    )}
+                  </div>
+                )})}
+              </div>
+            </div>
+          ))}
+          {fixture.physical && (
+            <div className="text-[10px] text-gray-600 space-y-1 grid grid-cols-2 gap-x-4">
+              {fixture.physical.bulbType && <div>💡 Bulb: {fixture.physical.bulbType}</div>}
+              {fixture.physical.bulbLumens && <div>🔆 Lumens: {fixture.physical.bulbLumens}</div>}
+              {fixture.physical.weight && <div>⚖️ Weight: {fixture.physical.weight}kg</div>}
+              {fixture.physical.lensDegMin != null && <div>🔍 Beam: {fixture.physical.lensDegMin}°{fixture.physical.lensDegMax ? `–${fixture.physical.lensDegMax}°` : ''}</div>}
+              {fixture.physical.powerConsumption && <div>⚡ Power: {fixture.physical.powerConsumption}W</div>}
+              {fixture.physical.DMXConnector && <div>🔌 DMX: {fixture.physical.DMXConnector}</div>}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── DMX Address Map ───────────────────────────────────────
+
+const CELL_SIZE = 28;
+const CELL_GAP = 2;
+const CHANNELS_PER_ROW = 32;
+const TOTAL_CHANNELS = 512;
+const ROWS = Math.ceil(TOTAL_CHANNELS / CHANNELS_PER_ROW);
+const ROW_LABEL_WIDTH = 24; // px — left gutter for row start channel numbers
+
+interface DmxAddressMapProps {
+  universeId: string;
+  fixtures: PatchedFixture[];
+  colorIndex: Map<string, number>;
+  hoveredId: string | null;
+  onHover: (id: string | null) => void;
+  onContextMenu: (e: React.MouseEvent, fixtureId: string, fixtureName: string) => void;
+}
+
+const DmxAddressMap: React.FC<DmxAddressMapProps> = ({
+  fixtures,
+  colorIndex,
+  hoveredId,
+  onHover,
+  onContextMenu,
+}) => {
+  const moveFixture = useShowStore((s) => s.moveFixture);
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  // Drag state
+  const dragRef = useRef<{
+    fixtureId: string;
+    channelCount: number;
+    originalAddr: number;
+    targetAddr: number;
+    dragging: boolean;
+    valid: boolean;
+  } | null>(null);
+  const [dragPreview, setDragPreview] = useState<{ addr: number; count: number; valid: boolean } | null>(null);
+  // Build a lookup: channel → fixture
+  const channelOwner = new Map<number, { fixture: PatchedFixture; isFirst: boolean }>();
+  for (const f of fixtures) {
+    for (let i = 0; i < f.channelCount; i++) {
+      channelOwner.set(f.startAddress + i, { fixture: f, isFirst: i === 0 });
+    }
+  }
+
+  // Convert cursor position to DMX address using DOM hit-testing (100% precise)
+  const addrFromCursor = useCallback((clientX: number, clientY: number): number | null => {
+    const el = document.elementFromPoint(clientX, clientY);
+    if (!el) return null;
+    // Walk up to find the cell div with data-dmx-addr
+    let target: HTMLElement | null = el as HTMLElement;
+    while (target && !target.dataset.dmxAddr) {
+      target = target.parentElement;
+    }
+    if (!target?.dataset.dmxAddr) return null;
+    const addr = parseInt(target.dataset.dmxAddr, 10);
+    if (isNaN(addr) || addr < 1 || addr > TOTAL_CHANNELS) return null;
+    return addr;
+  }, []);
+
+  // Drag handlers
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const d = dragRef.current;
+      if (!d || !d.dragging) return;
+      const addr = addrFromCursor(e.clientX, e.clientY);
+      if (addr === null) return;
+      const targetAddr = Math.max(1, Math.min(TOTAL_CHANNELS - d.channelCount + 1, addr));
+      d.targetAddr = targetAddr;
+      // Check for conflicts (exclude self)
+      const end = targetAddr + d.channelCount - 1;
+      let valid = targetAddr >= 1 && end <= TOTAL_CHANNELS;
+      if (valid) {
+        for (const f of fixtures) {
+          if (f.id === d.fixtureId) continue;
+          const fEnd = f.startAddress + f.channelCount - 1;
+          if (targetAddr <= fEnd && end >= f.startAddress) { valid = false; break; }
+        }
+      }
+      d.valid = valid;
+      setDragPreview({ addr: targetAddr, count: d.channelCount, valid });
+    };
+    const onUp = () => {
+      const d = dragRef.current;
+      if (!d || !d.dragging) return;
+      d.dragging = false;
+      if (d.targetAddr !== d.originalAddr && d.valid) {
+        moveFixture(d.fixtureId, d.targetAddr);
+      }
+      setDragPreview(null);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, [fixtures, addrFromCursor, moveFixture]);
+
+  // Determine which channels should be highlighted by hover
+  const hoverChannelSet = new Set<number>();
+
+  const rows: number[][] = [];
+  for (let r = 0; r < ROWS; r++) {
+    const row: number[] = [];
+    for (let c = 0; c < CHANNELS_PER_ROW; c++) {
+      const ch = r * CHANNELS_PER_ROW + c + 1;
+      if (ch <= TOTAL_CHANNELS) row.push(ch);
+    }
+    rows.push(row);
+  }
+
+  return (
+    <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
+      <div className="px-4 py-2 border-b border-gray-800/50 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-medium text-gray-400">DMX Address Map</span>
+          <span className="text-[10px] text-gray-600">512 channels · drag fixtures to reassign addresses</span>
+        </div>
+        <div className="flex items-center gap-2 text-[10px] text-gray-600">
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-sm bg-[#1a1a2e] inline-block" /> Free
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-sm bg-purple-500 inline-block" /> Occupied
+          </span>
+        </div>
+      </div>
+      <div className="p-3 overflow-x-auto">
+        <div
+          ref={gridRef}
+          className="w-max mx-auto flex flex-col relative"
+          style={{ gap: CELL_GAP }}
+        >
+          {/* Column headers (every 2nd) */}
+          <div className="flex items-end mb-0.5" style={{ gap: CELL_GAP, marginLeft: ROW_LABEL_WIDTH + CELL_GAP }}>
+            {Array.from({ length: CHANNELS_PER_ROW }).map((_, ci) => {
+              const ch = ci + 1;
+              const showLabel = ch === 1 || ch % 2 === 0;
+              return (
+                <div
+                  key={ci}
+                  className="flex items-end justify-center"
+                  style={{ width: CELL_SIZE, height: 14 }}
+                >
+                  {showLabel && (
+                    <span className="text-[7px] text-gray-600 leading-none font-mono">
+                      {ch}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {rows.map((row, ri) => (
+            <div key={ri} className="flex items-center" style={{ gap: CELL_GAP }}>
+              {/* Row label — start channel of this row */}
+              <span
+                className="text-[7px] text-gray-600 font-mono leading-none shrink-0 text-right"
+                style={{ width: ROW_LABEL_WIDTH }}
+              >
+                {row[0]}
+              </span>
+              {row.map((ch) => {
+                const owner = channelOwner.get(ch);
+                const isHovered = hoverChannelSet.has(ch);
+                const isFirst = owner?.isFirst;
+
+                let bg = '#1a1a2e'; // free
+                let borderColor: string | undefined;
+
+                if (owner) {
+                  const cIdx = colorIndex.get(owner.fixture.id) ?? 0;
+                  const baseColor = getFixtureColor(cIdx);
+                  bg = baseColor;
+                  if (isFirst) {
+                    // First channel = brighter (lighten by mixing with white)
+                    borderColor = '#ffffff';
+                  }
+                  if (isHovered) {
+                    // Brighten on hover
+                    bg = lightenColor(baseColor, 0.35);
+                  }
+                }
+
+                const title = owner
+                  ? `${owner.fixture.name} · Ch ${ch}${isFirst ? ' (start)' : ''}`
+                  : `Ch ${ch} — Free`;
+
+                return (
+                  <div
+                    key={ch}
+                    data-dmx-addr={ch}
+                    title={title}
+                    className={`rounded-sm transition-colors duration-75 relative flex items-center justify-center ${owner ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                    style={{
+                      width: CELL_SIZE,
+                      height: CELL_SIZE,
+                      backgroundColor: bg,
+                      border: borderColor ? `1px solid ${borderColor}` : '1px solid transparent',
+                    }}
+                    onMouseDown={(e) => {
+                      if (!owner || e.button !== 0) return;
+                      e.preventDefault();
+                      dragRef.current = {
+                        fixtureId: owner.fixture.id,
+                        channelCount: owner.fixture.channelCount,
+                        originalAddr: owner.fixture.startAddress,
+                        targetAddr: owner.fixture.startAddress,
+                        dragging: true,
+                        valid: true,
+                      };
+                    }}
+                    onMouseEnter={() => owner && onHover(owner.fixture.id)}
+                    onMouseLeave={() => onHover(null)}
+                    onContextMenu={(e) => {
+                      if (owner) {
+                        e.preventDefault();
+                        onContextMenu(e, owner.fixture.id, owner.fixture.name);
+                      }
+                    }}
+                  >
+                    {/* Channel number overlay */}
+                    <span
+                      className={`absolute inset-0 flex items-center justify-center font-mono leading-none pointer-events-none select-none ${owner ? 'text-[7px] text-white font-semibold' : 'text-[8px] text-gray-300'}`}
+                    >
+                      {ch <= 512 ? ch : ''}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+
+          {/* Drag preview overlay */}
+          {dragPreview && (() => {
+            const cellStep = CELL_SIZE + CELL_GAP;
+            const startRow = Math.floor((dragPreview.addr - 1) / CHANNELS_PER_ROW);
+            const startCol = (dragPreview.addr - 1) % CHANNELS_PER_ROW;
+            // Combien de cellules tient sur la 1re ligne (clampée à la fin de ligne)
+            const cellsInFirstRow = Math.min(dragPreview.count, CHANNELS_PER_ROW - startCol);
+            // La grille de cellules commence APRÈS le label de ligne (24px) et la
+            // ligne d'en-tête de colonnes (hauteur 14px) + marges (mb-0.5 2px et
+            // gap flex-col 2px). Sans ces décalages le preview se dessinait décalé
+            // du bloc réel (ombre fantôme pendant le drag).
+            const headerOffY = 14 + 2 + CELL_GAP;
+            const remainingCells = dragPreview.count - cellsInFirstRow;
+            const fullRows = remainingCells > 0 ? Math.floor(remainingCells / CHANNELS_PER_ROW) : 0;
+            const lastRowCells = remainingCells > 0 ? remainingCells % CHANNELS_PER_ROW : 0;
+
+            return (
+              <div className="absolute pointer-events-none z-10" style={{ top: 0, left: ROW_LABEL_WIDTH + CELL_GAP }}>
+                {/* First row */}
+                <div
+                  className={`absolute rounded-sm border-2 ${dragPreview.valid ? 'border-emerald-400 bg-emerald-400/20' : 'border-red-400 bg-red-400/20'}`}
+                  style={{
+                    left: startCol * cellStep,
+                    top: headerOffY + startRow * cellStep,
+                    width: cellsInFirstRow * cellStep - CELL_GAP,
+                    height: CELL_SIZE,
+                  }}
+                />
+                {/* Full middle rows */}
+                {Array.from({ length: fullRows }).map((_, ri) => (
+                  <div
+                    key={ri}
+                    className={`absolute rounded-sm border-2 ${dragPreview.valid ? 'border-emerald-400 bg-emerald-400/20' : 'border-red-400 bg-red-400/20'}`}
+                    style={{
+                      left: 0,
+                      top: headerOffY + (startRow + 1 + ri) * cellStep,
+                      width: CHANNELS_PER_ROW * cellStep - CELL_GAP,
+                      height: CELL_SIZE,
+                    }}
+                  />
+                ))}
+                {/* Last partial row */}
+                {lastRowCells > 0 && (
+                  <div
+                    className={`absolute rounded-sm border-2 ${dragPreview.valid ? 'border-emerald-400 bg-emerald-400/20' : 'border-red-400 bg-red-400/20'}`}
+                    style={{
+                      left: 0,
+                      top: headerOffY + (startRow + 1 + fullRows) * cellStep,
+                      width: lastRowCells * cellStep - CELL_GAP,
+                      height: CELL_SIZE,
+                    }}
+                  />
+                )}
+              </div>
+            );
+          })()}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Add Fixture Modal ─────────────────────────────────────
+
+/** Champ numérique effaçable : texte libre local, commit au parent quand la
+ *  valeur est valide. Sans ça (value={number} + parseInt), vider le champ est
+ *  impossible : parseInt("") = NaN → ignoré → le state number reprend la main
+ *  et le champ « revient ». Ici le texte reste éditable (dont vide) ; au blur
+ *  on réaffiche la valeur validée. La resynchro externe (auto-find,
+ *  changement de mode/univers) repasse par `value`. */
+function useErasableNumber(
+  value: number,
+  commit: (v: number) => void,
+  opts?: { min?: number; max?: number; maxLen?: number },
+) {
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => { setText(null); }, [value]);
+  const lo = opts?.min ?? 1;
+  const hi = opts?.max ?? 512;
+  const onChange = (rawIn: string) => {
+    const raw = rawIn.replace(/[^0-9]/g, '').slice(0, opts?.maxLen ?? 3);
+    setText(raw);
+    if (raw === '') return;
+    const v = parseInt(raw, 10);
+    if (!isNaN(v) && v >= lo && v <= hi) commit(v);
+  };
+  const onBlur = () => setText(null);
+  return { shown: text ?? String(value), onChange, onBlur };
+}
+
+interface AddFixtureModalProps {
+  step: PatchStep;
+  searchQuery: string;
+  searchResults: FixtureDefResult[];
+  searching: boolean;
+  selectedDef: FixtureDefResult | null;
+  selectedModeIdx: number;
+  startAddress: number;
+  quantity: number;
+  error: string | null;
+  universeId: string;
+  manufacturers: { name: string; count: number }[];
+  libLoading: boolean;
+  selectedManufacturer: string;
+  manufacturerFixtures: FixtureDefResult[];
+  allFixtures: FixtureDefResult[];
+  tier: 'primary' | 'secondary' | 'tertiary' | 'other';
+  onSetTier: (tier: 'primary' | 'secondary' | 'tertiary' | 'other') => void;
+  thumbnailId: string;
+  onSetThumbnail: (id: string) => void;
+  fixtureType: string;
+  onSearch: (query: string) => void;
+  onSelectDef: (def: FixtureDefResult) => void;
+  onSelectMode: (modeIdx: number) => void;
+  onSetAddress: (addr: number) => void;
+  onSetQuantity: (qty: number) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+  onBack: () => void;
+  onSelectManufacturer: (name: string) => void;
+  onBackToBrowse: () => void;
+  onSelectFromManufacturer: (def: FixtureDefResult) => void;
+  onSwitchToSearch: (query: string) => void;
+  onShowDetail: (def: FixtureDefResult) => void;
+  getNextFree: (universeId: string, channels: number, quantity?: number) => number;
+}
+
+const AddFixtureModal: React.FC<AddFixtureModalProps> = ({
+  step,
+  searchQuery,
+  searchResults,
+  searching,
+  selectedDef,
+  selectedModeIdx,
+  startAddress,
+  quantity,
+  error,
+  universeId,
+  manufacturers,
+  libLoading,
+  selectedManufacturer,
+  manufacturerFixtures,
+  allFixtures,
+  tier,
+  onSetTier,
+  thumbnailId,
+  onSetThumbnail,
+  fixtureType,
+  onSearch,
+  onSelectDef,
+  onSelectMode,
+  onSetAddress,
+  onSetQuantity,
+  onConfirm,
+  onCancel,
+  onBack,
+  onSelectManufacturer,
+  onBackToBrowse,
+  onSelectFromManufacturer,
+  onSwitchToSearch,
+  onShowDetail,
+  getNextFree,
+}) => {
+  const { t } = useTranslation();
+  // ── Classements : mode de navigation + regroupement des listes ──
+  const [browseMode, setBrowseMode] = useState<FixtureBrowseMode>('manufacturer');
+  const [selectedKind, setSelectedKind] = useState<string | null>(null);
+  const [listGrouping, setListGrouping] = useState<FixtureListGrouping>('none');
+  // Seaux de navigation (types et capacités) calculés depuis toute la librairie
+  const typeBuckets = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const f of allFixtures) {
+      const k = f.type || 'Autre';
+      map.set(k, (map.get(k) ?? 0) + 1);
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ name, count }));
+  }, [allFixtures]);
+  const capBuckets = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const b of FIXTURE_CAP_BUCKETS) map.set(b.id, 0);
+    for (const f of allFixtures) {
+      for (const c of fixtureCapsOf(f)) map.set(c, (map.get(c) ?? 0) + 1);
+    }
+    return FIXTURE_CAP_BUCKETS
+      .map((b) => ({ id: b.id, label: b.label, count: map.get(b.id) ?? 0 }))
+      .filter((b) => b.count > 0);
+  }, [allFixtures]);
+  const kindFixtures = useMemo(() => {
+    if (browseMode === 'type') return allFixtures.filter((f) => (f.type || 'Autre') === selectedKind);
+    if (browseMode === 'capability') return allFixtures.filter((f) => fixtureCapsOf(f).has(selectedKind ?? ''));
+    return [];
+  }, [allFixtures, browseMode, selectedKind]);
+  // Champs adresse / quantité effaçables (voir useErasableNumber).
+  const addrField = useErasableNumber(startAddress, onSetAddress, { min: 1, max: 512, maxLen: 3 });
+  const qtyField = useErasableNumber(quantity, onSetQuantity, { min: 1, max: 99, maxLen: 2 });
+  const mode =
+    selectedDef && selectedModeIdx < selectedDef.modes.length
+      ? selectedDef.modes[selectedModeIdx]
+      : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[480px] max-w-[95vw] max-h-[80vh] flex flex-col">
+        {/* Header */}
+        <div className="px-5 py-3 border-b border-gray-800/50 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-white">
+            {step === 'browse' && 'Add Fixture — Browse by Manufacturer'}
+            {step === 'manufacturer' && `Add Fixture — ${selectedManufacturer}`}
+            {step === 'searching' && 'Add Fixture — Search Library'}
+            {step === 'modeSelect' && `Select Mode — ${selectedDef?.manufacturer} ${selectedDef?.model}`}
+            {step === 'addressSet' && 'Set DMX Address'}
+          </h3>
+          <button onClick={onCancel} className="text-gray-500 hover:text-gray-300 transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5">
+          {/* Error */}
+          {error && (
+            <div className="flex items-center gap-2 px-3 py-2 mb-4 bg-red-900/20 border border-red-800/40 rounded-lg text-xs text-red-300">
+              <AlertTriangle size={14} className="shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {/* Step: Browse by Manufacturer */}
+          {step === 'browse' && (
+            <div className="space-y-4">
+              {/* Search bar */}
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => {
+                    const q = e.target.value;
+                    onSwitchToSearch(q);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && searchQuery.trim().length >= 1) {
+                      onSwitchToSearch(searchQuery.trim());
+                    }
+                  }}
+                  placeholder={t('design.searchFixtures')}
+                  className="w-full bg-gray-800/50 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-purple-500/50"
+                />
+              </div>
+              {libLoading ? (
+                <div className="flex flex-col items-center justify-center py-10 gap-3">
+                  <div className="w-6 h-6 rounded-full border-2 border-gray-700 border-t-purple-400 animate-spin" />
+                  <p className="text-xs text-gray-500">{t('design.loadingLibrary')}</p>
+                </div>
+              ) : (
+              <>
+              <p className="text-xs text-gray-500">
+                {manufacturers.length} manufacturers · {allFixtures.length} fixtures
+              </p>
+              {/* ── Classements : Fabricants / Types / Capacités ── */}
+              <div className="flex gap-1.5">
+                {([
+                  { id: 'manufacturer', label: t('design.browseManufacturers', 'Fabricants') },
+                  { id: 'type', label: t('design.browseTypes', 'Types') },
+                  { id: 'capability', label: t('design.browseCapabilities', 'Capacités') },
+                ] as Array<{ id: FixtureBrowseMode; label: string }>).map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => { setBrowseMode(m.id); setSelectedKind(null); }}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-medium border transition-all ${
+                      browseMode === m.id
+                        ? 'bg-purple-600/40 text-white border-purple-500/60'
+                        : 'bg-gray-800/50 text-gray-400 border-gray-700/60 hover:text-gray-200'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              {browseMode === 'manufacturer' && (
+              <div className="grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
+                {manufacturers.map((mfg) => {
+                  const hue = (mfg.name.charCodeAt(0) * 37 + mfg.name.length * 53) % 360;
+                  const previewColor = `hsl(${hue}, 60%, 35%)`;
+                  return (
+                    <button
+                      key={mfg.name}
+                      onClick={() => onSelectManufacturer(mfg.name)}
+                      className="text-left p-3 rounded-lg border border-gray-800/50 hover:border-purple-500/40 hover:bg-gray-800/20 transition-all group"
+                    >
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span
+                          className="w-3 h-3 rounded-sm shrink-0"
+                          style={{ backgroundColor: previewColor }}
+                        />
+                        <span className="text-xs text-gray-200 truncate group-hover:text-purple-200 transition-colors">
+                          {mfg.name}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-gray-600">
+                        {mfg.count} fixture{(mfg.count !== 1) ? 's' : ''}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              )}
+              {browseMode !== 'manufacturer' && selectedKind === null && (
+                /* Seaux de types ou de capacités */
+                <div className="grid grid-cols-2 gap-2 max-h-[300px] overflow-y-auto">
+                  {browseMode === 'type'
+                    ? typeBuckets.map((b) => {
+                        const hue = (b.name.charCodeAt(0) * 37 + b.name.length * 53) % 360;
+                        return (
+                          <button
+                            key={b.name}
+                            type="button"
+                            onClick={() => setSelectedKind(b.name)}
+                            className="text-left p-3 rounded-lg border border-gray-800/50 hover:border-purple-500/40 hover:bg-gray-800/20 transition-all group"
+                          >
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: `hsl(${hue}, 60%, 45%)` }} />
+                              <span className="text-xs text-gray-200 truncate group-hover:text-purple-200 transition-colors">{b.name}</span>
+                            </div>
+                            <div className="text-[10px] text-gray-600">{b.count} fixture{b.count !== 1 ? 's' : ''}</div>
+                          </button>
+                        );
+                      })
+                    : capBuckets.map((b) => (
+                        <button
+                          key={b.id}
+                          type="button"
+                          onClick={() => setSelectedKind(b.id)}
+                          className="text-left p-3 rounded-lg border border-gray-800/50 hover:border-purple-500/40 hover:bg-gray-800/20 transition-all group"
+                        >
+                          <div className="text-xs text-gray-200 truncate group-hover:text-purple-200 transition-colors">{b.label}</div>
+                          <div className="text-[10px] text-gray-600 mt-1.5">{b.count} fixture{b.count !== 1 ? 's' : ''}</div>
+                        </button>
+                      ))}
+                </div>
+              )}
+              {browseMode !== 'manufacturer' && selectedKind !== null && (
+                /* Liste filtrée par type / capacité */
+                <div>
+                  <button
+                    onClick={() => setSelectedKind(null)}
+                    className="text-[10px] text-purple-400 hover:text-purple-300"
+                    type="button"
+                  >
+                    ← {browseMode === 'type' ? t('design.browseTypes', 'Types') : t('design.browseCapabilities', 'Capacités')}
+                  </button>
+                  <p className="text-xs text-gray-400 mt-2">
+                    {kindFixtures.length} fixture{kindFixtures.length !== 1 ? 's' : ''} ·{' '}
+                    <span className="text-gray-200 font-medium">
+                      {browseMode === 'type'
+                        ? selectedKind
+                        : (FIXTURE_CAP_BUCKETS.find((b) => b.id === selectedKind)?.label ?? selectedKind)}
+                    </span>
+                  </p>
+                  <div className="space-y-1 max-h-60 overflow-y-auto mt-2">
+                    {kindFixtures.map((def) => (
+                      <button
+                        key={def.id}
+                        onClick={() => onSelectFromManufacturer(def)}
+                        onContextMenu={(e) => { e.preventDefault(); onShowDetail(def); }}
+                        title="Right-click for full details"
+                        className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-gray-800/40 transition-colors flex items-center justify-between group"
+                      >
+                        <div>
+                          <div className="text-sm text-gray-200">{def.model}</div>
+                          <div className="text-[10px] text-gray-500">
+                            {def.manufacturer} · {def.type}
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-gray-600">
+                          {def.modes.length} mode{def.modes.length !== 1 ? 's' : ''}
+                          <ChevronDown size={12} className="inline ml-1 -rotate-90 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              </>
+              )}
+            </div>
+          )}
+          {step === 'manufacturer' && (
+            <div className="space-y-4">
+              <button
+                onClick={() => onBackToBrowse()}
+                className="text-[10px] text-purple-400 hover:text-purple-300"
+                type="button"
+              >
+                ← Back to manufacturers
+              </button>
+              <p className="text-xs text-gray-400">
+                {manufacturerFixtures.length} fixture{manufacturerFixtures.length !== 1 ? 's' : ''} from{' '}
+                <span className="text-gray-200 font-medium">{selectedManufacturer}</span>
+              </p>
+              {/* Regroupement de la liste : aucun / type / capacités */}
+              <div className="flex gap-1.5">
+                {([
+                  { id: 'none', label: t('design.groupNone', 'Aucun') },
+                  { id: 'type', label: t('design.groupByType', 'Par type') },
+                  { id: 'capability', label: t('design.groupByCapability', 'Par capacités') },
+                ] as Array<{ id: FixtureListGrouping; label: string }>).map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => setListGrouping(g.id)}
+                    className={`px-2 py-0.5 rounded text-[10px] border transition-all ${
+                      listGrouping === g.id
+                        ? 'bg-purple-600/40 text-white border-purple-500/60'
+                        : 'bg-gray-800/50 text-gray-400 border-gray-700/60 hover:text-gray-200'
+                    }`}
+                  >
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+              <div className="space-y-1 max-h-60 overflow-y-auto">
+                {groupFixtureDefs(manufacturerFixtures, listGrouping).map(([groupName, defs]) => (
+                  <div key={groupName || '__all'}>
+                    {groupName && (
+                      <div className="px-2 py-1 text-[9px] uppercase tracking-wider text-gray-500 bg-gray-800/40 rounded mb-0.5">
+                        {groupName} · {defs.length}
+                      </div>
+                    )}
+                    {defs.map((def) => (
+                      <button
+                        key={def.id}
+                        onClick={() => onSelectFromManufacturer(def)}
+                        onContextMenu={(e) => { e.preventDefault(); onShowDetail(def); }}
+                        title="Right-click for full details"
+                        className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-gray-800/40 transition-colors flex items-center justify-between group"
+                      >
+                        <div>
+                          <div className="text-sm text-gray-200">{def.model}</div>
+                          <div className="text-[10px] text-gray-500">
+                            {def.type}
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-gray-600">
+                          {def.modes.length} mode{def.modes.length !== 1 ? 's' : ''}
+                          <ChevronDown size={12} className="inline ml-1 -rotate-90 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <p className="text-[9px] text-gray-700 text-center mt-1">{t('design.clickToSelect')}</p>
+            </div>
+          )}
+          {step === 'searching' && (
+            <div className="space-y-4">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => onSearch(e.target.value)}
+                  placeholder={t('design.searchFixtures')}
+                  className="w-full bg-gray-800/50 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-purple-500/50"
+                  autoFocus
+                />
+              </div>
+
+              {searching && (
+                <div className="text-xs text-gray-500 text-center py-4">Searching…</div>
+              )}
+
+              {!searching && searchQuery.length > 0 && searchResults.length === 0 && (
+                <div className="text-xs text-gray-600 text-center py-8">
+                  No fixtures found for "{searchQuery}"
+                </div>
+              )}
+
+              {searchResults.length > 0 && (
+                <>
+                {/* Regroupement des résultats : aucun / type / capacités */}
+                <div className="flex gap-1.5">
+                  {([
+                    { id: 'none', label: t('design.groupNone', 'Aucun') },
+                    { id: 'type', label: t('design.groupByType', 'Par type') },
+                    { id: 'capability', label: t('design.groupByCapability', 'Par capacités') },
+                  ] as Array<{ id: FixtureListGrouping; label: string }>).map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => setListGrouping(g.id)}
+                      className={`px-2 py-0.5 rounded text-[10px] border transition-all ${
+                        listGrouping === g.id
+                          ? 'bg-purple-600/40 text-white border-purple-500/60'
+                          : 'bg-gray-800/50 text-gray-400 border-gray-700/60 hover:text-gray-200'
+                      }`}
+                    >
+                      {g.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="space-y-1 max-h-60 overflow-y-auto">
+                  {groupFixtureDefs(searchResults, listGrouping).map(([groupName, defs]) => (
+                    <div key={groupName || '__all'}>
+                      {groupName && (
+                        <div className="px-2 py-1 text-[9px] uppercase tracking-wider text-gray-500 bg-gray-800/40 rounded mb-0.5">
+                          {groupName} · {defs.length}
+                        </div>
+                      )}
+                      {defs.map((def) => (
+                        <button
+                          key={def.id}
+                          onClick={() => onSelectDef(def)}
+                          onContextMenu={(e) => { e.preventDefault(); onShowDetail(def); }}
+                          title="Right-click for full details"
+                          className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-gray-800/40 transition-colors flex items-center justify-between group"
+                        >
+                          <div>
+                            <div className="text-sm text-gray-200">{def.model}</div>
+                            <div className="text-[10px] text-gray-500">
+                              {def.manufacturer} · {def.type}
+                            </div>
+                          </div>
+                          <div className="text-[10px] text-gray-600">
+                            {def.modes.length} mode{def.modes.length !== 1 ? 's' : ''}
+                            <ChevronDown size={12} className="inline ml-1 -rotate-90 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                </>
+              )}
+              {searchResults.length > 0 && (
+                <p className="text-[9px] text-gray-700 text-center mt-1">{t('design.clickToSelect')}</p>
+              )}
+            </div>
+          )}
+          {step === 'modeSelect' && selectedDef && (
+            <div className="space-y-3">
+              <p className="text-xs text-gray-400">
+                Choose a DMX mode for <span className="text-gray-200 font-medium">{selectedDef.model}</span>:
+              </p>
+              {selectedDef.modes.map((m, i) => (
+                <button
+                  key={i}
+                  onClick={() => onSelectMode(i)}
+                  className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${
+                    i === selectedModeIdx
+                      ? 'border-purple-500/50 bg-purple-600/10'
+                      : 'border-gray-800/50 hover:border-gray-700 hover:bg-gray-800/20'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-200 font-medium">{m.name}</span>
+                    <span className="text-xs text-gray-500 font-mono">{m.channels.length} ch</span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {m.channels.slice(0, 8).map((ch, j) => (
+                      <span key={j} className="text-[9px] px-1.5 py-0.5 rounded bg-gray-800/60 text-gray-400">
+                        {ch.type}
+                      </span>
+                    ))}
+                    {m.channels.length > 8 && (
+                      <span className="text-[9px] px-1.5 py-0.5 text-gray-600">
+                        +{m.channels.length - 8} more
+                      </span>
+                    )}
+                  </div>
+                </button>
+              ))}
+              <button
+                onClick={() => onBack()}
+                className="text-[10px] text-gray-500 hover:text-gray-300 mt-1"
+                type="button"
+              >
+                ← Back to {allFixtures.length > 0 ? 'manufacturer' : 'search'}
+              </button>
+            </div>
+          )}
+
+          {/* Step: Address */}
+          {step === 'addressSet' && selectedDef && mode && (
+            <div className="space-y-4">
+              <div className="bg-[#0d0d14] border border-gray-800/50 rounded-lg p-3">
+                <div className="text-xs text-gray-400">Fixture</div>
+                <div className="text-sm text-gray-200 font-medium">
+                  {selectedDef.manufacturer} {selectedDef.model}
+                </div>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  Mode: {mode.name} · {mode.channels.length} channels
+                  {quantity > 1 && (
+                    <span className="text-purple-300 ml-2">× {quantity} units</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs text-gray-400">Start DMX Address</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={513 - mode.channels.length * quantity}
+                    value={addrField.shown}
+                    onChange={(e) => addrField.onChange(e.target.value)}
+                    onBlur={addrField.onBlur}
+                    className="w-24 bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono outline-none focus:border-purple-500/50"
+                  />
+                  <span className="text-xs text-gray-600">
+                    {' · '}end: {startAddress + mode.channels.length * quantity - 1}
+                    {startAddress + mode.channels.length * quantity - 1 > 512 && (
+                      <span className="text-red-400 ml-1">⚠ Exceeds universe</span>
+                    )}
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    const free = getNextFree(universeId, mode.channels.length, quantity);
+                    if (free > 0) onSetAddress(free);
+                  }}
+                  className="text-[10px] text-purple-400 hover:text-purple-300"
+                  type="button"
+                >
+                  Auto-find first free address
+                </button>
+              </div>
+
+              {/* Quantity */}
+              <div className="space-y-1.5">
+                <label className="text-xs text-gray-400">Quantity</label>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => onSetQuantity(Math.max(1, quantity - 1))}
+                    disabled={quantity <= 1}
+                    className="w-8 h-8 rounded-lg bg-gray-800/50 border border-gray-700 text-gray-300 hover:bg-gray-700/50 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center text-sm font-mono"
+                    type="button"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={99}
+                    value={qtyField.shown}
+                    onChange={(e) => qtyField.onChange(e.target.value)}
+                    onBlur={qtyField.onBlur}
+                    className="w-16 bg-gray-800/50 border border-gray-700 rounded-lg px-2 py-2 text-sm text-gray-200 font-mono text-center outline-none focus:border-purple-500/50"
+                  />
+                  <button
+                    onClick={() => onSetQuantity(Math.min(99, quantity + 1))}
+                    disabled={quantity >= 99}
+                    className="w-8 h-8 rounded-lg bg-gray-800/50 border border-gray-700 text-gray-300 hover:bg-gray-700/50 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center text-sm font-mono"
+                    type="button"
+                  >
+                    +
+                  </button>
+                  <span className="text-[10px] text-gray-600 ml-1">
+                    {mode.channels.length * quantity} total ch
+                  </span>
+                </div>
+              </div>
+
+              {/* Live preview for batch */}
+              {quantity > 1 && (() => {
+                const channels = mode.channels.length;
+                const previews = Array.from({ length: Math.min(quantity, 8) }, (_, i) => ({
+                  idx: i + 1,
+                  name: `${selectedDef.manufacturer} ${selectedDef.model} #${i + 1}`,
+                  addr: startAddress + i * channels,
+                  end: startAddress + i * channels + channels - 1,
+                }));
+                return (
+                  <div className="bg-[#0d0d14] border border-gray-800/50 rounded-lg p-3 space-y-1">
+                    <div className="text-[10px] text-gray-500 uppercase tracking-wider">
+                      Live Preview
+                      {quantity > 8 && (
+                        <span className="text-gray-600 ml-1">(first 8 of {quantity})</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-400 font-mono space-y-0.5">
+                      {previews.map((p) => (
+                        <div key={p.idx} className="flex items-center gap-2">
+                          <span className="w-5 text-gray-600 text-right">#{p.idx}</span>
+                          <span className="text-gray-300 truncate max-w-[180px]">{p.name}</span>
+                          <span className="text-gray-500 whitespace-nowrap">
+                            @ {p.addr}–{p.end}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Fixture Thumbnail / Gif selector */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-gray-400">Fixture Preview</label>
+                  <span className="text-[9px] text-gray-600">{t('design.choose3d')}</span>
+                </div>
+                {
+  /* Use the imported getVariantsForCategory */
+  (() => {
+    const variants = getVariantsForCategory(fixtureType || 'moving_head');
+    return (
+      <div className="grid grid-cols-5 gap-2">
+        {variants.length > 0 ? variants.map((v) => {
+          const sel = thumbnailId === v.id;
+          return (
+            <button key={v.id}
+              onClick={() => onSetThumbnail(v.id)}
+              className={`flex flex-col items-center gap-1 p-1.5 rounded-lg border transition-all ${sel ? 'border-purple-400 bg-purple-600/20' : 'border-gray-700/50 bg-gray-800/30 hover:bg-gray-700/30'}`}
+              title={v.description}
+            >
+              <img src={v.dataUrl} className="w-10 h-10 rounded object-contain" />
+              <span className="text-[8px] text-gray-400 leading-tight text-center">{v.label}</span>
+            </button>
+          );
+        }) : <span className="text-[9px] text-gray-600">{t('design.loadingShort')}</span>}
+      </div>
+    );
+  })()
+}
+              </div>
+
+              {/* Tier selector */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-gray-400">Fixture Tier</label>
+                  <span className="text-[9px] text-gray-600">Tiers control show behavior (intensity/movement/strobe) — Groups control targeting</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { value: 'primary' as const, label: 'Primary', desc: 'Lead fixtures — full effects & movement', color: 'border-purple-500/50 bg-purple-600/10', activeColor: 'border-purple-400 bg-purple-600/30' },
+                    { value: 'secondary' as const, label: 'Secondary', desc: 'Fill lights — balanced effects', color: 'border-blue-500/50 bg-blue-600/10', activeColor: 'border-blue-400 bg-blue-600/30' },
+                    { value: 'tertiary' as const, label: 'Tertiary', desc: 'Ambient/wash — simple colors only', color: 'border-gray-500/50 bg-gray-600/10', activeColor: 'border-gray-400 bg-gray-600/30' },
+                    { value: 'other' as const, label: 'Other', desc: 'Non catalogué — effets neutres', color: 'border-cyan-500/50 bg-cyan-600/10', activeColor: 'border-cyan-400 bg-cyan-600/30' },
+                  ]).map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => onSetTier(opt.value)}
+                      className={`text-left p-2.5 rounded-lg border transition-all ${
+                        tier === opt.value ? opt.activeColor : opt.color + ' hover:bg-gray-800/20'
+                      }`}
+                    >
+                      <div className="text-xs font-medium text-gray-200">{opt.label}</div>
+                      <div className="text-[9px] text-gray-500 mt-0.5 leading-tight">{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => onBack()} className="flex-1 px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300 hover:bg-gray-700/50 transition-colors">
+                  Back
+                </button>
+                <button
+                  onClick={onConfirm}
+                  disabled={!thumbnailId}
+                  className={`flex-1 px-3 py-2 rounded-lg text-xs transition-colors font-medium ${
+                    thumbnailId
+                      ? 'bg-purple-600/30 border border-purple-500/30 text-purple-200 hover:bg-purple-600/50'
+                      : 'bg-gray-800/30 border border-gray-700/50 text-gray-600 cursor-not-allowed'
+                  }`}
+                >
+                  {!thumbnailId ? 'Select a preview' : `Patch ${quantity > 1 ? `${quantity} Fixtures` : 'Fixture'}`}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Patched Fixture List (Left Panel) ─────────────────────
+
+const PatchedFixtureList: React.FC = () => {
+  const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const universes = useShowStore((s) => s.universes);
+   const unpatchFixture = useShowStore((s) => s.unpatchFixture);
+   const updateFixtureTier = useShowStore((s) => s.updateFixtureTier);
+   const duplicateFixture = useShowStore((s) => s.duplicateFixture);
+  const setFixtureName = useShowStore((s) => s.setFixtureName);
+  const { testState, startTest, stopTest } = useFixtureTest();
+  const [testingFixtureId, setTestingFixtureId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string | null>(null);
+  const [editNameValue, setEditNameValue] = useState('');
+  const [ctxMenu, setCtxMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    fixtureId: string;
+    fixtureName: string;
+  }>({ visible: false, x: 0, y: 0, fixtureId: '', fixtureName: '' });
+
+  // Dismiss context menu on any click
+  useEffect(() => {
+    if (!ctxMenu.visible) return;
+    const dismiss = () => setCtxMenu((c) => ({ ...c, visible: false }));
+    window.addEventListener('click', dismiss);
+    return () => window.removeEventListener('click', dismiss);
+  }, [ctxMenu.visible]);
+
+  // Reset test state when test completes
+  useEffect(() => {
+    if (!testState.isRunning && testingFixtureId) {
+      setTestingFixtureId(null);
+    }
+  }, [testState.isRunning, testingFixtureId]);
+
+  const handleStartRename = (f: PatchedFixture) => {
+    setEditingName(f.id);
+    setEditNameValue(f.name);
+  };
+
+  const handleConfirmRename = () => {
+    if (editingName && editNameValue.trim()) {
+      setFixtureName(editingName, editNameValue.trim());
+    }
+    setEditingName(null);
+  };
+
+  if (patchedFixtures.length === 0) {
+    return (
+      <div className="text-xs text-gray-600 text-center py-8">
+        No fixtures patched yet
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="space-y-1">
+        {patchedFixtures.map((f, i) => {
+          const isTesting = testingFixtureId === f.id && testState.isRunning;
+          return (
+          <div
+            key={f.id}
+            className={`px-2 py-1.5 rounded-lg border bg-[#0d0d14] border-gray-700 hover:border-purple-500/40 hover:bg-gray-800/20 cursor-pointer text-xs flex items-center gap-2 transition-all ${isTesting ? '!bg-emerald-600/10 !border-emerald-500/40 shadow-[0_0_14px_rgba(16,185,129,0.25)]' : ''}`}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setCtxMenu({ visible: true, x: e.clientX, y: e.clientY, fixtureId: f.id, fixtureName: f.name });
+            }}
+          >
+            <span
+              className="w-2 h-2 rounded-sm shrink-0"
+              style={{ backgroundColor: isTesting ? '#10b981' : getFixtureColor(i) }}
+            />
+            <div className="flex-1 min-w-0">
+              {editingName === f.id ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={editNameValue}
+                    onChange={(e) => setEditNameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleConfirmRename();
+                      if (e.key === 'Escape') setEditingName(null);
+                    }}
+                    className="w-full bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none"
+                    autoFocus
+                  />
+                  <button onClick={handleConfirmRename} className="text-green-400 hover:text-green-300 shrink-0">
+                    <Check size={12} />
+                  </button>
+                  <button onClick={() => setEditingName(null)} className="text-gray-500 hover:text-gray-300 shrink-0">
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : (
+                <div className="text-gray-300 truncate">{f.name}</div>
+              )}
+              <div className="text-[10px] text-gray-600 flex items-center gap-1">
+                <span className={`inline-block px-1 py-0 rounded text-[8px] ${
+                  f.tier === 'primary' ? 'bg-purple-500/20 text-purple-400' :
+                  f.tier === 'secondary' ? 'bg-blue-500/20 text-blue-400' :
+                  f.tier === 'other' ? 'bg-cyan-500/20 text-cyan-400' :
+                  'bg-gray-500/20 text-gray-400'
+                }`}>{f.tier}</span>
+                {f.model} · {f.channelCount}ch · @{f.startAddress}
+              </div>
+              {isTesting && (
+                <div className="mt-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] text-emerald-400 font-medium">{testState.stepLabel}</span>
+                    <div className="flex-1 h-1 bg-gray-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-500 rounded-full transition-all duration-75"
+                        style={{ width: `${testState.progress * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={async (e) => {
+                e.stopPropagation();
+                if (isTesting) {
+                  stopTest();
+                  setTestingFixtureId(null);
+                  return;
+                }
+                // Load fixture definition to get channel types
+                try {
+                  const def = await (window as any).lightMaestro?.fixtures?.getDefinition(f.fixtureDefId);
+                  const mode = def?.modes?.[f.modeIndex ?? 0];
+                  const channels = mode?.channels || [];
+                  setTestingFixtureId(f.id);
+                  startTest({
+                    universeIndex: universes.findIndex(u => u.id === f.universeId),
+                    startAddress: f.startAddress,
+                    channels,
+                  });
+                } catch {
+                  // Fixture def not available — try a basic dimmer-only test
+                  setTestingFixtureId(f.id);
+                  startTest({
+                    universeIndex: universes.findIndex(u => u.id === f.universeId),
+                    startAddress: f.startAddress,
+                    channels: [{ name: 'Dimmer', type: 'Intensity', offset: 0 }],
+                  });
+                }
+              }}
+              onDoubleClick={(e) => e.stopPropagation()}
+              className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium transition-all ${
+                isTesting
+                  ? 'bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600/30'
+                  : 'bg-gray-800/50 text-gray-500 hover:text-emerald-400 hover:bg-emerald-600/10 border border-transparent hover:border-emerald-500/30'
+              }`}
+              title={isTesting ? 'Stop test' : 'Test fixture'}
+            >
+              {isTesting ? (
+                <Square size={10} />
+              ) : (
+                <Zap size={10} />
+              )}
+            </button>
+          </div>
+        )})}
+      </div>
+
+      {/* Context menu */}
+      {ctxMenu.visible && (
+        <div
+          className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
+          style={{ ...clampRect(ctxMenu.x, ctxMenu.y, 240, 240, window.innerWidth, window.innerHeight) }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider">
+            {ctxMenu.fixtureName}
+          </div>
+          <button
+            onClick={() => {
+              handleStartRename(patchedFixtures.find(f => f.id === ctxMenu.fixtureId)!);
+              setCtxMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-300 transition-colors flex items-center gap-2"
+          >
+            <Edit2 size={12} />
+            Rename
+          </button>
+          <button
+            onClick={() => {
+              const result = duplicateFixture(ctxMenu.fixtureId);
+              setCtxMenu((c) => ({ ...c, visible: false }));
+              if ('id' in result) {
+                try { (window as any).__lm_toast?.('Dupliqué', 'info'); } catch {}
+              }
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-purple-600/20 hover:text-purple-300 transition-colors flex items-center gap-2"
+          >
+            <Copy size={12} />
+            Dupliquer
+          </button>
+          <div className="my-1 border-t border-gray-800/60" />
+          <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">Groupe</div>
+          {(['primary', 'secondary', 'tertiary', 'other'] as const).map((tier) => {
+            const isCurrent = patchedFixtures.find((f) => f.id === ctxMenu.fixtureId)?.tier === tier;
+            return (
+              <button
+                key={tier}
+                onClick={() => {
+                  updateFixtureTier(ctxMenu.fixtureId, tier);
+                  setCtxMenu((c) => ({ ...c, visible: false }));
+                }}
+                className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                  isCurrent ? 'text-purple-300' : 'text-gray-300 hover:bg-purple-600/20 hover:text-purple-300'
+                }`}
+              >
+                <span className={`w-2.5 h-2.5 rounded-full ${
+                  tier === 'primary' ? 'bg-purple-400' : tier === 'secondary' ? 'bg-blue-400' : tier === 'other' ? 'bg-cyan-400' : 'bg-gray-400'
+                }`} />
+                {tier.charAt(0).toUpperCase() + tier.slice(1)}
+                {isCurrent && <Check size={12} className="ml-auto" />}
+              </button>
+            );
+          })}
+          <button
+            onClick={() => {
+              unpatchFixture(ctxMenu.fixtureId);
+              setCtxMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-red-300 hover:bg-red-600/20 hover:text-red-200 transition-colors flex items-center gap-2"
+          >
+            <Trash2 size={12} />
+            Unpatch
+          </button>
+        </div>
+      )}
+    </>
+  );
+};
+
+// ─── Groups List (Left Panel) ────────────────────────────
+
+const GROUPS_PRESET_COLORS = [
+  '#ff0064', '#6400ff', '#00c8ff', '#ffc800', '#00ff88', '#ff6600',
+];
+
+const GroupsList: React.FC = () => {
+  const groups = useShowStore((s) => s.fixtureGroups);
+  const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const universes = useShowStore((s) => s.universes);
+  const removeGroup = useShowStore((s) => s.removeGroup);
+  const [ctxMenu, setCtxMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    groupId: string;
+    groupName: string;
+  }>({ visible: false, x: 0, y: 0, groupId: '', groupName: '' });
+
+  useEffect(() => {
+    if (!ctxMenu.visible) return;
+    const dismiss = () => setCtxMenu((c) => ({ ...c, visible: false }));
+    window.addEventListener('click', dismiss);
+    return () => window.removeEventListener('click', dismiss);
+  }, [ctxMenu.visible]);
+
+  if (groups.length === 0) {
+    return (
+      <div className="text-xs text-gray-600 text-center py-8">
+        No groups created yet
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+        {groups.map((g) => (
+          <div
+            key={g.id}
+            className="rounded-lg border border-gray-700 bg-[#0d0d14] px-2 py-1.5 hover:border-purple-500/40 hover:bg-gray-800/20 cursor-pointer text-xs transition-all"
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setCtxMenu({ visible: true, x: e.clientX, y: e.clientY, groupId: g.id, groupName: g.name });
+            }}
+            title="Right-click to delete"
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: g.color || '#6b7280', boxShadow: `0 0 6px ${g.color || '#6b7280'}66` }}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-gray-200 truncate font-medium">{g.name}</div>
+                <div className="text-[10px] text-gray-500 truncate">
+                  {g.fixtureIds.length} fx
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Context menu */}
+      {ctxMenu.visible && (
+        <div
+          className="fixed z-[60] bg-[#1a1a28] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
+          style={{ ...clampRect(ctxMenu.x, ctxMenu.y, 240, 240, window.innerWidth, window.innerHeight) }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-1.5 text-[10px] text-gray-500 uppercase tracking-wider">
+            {ctxMenu.groupName}
+          </div>
+          <button
+            onClick={() => {
+              removeGroup(ctxMenu.groupId);
+              setCtxMenu((c) => ({ ...c, visible: false }));
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-red-300 hover:bg-red-600/20 hover:text-red-200 transition-colors flex items-center gap-2"
+          >
+            <Trash2 size={12} />
+            Delete Group
+          </button>
+        </div>
+      )}
+    </>
+  );
+};
+
+// ─── Groups Editor (Right Panel) ─────────────────────────
+
+const GroupsEditor: React.FC = () => {
+  const { t } = useTranslation();
+  const fixtureGroups = useShowStore((s) => s.fixtureGroups);
+  const patchedFixtures = useShowStore((s) => s.patchedFixtures);
+  const universes = useShowStore((s) => s.universes);
+  const addGroup = useShowStore((s) => s.addGroup);
+  const removeGroup = useShowStore((s) => s.removeGroup);
+  const renameGroup = useShowStore((s) => s.renameGroup);
+  const updateGroupFixtures = useShowStore((s) => s.updateGroupFixtures);
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newColor, setNewColor] = useState(GROUPS_PRESET_COLORS[0]);
+  const [newFixtureIds, setNewFixtureIds] = useState<string[]>([]);
+  const [editGroupId, setEditGroupId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editColor, setEditColor] = useState('');
+  const [editFixtureIds, setEditFixtureIds] = useState<string[]>([]);
+
+  // Le bouton générique "+ New group" du panneau de gauche ouvre ce formulaire
+  // via l'événement lm-open-group-create (le bouton d'en-tête redondant a été retiré).
+  useEffect(() => {
+    const open = () => setShowCreate(true);
+    window.addEventListener('lm-open-group-create', open);
+    return () => window.removeEventListener('lm-open-group-create', open);
+  }, []);
+
+  const resetCreate = () => {
+    setShowCreate(false);
+    setNewName('');
+    setNewColor(GROUPS_PRESET_COLORS[0]);
+    setNewFixtureIds([]);
+  };
+
+  const handleCreate = () => {
+    if (!newName.trim()) return;
+    addGroup(newName.trim(), newFixtureIds, newColor);
+    resetCreate();
+  };
+
+  const handleStartEdit = (g: FixtureGroup) => {
+    setEditGroupId(g.id);
+    setEditName(g.name);
+    setEditColor(g.color || GROUPS_PRESET_COLORS[0]);
+    setEditFixtureIds([...g.fixtureIds]);
+  };
+
+  const handleSaveEdit = () => {
+    if (!editGroupId || !editName.trim()) return;
+    renameGroup(editGroupId, editName.trim());
+    updateGroupFixtures(editGroupId, editFixtureIds);
+    setEditGroupId(null);
+  };
+
+  const handleCancelEdit = () => setEditGroupId(null);
+
+  const toggleFixture = (id: string, selected: string[], setSelected: (v: string[]) => void) => {
+    if (selected.includes(id)) {
+      setSelected(selected.filter((fid) => fid !== id));
+    } else {
+      setSelected([...selected, id]);
+    }
+  };
+
+  // Group fixtures by name for display
+  const fixtureNameMap = new Map(patchedFixtures.map((f) => [f.id, f]));
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-xl font-bold text-white">Fixture Groups</h2>
+        <p className="text-[10px] text-gray-500 mt-0.5 max-w-lg">
+          Groups are user-defined subsets used to target specific fixtures in AutoScript cues.
+          They differ from <span className="text-purple-400">Tiers</span>, which control automatic show behavior
+          (intensity, movement, and strobe scaling in DMX cues).
+        </p>
+      </div>
+
+      {fixtureGroups.length === 0 && !showCreate && (
+        <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-8 text-center">
+          <div className="text-4xl mb-3 opacity-30">📦</div>
+          <div className="text-sm text-gray-400 mb-1">No fixture groups yet</div>
+          <div className="text-xs text-gray-600 mb-4">
+            Groups let you target specific fixtures with cues and effects
+          </div>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="px-4 py-2 bg-purple-600/30 text-purple-200 rounded-lg text-xs font-medium hover:bg-purple-600/50 transition-all"
+          >
+            <Plus size={12} className="inline mr-1" /> Create First Group
+          </button>
+        </div>
+      )}
+
+      {/* Create form */}
+      {showCreate && (
+        <div className="bg-[#0d0d14] border border-purple-500/30 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-800/50 flex items-center justify-between">
+            <span className="text-xs font-semibold text-purple-300">New Group</span>
+            <button onClick={resetCreate} className="text-gray-500 hover:text-gray-300">
+              <X size={14} />
+            </button>
+          </div>
+          <div className="p-4 space-y-4">
+            {/* Name */}
+            <div className="space-y-1">
+              <label className="text-[10px] text-gray-500 uppercase tracking-wider">Name</label>
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="e.g. Front Wash, Moving Heads"
+                className="w-full bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-purple-500/50"
+                autoFocus
+                onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
+              />
+            </div>
+
+            {/* Color picker */}
+            <div className="space-y-1">
+              <label className="text-[10px] text-gray-500 uppercase tracking-wider">Color</label>
+              <div className="flex gap-2">
+                {GROUPS_PRESET_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setNewColor(c)}
+                    className={`w-7 h-7 rounded-full border-2 transition-all ${
+                      newColor === c ? 'border-white scale-110' : 'border-transparent'
+                    }`}
+                    style={{ backgroundColor: c }}
+                    title={c}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Fixture multi-select */}
+            <div className="space-y-2">
+              <label className="text-[10px] text-gray-500 uppercase tracking-wider">
+                Fixtures ({newFixtureIds.length} selected)
+              </label>
+              {patchedFixtures.length === 0 ? (
+                <div className="text-xs text-gray-600 py-2">
+                  No fixtures patched yet. Patch fixtures first.
+                </div>
+              ) : (
+                <div className="max-h-48 overflow-y-auto space-y-1 bg-gray-800/20 rounded-lg p-2">
+                  {patchedFixtures.map((f) => (
+                    <label
+                      key={f.id}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-800/30 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={newFixtureIds.includes(f.id)}
+                        onChange={() => toggleFixture(f.id, newFixtureIds, setNewFixtureIds)}
+                        className="accent-purple-500 w-3.5 h-3.5"
+                      />
+                      <span className="text-xs text-gray-300 truncate flex-1">{f.name}</span>
+                      <span className="text-[10px] text-gray-600">
+                        {f.model} · {f.channelCount}ch
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={resetCreate}
+                className="flex-1 px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300 hover:bg-gray-700/50 transition-colors"
+              >{t('common.cancel')}
+              </button>
+              <button
+                onClick={handleCreate}
+                disabled={!newName.trim() || newFixtureIds.length === 0}
+                className="flex-1 px-3 py-2 bg-purple-600/30 border border-purple-500/30 rounded-lg text-xs text-purple-200 hover:bg-purple-600/50 transition-colors font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Create Group
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Group cards */}
+      <div className="space-y-3">
+        {fixtureGroups.map((g) => {
+          const isEditing = editGroupId === g.id;
+          const cardColor = g.color || editColor || '#6b7280';
+          return (
+            <div
+              key={g.id}
+              className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden"
+              style={{ borderLeft: `3px solid ${cardColor}` }}
+            >
+              {isEditing ? (
+                /* Edit mode */
+                <div className="p-4 space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-500 uppercase tracking-wider">Name</label>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="w-full bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none focus:border-purple-500/50"
+                      autoFocus
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(); if (e.key === 'Escape') handleCancelEdit(); }}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-500 uppercase tracking-wider">Color</label>
+                    <div className="flex gap-2">
+                      {GROUPS_PRESET_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          onClick={() => setEditColor(c)}
+                          className={`w-7 h-7 rounded-full border-2 transition-all ${
+                            editColor === c ? 'border-white scale-110' : 'border-transparent'
+                          }`}
+                          style={{ backgroundColor: c }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] text-gray-500 uppercase tracking-wider">
+                      Fixtures ({editFixtureIds.length} selected)
+                    </label>
+                    <div className="max-h-48 overflow-y-auto space-y-1 bg-gray-800/20 rounded-lg p-2">
+                      {patchedFixtures.map((f) => {
+                        const fixtureId = String(f.id);
+                        return (
+                          <label
+                            key={fixtureId}
+                            className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-800/30 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={editFixtureIds.includes(fixtureId)}
+                              onChange={() => toggleFixture(fixtureId, editFixtureIds, setEditFixtureIds)}
+                              className="accent-purple-500 w-3.5 h-3.5"
+                            />
+                            <span className="text-xs text-gray-300 truncate flex-1">{f.name}</span>
+                            <span className="text-[10px] text-gray-600">
+                              {f.model} · {f.channelCount}ch
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => { removeGroup(g.id); setEditGroupId(null); }}
+                      className="px-3 py-2 bg-red-600/15 text-red-300 rounded-lg text-xs hover:bg-red-600/25 transition-colors flex items-center gap-1.5"
+                    >
+                      <Trash2 size={12} /> {t('common.delete')}
+                    </button>
+                    <div className="flex-1" />
+                    <button
+                      onClick={handleCancelEdit}
+                      className="px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300 hover:bg-gray-700/50 transition-colors"
+                    >
+                      {t('common.cancel')}
+                    </button>
+                    <button
+                      onClick={handleSaveEdit}
+                      disabled={!editName.trim()}
+                      className="px-3 py-2 bg-purple-600/30 border border-purple-500/30 rounded-lg text-xs text-purple-200 hover:bg-purple-600/50 transition-colors font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Display mode */
+                <div
+                  className="p-4 flex items-center gap-3 cursor-pointer hover:bg-gray-800/10 transition-colors"
+                  onClick={() => handleStartEdit(g)}
+                >
+                  {/* Draggable handle placeholder */}
+                  <GripVertical size={16} className="text-gray-600 shrink-0" />
+                  {/* Color dot */}
+                  <span
+                    className="w-3.5 h-3.5 rounded-sm shrink-0"
+                    style={{ backgroundColor: cardColor }}
+                  />
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-gray-200 font-medium truncate">{g.name}</div>
+                    <div className="text-xs text-gray-600">
+                      {g.fixtureIds.length} fixture{g.fixtureIds.length !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                  {/* Edit hint */}
+                  <span className="text-[10px] text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                    Click to edit
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ─── Color Utility ─────────────────────────────────────────
+
+function lightenColor(hex: string, amount: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const lr = Math.min(255, r + Math.round((255 - r) * amount));
+  const lg = Math.min(255, g + Math.round((255 - g) * amount));
+  const lb = Math.min(255, b + Math.round((255 - b) * amount));
+  return `#${lr.toString(16).padStart(2, '0')}${lg.toString(16).padStart(2, '0')}${lb.toString(16).padStart(2, '0')}`;
+}
+
+// ─── Design Settings Panel ─────────────────────────────────
+
+const DesignSettingsPanel: React.FC = () => {
+  const { t } = useTranslation();
+  const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const showUniverses = useShowStore((s) => s.universes);
+  const addShowUniverse = useShowStore((s) => s.addShowUniverse);
+  const removeShowUniverse = useShowStore((s) => s.removeShowUniverse);
+  const [serialPorts, setSerialPorts] = useState<any[]>([]);
+  // Local mirror of universes for instant UI updates (bypasses Zustand stale-closure issues with selects)
+  const [localUniverses, setLocalUniverses] = useState<ShowUniverse[]>([]);
+  useEffect(() => {
+    setLocalUniverses(showUniverses.map(u => ({ ...u })));
+  }, [showUniverses]);
+  const [portsLoading, setPortsLoading] = useState(false);
+   const [dmxEngineRunning, setDmxEngineRunning] = useState(false);
+   const [dmxConnecting, setDmxConnecting] = useState(false);
+  // Sync DMX engine state periodically (engine may be started by autoscript)
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const running = await window.lightMaestro.dmx.isRunning();
+        if (!cancelled) setDmxEngineRunning(running);
+      } catch { /* api not ready */ }
+    };
+    check(); // immediate
+    const interval = setInterval(check, 2000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+  const refreshPorts = useCallback(async () => {
+    setPortsLoading(true);
+    try { const p = await window.lightMaestro.dmx.listSerialPorts(); setSerialPorts(p || []); } catch { setSerialPorts([]); }
+    setPortsLoading(false);
+  }, []);
+  useEffect(() => { refreshPorts(); }, [refreshPorts]);
+  const dmxStartingRef = useRef(false);
+  const handleStartDmx = async () => {
+    if (dmxStartingRef.current || dmxEngineRunning) return; // sync guard — no double-start
+    dmxStartingRef.current = true;
+    try {
+      const running = await window.lightMaestro.dmx.isRunning();
+      if (running) {
+        setDmxEngineRunning(true);
+        return;
+      }
+      // Sync showStore universes into the DMX engine before starting
+      const universes = useShowStore.getState().universes;
+      // Auto-detect a DMX adapter port when a usb-dmx universe has none configured
+      let missingPort = universes.some((u: any) => u.type === 'usb-dmx' && !u.serialPort);
+      if (missingPort) {
+        try {
+          const ports = await window.lightMaestro.dmx.listSerialPorts();
+          const dmxPorts = (ports || []).filter(isDmxPort);
+          // Never fall back to an arbitrary port (e.g. a Bluetooth serial link)
+          // when no DMX adapter is detected — that silently misconfigures a
+          // non-DMX port as USB-DMX output.
+          const chosen = dmxPorts[0];
+          if (chosen) {
+            const st = useShowStore.getState();
+            st.setShowUniverses(st.universes.map((u: any) => u.type === 'usb-dmx' && !u.serialPort ? { ...u, serialPort: chosen.path } : u));
+          }
+        } catch { /* serial port listing unavailable */ }
+      }
+      const universes2 = useShowStore.getState().universes;
+      for (const u of universes2) {
+        try {
+          await window.lightMaestro.dmx.addUniverse(universeToEngineConfig(u));
+        } catch { /* already exists or not ready */ }
+      }
+      await window.lightMaestro.dmx.start();
+      setDmxEngineRunning(true);
+    } catch (e: any) {
+      // Engine may already be running from autoscript — sync UI state instead
+      if (e.message?.includes('already running')) {
+        setDmxEngineRunning(true);
+      } else {
+        setSaveStatus('DMX start failed: ' + (e.message || 'Unknown'));
+      }
+    } finally {
+      dmxStartingRef.current = false;
+    }
+  };
+
+   // Auto-start DMX engine on mount — but only after a USB port is detected.
+   // We watch for usb-dmx universes without a port and poll until one appears,
+   // then start the engine automatically (plug-and-play UX).
+   // If there are NO usb-dmx universes at all, skip auto-start (user may be
+   // using Art-Net/sACN only, which don't need a serial port).
+   const dmxAutoStartRef = useRef(false);
+   useEffect(() => {
+     if (dmxAutoStartRef.current) return;
+     dmxAutoStartRef.current = true;
+     if (showUniverses.length === 0) return;
+     const hasUsbUniverse = showUniverses.some((u: any) => u.type === 'usb-dmx');
+     if (!hasUsbUniverse) return; // no USB universe → nothing to auto-detect
+     const hasUsbNoPort = showUniverses.some((u: any) => u.type === 'usb-dmx' && !u.serialPort);
+     if (!hasUsbNoPort) {
+       // All USB universes have ports → start immediately
+       handleStartDmx();
+       return;
+     }
+     // Poll until a DMX adapter appears, then start
+     let tries = 0;
+     let cancelled = false;
+     const tick = async () => {
+       if (cancelled || tries >= 30) { setDmxConnecting(false); return; } // ~60s timeout
+       tries++;
+       setDmxConnecting(true);
+       try {
+         const ports = await window.lightMaestro.dmx.listSerialPorts();
+         const dmxPorts = (ports || []).filter(isDmxPort);
+         if (dmxPorts.length > 0) {
+           const st = useShowStore.getState();
+           const merged = st.universes.map((u: any) =>
+             u.type === 'usb-dmx' && !u.serialPort ? { ...u, serialPort: dmxPorts[0].path } : u
+           );
+           st.setShowUniverses(merged);
+           setDmxConnecting(false);
+           // Show toast to confirm auto-connection
+           try { (window as any).__lm_toast?.(`USB DMX connecté sur ${dmxPorts[0].path}`, 'ok'); } catch {}
+           // Now that a port is assigned, start the engine
+           handleStartDmx();
+           return;
+         }
+       } catch { /* ports not ready */ }
+       setTimeout(tick, 2000);
+     };
+     tick();
+     return () => { cancelled = true; setDmxConnecting(false); };
+   }, [showUniverses]); // eslint-disable-line
+
+  // Auto-detect a DMX serial port: keep polling while a usb-dmx universe has no
+  // port assigned (the adapter may enumerate a few seconds after boot).
+  useEffect(() => {
+    let tries = 0;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || tries >= 15) return;
+      tries++;
+      const st = useShowStore.getState();
+      const needs = st.universes.some((u: any) => u.type === 'usb-dmx' && !u.serialPort);
+      if (!needs) return;
+      try {
+        const ports = await window.lightMaestro.dmx.listSerialPorts();
+        const dmxPorts = (ports || []).filter(isDmxPort);
+        // Same rule as above: only auto-assign a port that looks like a DMX adapter.
+        const chosen = dmxPorts[0];
+        if (chosen) {
+          const merged = st.universes.map((u: any) => u.type === 'usb-dmx' && !u.serialPort ? { ...u, serialPort: chosen.path } : u);
+          st.setShowUniverses(merged);
+          for (const u of merged) {
+            if (u.type === 'usb-dmx') {
+              window.lightMaestro.dmx.addUniverse(universeToEngineConfig(u)).catch(() => {});
+            }
+          }
+          return;
+        }
+      } catch { /* ports not ready yet */ }
+      setTimeout(tick, 2000);
+    };
+    tick();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleStopDmx = async () => {
+    try { await window.lightMaestro.dmx.stop(); setDmxEngineRunning(false); } catch (e: any) { setSaveStatus('DMX stop failed: ' + (e.message || 'Unknown')); }
+  };
+  const handleAddUniverse = () => {
+    const id = 'universe-' + (showUniverses.length + 1);
+    const result = addShowUniverse({ id, name: 'Universe ' + (showUniverses.length + 1), type: 'usb-dmx', channels: 512, serialPort: '' });
+    if (result && 'error' in result) {
+      setSaveStatus(result.error);
+    } else {
+      setSaveStatus(null);
+    }
+  };
+  const handleRemoveUniverse = (id: string) => removeShowUniverse(id);
+  const handleUpdateUniverse = (id: string, updates: any) => {
+    // 1. Update local state immediately → instant UI reaction (select re-renders with new value)
+    setLocalUniverses(prev => prev.map(u => u.id === id ? { ...u, ...updates } : u));
+    // 2. Push merged array to store (avoids stale closure / selector memoisation issues)
+    const store = useShowStore.getState();
+    const merged = store.universes.map(u => u.id === id ? { ...u, ...updates } : u);
+    store.setShowUniverses(merged);
+    // 3. Sync to the DMX engine right away: changing the port (or type) must
+    //    start/restart the output without requiring a manual stop + start.
+    const u = merged.find(x => x.id === id);
+    if (u && window.lightMaestro?.dmx?.addUniverse) {
+      window.lightMaestro.dmx.addUniverse(universeToEngineConfig(u)).catch(() => {});
+    }
+  };
+
+  const sceneCount = useShowStore((s) => s.scenes.length);
+  const chaserCount = useShowStore((s) => s.chasers.length);
+  const fixtureCount = useShowStore((s) => s.patchedFixtures.length);
+  const groupCount = useShowStore((s) => s.fixtureGroups.length);
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-xl font-bold text-white">Design Settings</h2>
+
+      {/* DMX Engine */}
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <div><h3 className="text-sm font-semibold text-gray-200">DMX Engine</h3><p className="text-[10px] text-gray-500">Must be running before DMX output works</p></div>
+          <div className="flex items-center gap-2">
+            <span className={'w-2 h-2 rounded-full ' + (dmxEngineRunning ? 'bg-green-500' : dmxConnecting ? 'bg-yellow-500 animate-pulse' : 'bg-gray-600')} />
+            <span className="text-[10px] text-gray-500">{dmxEngineRunning ? t('design.dmxRunning') : dmxConnecting ? 'Detecting USB…' : t('design.dmxStopped')}</span>
+            {dmxEngineRunning ? (
+              <button onClick={handleStopDmx} className="px-3 py-1.5 bg-red-600/30 text-red-300 rounded text-[10px] font-semibold hover:bg-red-600/50 border border-red-500/30">{t('common.stop')}</button>
+            ) : (
+              <button onClick={handleStartDmx} className="px-3 py-1.5 bg-green-600/30 text-green-300 rounded text-[10px] font-semibold hover:bg-green-600/50 border border-green-500/30">{t('design.dmxStart')}</button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Universes */}
+      <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div><h3 className="text-sm font-semibold text-gray-200">DMX Universes</h3><p className="text-[10px] text-gray-500">Configure output: USB-DMX, ArtNet, sACN, or Virtual</p></div>
+          <button onClick={handleAddUniverse} className="px-2 py-1 bg-purple-600/20 text-purple-300 rounded text-[10px] hover:bg-purple-600/30 border border-purple-500/30">+ Add</button>
+        </div>
+        {(localUniverses.length > 0 ? localUniverses : showUniverses).map((univ: any) => {
+          const uType = univ.type || 'virtual';
+          const uPort = univ.serialPort || '';
+          const types = ['usb-dmx', 'artnet', 'sacn', 'virtual'] as const;
+          const typeLabels: Record<string, string> = { 'usb-dmx': 'USB', artnet: 'ArtNet', sacn: 'sACN', virtual: 'Virtual' };
+          const dmxPorts = serialPorts.filter(isDmxPort);
+          // If no DMX-looking ports found, show ALL ports (user can pick any COM port)
+          const showPorts = dmxPorts.length > 0 ? dmxPorts : serialPorts;
+          return (
+            <div key={univ.id} className="bg-[#12121a] border border-gray-800/30 rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-gray-300">{univ.name}</span>
+                <div className="flex items-center gap-2">
+                  <div className="flex rounded overflow-hidden border border-gray-700/50">
+                    {types.map(t => (
+                      <button
+                        key={t}
+                        onClick={() => handleUpdateUniverse(univ.id, { type: t })}
+                        className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                          uType === t
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-[#0a0a0f] text-gray-500 hover:text-gray-300 hover:bg-[#1a1a25]'
+                        }`}
+                      >
+                        {typeLabels[t]}
+                      </button>
+                    ))}
+                  </div>
+                  {showUniverses.length > 1 && <button onClick={() => handleRemoveUniverse(univ.id)} className="text-[10px] text-red-400 hover:text-red-300">✕</button>}
+                </div>
+              </div>
+              <div className={`${uType === 'usb-dmx' ? '' : 'hidden'}`}>
+                <div className="flex gap-1">
+                  <select value={uPort} onChange={(e) => handleUpdateUniverse(univ.id, { serialPort: e.target.value })} className="flex-1 bg-[#0a0a0f] border border-gray-700/50 rounded px-2 py-1 text-[10px] text-gray-300">
+                    <option value="">{t('design.selectSerialPort')}</option>
+                    {showPorts.map((p: any) => <option key={p.path} value={p.path}>{p.path}{p.manufacturer ? ' - ' + p.manufacturer : ''}</option>)}
+                  </select>
+                  <button onClick={refreshPorts} disabled={portsLoading} className="px-2 py-1 bg-gray-800/50 text-gray-400 rounded text-[9px] hover:bg-gray-700/50" title="Refresh">{portsLoading ? '...' : '↻'}</button>
+                </div>
+                {!uPort && <p className="text-[9px] text-yellow-500 mt-1">⚠ {t('design.selectComPort')}</p>}
+              </div>
+              <div className={`${uType === 'artnet' ? '' : 'hidden'}`}>
+                <div className="flex gap-1"><input type="text" value={univ.artnetIP || '255.255.255.255'} onChange={(e) => handleUpdateUniverse(univ.id, { artnetIP: e.target.value })} placeholder="IP" className="flex-1 bg-[#0a0a0f] border border-gray-700/50 rounded px-2 py-1 text-[10px] text-gray-300" /><input type="number" value={univ.artnetSubnet || 0} onChange={(e) => handleUpdateUniverse(univ.id, { artnetSubnet: parseInt(e.target.value)||0 })} placeholder="Subnet" className="w-14 bg-[#0a0a0f] border border-gray-700/50 rounded px-2 py-1 text-[10px] text-gray-300" /><input type="number" value={univ.artnetUniverse || 0} onChange={(e) => handleUpdateUniverse(univ.id, { artnetUniverse: parseInt(e.target.value)||0 })} placeholder="Univ" className="w-14 bg-[#0a0a0f] border border-gray-700/50 rounded px-2 py-1 text-[10px] text-gray-300" /></div>
+              </div>
+              <div className={`${uType === 'sacn' ? '' : 'hidden'}`}>
+                <div className="flex gap-1"><input type="number" value={univ.sacnUniverse || 1} onChange={(e) => handleUpdateUniverse(univ.id, { sacnUniverse: parseInt(e.target.value)||1 })} placeholder="Universe" className="w-20 bg-[#0a0a0f] border border-gray-700/50 rounded px-2 py-1 text-[10px] text-gray-300" /><input type="number" value={univ.sacnPriority || 100} onChange={(e) => handleUpdateUniverse(univ.id, { sacnPriority: parseInt(e.target.value)||100 })} placeholder="Priority" className="w-16 bg-[#0a0a0f] border border-gray-700/50 rounded px-2 py-1 text-[10px] text-gray-300" /></div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+
+      {saveStatus && (
+        <div className={`text-xs px-3 py-2 rounded-lg ${
+          saveStatus.includes('failed') || saveStatus.includes('Licence') || saveStatus.includes('limitée') || saveStatus.includes('limit')
+            ? 'bg-red-900/20 border border-red-800/40 text-red-300'
+            : 'bg-green-900/20 border border-green-800/40 text-green-300'
+        }`}>
+          {saveStatus}
+        </div>
+      )}
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-4 max-w-lg">
+        {[
+          { label: 'Scenes', value: `${sceneCount} scene${sceneCount !== 1 ? 's' : ''}` },
+          { label: 'Chasers', value: `${chaserCount} chaser${chaserCount !== 1 ? 's' : ''}` },
+          { label: 'Fixtures Patched', value: `${fixtureCount} fixture${fixtureCount !== 1 ? 's' : ''}` },
+          { label: 'Fixture Groups', value: `${groupCount} group${groupCount !== 1 ? 's' : ''}` },
+          { label: 'Default Fade In', value: '1000 ms' },
+          { label: 'DMX Refresh Rate', value: '44 Hz' },
+        ].map((s, i) => (
+          <div key={i} className="bg-[#0d0d14] border border-gray-800/50 rounded-xl p-3 space-y-1">
+            <div className="text-[10px] text-gray-500 uppercase">{s.label}</div>
+            <div className="text-sm text-gray-300">{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* License limit popup */}
+      <LicenseLimitPopup />
+    </div>
+  );
+};
+
+// ─── Fixture Editor Modal ────────────────────────────────
+
+const FIXTURE_TYPES = [
+  'Moving Head', 'LED PAR', 'Scanner', 'Strobe', 'Dimmer',
+  'Smoke', 'Laser', 'Flower', 'Blinder', 'Wash', 'Spot', 'Beam', 'Other',
+];
+
+const CHANNEL_TYPES = [
+  'Intensity', 'Pan', 'Tilt', 'Colour', 'Gobo', 'Shutter',
+  'Strobe', 'Speed', 'Prism', 'Effect', 'Beam', 'Zoom', 'Frost', 'Focus', 'Iris',
+  'Macro', 'Nothing', 'Maintenance',
+];
+
+/** Libellé du sous-menu de capacités par type de canal (fallback « Capabilities »). */
+const CAPABILITY_LABELS: Record<string, string> = {
+  Colour: 'Colors',
+  Gobo: 'Gobo Patterns',
+  Macro: 'Macros',
+};
+
+interface EditorChannel {
+  name: string;
+  type: string;
+  defaultValue?: number;
+  capabilities?: Array<{ min: number; max: number; name: string; color?: string }>;
+}
+
+interface EditorMode {
+  name: string;
+  channels: EditorChannel[];
+}
+
+const FixtureEditorModal: React.FC<{ onClose: () => void; preloadedFixture?: any }> = ({ onClose, preloadedFixture }) => {
+  const { t } = useTranslation();
+  const [tab, setTab] = useState<'create' | 'edit'>(preloadedFixture ? 'edit' : 'create');
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  // Create tab
+  const [manufacturer, setManufacturer] = useState(preloadedFixture?.manufacturer || '');
+  const [model, setModel] = useState(preloadedFixture?.model || '');
+  const [fixtureType, setFixtureType] = useState(preloadedFixture?.type || 'Moving Head');
+  const [createModes, setCreateModes] = useState<EditorMode[]>(
+    preloadedFixture?.modes?.length > 0
+      ? preloadedFixture.modes.map((m: any) => ({ name: m.name, channels: m.channels?.map((ch: any) => ({ name: ch.name, type: ch.type, defaultValue: ch.defaultValue ?? 0, capabilities: ch.capabilities?.map((c: any) => ({ min: c.min, max: c.max, name: c.name, color: c.color })) || [] })) || [] }))
+      : [{ name: 'Default', channels: [] }]
+  );
+  // Physical properties (create tab)
+  const [lampType, setLampType] = useState(preloadedFixture?.lampType || '');
+  const [beamAngle, setBeamAngle] = useState(preloadedFixture?.beamAngle ?? 25);
+  const [weight, setWeight] = useState(preloadedFixture?.weight ?? 0);
+  const [power, setPower] = useState(preloadedFixture?.power ?? 0);
+  const [width, setWidth] = useState(preloadedFixture?.width ?? 0);
+  const [height, setHeight] = useState(preloadedFixture?.height ?? 0);
+  const [depth, setDepth] = useState(preloadedFixture?.depth ?? 0);
+
+  // Edit tab
+  const [searchQuery, setSearchQuery] = useState('');
+  const [allDefs, setAllDefs] = useState<FixtureDefResult[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [selectedEditId, setSelectedEditId] = useState<string | null>(null);
+  const [editManufacturer, setEditManufacturer] = useState('');
+  const [editModel, setEditModel] = useState('');
+  const [editType, setEditType] = useState('');
+  const [editModes, setEditModes] = useState<EditorMode[]>([]);
+
+  // Load all defs for edit tab
+  useEffect(() => {
+    (async () => {
+      try {
+        const all = await (window.lightMaestro.fixtures as any).getAll();
+        setAllDefs((all || []).map((d: any) => ({
+          id: d.id, manufacturer: d.manufacturer, model: d.model,
+          type: d.type, modes: d.modes || [],
+        })));
+      } catch { setError('Failed to load fixture library'); }
+      setLoaded(true);
+    })();
+  }, []);
+
+  // ESC key closes the modal
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const filtered = !searchQuery.trim() ? allDefs : allDefs.filter((d) =>
+    (d.manufacturer || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (d.model || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (d.type || '').toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Load a def for editing
+  const handleLoadForEdit = async (id: string) => {
+    setError(null); setSuccess(null);
+    try {
+      const full = await window.lightMaestro.fixtures.getDefinition(id);
+      setSelectedEditId(id);
+      setEditManufacturer(full.manufacturer || '');
+      setEditModel(full.model || '');
+      setEditType(full.type || '');
+      setEditModes((full.modes || []).map((m: any) => ({
+        name: m.name || '',
+        channels: (m.channels || []).map((ch: any) => ({
+          name: ch.name || '', type: displayTypeForChannel(ch),
+          defaultValue: ch.defaultValue,
+          capabilities: ch.capabilities ? [...ch.capabilities] : undefined,
+        })),
+      })));
+    } catch { setError('Failed to load fixture definition'); }
+  };
+
+  // Helpers
+  const addMode = (target: 'create' | 'edit') => {
+    const [modes, setModes] = target === 'create' ? [createModes, setCreateModes] as const : [editModes, setEditModes] as const;
+    setModes([...modes, { name: `Mode ${modes.length + 1}`, channels: [] }]);
+  };
+
+  const removeMode = (target: 'create' | 'edit', idx: number) => {
+    const [modes, setModes] = target === 'create' ? [createModes, setCreateModes] as const : [editModes, setEditModes] as const;
+    if (modes.length <= 1) return;
+    setModes(modes.filter((_, i) => i !== idx));
+  };
+
+  const setModeName = (target: 'create' | 'edit', mi: number, name: string) => {
+    const [modes, setModes] = target === 'create' ? [createModes, setCreateModes] as const : [editModes, setEditModes] as const;
+    setModes(modes.map((m, i) => i === mi ? { ...m, name } : m));
+  };
+
+  const addChannel = (target: 'create' | 'edit', mi: number) => {
+    const [modes, setModes] = target === 'create' ? [createModes, setCreateModes] as const : [editModes, setEditModes] as const;
+    setModes(modes.map((m, i) => i === mi ? { ...m, channels: [...m.channels, { name: `Channel ${m.channels.length + 1}`, type: 'Intensity' }] } : m));
+  };
+
+  const removeChannel = (target: 'create' | 'edit', mi: number, ci: number) => {
+    const [modes, setModes] = target === 'create' ? [createModes, setCreateModes] as const : [editModes, setEditModes] as const;
+    setModes(modes.map((m, i) => i === mi ? { ...m, channels: m.channels.filter((_, j) => j !== ci) } : m));
+  };
+
+  const updateChannel = (target: 'create' | 'edit', mi: number, ci: number, updates: Partial<EditorChannel>) => {
+    const [modes, setModes] = target === 'create' ? [createModes, setCreateModes] as const : [editModes, setEditModes] as const;
+    setModes(modes.map((m, i) =>
+      i === mi ? { ...m, channels: m.channels.map((ch, j) => j === ci ? { ...ch, ...updates } : ch) } : m
+    ));
+  };
+
+  const moveChannel = (target: 'create' | 'edit', mi: number, ci: number, dir: -1 | 1) => {
+    const [modes, setModes] = target === 'create' ? [createModes, setCreateModes] as const : [editModes, setEditModes] as const;
+    const ni = ci + dir;
+    if (ni < 0 || ni >= modes[mi].channels.length) return;
+    const chs = [...modes[mi].channels];
+    [chs[ci], chs[ni]] = [chs[ni], chs[ci]];
+    setModes(modes.map((m, i) => i === mi ? { ...m, channels: chs } : m));
+  };
+
+  const addCapability = (target: 'create' | 'edit', mi: number, ci: number) => {
+    const [modes] = target === 'create' ? [createModes] as const : [editModes] as const;
+    const ch = modes[mi].channels[ci];
+    const lastCap = (ch.capabilities || []).at(-1);
+    // Pré-remplir le début à max+1 de la dernière macro (ex. 1-50 → prochaine à 51)
+    const cap: { min: number | undefined; max: number | undefined; name: string; color?: string } = {
+      min: lastCap ? lastCap.max + 1 : 0,
+      max: 255,
+      name: 'New Capability',
+    };
+    if (ch.type === 'Colour') cap.color = '#ff0000';
+    updateChannel(target, mi, ci, { capabilities: [...(ch.capabilities || []), cap] });
+  };
+
+  const removeCapability = (target: 'create' | 'edit', mi: number, ci: number, capIdx: number) => {
+    const [modes] = target === 'create' ? [createModes] : [editModes];
+    const caps = (modes[mi].channels[ci].capabilities || []).filter((_, i) => i !== capIdx);
+    updateChannel(target, mi, ci, { capabilities: caps.length ? caps : undefined });
+  };
+
+  const updateCapability = (target: 'create' | 'edit', mi: number, ci: number, capIdx: number, updates: Partial<{ min: number | undefined; max: number | undefined; name: string; color: string }>) => {
+    const [modes] = target === 'create' ? [createModes] : [editModes];
+    const caps = (modes[mi].channels[ci].capabilities || []).map((c, i) => i === capIdx ? { ...c, ...updates } : c);
+    updateChannel(target, mi, ci, { capabilities: caps });
+  };
+
+  // Build def from form
+  const buildDef = (isCreate: boolean) => {
+    const mfg = isCreate ? manufacturer : editManufacturer;
+    const mdl = isCreate ? model : editModel;
+    const ft = isCreate ? fixtureType : editType;
+    const modes = isCreate ? createModes : editModes;
+    const id = `custom-${mfg.toLowerCase().replace(/\s+/g, '-')}-${mdl.toLowerCase().replace(/\s+/g, '-')}`;
+    return {
+      id,
+      manufacturer: mfg.trim(),
+      model: mdl.trim(),
+      type: ft,
+      modes: modes.map((m) => ({
+        name: m.name || 'Default',
+        channels: m.channels.map((ch) => {
+          const c: any = { name: ch.name || 'Unnamed', type: ch.type };
+          if (ch.defaultValue != null) c.defaultValue = ch.defaultValue;
+          if (ch.capabilities?.length) c.capabilities = ch.capabilities;
+          return c;
+        }),
+      })),
+      // Physical properties
+      ...(isCreate ? {
+        lampType: lampType || undefined,
+        beamAngle: beamAngle || undefined,
+        weight: weight || undefined,
+        power: power || undefined,
+        width: width || undefined,
+        height: height || undefined,
+        depth: depth || undefined,
+      } : {}),
+    };
+  };
+
+  const handleSave = async (isCreate: boolean) => {
+    setError(null); setSuccess(null);
+    const mfg = isCreate ? manufacturer : editManufacturer;
+    const mdl = isCreate ? model : editModel;
+    if (!mfg.trim()) { setError('Manufacturer is required'); return; }
+    if (!mdl.trim()) { setError('Model is required'); return; }
+    try {
+      await window.lightMaestro.fixtures.addCustom(buildDef(isCreate));
+      clearFixtureDefCache(); // flush cache so new custom fixture is loaded next time
+      setSuccess(`Fixture "${mfg.trim()} ${mdl.trim()}" saved!`);
+      if (isCreate) {
+        setManufacturer(''); setModel(''); setCreateModes([{ name: 'Default', channels: [] }]);
+        setLampType(''); setBeamAngle(25); setWeight(0); setPower(0); setWidth(0); setHeight(0); setDepth(0);
+      }
+      // Refresh the edit-tab list
+      try { const all = await (window.lightMaestro.fixtures as any).getAll();
+        setAllDefs((all || []).map((d: any) => ({ id: d.id, manufacturer: d.manufacturer, model: d.model, type: d.type, modes: d.modes || [] })));
+      } catch {}
+      // Close modal after successful save
+      setTimeout(() => onClose(), 800);
+    } catch (e: any) { setError(`Save failed: ${e?.message || 'Unknown'}`); }
+  };
+
+  // ── render helpers ──
+  const renderChannel = (target: 'create' | 'edit', mi: number, ch: EditorChannel, ci: number, total: number) => (
+    <div key={ci} className="bg-gray-800/20 border border-gray-800/50 rounded-lg p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-gray-600 font-mono w-5 shrink-0">{ci + 1}</span>
+        <input type="text" value={ch.name} onChange={(e) => updateChannel(target, mi, ci, { name: e.target.value })}
+          className="flex-1 min-w-0 bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 outline-none focus:border-purple-500/50" placeholder="Name" />
+        <select value={ch.type} onChange={(e) => updateChannel(target, mi, ci, { type: e.target.value })}
+          className="bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 outline-none shrink-0">
+          {CHANNEL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <input type="number" value={ch.defaultValue ?? ''} onChange={(e) => {
+          const v = e.target.value === '' ? undefined : Math.max(0, Math.min(255, parseInt(e.target.value) || 0));
+          updateChannel(target, mi, ci, { defaultValue: v });
+        }} placeholder="Def" className="w-14 bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 outline-none shrink-0" />
+        <button onClick={() => moveChannel(target, mi, ci, -1)} disabled={ci === 0}
+          className="p-1 text-gray-500 hover:text-gray-300 disabled:opacity-20 shrink-0" title="Move up">▲</button>
+        <button onClick={() => moveChannel(target, mi, ci, 1)} disabled={ci === total - 1}
+          className="p-1 text-gray-500 hover:text-gray-300 disabled:opacity-20 shrink-0" title="Move down">▼</button>
+        <button onClick={() => removeChannel(target, mi, ci)} className="p-1 text-gray-500 hover:text-red-400 shrink-0" title="Remove channel"><X size={14} /></button>
+      </div>
+      <div className="ml-7 space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] text-gray-500 uppercase tracking-wider">{CAPABILITY_LABELS[ch.type] ?? 'Capabilities'}</span>
+          <button onClick={() => addCapability(target, mi, ci)}
+            className="text-[9px] text-purple-400 hover:text-purple-300 flex items-center gap-1">
+            <Plus size={10} /> Add
+          </button>
+        </div>
+        {(ch.capabilities || []).map((cap, cci) => (
+          <div key={cci} className="flex items-center gap-1.5">
+            <span className="text-[9px] text-gray-600 w-5 shrink-0">{cci + 1}</span>
+            <input type="number" value={cap.min ?? ''} onChange={(e) => {
+              const v = e.target.value === '' ? undefined : Math.max(0, Math.min(255, parseInt(e.target.value) || 0));
+              updateCapability(target, mi, ci, cci, { min: v });
+            }}
+              className="w-12 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono outline-none" placeholder="0" />
+            <span className="text-[9px] text-gray-600">–</span>
+            <input type="number" value={cap.max ?? ''} onChange={(e) => {
+              const v = e.target.value === '' ? undefined : Math.max(0, Math.min(255, parseInt(e.target.value) || 0));
+              updateCapability(target, mi, ci, cci, { max: v });
+            }}
+              className="w-12 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono outline-none" placeholder="255" />
+            <input type="text" value={cap.name} onChange={(e) => updateCapability(target, mi, ci, cci, { name: e.target.value })}
+              className="flex-1 min-w-0 bg-gray-800/50 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 outline-none" placeholder="Name" />
+            {ch.type === 'Colour' && (
+              <input type="color" value={cap.color || '#ff0000'} onChange={(e) => updateCapability(target, mi, ci, cci, { color: e.target.value })}
+                className="w-6 h-5 rounded cursor-pointer border-0 p-0 bg-transparent shrink-0" />
+            )}
+            <button onClick={() => removeCapability(target, mi, ci, cci)} className="text-gray-500 hover:text-red-400 shrink-0" title="Remove"><X size={10} /></button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const modes = tab === 'create' ? createModes : editModes;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
+      <div className="bg-[#12121a] border border-gray-700 rounded-xl shadow-2xl w-[680px] max-w-[95vw] max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="px-5 py-3 border-b border-gray-800/50 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-white">Fixture Editor</h3>
+          <span className="text-[10px] text-gray-600">Fill all fields then save</span>
+        </div>
+
+        {/* Tabs */}
+        <div className="px-5 pt-3 flex gap-1 border-b border-gray-800/30">
+          {(['create', 'edit'] as const).map((t) => (
+            <button key={t} onClick={() => { setTab(t); setError(null); setSuccess(null); }}
+              className={`px-4 py-2 rounded-t-lg text-xs font-medium transition-colors ${
+                tab === t ? 'bg-purple-600/20 text-purple-300 border-t border-l border-r border-purple-500/30' : 'text-gray-500 hover:text-gray-300'
+              }`}>
+              {t === 'create' ? 'Create New' : 'Edit Existing'}
+            </button>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {error && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-red-900/20 border border-red-800/40 rounded-lg text-xs text-red-300">
+              <AlertTriangle size={14} className="shrink-0" />{error}
+            </div>
+          )}
+          {success && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-green-900/20 border border-green-800/40 rounded-lg text-xs text-green-300">
+              <Check size={14} className="shrink-0" />{success}
+            </div>
+          )}
+
+          {tab === 'create' ? (
+            /* ── CREATE NEW TAB ── */
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">Manufacturer</label>
+                  <input type="text" value={manufacturer} onChange={(e) => setManufacturer(e.target.value)}
+                    className="w-full bg-gray-800/50 border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-200 outline-none focus:border-purple-500/50" placeholder="e.g. Chauvet" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">Model</label>
+                  <input type="text" value={model} onChange={(e) => setModel(e.target.value)}
+                    className="w-full bg-gray-800/50 border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-200 outline-none focus:border-purple-500/50" placeholder="e.g. Intimidator 150" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">Type</label>
+                  <select value={fixtureType} onChange={(e) => setFixtureType(e.target.value)}
+                    className="w-full bg-gray-800/50 border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-300 outline-none">
+                    {FIXTURE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* Physical Properties (collapsible) */}
+              <details className="bg-[#0d0d14] border border-gray-800/50 rounded-lg overflow-hidden">
+                <summary className="px-3 py-2 cursor-pointer text-[10px] text-gray-500 uppercase tracking-wider hover:text-gray-300 select-none">
+                  Physical Properties ▾
+                </summary>
+                <div className="p-3 grid grid-cols-3 gap-3 border-t border-gray-800/30">
+                  <div className="space-y-1">
+                    <label className="text-[9px] text-gray-600">Lamp Type</label>
+                    <input type="text" value={lampType} onChange={(e) => setLampType(e.target.value)}
+                      className="w-full bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-purple-500/50" placeholder="e.g. LED 60W" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] text-gray-600">Beam Angle (°)</label>
+                    <input type="number" value={beamAngle || ''} onChange={(e) => setBeamAngle(parseInt(e.target.value) || 0)}
+                      className="w-full bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-purple-500/50" placeholder="25" min="0" max="360" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] text-gray-600">Weight (kg)</label>
+                    <input type="number" value={weight || ''} onChange={(e) => setWeight(parseFloat(e.target.value) || 0)}
+                      className="w-full bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-purple-500/50" placeholder="0" min="0" step="0.1" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] text-gray-600">Power (W)</label>
+                    <input type="number" value={power || ''} onChange={(e) => setPower(parseInt(e.target.value) || 0)}
+                      className="w-full bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-purple-500/50" placeholder="0" min="0" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] text-gray-600">Width (mm)</label>
+                    <input type="number" value={width || ''} onChange={(e) => setWidth(parseInt(e.target.value) || 0)}
+                      className="w-full bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-purple-500/50" placeholder="0" min="0" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] text-gray-600">Height (mm)</label>
+                    <input type="number" value={height || ''} onChange={(e) => setHeight(parseInt(e.target.value) || 0)}
+                      className="w-full bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-purple-500/50" placeholder="0" min="0" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] text-gray-600">Depth (mm)</label>
+                    <input type="number" value={depth || ''} onChange={(e) => setDepth(parseInt(e.target.value) || 0)}
+                      className="w-full bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-purple-500/50" placeholder="0" min="0" />
+                  </div>
+                </div>
+              </details>
+
+              {createModes.map((mode, mi) => (
+                <div key={mi} className="bg-[#0d0d14] border border-gray-800/50 rounded-lg overflow-hidden">
+                  <div className="px-3 py-2 border-b border-gray-800/30 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-gray-500">Mode {mi + 1}</span>
+                      <input type="text" value={mode.name} onChange={(e) => setModeName('create', mi, e.target.value)}
+                        className="bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 outline-none w-32" placeholder="Name" />
+                      <span className="text-[10px] text-gray-600">{mode.channels.length} ch</span>
+                    </div>
+                    <div className="flex gap-1">
+                      <button onClick={() => addChannel('create', mi)}
+                        className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-1 px-2 py-1 rounded hover:bg-purple-600/10">
+                        <Plus size={10} /> Channel
+                      </button>
+                      {createModes.length > 1 && (
+                        <button onClick={() => removeMode('create', mi)} className="text-[10px] text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-red-600/10">Remove</button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="p-3 space-y-2 max-h-60 overflow-y-auto">
+                    {mode.channels.length === 0 ? (
+                      <div className="text-[10px] text-gray-600 text-center py-4">No channels — click &quot;+ Channel&quot; to add</div>
+                    ) : mode.channels.map((ch, ci) => renderChannel('create', mi, ch, ci, mode.channels.length))}
+                  </div>
+                </div>
+              ))}
+              <button onClick={() => addMode('create')}
+                className="w-full px-3 py-2 border border-dashed border-gray-700 rounded-lg text-xs text-gray-500 hover:text-gray-300 hover:border-gray-600 transition-colors">
+                <Plus size={12} className="inline mr-1" /> Add Mode
+              </button>
+            </div>
+          ) : (
+            /* ── EDIT EXISTING TAB ── */
+            <div className="space-y-4">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t('design.searchFixtures')}
+                  className="w-full bg-gray-800/50 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-purple-500/50" />
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-1">
+                {!loaded && <div className="text-xs text-gray-500 text-center py-4">{t('design.loadingFixtures')}</div>}
+                {loaded && filtered.length === 0 && <div className="text-xs text-gray-600 text-center py-4">No fixtures found</div>}
+                {filtered.slice(0, 50).map((def) => (
+                  <button key={def.id} onClick={() => handleLoadForEdit(def.id)}
+                    className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center justify-between ${
+                      selectedEditId === def.id ? 'bg-purple-600/10 border border-purple-500/30' : 'hover:bg-gray-800/30'
+                    }`}>
+                    <div>
+                      <div className="text-xs text-gray-200">{def.manufacturer} {def.model}</div>
+                      <div className="text-[10px] text-gray-500">{def.type} · {def.modes.length} mode{def.modes.length !== 1 ? 's' : ''}</div>
+                    </div>
+                    <ChevronDown size={12} className="text-gray-600 -rotate-90" />
+                  </button>
+                ))}
+              </div>
+
+              {selectedEditId && editModes.length > 0 && (
+                <>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-500 uppercase tracking-wider">Manufacturer</label>
+                      <input type="text" value={editManufacturer} onChange={(e) => setEditManufacturer(e.target.value)}
+                        className="w-full bg-gray-800/50 border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-200 outline-none focus:border-purple-500/50" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-500 uppercase tracking-wider">Model</label>
+                      <input type="text" value={editModel} onChange={(e) => setEditModel(e.target.value)}
+                        className="w-full bg-gray-800/50 border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-200 outline-none focus:border-purple-500/50" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-500 uppercase tracking-wider">Type</label>
+                      <select value={editType} onChange={(e) => setEditType(e.target.value)}
+                        className="w-full bg-gray-800/50 border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-300 outline-none">
+                        {FIXTURE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  {editModes.map((mode, mi) => (
+                    <div key={mi} className="bg-[#0d0d14] border border-gray-800/50 rounded-lg overflow-hidden">
+                      <div className="px-3 py-2 border-b border-gray-800/30 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-gray-500">Mode {mi + 1}</span>
+                          <input type="text" value={mode.name} onChange={(e) => setModeName('edit', mi, e.target.value)}
+                            className="bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 outline-none w-32" placeholder="Name" />
+                          <span className="text-[10px] text-gray-600">{mode.channels.length} ch</span>
+                        </div>
+                        <div className="flex gap-1">
+                          <button onClick={() => addChannel('edit', mi)}
+                            className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-1 px-2 py-1 rounded hover:bg-purple-600/10">
+                            <Plus size={10} /> Channel
+                          </button>
+                          {editModes.length > 1 && (
+                            <button onClick={() => removeMode('edit', mi)} className="text-[10px] text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-red-600/10">Remove</button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="p-3 space-y-2 max-h-60 overflow-y-auto">
+                        {mode.channels.length === 0 ? (
+                          <div className="text-[10px] text-gray-600 text-center py-4">No channels — click &quot;+ Channel&quot; to add</div>
+                        ) : mode.channels.map((ch, ci) => renderChannel('edit', mi, ch, ci, mode.channels.length))}
+                      </div>
+                    </div>
+                  ))}
+                  <button onClick={() => addMode('edit')}
+                    className="w-full px-3 py-2 border border-dashed border-gray-700 rounded-lg text-xs text-gray-500 hover:text-gray-300 hover:border-gray-600 transition-colors">
+                    <Plus size={12} className="inline mr-1" /> Add Mode
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-gray-800/50 flex items-center justify-between">
+          <span className="text-[10px] text-gray-600">Fixture saved to user data folder</span>
+          <button onClick={() => handleSave(tab === 'create')}
+            className="px-5 py-2 bg-purple-600/30 border border-purple-500/30 rounded-lg text-xs text-purple-200 hover:bg-purple-600/50 transition-colors font-medium flex items-center gap-1.5">
+            <Save size={12} />
+            Save Fixture
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Param Field ───────────────────────────────────────────
+
+const ParamField: React.FC<{ label: string; value: number; unit: string; onChange: (v: number) => void }> =
+  ({ label, value, unit, onChange }) => {
+    const [draft, setDraft] = React.useState<string>(String(value));
+    React.useEffect(() => setDraft(String(value)), [value]);
+    return (
+      <div className="space-y-1">
+        <label className="block text-[10px] text-gray-500 uppercase tracking-wider">{label}</label>
+        <div className="flex items-center gap-1">
+          <input type="number" value={draft} onChange={(e) => {
+            const raw = e.target.value;
+            setDraft(raw);
+            if (raw === '') return;
+            const n = Number(raw);
+            if (!Number.isFinite(n)) return;
+            onChange(Math.max(0, Math.min(60000, Math.round(n))));
+          }} onBlur={() => setDraft(String(value))}
+          className="w-20 bg-gray-800/50 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-purple-500/50" />
+          <span className="text-[10px] text-gray-600">{unit}</span>
+        </div>
+      </div>
+    );
+  };
+
+// ─── Réseau sACN (Network Monitor) ─────────────────────────
+// Monitoring de ce qui part (émetteur sACN) et de ce qui arrive
+// (récepteur sACN, merge HTP des sources externes) par univers.
+// Données : dmx.getStatus().network (poll 1s). Le toggle réception
+// pilote l'API dmx:setSacnReceive côté moteur.
+
+const fmtNetTime = (ts: number): string =>
+  ts > 0 ? new Date(ts).toLocaleTimeString() : '—';
+
+const fmtNetPackets = (n: number): string => n.toLocaleString('fr-FR');
+
+const NetDot: React.FC<{ ok: boolean; off?: boolean; title: string }> = ({ ok, off, title }) => (
+  <span
+    title={title}
+    className={`inline-block w-2 h-2 rounded-full shrink-0 ${
+      off ? 'bg-gray-700' : ok ? 'bg-green-500' : 'bg-red-500'
+    }`}
+  />
+);
+
+const NetworkMonitor: React.FC = () => {
+  const { t } = useTranslation();
+  const [network, setNetwork] = useState<{ enabled: boolean; errors: string[]; universes: any[] } | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const s = await (window as any).lightMaestro?.dmx?.getStatus?.();
+        if (alive && s?.network) setNetwork(s.network);
+      } catch { /* engine not available — keep last state */ }
+    };
+    tick();
+    const iv = setInterval(tick, 1000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+
+  const toggleReceive = async (universeId: string, enabled: boolean) => {
+    setToggling(universeId);
+    try {
+      const s = await (window as any).lightMaestro?.dmx?.setSacnReceive?.(universeId, enabled);
+      if (s?.network) setNetwork(s.network);
+    } catch { /* engine off */ }
+    finally { setToggling(null); }
+  };
+
+  const universes = network?.universes ?? [];
+
+  return (
+    <div className="bg-[#0d0d14] border border-gray-800/50 rounded-xl overflow-hidden">
+      <div className="px-4 py-2 border-b border-gray-800/50 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-medium text-gray-400">{t('design.sacnNetwork')}</span>
+          <span className="flex items-center gap-1.5 text-[10px] text-gray-500">
+            <span className={`inline-block w-2 h-2 rounded-full ${network?.enabled ? 'bg-green-500' : 'bg-gray-700'}`} />
+            {network?.enabled ? t('design.sacnRxOn') : t('design.sacnRxOff')}
+          </span>
+          <span className="text-[10px] text-gray-600">{t('design.sacnHint')}</span>
+        </div>
+        {!!network?.errors?.length && (
+          <span className="flex items-center gap-1 text-[10px] text-red-400">
+            <AlertTriangle size={11} /> {t('design.sacnErrors', { count: network.errors.length })}
+          </span>
+        )}
+      </div>
+
+      {universes.length === 0 ? (
+        <div className="p-4 text-center text-xs text-gray-600">
+          {t('design.sacnEmpty')}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-gray-800/30 text-[10px] text-gray-500 uppercase tracking-wider">
+                <th className="text-left px-4 py-2 font-medium">{t('common.universe')}</th>
+                <th className="text-left px-4 py-2 font-medium">{t('design.sacnColTx')}</th>
+                <th className="text-left px-4 py-2 font-medium">{t('design.sacnColRx')}</th>
+                <th className="text-left px-4 py-2 font-medium">{t('design.sacnColSources')}</th>
+                <th className="text-right px-4 py-2 font-medium">{t('design.sacnColRxState')}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800/20">
+              {universes.map((u) => (
+                <tr key={u.universeId} className="hover:bg-gray-800/20 transition-colors align-top">
+                  {/* Univers */}
+                  <td className="px-4 py-2">
+                    <div className="font-medium text-gray-200">{u.name}</div>
+                    <div className="text-[10px] text-gray-600 font-mono">U{u.universe} · prio {u.priority}</div>
+                  </td>
+
+                  {/* Émission */}
+                  <td className="px-4 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <NetDot ok={!!u.txActive && !!u.outputEnabled} title={u.txActive && u.outputEnabled ? 'Émission active' : 'Émission inactive'} />
+                      <span className={u.txActive && u.outputEnabled ? 'text-gray-300' : 'text-gray-600'}>
+                        {u.txActive && u.outputEnabled ? `${u.txFps} fps` : 'inactif'}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-gray-600 mt-0.5">
+                      {fmtNetPackets(u.txPackets)} paquets · dernière {fmtNetTime(u.txLastSendAt)}
+                    </div>
+                  </td>
+
+                  {/* Réception */}
+                  <td className="px-4 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <NetDot ok={!!u.receiving} off={!u.receiveEnabled} title={!u.receiveEnabled ? 'Réception désactivée' : u.receiving ? 'Réception active' : 'Aucune trame reçue'} />
+                      <span className={!u.receiveEnabled ? 'text-gray-600' : u.receiving ? 'text-gray-300' : 'text-red-400'}>
+                        {!u.receiveEnabled ? 'désactivée' : u.receiving ? `${u.rxFps} fps` : 'aucune trame'}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-gray-600 mt-0.5">
+                      {u.rxPps} paquets/s · {fmtNetPackets(u.rxPackets)} reçus · dernière trame {fmtNetTime(u.rxLastFrameAt)}
+                      {u.mergeOutput && <span className="text-purple-400/80"> · merge HTP → sortie</span>}
+                    </div>
+                  </td>
+
+                  {/* Sources */}
+                  <td className="px-4 py-2">
+                    {u.sources.length === 0 ? (
+                      <span className="text-[10px] text-gray-600">—</span>
+                    ) : (
+                      <div className="space-y-1">
+                        {u.sources.map((s: any) => (
+                          <div key={s.cid} className="flex items-center gap-1.5 text-[10px]">
+                            <NetDot ok={!!s.active} title={s.active ? 'Source active' : 'Source inactive (timeout)'} />
+                            <span className={s.active ? 'text-gray-300' : 'text-gray-600'}>
+                              {s.name || 'inconnue'}
+                            </span>
+                            <span className="text-gray-600">{s.address}</span>
+                            <span className="text-gray-600">prio {s.priority}</span>
+                            <span className={s.active ? 'text-gray-500' : 'text-gray-700'}>
+                              {s.active ? `${s.fps} fps` : 'timeout'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+
+                  {/* Toggle réception */}
+                  <td className="px-4 py-2 text-right">
+                    <button
+                      onClick={() => toggleReceive(u.universeId, !u.receiveEnabled)}
+                      disabled={toggling === u.universeId}
+                      title={u.receiveEnabled ? 'Désactiver la réception' : 'Activer la réception'}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all border cursor-pointer ${
+                        u.receiveEnabled
+                          ? 'bg-green-500/15 text-green-300 border-green-500/30 hover:bg-green-500/25'
+                          : 'bg-gray-800/40 text-gray-500 border-gray-700 hover:bg-gray-700/40 hover:text-gray-300'
+                      } ${toggling === u.universeId ? 'opacity-50' : ''}`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${u.receiveEnabled ? 'bg-green-400' : 'bg-gray-600'}`} />
+                      {u.receiveEnabled ? 'ON' : 'OFF'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!!network?.errors?.length && (
+        <div className="px-4 py-2 border-t border-gray-800/50 space-y-0.5">
+          {network.errors.slice(-5).map((e, i) => (
+            <div key={i} className="text-[10px] text-red-400/80 flex items-center gap-1.5">
+              <AlertTriangle size={10} className="shrink-0" /> {e}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+

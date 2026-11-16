@@ -1,0 +1,45 @@
+<?php
+/**
+ * POST /auth/login.php
+ * Connexion compte — retourne l'édition de licence active.
+ *
+ * body : { email, password }
+ * 200 : { token, edition, email, displayName }
+ * 401 : { error: 'invalid_credentials' }
+ */
+
+require_once __DIR__ . '/../helpers.php';
+
+$b = body();
+$email = strtolower(trim((string)($b['email'] ?? '')));
+$password = (string)($b['password'] ?? '');
+
+// Limitation des tentatives (compteur sur les échecs uniquement).
+rl_check('login', 30, 900); // 30 échecs / 15 min
+
+$stmt = db()->prepare('SELECT id, email, password_hash, display_name, edition, stripe_customer_id FROM users WHERE email = ?');
+$stmt->execute([$email]);
+$user = $stmt->fetch();
+
+if (!$user || !password_verify($password, $user['password_hash'])) {
+    rl_record_failure('login', client_ip());
+    respond(['error' => 'invalid_credentials', 'message' => 'Identifiants invalides'], 401);
+}
+
+// Connexion réussie : on remet le compteur à zéro.
+rl_clear('login', client_ip());
+
+// Alerte admin : quelqu'un s'est connecté.
+if (function_exists('notify_admin')) {
+    notify_admin('Connexion', 'Utilisateur connecté : ' . $user['email'] . ' (édition ' . $user['edition'] . ')');
+}
+
+// Le client attend aussi `stripe_customer_id` (optionnel) pour relancer un checkout.
+respond([
+    'token' => sign_token((int)$user['id']),
+    'edition' => $user['edition'],
+    'email' => $user['email'],
+    'displayName' => $user['display_name'] ?: null,
+    'stripeCustomerId' => $user['stripe_customer_id'] ?: null,
+    'limits' => edition_limits((string)$user['edition']),
+]);

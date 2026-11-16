@@ -1,0 +1,402 @@
+/**
+ * AUDIT VALEURS LASER — subagent « auditeur des valeurs laser »
+ * ============================================================
+ * NE MODIFIE AUCUN FICHIER src/ — script de calcul (vitest) qui :
+ *   1. charge les OFL réels (Galaxian 3D, IODA 400 RGY, Boom Box Fx2)
+ *   2. analyse les canaux AVEC le vrai analyseur (src/engine/fixture-analyzer)
+ *   3. réimplémente MOT À MOT les 4 chemins d'écriture :
+ *        A) tick live useDmxPlayback (src/hooks/dmx-playback.ts ~L740-1170)  → SANS bloc laser
+ *        B) computeDmxForCue  (idem L1171-1500)                              → bloc laser L1431-1484
+ *        C) computeDmxCues    (src/hooks/dmx-cues.ts, bloc 7b L922-977 + filet 128 L990-1003)
+ *        D) Autoloop/SoundSwitch (autoloop-runtime L155-190 + moteur réel)
+ *   4. classe chaque valeur dans les zones OFL du canal, verdict éteint/strobe/ouvert.
+ *
+ * Lancer : npx vitest run .cluster/laser-live/subagent-03-calc.test.ts
+ * (sortie console détaillée)
+ */
+import { describe, it, expect } from 'vitest';
+import { analyzeFixtureChannels } from '../../src/engine/fixture-analyzer';
+import { buildSoundswitchBanks, toAutoloopFixtures } from '../../src/engine/autoloop-runtime';
+import { AutoloopPlaybackEngine, type DmxOutput } from '../../src/engine/autoloop-engine';
+import type { PatchedFixture } from '../../src/stores/showStore';
+import type { DmxFixtureCapability, DmxFixtureChannel, DmxFixtureDefinition } from '../../src/hooks/dmx-cues';
+import fs from 'fs';
+import path from 'path';
+
+// ─────────────────────────────────────────────────────────────
+// 1. Chargement OFL (même parsing que FixtureLibrary.parseOFLFixture)
+// ─────────────────────────────────────────────────────────────
+const OFL_TYPE_MAP: Record<string, DmxFixtureChannel['type']> = {
+  Intensity: 'Intensity', ColorIntensity: 'Colour', ColorPreset: 'Colour', ColorTemperature: 'Colour',
+  Pan: 'Pan', Tilt: 'Tilt', PanTiltSpeed: 'Speed', Speed: 'Speed', EffectSpeed: 'Speed', EffectDuration: 'Speed',
+  ShutterStrobe: 'Shutter', StrobeDuration: 'Shutter', StrobeSpeed: 'Speed',
+  Prism: 'Prism', PrismRotation: 'Prism',
+  GoboWheel: 'Gobo', GoboWheelRotation: 'Gobo', GoboIndex: 'Gobo', GoboStencil: 'Gobo', GoboShake: 'Gobo',
+  BeamAngle: 'Beam', BeamPosition: 'Beam', Zoom: 'Beam', Focus: 'Beam', Frost: 'Beam', FrostEffect: 'Beam',
+  Iris: 'Beam', IrisEffect: 'Beam', BladeInsertion: 'Beam', BladeRotation: 'Beam', BladeSystemRotation: 'Beam',
+  Effect: 'Effect', EffectParameter: 'Effect', Generic: 'Effect', Fog: 'Effect', FogOutput: 'Effect', FogType: 'Effect',
+  Maintenance: 'Maintenance',
+  Rotation: 'Speed',
+  NoFunction: 'Nothing', SoundSensitivity: 'Nothing', Time: 'Nothing',
+};
+function loadOfl(relPath: string): DmxFixtureDefinition {
+  const raw = JSON.parse(fs.readFileSync(path.resolve(__dirname, relPath), 'utf8'));
+  const channels: DmxFixtureChannel[] = [];
+  const available: Record<string, any> = raw.availableChannels;
+  for (const chRef of raw.modes[0].channels) {
+    let def = available[chRef];
+    if (!def) {
+      // Résolution des templates OFL ($pixelKey …) : le nom du template devient le nom réel
+      const tplKey = Object.keys(available).find(k => k.startsWith('$pixelKey'));
+      if (tplKey) def = available[tplKey];
+    }
+    if (!def) { channels.push({ name: chRef, type: 'Nothing', capabilities: [] }); continue; }
+    const capsArr = def.capabilities ? def.capabilities : def.capability ? [def.capability] : [];
+    const firstType = (def.capability?.type) || (Array.isArray(def.capabilities) && def.capabilities[0]?.type) || '';
+    const chType = firstType ? (OFL_TYPE_MAP[firstType] || 'Nothing') : 'Nothing';
+    const caps: DmxFixtureCapability[] = capsArr.map((c: any) => {
+      const dr = c.dmxRange || [0, 255];
+      const obj: DmxFixtureCapability = {
+        min: dr[0] ?? 0, max: dr[1] ?? 255,
+        name: c.comment || c.effectName || c.type || '',
+      };
+      if (c.color) obj.color = c.color;
+      if (c.colorsStart?.length) obj.color = c.colorsStart[0];
+      return obj;
+    });
+    channels.push({ name: def.name || chRef, type: chType, capabilities: caps });
+  }
+  const typeByName = ((raw.categories || []).map((c: string) => c.toLowerCase()).some((c: string) => c.includes('laser')) ? 'Laser' : 'Other');
+  return { id: raw.name.toLowerCase().replace(/[^a-z0-9]/g, '-'), manufacturer: raw.$schema ? 'OFL' : 'OFL', model: raw.name, modes: [{ name: raw.modes[0].name, channels }], physical: {} };
+}
+const GALAXIAN = loadOfl('../../resources/fixtures/ofl/american-dj/galaxian-3d.json');
+const IODA = loadOfl('../../resources/fixtures/ofl/cameo/ioda-400-rgy.json');
+const BOOM = loadOfl('../../resources/fixtures/ofl/american-dj/boom-box-fx2.json');
+
+function mkPf(def: DmxFixtureDefinition, startAddress: number): PatchedFixture {
+  return {
+    id: def.id + '@' + startAddress,
+    fixtureDefId: def.id,
+    manufacturer: 'OFL',
+    model: def.model,
+    fixtureType: 'Laser',
+    modeIndex: 0,
+    modeName: def.modes[0].name,
+    universeId: 'u1',
+    startAddress,
+    channelCount: def.modes[0].channels.length,
+    name: def.model,
+    tier: 'primary',
+    enabled: true,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Aides zones OFL
+// ─────────────────────────────────────────────────────────────
+function zoneLabel(caps: DmxFixtureCapability[], v: number): string {
+  if (!caps || caps.length === 0) return `v=${v} (pas de caps)`;
+  const cap = caps.find(c => v >= c.min && v <= c.max);
+  return cap ? `[${cap.min}-${cap.max}] «${cap.name}»` : `v=${v} HORS CAPS`;
+}
+// Convention laser « Shutter typé » utilisée par le produit (fixture-analyzer laserGateValue : >22 → 255, sinon 0)
+const isShutterClosed = (v: number) => v <= 22;      // convention code (laserGateValue)
+const isShutterClosedUser = (v: number) => v <= 31;  // convention utilisateur (0-31 fermé / 32-255 ouvert)
+
+// ─────────────────────────────────────────────────────────────
+// A. Tick live useDmxPlayback — réimplémentation des blocs SANS laser
+//    (source : src/hooks/dmx-playback.ts, tick ~L740-1170 ; aucun `fa.isLaser`)
+// ─────────────────────────────────────────────────────────────
+function mapIntensity(level: string, energy: number, tier: string): number {
+  let val: number;
+  if (level === 'dynamic') val = Math.round(Math.max(0, 20 + energy * 235));
+  else {
+    let lo = 120, hi = 220;
+    switch (level) { case 'very-low': lo = 40; hi = 130; break; case 'low': lo = 100; hi = 200; break; case 'medium': lo = 140; hi = 240; break; case 'high': lo = 180; hi = 255; break; case 'very-high': lo = 200; hi = 255; break; }
+    val = Math.round(Math.max(0, lo + Math.max(0, Math.min(1, energy)) * (hi - lo)));
+  }
+  const tierMult = tier === 'primary' ? 1.0 : tier === 'secondary' ? 0.7 : 0.4;
+  return Math.round(val * tierMult);
+}
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  return [parseInt(h.substring(0, 2), 16), parseInt(h.substring(2, 4), 16), parseInt(h.substring(4, 6), 16)];
+}
+/** Chemins A : tick live. Retourne chVals (canaux écrits) + liste canaux laser jamais écrits. */
+function simulateLiveTick(anim: import('../../src/engine/fixture-analyzer').FixtureChannelAnalysis, energy: number, intensity: string, paletteColor: string | undefined, ct: number): { ch: Record<number, number>; unwritten: number[] } {
+  const pf = anim.fixture;
+  const base = pf.startAddress;
+  const ch: Record<number, number> = {};
+  // I. intensité
+  const dimmerVal = mapIntensity(intensity, energy, pf.tier);
+  if (anim.intensityOffset !== null) { const a = base + anim.intensityOffset; if (!ch[a] || dimmerVal > ch[a]) ch[a] = dimmerVal; }
+  // II. couleur — uniquement rgbSegments (>=3 canaux) ou wheel ; JAMAIS rgbOffsets 2 canaux
+  if (anim.rgbSegments.length > 0 && paletteColor) {
+    const [r, g, b] = hexToRgb(paletteColor);
+    for (const seg of anim.rgbSegments) { ch[base + seg.r] = r; ch[base + seg.g] = g; ch[base + seg.b] = b; if (seg.w !== null) ch[base + seg.w] = 0; }
+    if (anim.intensityOffset === null) { const dScale = dimmerVal / 255; for (const seg of anim.rgbSegments) { ch[base + seg.r] = Math.round((ch[base + seg.r] ?? 0) * dScale); ch[base + seg.g] = Math.round((ch[base + seg.g] ?? 0) * dScale); ch[base + seg.b] = Math.round((ch[base + seg.b] ?? 0) * dScale); } }
+  } else if (anim.wheelOffset !== null && paletteColor) {
+    const caps = anim.wheelCaps;
+    let wv = 0;
+    if (caps.length > 0) { const c = caps[0]; wv = Math.round((c.min + c.max) / 2); }
+    ch[base + anim.wheelOffset] = wv;
+  }
+  // III. shutter
+  if (anim.shutterOffset !== null) {
+    const s = base + anim.shutterOffset;
+    if (anim.intensityOffset === null) ch[s] = Math.max(8, Math.min(255, 8 + Math.round((dimmerVal / 255) * 247)));
+    else ch[s] = 255;
+  }
+  // IV. pan/tilt — les lasers n'ont PAS de canaux Pan/Tilt typés (scanX/Y ne sont pas panOffsets)
+  // V. gobo/prism/zoom/frost/iris/focus (audio-reactive)
+  const fxEnergy = energy; const fxPhase = ct * Math.PI * 2 * 1;
+  if (anim.goboOffset !== null) { const a = base + anim.goboOffset; if (anim.goboCaps.length > 0) { const gi = Math.floor((fxPhase * 0.5) % anim.goboCaps.length); ch[a] = Math.round((anim.goboCaps[gi].min + anim.goboCaps[gi].max) / 2); } else ch[a] = Math.round(fxEnergy * 255); }
+  if (anim.prismOffset !== null) ch[base + anim.prismOffset] = Math.round(Math.max(0, Math.min(255, 64 + Math.sin(fxPhase * 0.7) * 128 * fxEnergy)));
+  if (anim.zoomOffset !== null) ch[base + anim.zoomOffset] = Math.round(64 + Math.sin(fxPhase * 0.4) * 96 * fxEnergy + 64 * fxEnergy);
+  if (anim.frostOffset !== null) ch[base + anim.frostOffset] = Math.round(Math.max(0, 255 - (fxEnergy * 255)));
+  if (anim.irisOffset !== null) ch[base + anim.irisOffset] = Math.round(40 + fxEnergy * 200 + Math.sin(fxPhase * 0.5) * 15 * fxEnergy);
+  if (anim.focusOffset !== null) ch[base + anim.focusOffset] = Math.round(80 + fxEnergy * 120 + Math.sin(fxPhase * 0.3) * 30);
+  if (anim.beamOffset !== null) { const bv = 60 + Math.round(fxEnergy * 30); ch[base + anim.beamOffset] = Math.max(0, Math.min(255, bv)); }
+  if (anim.speedOffset !== null) ch[base + anim.speedOffset] = 40 + Math.round(fxEnergy * 40);
+  // VI. AUCUN bloc laser (mode, pattern, scan, vitesses, rotations, blank, rgbOffsets 2 canaux)
+  const unwritten: number[] = [];
+  const written = new Set(Object.keys(ch).map(Number).map(k => k - base));
+  anim.rgbOffsets?.forEach(o => { if (!(o in written)) unwritten.push(o); }); // note: written est un Set d'adresses-base
+  return { ch, unwritten };
+}
+
+// ─────────────────────────────────────────────────────────────
+// B. computeDmxForCue — bloc laser L1431-1484 (MOT À MOT)
+// ─────────────────────────────────────────────────────────────
+function laserBlockComputeDmxForCue(anim: import('../../src/engine/fixture-analyzer').FixtureChannelAnalysis, ch: Record<number, number>, energy: number, paletteColor: string | undefined, cue: { time: number; section: string; strobe?: boolean }, dropBoost: boolean) {
+  const pf = anim.fixture;
+  const laserT = cue.time;
+  const laserPhase = ((pf.startAddress % 16) / 16) * 2 * Math.PI;
+  const lissajous = pf.startAddress % 3 === 2;
+  const laserRadius = 60 + Math.round(energy * 40);
+  const isDrop = cue.section.toLowerCase() === 'drop' || dropBoost;
+  const isChorus = cue.section.toLowerCase() === 'chorus';
+  if (anim.laserModeOffset !== null) ch[pf.startAddress + anim.laserModeOffset] = capMid(pickLaserModeCap(anim.laserModeCaps));
+  if (anim.patternOffset !== null && anim.patternCaps.length > 0) { const idx = Math.floor(laserT / 2) % anim.patternCaps.length; ch[pf.startAddress + anim.patternOffset] = capMid(anim.patternCaps[idx]); }
+  if (anim.scanXOffset !== null) ch[pf.startAddress + anim.scanXOffset] = Math.round(128 + laserRadius * Math.sin(2 * Math.PI * laserT + laserPhase));
+  if (anim.scanYOffset !== null) { const yv = lissajous ? Math.sin(4 * Math.PI * laserT + laserPhase) : Math.cos(2 * Math.PI * laserT + laserPhase); ch[pf.startAddress + anim.scanYOffset] = Math.round(128 + laserRadius * yv); }
+  if (anim.laserColorMode === 'wheel' && anim.wheelOffset !== null && anim.wheelCaps.length > 0 && ch[pf.startAddress + anim.wheelOffset] === undefined) { const idx = Math.floor(laserT / 2) % anim.wheelCaps.length; ch[pf.startAddress + anim.wheelOffset] = capMid(anim.wheelCaps[idx]); }
+  if (anim.rgbOffsets && anim.rgbSegments.length === 0 && ch[pf.startAddress + anim.rgbOffsets[0]] === undefined) {
+    const [rr, gg, bb] = paletteColor ? hexToRgb(paletteColor) : [Math.round(255 * energy), Math.round(255 * energy), 0];
+    if (anim.rgbOffsets[0] !== undefined) ch[pf.startAddress + anim.rgbOffsets[0]] = rr;
+    if (anim.rgbOffsets[1] !== undefined) ch[pf.startAddress + anim.rgbOffsets[1]] = gg;
+    if (anim.rgbOffsets[2] !== undefined) ch[pf.startAddress + anim.rgbOffsets[2]] = bb;
+  }
+  if (anim.laserSpeedScanOffset !== null) ch[pf.startAddress + anim.laserSpeedScanOffset] = Math.round(128 + 60 * Math.sin(2 * Math.PI * laserT + laserPhase));
+  if (anim.laserSpeedPatternOffset !== null) ch[pf.startAddress + anim.laserSpeedPatternOffset] = Math.round(128 + 64 * Math.sin(2 * Math.PI * laserT / 4));
+  anim.laserRotationOffsets.forEach((off, i) => { ch[pf.startAddress + off] = Math.round(128 + 65 * Math.sin(2 * Math.PI * laserT / (4 * (i + 1)) + laserPhase)); });
+  if (anim.blankOffset !== null) ch[pf.startAddress + anim.blankOffset] = (isDrop || isChorus) && cue.strobe ? 255 : 0;
+}
+function capMid(cap: DmxFixtureCapability | null | undefined): number { if (!cap) return 128; return Math.round((cap.min + cap.max) / 2); }
+function pickLaserModeCap(caps: DmxFixtureCapability[]): DmxFixtureCapability {
+  const byName = (re: RegExp) => caps.find((c) => re.test(c.name ?? ''));
+  return byName(/dmx|dynamic|manual/i) ?? byName(/auto/i) ?? caps.find((c) => c.max >= 200 && c.min > 0) ?? caps.find((c) => c.min > 0) ?? { min: 128, max: 255, name: 'DMX' };
+}
+
+// ─────────────────────────────────────────────────────────────
+// C. computeDmxCues — bloc 7b laser (L922-977) + filet sécurité 128 (L990-1003)
+// ─────────────────────────────────────────────────────────────
+function block7bDmxCues(anim: import('../../src/engine/fixture-analyzer').FixtureChannelAnalysis, ch: Record<number, number>, energy: number, beat: number, isDrop: boolean) {
+  const pf = anim.fixture;
+  const laserPhase = ((pf.startAddress % 16) / 16) * 2 * Math.PI;
+  const lissajous = pf.startAddress % 3 === 2;
+  if (anim.laserModeOffset !== null) ch[pf.startAddress + anim.laserModeOffset] = capMid(pickLaserModeCap(anim.laserModeCaps));
+  if (anim.patternOffset !== null && anim.patternCaps.length > 0) { const idx = Math.floor(beat / 8) % anim.patternCaps.length; ch[pf.startAddress + anim.patternOffset] = capMid(anim.patternCaps[idx]); }
+  if (anim.scanXOffset !== null) ch[pf.startAddress + anim.scanXOffset] = 128 + Math.round(90 * Math.sin(2 * Math.PI * beat / 4 + laserPhase));
+  if (anim.scanYOffset !== null) { const yv = lissajous ? Math.sin(2 * 2 * Math.PI * beat / 4 + laserPhase) : Math.cos(2 * Math.PI * beat / 4 + laserPhase); ch[pf.startAddress + anim.scanYOffset] = 128 + Math.round(90 * yv); }
+  if (anim.laserColorMode === 'wheel' && anim.wheelOffset !== null && anim.wheelCaps.length > 0 && ch[pf.startAddress + anim.wheelOffset] === undefined) { const idx = Math.floor(beat / 8) % anim.wheelCaps.length; ch[pf.startAddress + anim.wheelOffset] = capMid(anim.wheelCaps[idx]); }
+  if (anim.laserSpeedScanOffset !== null) ch[pf.startAddress + anim.laserSpeedScanOffset] = 128 + Math.round(60 * Math.sin(2 * Math.PI * beat / 4 + laserPhase));
+  if (anim.laserSpeedPatternOffset !== null) ch[pf.startAddress + anim.laserSpeedPatternOffset] = 128 + Math.round(64 * Math.sin(2 * Math.PI * beat / 16));
+  anim.laserRotationOffsets.forEach((off, i) => { ch[pf.startAddress + off] = 128 + Math.round(70 * Math.sin(2 * Math.PI * beat / (16 * (i + 1)) + laserPhase)); });
+  if (anim.blankOffset !== null) ch[pf.startAddress + anim.blankOffset] = isDrop ? 255 : 0; // enableStrobe && isDrop → isDrop
+}
+/** filet sécurité dmx-cues : tout canal non reconnu/écrit → 128 */
+function safetyNet128(anim: import('../../src/engine/fixture-analyzer').FixtureChannelAnalysis, ch: Record<number, number>) {
+  const pf = anim.fixture;
+  for (let c = 0; c < anim.channelCount; c++) {
+    const addr = pf.startAddress + c;
+    if (ch[addr] === undefined) ch[addr] = 128;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// D. Autoloop / SoundSwitch — moteur réel + bank 4×32
+// ─────────────────────────────────────────────────────────────
+describe('audit valeurs laser — calculs', () => {
+  it('exécute tous les calculs et imprime le rapport', () => {
+    const fixtures: PatchedFixture[] = [mkPf(GALAXIAN, 1), mkPf(IODA, 17), mkPf(BOOM, 33)];
+    const defs = new Map([[GALAXIAN.id, GALAXIAN], [IODA.id, IODA], [BOOM.id, BOOM]]);
+    const universes = [{ id: 'u1' }];
+    const anims = fixtures.map(f => analyzeFixtureChannels(f, defs.get(f.fixtureDefId)));
+    const energies = [0.1, 0.25, 0.5, 0.8, 0.95];
+    const palettes: Array<[string | undefined, string]> = [
+      [undefined, '(aucune palette → round(255×énergie))'],
+      ['#ff0000', 'palette rouge'], ['#0000ff', 'palette bleue'], ['#ffff00', 'palette jaune'], ['#ffffff', 'palette blanche'],
+    ];
+    const lines: string[] = [];
+    const L = (s: string) => { lines.push(s); console.log(s); };
+
+    L('══════════════════════════════════════════════════════════════');
+    L('ÉTAPE 0 — Analyse des canaux (analyseur réel)');
+    L('══════════════════════════════════════════════════════════════');
+    for (const anim of anims) {
+      L(`\n◆ ${anim.fixture.name} (${anim.fixture.fixtureDefId}, addr=${anim.fixture.startAddress}, ${anim.channelCount}ch) isLaser=${anim.isLaser} colorMode=${anim.laserColorMode}`);
+      L(`  rgbOffsets=${JSON.stringify(anim.rgbOffsets)} rgbSegments=${anim.rgbSegments.length} wheel=${anim.wheelOffset} (${anim.wheelCaps.length} caps)`);
+      L(`  intensity=${anim.intensityOffset} shutter=${anim.shutterOffset} effect=${anim.effectOffset} zoom=${anim.zoomOffset} beam=${anim.beamOffset} speed=${anim.speedOffset}`);
+      L(`  laser: mode=${anim.laserModeOffset} (${anim.laserModeCaps.length} caps) pattern=${anim.patternOffset} scanX=${anim.scanXOffset} scanY=${anim.scanYOffset} rot=[${anim.laserRotationOffsets}] blank=${anim.blankOffset} speedScan=${anim.laserSpeedScanOffset} speedPat=${anim.laserSpeedPatternOffset}`);
+      if (anim.patternOffset !== null && anim.patternCaps.length > 0) L(`  patternCaps[0..2]=${JSON.stringify(anim.patternCaps.slice(0, 3))}`);
+    }
+
+    L('\n══════════════════════════════════════════════════════════════');
+    L('ÉTAPE 1 — CHEMINS A/B/C pour GALAXIAN 3D (R@0, G@1 typés Shutter)');
+    L('══════════════════════════════════════════════════════════════');
+    const animG = anims[0];
+    const capsRG = GALAXIAN.modes[0].channels[0].capabilities!;
+    L(`\nZones OFL canal «Red/Green Laser» (typé ShutterStrobe) :`);
+    for (const c of capsRG) L(`   ${c.min}-${c.max} → «${c.name}»`);
+    L('Convention produit (laserGateValue) : 0-22 fermé / >22 = 255 ⇒ jamais d\'ouvert en valeurs intermédiaires');
+    L('Convention utilisateur (task) : 0-31 fermé / 32-255 ouvert');
+
+    for (const e of energies) {
+      for (const [pal, palLabel] of palettes) {
+        const chLive: Record<number, number> = {};
+        const chCue: Record<number, number> = {};
+        const chCues: Record<number, number> = {};
+        // chemin A : rien écrit pour les canaux R/G (rgbOffsets 2 canaux ignorés par le tick)
+        simulateLiveTick(animG, e, 'medium', pal, 0);
+        // chemin B : bloc laser (computeDmxForCue)
+        laserBlockComputeDmxForCue(animG, chCue, e, pal, { time: 1.0, section: 'verse' }, false);
+        // chemin C : 7b + filet
+        block7bDmxCues(animG, chCues, e, 4, false);
+        safetyNet128(animG, chCues);
+        const rv = chCue[animG.fixture.startAddress + animG.rgbOffsets![0]];
+        const gv = chCue[animG.fixture.startAddress + animG.rgbOffsets![1]];
+        const rNet = chCues[animG.fixture.startAddress + animG.rgbOffsets![0]];
+        const mac = animG.effectOffset ?? -1; const macVal = chCues[animG.fixture.startAddress + mac];
+        L(`\nénergie=${e} ${palLabel} :`);
+        L(`  A(tick live)   : R/G JAMAIS écrits → DMX reste à 0 → Closed → laser ÉTEINT`);
+        L(`  B(computeDmxForCue) : R=${rv} G=${gv} → R:${zoneLabel(capsRG, rv)} | G:${zoneLabel(capsRG, gv)}  ${isShutterClosed(rv) && isShutterClosed(gv) ? '→ ÉTEINT (≤22)' : isShutterClosedUser(rv) && isShutterClosedUser(gv) ? '→ ÉTEINT selon conv. 0-31' : '→ allumé mais zone ?'}${(!isShutterClosed(rv) || !isShutterClosed(gv)) && (!isShutterClosedUser(rv) || !isShutterClosedUser(gv)) ? (rv >= 16 && rv <= 239 || gv >= 16 && gv <= 239 ? ' [⚠ STROBE OFL]' : '') : ''}`);
+        L(`  C(computeDmxCues+filet) : R=${rNet} via filet 128 (jamais écrits par le bloc 7b) → ${zoneLabel(capsRG, rNet)} — Macros@${mac}=${macVal} (${zoneLabel(animG.laserModeCaps.length ? animG.laserModeCaps : GALAXIAN.modes[0].channels[4].capabilities!, macVal)}) → macro autonome !`);
+      }
+    }
+
+    L('\n══════════════════════════════════════════════════════════════');
+    L('ÉTAPE 2 — IODA-400-RGY (Program@0 mode, Drawing@9, Zoom@8)');
+    L('══════════════════════════════════════════════════════════════');
+    const animI = anims[1];
+    const capsProg = IODA.modes[0].channels[0].capabilities!;
+    L(`\nZones «Program»@0 (mode) :`); for (const c of capsProg) L(`   ${c.min}-${c.max} → «${c.name}»`);
+    const capsZoom = IODA.modes[0].channels[8].capabilities!;
+    L(`Zones «Zoom»@8 :`); for (const c of capsZoom) L(`   ${c.min}-${c.max} → «${c.name}»`);
+    const capsDraw = IODA.modes[0].channels[9].capabilities!;
+    L(`Zones «Drawing»@9 :`); for (const c of capsDraw) L(`   ${c.min}-${c.max} → «${c.name}»`);
+    const capsScan = IODA.modes[0].channels[10].capabilities!;
+    L(`Zones «Scanning Speed»@10 :`); for (const c of capsScan) L(`   ${c.min}-${c.max} → «${c.name}»`);
+
+    const modeCap = pickLaserModeCap(animI.laserModeCaps);
+    L(`\npickLaserModeCap(Program) → [${modeCap.min}-${modeCap.max}] «${modeCap.name}» → valeur écrite = ${capMid(modeCap)} (B ET C, à CHAQUE frame)`);
+    for (const e of energies) {
+      const chB: Record<number, number> = {};
+      laserBlockComputeDmxForCue(animI, chB, e, '#0000ff', { time: 1.0, section: 'verse' }, false);
+      const chC: Record<number, number> = {};
+      block7bDmxCues(animI, chC, e, 4, false); safetyNet128(animI, chC);
+      const b = animI.fixture.startAddress;
+      L(`\nénergie=${e} (palette bleue) :`);
+      L(`  mode@0 : B=${chB[b + 0]} (${zoneLabel(capsProg, chB[b + 0])}) | C=${chC[b + 0]} → DMX mode ✓ chaque frame`);
+      L(`  pattern@2 : B=${chB[b + 2]} C=${chC[b + 2]} (cycle beat/8) — cycle OUI`);
+      L(`  scanX@6=${chB[b + 6]} scanY@7=${chB[b + 7]} (cercle/lissajous B=computeDmxForCue)`);
+      L(`  zoom@8 : B=(non écrit par bloc laser) ${chB[b + 8] === undefined ? '∅' : chB[b + 8]} | C(filet)=${chC[b + 8]} → ${zoneLabel(capsZoom, chC[b + 8])} ⚠ zone AUTO`);
+      L(`  drawing@9 : B=${chB[b + 9] === undefined ? '∅ (jamais écrit)' : chB[b + 9]} | C(filet)=${chC[b + 9]} → ${zoneLabel(capsDraw, chC[b + 9])}`);
+      L(`  speedScan@10 : B=${chB[b + 10]} → ${zoneLabel(capsScan, chB[b + 10])} — 128+ = «with gaps» (faisceau troué) ⚠`);
+      L(`  rot@3/4/5 : B=${chB[b + 3] ?? '∅'},${chB[b + 4] ?? '∅'},${chB[b + 5] ?? '∅'}`);
+    }
+    // chemin A pour IODA
+    const chA: Record<number, number> = {};
+    const unr = simulateLiveTick(animI, 0.5, 'medium', '#ff0000', 2).ch;
+    const bI = animI.fixture.startAddress;
+    L(`\nChemin A (tick live) IODA énergie=0.5 palette rouge :`);
+    L(`  canaux écrits : ${JSON.stringify(Object.fromEntries(Object.entries(unr).map(([k, v]) => [Number(k) - bI, v])))}`);
+    L(`  mode@0=${unr[bI + 0] ?? 'JAMAIS écrit → 0 (off!)'} pattern@2=${unr[bI + 2] ?? '∅'} wheel@1=${unr[bI + 1] ?? '∅'}`);
+    L(`  ⇒ mode jamais écrit : canal Program reste à 0 (0-9 Closed) → LASER ÉTEINT même si wheel/zoom écrits`);
+
+    L('\n══════════════════════════════════════════════════════════════');
+    L('ÉTAPE 3 — Boom Box Fx2 (R@1, G@2 laser ; BeamStrobe@8 ; BeamDimmer@9 ; ShowMode@16)');
+    L('══════════════════════════════════════════════════════════════');
+    const animB = anims[2];
+    const capsMode = BOOM.modes[0].channels[16].capabilities!;
+    const capsLaser = BOOM.modes[0].channels[1].capabilities!;
+    L(`\nZones «Show mode»@16 :`); for (const c of capsMode) L(`   ${c.min}-${c.max} → «${c.name}»`);
+    L(`Zones «Red/Green Laser»@1/2 :`); for (const c of capsLaser) L(`   ${c.min}-${c.max} → «${c.name}»`);
+    const modeCapB = pickLaserModeCap(animB.laserModeCaps);
+    L(`\npickLaserModeCap(Show mode) → [${modeCapB.min}-${modeCapB.max}] «${modeCapB.name}» → mode@16 = ${capMid(modeCapB)} (⚠ SHOW AUTONOME, pas un mode DMX!)`);
+    for (const e of energies) {
+      const chB: Record<number, number> = {};
+      laserBlockComputeDmxForCue(animB, chB, e, undefined, { time: 1.0, section: 'verse' }, false);
+      const b = animB.fixture.startAddress;
+      L(`\nénergie=${e} sans palette : mode@16=${chB[b + 16]} (${zoneLabel(capsMode, chB[b + 16])}) → ${chB[b + 16] >= 70 ? 'la fixture joue SON show interne : R/G DMX ignorés' : 'contrôlable'}`);
+      L(`  R@1=${chB[b + 1]} (${zoneLabel(capsLaser, chB[b + 1])}) G@2=${chB[b + 2]} (${zoneLabel(capsLaser, chB[b + 2])})`);
+    }
+    L(`\nChemin A (tick live) Boom Box : R/G captés couleur (2 canaux) → jamais écrits → 0 → Closed ; BeamDimmer@9=${mapIntensity('medium', 0.5, 'primary')} (beams LED visibles) ; BeamStrobe@8=255 ; ShowMode@16 jamais écrit → 0 (NoFunction → DMX actif, mais laser R/G reste à 0).`);
+    L(`⇒ Ce qu'on VOIT = les faisceaux LED (dimmer+strobe+couleurs), JAMAIS le laser R/G.`);
+    L(`\nChemin D (Autoloop) : laserMode@16 vaut 255 en dur (defaultLaserBeamCues l-mode) → ${'250-255 «Show 0»'} → show autonome à nouveau.`);
+
+    L('\n══════════════════════════════════════════════════════════════');
+    L('ÉTAPE 4 — Chemin D : moteur Autoloop/SoundSwitch réel (4 banques, 128 beats)');
+    L('══════════════════════════════════════════════════════════════');
+    // fixture de test avec scan pour visualiser le mouvement PositionCue (lasers réels)
+    const frames: Array<Record<number, number>> = [];
+    const output: DmxOutput = { send(channels: Record<number, number>) { frames.push({ ...channels }); } };
+    const autoloopFixtures = toAutoloopFixtures(fixtures, defs, universes);
+    const banks = buildSoundswitchBanks(autoloopFixtures);
+    L(`\nFixtures Autoloop : ${autoloopFixtures.map(f => `${f.id}:${f.category} laser=${f.isLaser} map={${Object.entries(f.channelMap).map(([k, v]) => `${k}@${v}`).join(',')}}`).join('\n  ')}`);
+    const engine = new AutoloopPlaybackEngine(output, 120);
+    for (let bank = 0; bank < 4; bank++) {
+      const loop = banks.select(bank, 0);
+      if (!loop) { L(`banque ${bank} : pas de loop`); continue; }
+      frames.length = 0;
+      engine.load(loop); engine.trigger();
+      for (let bar = 0; bar < 8; bar++) for (let beat = 0; beat < 4; beat++) engine.onBarBeat(bar, beat + (beat === 0 ? 0 : 0)); // 32 beats
+      // agréger par adresse : valeurs min/max + ensemble
+      const agg = new Map<number, Set<number>>();
+      for (const f of frames) for (const [k, v] of Object.entries(f)) { const a = Number(k); if (!agg.has(a)) agg.set(a, new Set()); agg.get(a)!.add(v); }
+      L(`\nbanque ${bank} loop=${loop.id} bars=${loop.bars} keys=${loop.keys.length} cat=${loop.category}`);
+      for (const [a, setV] of [...agg.entries()].sort((x, y) => x[0] - y[0])) {
+        const vals = [...setV].sort((x, y) => x - y);
+        const min = Math.min(...vals), max = Math.max(...vals);
+        const rel = a - 0; void rel;
+        L(`  adr ${String(a).padStart(3)} : ${min === max ? `fixe=${min}` : `min=${min} max=${max}`}${vals.length <= 6 ? ` vals=[${vals.join(',')}]` : ` (${vals.length} valeurs)`}`);
+      }
+    }
+
+    // ── synthèse finale ──
+    L('\n══════════════════════════════════════════════════════════════');
+    L('SYNTHÈSE DES FUITES VERS L\'ÉTEINT / ÉTAT FIGÉ — par cause racine');
+    L('══════════════════════════════════════════════════════════════');
+    L('F1. [BLOQUANT] Tick live useDmxPlayback (L740-1170) : AUCUNE ligne isLaser.');
+    L('    Les canaux laser (mode/pattern/scan/vitesses/rotations/blanking ET rgbOffsets'); 
+    L('    2 canaux) ne sont JAMAIS écrits. Le write replace-all du bridge ne contient');
+    L('    pas ces adresses → DMX hardware conserve la valeur initiale 0 → Galaxian');
+    L('    0-7 Closed, IODA Program 0-9 Closed, BoomBox R/G 0-127 Closed → TOUS ÉTEINTS.');
+    L('F2. [BLOQUANT] computeDmxCues filet 128 (L990) appliqué aux lasers 2 canaux :');
+    L('    le bloc 7b n\'écrit PAS rgbOffsets → R/G Galaxian = 128 = STROBE OFL (16-239),');
+    L('    et Macros@4 (Nothing) = 128 = Macro 7 → autonome »apparition toujours la même».');
+    L('F3. [CRITIQUE] pickLaserModeCap sur «Show mode» (Boom Box) renvoie Show 8 (175),');
+    L('    et AutoLoop écrit laserMode=255 = Show 0 → la fixture joue SON show interne,');
+    L('    les canaux R/G DMX sont ignorés → »apparition toujours la même».');
+    L('F4. [SANS PALETTE] computeDmxForCue R/G = round(255×énergie) : 0.25→64, 0.5→128,');
+    L('    0.8→204 tombent dans 16-239 = STROBE (jamais un ouvert stable 8-15/248-255).');
+    L('    Avec palette bleue/violette → 0/0 ≤22 → ÉTEINT (roue spectrale non gatée).');
+    L('F5. [ZOOM AUTO] IODA Zoom@8 : computeDmxForCue ne l\'écrit pas (∅), le filet C=128');
+    L('    = decreasing auto zooming (128-191) ; le hook live écrit 48..144 → 105..144');
+    L('    passe 127 → auto une partie du temps. Value auto ≠ éteint mais instable/figé.');
+
+    expect(animG.isLaser).toBe(true);
+    expect(animI.isLaser).toBe(true);
+    expect(animB.isLaser).toBe(true);
+  }, 60000);
+});

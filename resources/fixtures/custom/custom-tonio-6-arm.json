@@ -1,0 +1,157 @@
+{
+  "id": "custom-tonio-6-arm",
+  "manufacturer": "Tonio",
+  "model": "6 arm",
+  "type": "Flower",
+  "modes": [
+    {
+      "name": "22ch",
+      "channels": [
+        {
+          "name": "X Motor",
+          "type": "Pan",
+          "defaultValue": 0
+        },
+        {
+          "name": "X Motor Speed",
+          "type": "Speed",
+          "defaultValue": 0
+        },
+        {
+          "name": "Bee-eyemotor",
+          "type": "Tilt",
+          "defaultValue": 0
+        },
+        {
+          "name": "Motor 1",
+          "type": "Tilt",
+          "defaultValue": 0
+        },
+        {
+          "name": "Motor 2",
+          "type": "Tilt",
+          "defaultValue": 0
+        },
+        {
+          "name": "Motor 3",
+          "type": "Tilt",
+          "defaultValue": 0
+        },
+        {
+          "name": "Motor 4",
+          "type": "Tilt",
+          "defaultValue": 0
+        },
+        {
+          "name": "Motor 5",
+          "type": "Tilt",
+          "defaultValue": 0
+        },
+        {
+          "name": "Motor 6",
+          "type": "Tilt",
+          "defaultValue": 0
+        },
+        {
+          "name": "Dimmer",
+          "type": "Intensity",
+          "defaultValue": 0
+        },
+        {
+          "name": "Strobe",
+          "type": "Effect",
+          "defaultValue": 0
+        },
+        {
+          "name": "Bee eye red",
+          "type": "Beam",
+          "defaultValue": 0
+        },
+        {
+          "name": "Bee eye Green",
+          "type": "Beam",
+          "defaultValue": 0
+        },
+        {
+          "name": "Bee eye Blue",
+          "type": "Beam",
+          "defaultValue": 0
+        },
+        {
+          "name": "Bee eye white",
+          "type": "Beam",
+          "defaultValue": 0
+        },
+        {
+          "name": "Beam red",
+          "type": "Beam",
+          "defaultValue": 0
+        },
+        {
+          "name": "Beam green",
+          "type": "Beam",
+          "defaultValue": 0
+        },
+        {
+          "name": "Beam blue",
+          "type": "Beam",
+          "defaultValue": 0
+        },
+        {
+          "name": "Beam white",
+          "type": "Beam",
+          "defaultValue": 0
+        },
+        {
+          "name": "Red laser",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 255,
+              "name": "Red laser",
+              "color": "#ff0000"
+            }
+          ]
+        },
+        {
+          "name": "Green laser",
+          "type": "Colour",
+          "defaultValue": 0
+        },
+        {
+          "name": "Macro fonction",
+          "type": "Macro",
+          "defaultValue": 0,
+          "capabilities": [
+            {
+              "min": 0,
+              "max": 50,
+              "name": "Channels 0 à 50 actives",
+              "color": "#ff0000"
+            },
+            {
+              "min": 51,
+              "max": 150,
+              "name": "Auto run",
+              "color": "#ff0000"
+            },
+            {
+              "min": 151,
+              "max": 250,
+              "name": "Sound",
+              "color": "#ff0000"
+            },
+            {
+              "min": 251,
+              "max": 255,
+              "name": "3 sec to reset",
+              "color": "#ff0000"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

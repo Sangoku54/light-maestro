@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "currency": "EUR",
+  "referenceDate": "2026-08-15",
+  "note": "Liste curated v1 — prix publics vérifiés le 15/08/2026 (sources : Thomann, eu.shehds.com, fnac.com). Fourchettes indicatives autour du prix constaté (±5 % / min-max observés). manufacturer = dossier OFL, model = name racine OFL (matching normalisé dans l'UI). Voir .cluster/light-maestro-strategy/subagent_26b_ofl_pricing.md pour le détail des sources.",
+  "entries": [
+    {
+      "manufacturer": "stairville",
+      "model": "LED PAR 56",
+      "priceMin": 40,
+      "priceMax": 46,
+      "priceLabel": "~40–46 €",
+      "type": "par",
+      "url": "https://www.thomann.de/gr/stairville_led_par_56_alu_schwarz.htm",
+      "checkedAt": "2026-08-15"
+    },
+    {
+      "manufacturer": "stairville",
+      "model": "LED PAR 64",
+      "priceMin": 57,
+      "priceMax": 62,
+      "priceLabel": "~57–62 €",
+      "type": "par",
+      "url": "https://www.thomann.de/be/stairville_led_par_56_black_floor_b_stock_2.htm",
+      "checkedAt": "2026-08-15"
+    },
+    {
+      "manufacturer": "eurolite",
+      "model": "LED PARty Spot",
+      "priceMin": 47,
+      "priceMax": 52,
+      "priceLabel": "~47–52 €",
+      "type": "par",
+      "url": "https://www.thomann.de/be/stairville_led_par_56_black_floor_b_stock_2.htm",
+      "checkedAt": "2026-08-15"
+    },
+    {
+      "manufacturer": "eurolite",
+      "model": "LED PIX-144",
+      "priceMin": 73,
+      "priceMax": 80,
+      "priceLabel": "~73–80 €",
+      "type": "effect",
+      "url": "https://www.thomannmusic.com/eurolite_led_pix_144_rgb_bar.htm",
+      "checkedAt": "2026-08-15"
+    },
+    {
+      "manufacturer": "eurolite",
+      "model": "LED Bar-6 QCL RGBW",
+      "priceMin": 78,
+      "priceMax": 84,
+      "priceLabel": "~78–84 €",
+      "type": "effect",
+      "url": "https://www.thomann.gr/eurolite_led_bar_6_qcl_rgbw.htm",
+      "checkedAt": "2026-08-15"
+    },
+    {
+      "manufacturer": "varytec",
+      "model": "Giga Bar Frost Pix 8 RGB",
+      "priceMin": 66,
+      "priceMax": 72,
+      "priceLabel": "~66–72 €",
+      "type": "effect",
+      "url": "https://www.thomann.de/gr/varytec_giga_bar_frost_pix_8_rgb.htm",
+      "checkedAt": "2026-08-15"
+    },
+    {
+      "manufacturer": "shehds",
+      "model": "LED Spot 60W",
+      "priceMin": 85,
+      "priceMax": 95,
+      "priceLabel": "~85–95 €",
+      "type": "moving-head",
+      "url": "https://eu.shehds.com/products/good-technology-led-60w-gobos-moving-head-lighting-for-dmx512-stage-effect-dj-festivals-disco-home-entertainments-in-9-11-channels",
+      "checkedAt": "2026-08-15"
+    },
+    {
+      "manufacturer": "ibiza-light",
+      "model": "LP64 LED-PROMO",
+      "priceMin": 78,
+      "priceMax": 92,
+      "priceLabel": "~78–92 €",
+      "type": "effect",
+      "url": "https://www.fnac.com/mp20120301/IBIZA-LIGHT-LP64-LED-Effet-animation-181-LEDs-RVB-DMX-512",
+      "checkedAt": "2026-08-15"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+﻿const fs = require("fs");
+const p = "electron/remote/server.ts";
+let s = fs.readFileSync(p, "utf8");
+const html = fs.readFileSync("electron/remote/_page.tmp.html", "utf8");
+const marker = "const REMOTE_PAGE_HTML = ";
+const a = s.indexOf(marker);
+if (a < 0) throw new Error("marker introuvable");
+if (html.includes("`")) throw new Error("backtick dans le HTML");
+if (html.includes("${")) throw new Error("${ dans le HTML");
+s = s.slice(0, a) + marker + "`" + html + "`;\n";
+fs.writeFileSync(p, s, "utf8");
+console.log("HTML reinjecte, taille=" + s.length);

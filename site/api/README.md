@@ -1,0 +1,89 @@
+# Backend de licence Light Maestro — installation LWS
+
+Backend PHP/MySQL qui relie l'app Light Maestro à Stripe (paiement unique, licence perpétuelle).
+
+## Arborescence
+
+```
+site/api/
+  composer.json
+  schema.sql
+  config.php.example   ← modèle (config.php n'est PAS versionné : secrets)
+  helpers.php
+  auth/register.php
+  auth/login.php
+  auth/me.php
+  stripe/checkout.php
+  stripe/webhook.php
+```
+
+## Étapes d'installation chez LWS
+
+### 1. Créer la base MySQL
+- Dans le panneau LWS (ou cPanel), crée une base + un utilisateur MySQL.
+- Dans phpMyAdmin, importe `schema.sql` (crée `users` + `payments`).
+  Le fichier est fourni dans le dépôt (`site/api/schema.sql`) : le serveur
+  en refuse le téléchargement direct (`.htaccess`), téléverse-le ou copie
+  son contenu dans phpMyAdmin.
+
+### 2. Déployer les fichiers
+- Uploade le dossier `api/` sur le serveur, par exemple sous `https://ton-domaine.fr/api/`.
+- `config.php` n'est **pas** versionné dans git : il contient les secrets
+  du serveur et ne doit jamais être écrasé par une mise en ligne. Crée-le
+  à partir de `config.php.example` et renseigne-le une seule fois.
+- `config.php` et `config.php.example` sont protégés par `.htaccess`
+  (accès direct → 403). `helpers.php` ne renvoie que du JSON : il n'expose
+  rien de sensible.
+- Les fichiers de documentation (`.md`), journaux (`.log`) et sauvegardes
+  (`.bak`) sont également refusés par `.htaccess`.
+
+### 3. Installer les dépendances (Composer)
+LWS mutualisé inclut souvent PHP avec Composer. Si l'accès SSH/Composer n'est pas dispo :
+- Lancer `composer install` en local dans `site/api/` (génère le dossier `vendor/`).
+- Uploade le dossier `vendor/` complet sur le serveur.
+
+Cela installe `stripe/stripe-php` et `firebase/php-jwt`.
+
+### 4. Renseigner `config.php`
+```php
+DB_HOST / DB_NAME / DB_USER / DB_PASS     ← identifiants MySQL LWS
+STRIPE_SECRET_KEY                          ← sk_live_... (dashboard Stripe)
+STRIPE_WEBHOOK_SECRET                      ← whsec_... (dashboard Stripe → Webhooks)
+STRIPE_PRICE_STANDARD                      ← id du price 69 €
+STRIPE_PRICE_FULL                          ← id du price 99 €
+JWT_SECRET                                 ← chaîne aléatoire longue
+```
+
+### 5. Créer les produits/prix dans Stripe — D'ABORD EN MODE TEST
+> ⚠️ Test et live sont deux mondes séparés : clés, prix et webhooks ne sont
+> pas partagés. Toujours valider le flux complet en test avant de toucher au live.
+1. Bascule le dashboard en **mode Test** (interrupteur en haut).
+2. Deux produits en **paiement unique (one-time)** :
+   - « Standard » → prix 6900 (69 €) → note l'id (`price_...` test) → `STRIPE_PRICE_STANDARD`
+   - « Full » → prix 9900 (99 €) → note l'id (`price_...` test) → `STRIPE_PRICE_FULL`
+3. Paiement test avec la carte `4242 4242 4242 4242`.
+4. Quand tout marche, **refais les étapes 5-6 en mode Live** (nouveaux prix,
+   nouveau webhook, nouvelles clés) et remplace les 4 valeurs dans `config.php`.
+   Ne jamais mélanger : `sk_test` + secret test, `sk_live` + secret live —
+   sinon les paiements passent mais les licences ne s'activent jamais.
+
+### 6. Configurer le webhook Stripe
+- Dashboard Stripe → **Webhooks** → ajouter un endpoint : `https://ton-domaine.fr/api/stripe/webhook.php`
+- Événements : cocher `checkout.session.completed`
+- Récupérer le secret de signature → `STRIPE_WEBHOOK_SECRET`
+
+## Flux complet
+
+1. **Inscription** : l'app appelle `POST /auth/register.php` → crée le compte (`free`).
+2. **Connexion** : l'app appelle `POST /auth/login.php` → reçoit `edition` + `token`.
+3. **Achat** : l'app appelle `POST /stripe/checkout.php` (avec token + `edition`) → reçoit une `url` de checkout, redirige l'utilisateur.
+4. **Paiement** : Stripe appelle `POST /stripe/webhook.php` → met `users.edition` à jour.
+5. **Réouverture** : l'app rappelle `login` (ou `me`) → reçoit la nouvelle édition.
+
+## Côté application (à faire après déploiement)
+
+Dans `electron/license/server.ts` :
+- `LICENSE_API_URL` = `https://ton-domaine.fr/api`
+- `LICENSE_OFFLINE_MODE` = `false`
+
+Et dans `electron/license/server.ts`, ajouter l'appel `register` lors de la création de compte (voir câblage UI).

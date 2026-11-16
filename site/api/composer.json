@@ -1,0 +1,13 @@
+{
+  "name": "light-maestro/licence-backend",
+  "description": "Backend de licence Light Maestro (LWS) : register/login + Stripe checkout + webhook.",
+  "type": "project",
+  "require": {
+    "php": ">=7.4",
+    "stripe/stripe-php": "^13.0",
+    "firebase/php-jwt": "^6.0"
+  },
+  "config": {
+    "optimize-autoloader": true
+  }
+}

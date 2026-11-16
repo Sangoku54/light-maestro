@@ -1,0 +1,93 @@
+{
+  "id": "robe-robin-300e-spot",
+  "manufacturer": "Robe",
+  "model": "Robin 300E Spot",
+  "type": "Moving Head",
+  "author": "Light Maestro",
+  "modes": [
+    {
+      "name": "16-channel",
+      "channels": [
+        { "name": "Pan", "type": "Pan", "defaultValue": 128 },
+        { "name": "Pan Fine", "type": "Pan", "defaultValue": 128 },
+        { "name": "Tilt", "type": "Tilt", "defaultValue": 128 },
+        { "name": "Tilt Fine", "type": "Tilt", "defaultValue": 128 },
+        { "name": "Pan/Tilt Speed", "type": "Speed", "defaultValue": 0 },
+        {
+          "name": "Color Wheel",
+          "type": "Colour",
+          "defaultValue": 0,
+          "capabilities": [
+            { "min": 0, "max": 10, "name": "White", "color": "#ffffff" },
+            { "min": 11, "max": 20, "name": "Red", "color": "#ff0000" },
+            { "min": 21, "max": 30, "name": "Blue", "color": "#0000ff" },
+            { "min": 31, "max": 40, "name": "Green", "color": "#00ff00" },
+            { "min": 41, "max": 50, "name": "Yellow", "color": "#ffff00" },
+            { "min": 51, "max": 60, "name": "Magenta", "color": "#ff00ff" },
+            { "min": 61, "max": 70, "name": "Cyan", "color": "#00ffff" },
+            { "min": 71, "max": 127, "name": "Split colors" },
+            { "min": 128, "max": 255, "name": "CCW rotation slow-fast" }
+          ]
+        },
+        { "name": "Cyan", "type": "Colour", "defaultValue": 0 },
+        { "name": "Magenta", "type": "Colour", "defaultValue": 0 },
+        { "name": "Yellow", "type": "Colour", "defaultValue": 0 },
+        {
+          "name": "Gobo Wheel",
+          "type": "Gobo",
+          "defaultValue": 0,
+          "capabilities": [
+            { "min": 0, "max": 5, "name": "Open" },
+            { "min": 6, "max": 15, "name": "Gobo 1" },
+            { "min": 16, "max": 25, "name": "Gobo 2" },
+            { "min": 26, "max": 35, "name": "Gobo 3" },
+            { "min": 36, "max": 45, "name": "Gobo 4" },
+            { "min": 46, "max": 55, "name": "Gobo 5" },
+            { "min": 56, "max": 65, "name": "Gobo 6" },
+            { "min": 66, "max": 75, "name": "Gobo 7" },
+            { "min": 76, "max": 95, "name": "Gobo shake" },
+            { "min": 96, "max": 255, "name": "CCW rotation slow-fast" }
+          ]
+        },
+        {
+          "name": "Prism",
+          "type": "Prism",
+          "defaultValue": 0,
+          "capabilities": [
+            { "min": 0, "max": 10, "name": "Open" },
+            { "min": 11, "max": 255, "name": "3-facet prism" }
+          ]
+        },
+        { "name": "Prism Rotation", "type": "Effect", "defaultValue": 0 },
+        { "name": "Focus", "type": "Beam", "defaultValue": 128 },
+        {
+          "name": "Shutter/Strobe",
+          "type": "Shutter",
+          "defaultValue": 0,
+          "capabilities": [
+            { "min": 0, "max": 31, "name": "Closed" },
+            { "min": 32, "max": 63, "name": "Open" },
+            { "min": 64, "max": 95, "name": "Strobe slow-fast" },
+            { "min": 96, "max": 127, "name": "Open" },
+            { "min": 128, "max": 159, "name": "Pulse close slow-fast" },
+            { "min": 160, "max": 191, "name": "Open" },
+            { "min": 192, "max": 223, "name": "Random strobe" },
+            { "min": 224, "max": 255, "name": "Open" }
+          ]
+        },
+        { "name": "Dimmer", "type": "Intensity", "defaultValue": 0 },
+        { "name": "Dimmer Fine", "type": "Intensity", "defaultValue": 0 }
+      ],
+      "physical": {
+        "bulbType": "MSD Platinum 300",
+        "bulbLumens": 18000,
+        "bulbColorTemp": 7800,
+        "weight": 21.3,
+        "lensDegMin": 15,
+        "lensDegMax": 15,
+        "focusType": "Head",
+        "powerConsumption": 470
+      }
+    }
+  ]
+}

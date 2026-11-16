@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Tutoriels vidéo — Light Maestro | De 0 à show en 30 min</title>
+<meta name="description" content="Tutoriels vidéo Light Maestro : Quick Show, Design, chasers, matrice RGB, 3D Stage. Chapitrés, avec fichiers d'exemple à télécharger."/>
+<link rel="icon" type="image/png" href="./assets/favicon-32.png"/>
+<link rel="stylesheet" href="./assets/site.css"/>
+<style>.chapter{scroll-margin-top:84px}</style>
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="./index.html"><img src="./assets/logo.svg" alt="Light Maestro" style="width:34px;height:34px;border-radius:10px;box-shadow:0 8px 24px rgba(168,85,247,.35)"/><span class="brand-word">LIGHT <span>MAESTRO</span></span></a>
+    <nav class="nav-links"><a href="./index.html">Accueil</a><a href="./fonctionnalites.html">Fonctionnalités</a><a class="active" href="./tutoriels.html">Tutoriels</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a><a href="./support.html">Support</a></nav>
+    <div style="display:flex; gap:10px; align-items:center"><a class="nav-cta" href="./telecharger.html">⬇ Télécharger</a><a href="./tutoriels-en.html" style="font-size:12px; font-weight:700; color:#9ca3af; text-decoration:none" title="English version">🇬🇧 EN</a><button class="hamburger" data-menu>≡</button></div>
+  </div>
+  <div data-menu-panel style="display:none; border-top:1px solid #1f1f2e; background: rgba(6,6,10,.88)"><div class="wrap" style="padding:12px 20px; display:flex; flex-wrap:wrap; gap:10px"><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tutoriels.html">Tutoriels</a><a href="./aide.html">Aide</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a><a href="./support.html">Support</a></div></div>
+</header>
+
+<section class="hero" style="padding:26px 0 18px">
+  <div class="wrap">
+    <span class="kicker">Vidéos • Chapitré • Fichiers d'exemple inclus</span>
+    <h1 class="h1">Passez en Maestro en 30 minutes.</h1>
+    <p class="lead">10 épisodes chapitrés. Installez, branchez, jouez — puis peaufinez.</p>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px">
+      <a class="btn btn-ghost" href="#catalogue">Voir les formations ↓</a>
+    </div>
+  </div>
+</section>
+
+<section id="comprendre" class="section chapter" style="background: linear-gradient(180deg, #07070b, #0a0a12); border-top:1px solid #1f1f2e; border-bottom:1px solid #1f1f2e">
+  <div class="wrap">
+    <span class="kicker">Comprendre avant de brancher</span>
+    <h2 class="h2" style="margin-top:10px">USB-DMX : le pont entre ton PC et tes projecteurs</h2>
+    <div class="grid grid-2" style="margin-top:16px">
+      <div class="card">
+        <h3 class="h3">Comment ça marche ?</h3>
+        <p style="margin-top:8px">Une <b style="color:white">interface USB DMX</b> (ou dongle) fait le pont entre ton ordinateur et tes projecteurs : elle traduit les instructions de ton logiciel d'éclairage en signaux DMX512. Seule, elle ne contrôle rien. Elle nécessite un ordinateur portable et un logiciel compatible comme Light-Maestro.</p>
+        <p style="margin-top:8px">Le protocole DMX512 fonctionne de manière <b style="color:white">unidirectionnelle</b> : le contrôleur envoie les données, les projecteurs les reçoivent. Un univers DMX contient <b style="color:white">512 canaux</b>. Le nombre d'appareils pilotables dépend des besoins de chacun :</p>
+        <ul style="margin:10px 0 0; padding-left:18px; color:#d1d5db; font-size:13px; line-height:1.8">
+          <li><b style="color:white">PAR LED basique :</b> 6 à 8 canaux.</li>
+          <li><b style="color:white">Lyre (tête mobile) :</b> 14 à 16 canaux (ou plus selon le mode).</li>
+        </ul>
+        <p style="margin-top:8px">Il est donc essentiel de connaître le nombre de canaux requis par chaque équipement et de bien définir leur adresse de départ, en s'aidant de la notice d'utilisation de chaque fixture.</p>
+      </div>
+      <div class="card">
+        <h3 class="h3">Rôle de l'interface USB-DMX Light Maestro</h3>
+        <p style="margin-top:8px">L'interface agit comme un traducteur. Ton logiciel génère des ordres (intensité à 100 %, couleur bleue, mouvement panoramique), et l'interface les convertit en signal DMX vers la chaîne de projecteurs.</p>
+        <p style="margin-top:8px">Les modèles du marché vont des versions de base aux boîtiers plus avancés (comme ENTTEC ou DMXking). La plupart des interfaces abordables intègrent un chipset FTDI, ce qui nécessite l'installation préalable du pilote FTDI adapté à ton système d'exploitation. Bonne nouvelle : Light Maestro détecte automatiquement votre interface au lancement — branchez, lancez, ça sort.</p>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3 class="h3">Interface USB vs Console DMX matérielle</h3>
+      <table class="table" style="margin-top:12px">
+        <tr><th>Critère</th><th>Interface USB DMX + Logiciel</th><th>Console DMX matérielle</th></tr>
+        <tr><td><b>Coût</b></td><td>Économique, idéal pour débuter</td><td>Investissement initial plus élevé</td></tr>
+        <tr><td><b>Flexibilité</b></td><td>Évolutive : scènes complexes, cues, profils d'appareils</td><td>Flux de travail fixe</td></tr>
+        <tr><td><b>Apprentissage</b></td><td>Moyenne</td><td>Rapide pour les configurations basiques</td></tr>
+        <tr><td><b>Usage idéal</b></td><td>DJs, prestations mobiles, petites salles, home studio</td><td>Théâtres, installations fixes, régie direct</td></tr>
+        <tr><td><b>Portabilité</b></td><td>Maximale (un câble + un PC)</td><td>Modérée</td></tr>
+      </table>
+      <p style="margin-top:12px">Opter pour une interface USB DMX avec <b style="color:white">Light Maestro</b>, c'est choisir la souplesse du logiciel : édition de scènes simplifiée, sauvegarde illimitée de vos shows et accès à de larges bibliothèques d'appareils, sans les contraintes des boutons d'une console physique.</p>
+    </div>
+  </div>
+</section>
+
+
+
+<section id="catalogue" class="section chapter" style="background: linear-gradient(180deg, #07070b, #0a0a12); border-top:1px solid #1f1f2e; border-bottom:1px solid #1f1f2e">
+  <div class="wrap">
+    <h2 class="h2">Formez-vous</h2>
+    <p class="lead">Filtrez par mode. Chaque épisode = une vidéo + chapitrage + fichiers.</p>
+
+    <div id="quickshow" class="chapter" style="margin-top:18px">
+      <h3 class="h3" style="font-size:22px">🎧 Quick Show — DJ / Auto</h3>
+      <div class="grid grid-3" style="margin-top:12px">
+        <article class="card">
+          <div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/uDqgdRPOrbg?rel=0" title="Light Maestro — Génération automatique" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>
+          <div class="meta" style="margin-top:10px"><b>S01E01</b> • 01:39 • Débutant</div>
+          <h3 class="h3" style="margin-top:6px">Génération automatique</h3>
+          <p>L'app analyse ton audio et génère ton show automatiquement : BPM, sections, couleurs et effets.</p>
+        </article>
+        <article class="card">
+          <div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/Rd3ieNq9QoA?rel=0" title="Light Maestro — Palettes de couleurs" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>
+          <div class="meta" style="margin-top:10px"><b>S01E02</b> • 00:47 • Débutant</div>
+          <h3 class="h3" style="margin-top:6px">Palettes de couleurs</h3>
+          <p>Warm, Cool, Party : créez vos palettes personnelles (nom + couleur), appliquez-les en un clic par section et gardez une cohérence colorimétrique sur tout le show. « ↻ Remplacer partout » propage une nouvelle couleur à toutes les scènes, en RGB comme sur roue.</p>
+          <div class="meta" style="margin-top:10px"><span class="badge cyan">À voir</span> Color Tracks • Dimmer Tracks • EFX Tracks</div>
+        </article>
+        <article class="card">
+<div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/otrWWy-hY1g?rel=0" title="Light Maestro — EFX programmés" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>
+          <div class="meta" style="margin-top:10px"><b>S01E03</b> • 02:58 • Intermédiaire</div>
+          <h3 class="h3" style="margin-top:6px">EFX programmés</h3>
+          <p>Color Wave, Strobe Blast, Chase, Dimmer Pulse, Pan Sweep, Build Up, Breakdown, Peak Drop — quand et comment les déclencher.</p>
+        </article>
+      </div>
+    </div>
+
+    <div id="design" class="chapter" style="margin-top:22px">
+      <h3 class="h3" style="font-size:22px">🔧 Design — Édition pro</h3>
+      <div class="grid grid-3" style="margin-top:12px">
+        <article class="card"><div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/yl2wmvLibXQ?rel=0" title="Light Maestro — Chaser" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="meta" style="margin-top:10px"><b>S02E01</b> • 01:56</div><h3 class="h3" style="margin-top:6px">Chaser</h3><p>Enchaînez vos scènes en boucle : ordre des pas, vitesse, Loop et Ping-pong — le mouvement perpétuel sans toucher un bouton.</p></article>
+        <article class="card"><div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/UsPRktavT_E?rel=0" title="Light Maestro — Script auto - Fonctions avancées" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="meta" style="margin-top:10px"><b>S02E02</b> • 03:29</div><h3 class="h3" style="margin-top:6px">Script auto - Fonctions avancées</h3><p>Sections, palettes personnalisées, pistes EFX et presets : poussez la génération automatique au niveau pro. Harmonie garantie — les têtes identiques bougent ensemble (vague sur le rig, chorus collectif).</p></article>
+        <article class="card"><div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/07JS3IV7FNQ?rel=0" title="Light Maestro — Matrice RGB" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="meta" style="margin-top:10px"><b>S02E03</b> • 02:11</div><h3 class="h3" style="margin-top:6px">Matrice RGB</h3><p>Motifs ligne, cercle et diamant sur vos PARs et washes : pixel mapping simple pour des dégradés qui claquent. Direction et décalage de cellules, ordre = ordre du groupe, cellules éteintes réellement éteintes, alerte si une fixture du groupe n'a ni RGB ni roue.</p></article>
+        <article class="card"><div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/P9uNSqpXQ8k?rel=0" title="Light Maestro — Intégration de fixture" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="meta" style="margin-top:10px"><b>S02E04</b> • 01:20</div><h3 class="h3" style="margin-top:6px">Intégration de fixture</h3><p>Votre projecteur absent de la bibliothèque ? Importez son fichier .qxf, vérifiez modes et canaux, patchez-le avec la bonne adresse — prêt à jouer en 5 minutes.</p></article>
+        <article class="card"><div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/TfOUnstptSI?rel=0" title="Light Maestro — Vue 3D fonctions avancées" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="meta" style="margin-top:10px"><b>S02E05</b> • 02:56</div><h3 class="h3" style="margin-top:6px">Vue 3D fonctions avancées</h3><p>Placez vos fixtures, prévisualisez faisceaux & strobes en Three.js, validez avant le montage. Faisceaux réalistes (fondu, arrêt au sol), gobos projetés dans le faisceau, plages mécaniques réelles (pan 540°…), silhouette DJ et musiciens.</p></article>
+        <article class="card"><div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/fllJz4vApbc?rel=0" title="Light Maestro — Création d'un show" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="meta" style="margin-top:10px"><b>S02E06</b> • 02:16</div><h3 class="h3" style="margin-top:6px">Création d'un show</h3><p>De la première scène au show complet : assemblez scènes, chasers et presets, sauvegardez en .lmproj, prêt pour le live.</p></article>
+        <article class="card"><div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/ZlNLsxwkqRU?rel=0" title="Light Maestro — Création de scènes" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="meta" style="margin-top:10px"><b>S02E07</b> • 05:04</div><h3 class="h3" style="margin-top:6px">Création de scènes</h3><p>Partez d'une page noire : choisissez vos fixtures, réglez intensité, couleurs et positions, dosez les fades in/out, nommez et rangez en dossiers — fixtures sans dimmer supportées (badge NO DIM = toujours allumées). La brique de base dont tout le reste découle — chasers, shows et presets.</p></article>
+        <article class="card"><div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/HvzaM6IcvNo?rel=0" title="Light Maestro — Paramètre" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="meta" style="margin-top:10px"><b>S02E08</b> • 01:27</div><h3 class="h3" style="margin-top:6px">Paramètre</h3><p>Réglages essentiels : audio, DMX, langue, dossiers — prépare ton poste avant le show.</p></article>
+        <article class="card"><div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/Ugjn9ymxHvo?rel=0" title="Light Maestro — Création de groupes" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="meta" style="margin-top:10px"><b>S02E09</b> • 00:59</div><h3 class="h3" style="margin-top:6px">Création de groupes</h3><p>Regroupe tes fixtures par position ou rôle : la base des matrices RGB, des pistes et des chasers.</p></article>
+        <article class="card"><div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/nKBXc2YgnKQ?rel=0" title="Light Maestro — Création de fixtures" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="meta" style="margin-top:10px"><b>S02E10</b> • 03:42</div><h3 class="h3" style="margin-top:6px">Création de fixtures</h3><p>Crée tes propres fixtures : modes, canaux, couleurs — pour piloter n’importe quel projecteur, même absent de la bibliothèque.</p></article>
+        <article class="card"><div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/grYStn3RgxA?rel=0" title="Light Maestro — Implantation sur la vue 2D" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="meta" style="margin-top:10px"><b>S02E11</b> • 01:01</div><h3 class="h3" style="margin-top:6px">Implantation sur la vue 2D</h3><p>Place tes fixtures sur le plan 2D : positions, orientations — prépare ta scène avant le montage.</p></article>
+        <article class="card"><div class="video"><iframe width="100%" height="100%" style="aspect-ratio:16/9; border:0; border-radius:16px" src="https://www.youtube.com/embed/NG1w29Py6qM?rel=0" title="Light Maestro — Scènes programmées" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="meta" style="margin-top:10px"><b>S02E12</b> • 02:07</div><h3 class="h3" style="margin-top:6px">Scènes programmées</h3><p>Exploite tes scènes programmées : déclenchement, enchaînement, shows et chasers.</p></article>
+
+
+
+
+      </div>
+    </div>
+
+
+
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div><div style="display:flex; align-items:center; gap:10px; font-weight:900; letter-spacing:.18em; font-size:12px"><img src="./assets/logo.svg" alt="Light Maestro" style="width:28px;height:28px;border-radius:8px"/> LIGHT MAESTRO</div><p style="margin:10px 0 0; max-width:360px">Tutoriels chapitrés, fichiers d'exemple, transcriptions — tout pour passer en pro vite.</p><p class="mono" style="margin-top:10px; font-size:11px; color:#6b7280">© <span data-year></span> Light Maestro</p></div>
+      <div><div style="font-weight:800; color:white; margin-bottom:8px">Formations</div><div style="display:grid; gap:8px"><a href="#quickshow">Quick Show</a><a href="#design">Design</a></div></div>
+      <div><div style="font-weight:800; color:white; margin-bottom:8px">Site</div><div style="display:grid; gap:8px"><a href="./index.html">Accueil</a><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a></div></div>
+      <div><div style="font-weight:800; color:white; margin-bottom:8px">Aide</div><div style="display:grid; gap:8px"><a href="./support.html">Support & FAQ</a><a href="./support.html#contact">Contact</a></div></div>
+    </div>
+  </div>
+</footer>
+<script src="./assets/site.js"></script>
+</body>
+</html>

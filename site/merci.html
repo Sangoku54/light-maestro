@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Merci ! — Light Maestro | Activez votre licence</title>
+<meta name="description" content="Paiement confirmé. Activez votre licence Light Maestro en 1 minute depuis l'application."/>
+<link rel="icon" type="image/png" href="./assets/favicon-32.png"/>
+<link rel="stylesheet" href="./assets/site.css"/>
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="./index.html"><img src="./assets/logo.svg" alt="Light Maestro" style="width:34px;height:34px;border-radius:10px;box-shadow:0 8px 24px rgba(168,85,247,.35)"/><span class="brand-word">LIGHT <span>MAESTRO</span></span></a>
+    <nav class="nav-links"><a href="./index.html">Accueil</a><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tutoriels.html">Tutoriels</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a><a href="./support.html">Support</a></nav>
+    <div style="display:flex; gap:10px; align-items:center"><a class="nav-cta" href="./telecharger.html">⬇ Télécharger</a><a href="./merci-en.html" style="font-size:12px; font-weight:700; color:#9ca3af; text-decoration:none" title="English version">🇬🇧 EN</a><button class="hamburger" data-menu>≡</button></div>
+  </div>
+  <div data-menu-panel style="display:none; border-top:1px solid #1f1f2e; background: rgba(6,6,10,.88)"><div class="wrap" style="padding:12px 20px; display:flex; flex-wrap:wrap; gap:10px"><a href="./fonctionnalites.html">Fonctionnalités</a><a href="./tutoriels.html">Tutoriels</a><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a><a href="./support.html">Support</a></div></div>
+</header>
+
+<section class="hero" style="padding:40px 0 24px">
+  <div class="wrap" style="text-align:center; max-width:680px; margin:0 auto">
+    <span class="kicker">Paiement confirmé</span>
+    <h1 class="h1">Merci — à vous la régie complète.</h1>
+    <p class="lead" style="margin:0 auto">Votre licence est active sur votre compte. Il reste une étape : la récupérer dans l'application.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap" style="max-width:680px; margin:0 auto">
+    <div class="card">
+      <h2 class="h3">Activez votre licence en 1 minute</h2>
+      <ol style="margin:14px 0 0; padding-left:18px; color:#d1d5db; line-height:2; font-size:14px">
+        <li>Ouvrez Light Maestro (téléchargez-le <a href="./telecharger.html" style="color:#c084fc; font-weight:800">ici</a> si besoin).</li>
+        <li>En haut à droite, cliquez <b style="color:white">Compte & Licence</b>.</li>
+        <li>Connectez-vous avec <b style="color:white">le même email</b> que l'achat.</li>
+        <li>L'édition <b style="color:white">Standard</b> ou <b style="color:white">Complète</b> s'affiche — c'est parti.</li>
+      </ol>
+      <div class="notice" style="margin-top:14px">Pas de clé à copier, rien à saisir : la licence est liée à votre compte. Sur une nouvelle machine, reconnectez-vous de la même façon.</div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px">
+        <a class="btn btn-primary" href="./telecharger.html">⬇ Télécharger l'app</a>
+        <a class="btn btn-ghost" href="./support.html#contact">Un souci ? Contactez-nous →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div><div style="display:flex; align-items:center; gap:10px; font-weight:900; letter-spacing:.18em; font-size:12px"><img src="./assets/logo.svg" alt="Light Maestro" style="width:28px;height:28px;border-radius:8px"/> LIGHT MAESTRO</div><p class="mono" style="margin-top:10px; font-size:11px; color:#6b7280">© <span data-year></span> Light Maestro</p></div>
+      <div><div style="font-weight:800; color:white; margin-bottom:8px">Produit</div><div style="display:grid; gap:8px"><a href="./tarifs.html">Tarifs</a><a href="./telecharger.html">Télécharger</a></div></div>
+      <div><div style="font-weight:800; color:white; margin-bottom:8px">Aide</div><div style="display:grid; gap:8px"><a href="./support.html">Support & FAQ</a><a href="./support.html#contact">Contact</a></div></div>
+      <div><div style="font-weight:800; color:white; margin-bottom:8px">Légal</div><div style="display:grid; gap:8px"><a href="./mentions-legales.html">Mentions légales</a><a href="./licence.html">Licence</a></div></div>
+    </div>
+  </div>
+</footer>
+<script>
+  // Notifie l'admin que quelqu'un vient de compléter un paiement (merci.html = retour Stripe).
+  // sendBeacon = non-blocking, ne gêne pas la navigation.
+  try {
+    navigator.sendBeacon('/api/track.php', JSON.stringify({ file: 'paypal-success', version: '?' }));
+  } catch(_) {}
+</script>
+</body>
+</html>
