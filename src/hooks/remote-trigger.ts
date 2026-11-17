@@ -44,7 +44,8 @@ import {
 import { vcPressWidget, vcSetSliderFraction } from '../engine/virtual-console-runtime';
 import { vcPlaybackActiveIds } from '../engine/vc-playback-runtime';
 import { useAppStore } from '../stores/appStore';
-import { usePerformStore } from '../stores/performStore';
+import { usePerformStore, type ConsoleWidget } from '../stores/performStore';
+import { useGroupMastersStore } from '../stores/groupMastersStore';
 import { useShowStore, findBestSongPreset, presetHasAudio } from '../stores/showStore';
 import { getLatencyMs } from '../utils/latency-meter';
 
@@ -147,6 +148,56 @@ export interface RemoteWidgetEntry {
 /** Intervalle de push du snapshot (500 ms, throttlé avec garde anti-recouvrement). */
 const PUSH_INTERVAL_MS = 500;
 
+// ─── Flash (bouton momentané) piloté depuis le téléphone ──────────────────
+
+/**
+ * Relâchements programmés (widgetId → timer) : évite qu'un second tap
+ * n'annule ou ne double le relâchement du premier.
+ */
+const pendingFlashReleases = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * Durée de maintien d'un bouton « flash » déclenché depuis le Remote.
+ *
+ * Sur le PC, le bouton est relâché au relâchement de la souris : le moteur a
+ * donc le temps de RENDRE la scène (quelques frames). Depuis la page mobile,
+ * un tap produit un press+release synchrone : la scène était annulée avant
+ * le moindre rendu → flash invisible. On impose donc un maintien minimal :
+ *   - scène   : la durée de son fondu d'entrée (+ marge) → le flash est
+ *               réellement visible, puis la scène s'éteint ;
+ *   - chaser  : 1 s (au moins un pas de séquence visible) ;
+ *   - autre   : 250 ms (noir, GM, canal DMX).
+ */
+export function flashHoldMs(widget: ConsoleWidget): number {
+  const cfg = widget.config ?? {};
+  if (cfg.actionType === 'scene') {
+    const sceneId = typeof cfg.sceneId === 'string' ? cfg.sceneId : '';
+    const scene = sceneId ? useShowStore.getState().scenes.find((s) => s.id === sceneId) : undefined;
+    const fadeIn = Number(scene?.fadeIn ?? 0);
+    return Math.max(200, Math.min(3000, (Number.isFinite(fadeIn) ? fadeIn : 0) + 150));
+  }
+  if (cfg.actionType === 'chaser') return 1000;
+  return 250;
+}
+
+/** Programme le relâchement différé d'un bouton flash. */
+export function scheduleFlashRelease(widgetId: string, widget: ConsoleWidget): void {
+  const pending = pendingFlashReleases.get(widgetId);
+  if (pending) {
+    clearTimeout(pending);
+    pendingFlashReleases.delete(widgetId);
+  }
+  const timer = setTimeout(() => {
+    pendingFlashReleases.delete(widgetId);
+    try {
+      vcPressWidget(widgetId, false);
+    } catch {
+      /* widget supprimé entre-temps */
+    }
+  }, flashHoldMs(widget));
+  pendingFlashReleases.set(widgetId, timer);
+}
+
 // ─── Accès défensif au preload ───────────────────────────────────────────
 // Le preload de l'agent serveur (lot #17) n'existe pas encore : on cast
 // `window.lightMaestro` en type local pour ne pas dépendre de types.d.ts.
@@ -179,6 +230,11 @@ function clamp01(value: unknown): number | null {
 }
 
 // ─── Dispatch des commandes ──────────────────────────────────────────────
+
+/** Test hook : dispatch direct d'une commande Remote (sans passer par l'IPC). */
+export function __dispatchRemoteCommand(cmd: RemoteCommand): void {
+  dispatchCommand(cmd);
+}
 
 function dispatchCommand(cmd: RemoteCommand): void {
   switch (cmd.type) {
@@ -254,9 +310,12 @@ function dispatchCommand(cmd: RemoteCommand): void {
           console.warn(`[remote-trigger] widget introuvable ou non pilotable (id=${cmd.id})`);
           return;
         }
-        // Un bouton flash ne « vit » que pendant la pression : l'impulsion web
-        // est donc press immédiat + release (sinon il resterait allumé).
-        if (flash) vcPressWidget(cmd.id, false);
+        // Un bouton flash ne « vit » que pendant la pression. La page mobile
+        // envoie un simple « toggle » (un tap) : on relâche donc APRÈS un
+        // délai minimal, sinon press+release dans la MÊME frame annulait la
+        // scène avant qu'elle n'ait eu le temps d'être rendue (flash
+        // invisible côté téléphone).
+        if (flash) scheduleFlashRelease(cmd.id, widget);
         return;
       }
       if (!vcPressWidget(cmd.id, true)) {
@@ -370,18 +429,24 @@ async function buildSnapshot(): Promise<RemoteStateSnapshot> {
 // est résolu côté PC (nom de la scène / du chaser / du preset) pour que la
 // tablette affiche du texte lisible et non des identifiants techniques.
 
-function buildWidgetSnapshot(): RemoteWidgetEntry[] {
+export function buildWidgetSnapshot(): RemoteWidgetEntry[] {
   const perf = usePerformStore.getState();
   const show = useShowStore.getState();
   const activeIds = new Set(vcPlaybackActiveIds());
+  const groupMasters = useGroupMastersStore.getState().values;
 
   return perf.vcWidgets
-    .filter((w) => w.type === 'button' || w.type === 'slider')
+    // Les masters de groupe sont exposés comme des FADERS : sans eux, le
+    // téléphone ne pouvait pas piloter le plafond d'un groupe de fixtures.
+    .filter((w) => w.type === 'button' || w.type === 'slider' || w.type === 'group-master')
     .map((w) => {
       const cfg = w.config ?? {};
+      const isGroupMaster = w.type === 'group-master';
       let label = cfg.label || '';
       if (!label) {
-        if (cfg.actionType === 'scene' && cfg.sceneId) {
+        if (isGroupMaster) {
+          label = show.fixtureGroups.find((g) => g.id === cfg.groupId)?.name || 'Master';
+        } else if (cfg.actionType === 'scene' && cfg.sceneId) {
           label = show.scenes.find((s) => s.id === cfg.sceneId)?.name || '';
         } else if (cfg.actionType === 'chaser' && cfg.chaserId) {
           label = show.chasers.find((c) => c.id === cfg.chaserId)?.name || '';
@@ -402,16 +467,20 @@ function buildWidgetSnapshot(): RemoteWidgetEntry[] {
           label = 'Noir';
         }
       }
-      const isSlider = w.type === 'slider';
-      const min = Number(cfg.min ?? 0);
-      const max = Number(cfg.max ?? 255);
-      const value = perf.vcWidgetValues[w.id];
+      const isSlider = w.type === 'slider' || isGroupMaster;
+      const min = isGroupMaster ? 0 : Number(cfg.min ?? 0);
+      const max = isGroupMaster ? 255 : Number(cfg.max ?? 255);
+      // Source de vérité du plafond : groupMastersStore (le store des widgets
+      // ne suit que le dernier mouvement de fader).
+      const value = isGroupMaster
+        ? (typeof groupMasters[cfg.groupId ?? ''] === 'number' ? groupMasters[cfg.groupId ?? ''] : 255)
+        : perf.vcWidgetValues[w.id];
       return {
         id: w.id,
         type: isSlider ? 'slider' : 'button',
         pageIndex: w.pageIndex,
         label,
-        actionType: cfg.actionType || '',
+        actionType: isGroupMaster ? 'groupMaster' : (cfg.actionType || ''),
         color: cfg.color || '',
         flashMode: cfg.flashMode || '',
         min: isSlider ? min : undefined,

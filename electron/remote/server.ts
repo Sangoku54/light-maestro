@@ -153,6 +153,8 @@ export class RemoteServer {
   private snapshot: RemoteStateSnapshot | null = null;
   /** Appareils ayant contacté le serveur (téléphones/tablettes). */
   private clients = new Map<string, RemoteClientEntry>();
+  /** Réservoir à jetons par IP : bride les commandes (POST) par appareil. */
+  private commandBuckets = new Map<string, { tokens: number; last: number }>();
   private mainWindow: BrowserWindow | null = null;
   /** Pont vers le moteur DMX — défini par main.ts au démarrage. */
   private dmxBridge: {
@@ -246,6 +248,7 @@ export class RemoteServer {
     // (QR code) déjà distribuées sur les téléphones continuent de fonctionner.
     this.snapshot = null;
     this.clients.clear();
+    this.commandBuckets.clear();
     if (this.onListening) srv.off('listening', this.onListening);
     if (this.onError) srv.off('error', this.onError);
     this.onListening = null;
@@ -317,6 +320,35 @@ export class RemoteServer {
     return false;
   }
 
+  /**
+   * Consommation d'un jeton de commande pour une IP (réservoir à jetons).
+   * Réserve de 120 jetons, reconstitution à 60/s. Un glissement de fader
+   * (la page mobile coalesce à 25 Hz) reste autorisé ; une boucle infinie
+   * est bridée.
+   */
+  private allowCommand(ip: string): boolean {
+    const now = Date.now();
+    const CAPACITY = 120;
+    const REFILL_PER_SEC = 60;
+    let bucket = this.commandBuckets.get(ip);
+    if (!bucket) {
+      bucket = { tokens: CAPACITY, last: now };
+      this.commandBuckets.set(ip, bucket);
+    }
+    const elapsed = (now - bucket.last) / 1000;
+    bucket.tokens = Math.min(CAPACITY, bucket.tokens + elapsed * REFILL_PER_SEC);
+    bucket.last = now;
+    if (bucket.tokens < 1) return false;
+    bucket.tokens -= 1;
+    // Nettoyage des réservoirs inactifs (évite une fuite mémoire).
+    if (this.commandBuckets.size > 64) {
+      for (const [key, b] of this.commandBuckets) {
+        if (now - b.last > 60_000) this.commandBuckets.delete(key);
+      }
+    }
+    return true;
+  }
+
   /** Liste des clients connus (les inactifs depuis > 10 min sont purged). */
   getClients(): RemoteClientEntry[] {
     const cutoff = Date.now() - 10 * 60 * 1000;
@@ -350,6 +382,16 @@ export class RemoteServer {
     }
 
     if (req.method === 'POST') {
+      // Limite de débit sur les COMMANDES : un client defectueux (boucle
+      // infinie) ou malveillant ne doit pas pouvoir noyer le renderer sous
+      // des milliers de commandes/seconde (freeze de l'UI, saturation DMX).
+      // Budget large : 120 commandes en rafale puis 60/s reconstituées — le
+      // glissement d'un fader (la page mobile coalesce à 25 Hz) passe sans
+      // être tronqué.
+      if (!this.allowCommand(this.clientIp(req))) {
+        res.setHeader('Retry-After', '1');
+        return this.sendJson(res, 429, { ok: false, error: 'trop de commandes : ralentissez' });
+      }
       const scene = /^\/api\/scene\/([^/]+)$/.exec(url.pathname);
       if (scene) {
         return this.readJsonBody(req, res, (body) => {
@@ -1098,6 +1140,39 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
       .finally(function () { btn.disabled = false; });
   });
 
+  // Coalescence des faders : une seule commande toutes les 40 ms (25 Hz).
+  // Un ecran tactile 120 Hz declenche sinon > 100 evenements input par
+  // seconde : on saturerait la limite de debit du serveur (429) et le fader
+  // saccaderait. La DERNIERE valeur est toujours envoyee (rien n est perdu).
+  var VC_FADER_MS = 40;
+  var vcFaderLast = {};
+  var vcFaderPending = {};
+  var vcFaderTimer = {};
+
+  function sendFader(id, fraction) {
+    var now = Date.now();
+    if (now - (vcFaderLast[id] || 0) < VC_FADER_MS) {
+      vcFaderPending[id] = fraction;
+      if (!vcFaderTimer[id]) {
+        vcFaderTimer[id] = setTimeout(function () { flushFader(id); }, VC_FADER_MS);
+      }
+      return;
+    }
+    vcFaderLast[id] = now;
+    post('api/widget/' + encodeURIComponent(id), { action: 'slider', value: fraction })
+      .catch(function () {});
+  }
+
+  function flushFader(id) {
+    vcFaderTimer[id] = null;
+    var fraction = vcFaderPending[id];
+    if (fraction == null) return;
+    delete vcFaderPending[id];
+    vcFaderLast[id] = Date.now();
+    post('api/widget/' + encodeURIComponent(id), { action: 'slider', value: fraction })
+      .catch(function () {});
+  }
+
   document.getElementById('vcWidgets').addEventListener('input', function (ev) {
     var input = ev.target.closest('input[data-fader]');
     if (!input) return;
@@ -1111,8 +1186,7 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
     var label = document.querySelector('[data-v="' + id + '"]');
     if (label) label.textContent = String(value);
     vcPending[id] = Date.now();
-    post('api/widget/' + encodeURIComponent(id), { action: 'slider', value: fraction })
-      .catch(function () {});
+    sendFader(id, fraction);
   });
 
   document.getElementById('vcPages').addEventListener('click', function (ev) {
