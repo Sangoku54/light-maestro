@@ -15,13 +15,15 @@ import { AudioFileUpload, useAudioFileLoader } from '../hooks/useAudioFileLoader
 import { TrackAnalysis, TrackSection, SECTION_COLORS, keyToPalette, SectionAnalysis, AtmosphereType } from '../hooks/audio-analysis';
 import type { GenreProfile } from '../hooks/audio-analysis';
 import { computeFixtureTrackOverrides, computeEfxOverrides, type FixtureTrack } from '../hooks/fixture-tracks';
-import { loadFixtureDefinitions, clearFixtureDefCache, type DmxCue, type DmxFixtureDefinition } from '../hooks/dmx-cues';
+import { loadFixtureDefinitions, clearFixtureDefCache, type DmxCue, type DmxFixtureDefinition, SECTION_MIN_INTENSITY } from '../hooks/dmx-cues';
 import { findIncompatibleFixtures } from '../hooks/rgb-matrix-playback';
 import { useDmxPlayback, computeDmxForCue, computeColorTrackColors, type ColorTrackRef, type DimmerTrackRef, computeDimmerTrackOverrides, computeStrobeTrackOverrides, computeChaserTrackOverrides, type ChaserTrackRef, computeSceneTrackOverrides, computeShowTrackOverrides } from '../hooks/dmx-playback';
 import { analyzeChannels } from '../engine/fixture-analyzer';
 import { dmxBridge } from '../utils/dmx-bridge';
 import { halfDegToDmxOffset, SPATIAL_BY_SECTION } from '../engine/dmx-movement';
 import { setSectionChain } from '../engine/autoscript-loops';
+import { buildSectionEnvelope, setSectionEnvelopes, median, type SectionEnvelope } from '../engine/autoscript-envelopes';
+import { intensityBand } from '../engine/dmx-color';
 import { normalizeRoster, type MusicianRoster } from '../utils/musicians';
 import { importCustomFixtureDefs } from '../utils/custom-fixtures';
 import { pickAudioUrl, audioBufferToWavDataUrl } from '../utils/audio-cache';
@@ -35,6 +37,32 @@ import TrackTimeline from './TrackTimeline';
 import type { EfxTrack, EfxTrackEntry, ColorTrack, ColorTrackEntry, StrobeTrack, StrobeTrackEntry, DimmerTrack, DimmerTrackEntry, ChaserTrack, ChaserTrackEntry, ShowTrack, ShowTrackEntry, SceneTrack, SceneTrackEntry, MatrixTrack, MatrixTrackEntry, BlackoutTrack, BlackoutTrackEntry } from './TrackTimeline';
 
 type EnrichedCue = DmxCue;
+
+/**
+ * Score d'un palier d'intensité (0..1).
+ *
+ * Utilisé pour (a) le fondu de frontière historique et (b) le niveau
+ * nominal de l'enveloppe CONTINUE du dimmer : on prend la médiane des
+ * paliers de la section, pas le dernier palier rencontré (sinon le dimmer
+ * repartirait de zéro à chaque frontière de section).
+ */
+const INTENSITY_SCORE: Record<string, number> = { 'very-low': 0.1, low: 0.25, medium: 0.5, high: 0.8, 'very-high': 0.95 };
+
+/** Inverse de INTENSITY_SCORE : un score → un palier d'intensité. */
+const scoreToIntensity = (s: number): string =>
+  s >= 0.875 ? 'very-high' : s >= 0.65 ? 'high' : s >= 0.375 ? 'medium' : s >= 0.175 ? 'low' : 'very-low';
+
+/**
+ * Rythme de resélection du pattern de mouvement, en BEATS.
+ *
+ * Avant : toutes les 4 CUES. Or la densité des cues varie fortement
+ * (drop = 2,2 → une cue toutes les 0,23 s à 120 BPM) → le pattern
+ * changeait toutes les 0,9 s : la tête repartait de zéro à chaque
+ * changement, d'où les mouvements « pourris ».
+ * Maintenant : un changement tous les 8 beats (2 mesures) → un nouveau
+ * mouvement qui tombe sur une frontière musicale.
+ */
+const RESEED_BEATS: Record<string, number> = { drop: 8, chorus: 8, build: 8 };
 
 /* ─── PromptModal ─────────────────────────────────────────
  * Electron 21+ no longer supports window.prompt(). This inline
@@ -565,9 +593,6 @@ export function genCues(
     // ── Transitions de section : fondu d'intensité sur les 2 premiers beats ──
     // À un changement de section, le dimmer démarre à l'intensité de la section
     // précédente et rejoint progressivement la cible (fini les snaps aux frontières).
-    const INTENSITY_SCORE: Record<string, number> = { 'very-low': 0.1, low: 0.25, medium: 0.5, high: 0.8, 'very-high': 0.95 };
-    const scoreToIntensity = (s: number): string =>
-      s >= 0.875 ? 'very-high' : s >= 0.65 ? 'high' : s >= 0.375 ? 'medium' : s >= 0.175 ? 'low' : 'very-low';
     let prevSectionIntensity: number | null = null;
     let lastSectionType = '';
 
@@ -749,7 +774,15 @@ export function genCues(
       const sectionCentroid = midFeature?.centroid ?? 0.5;
       const sectionBass = midFeature ? midFeature.bass / Math.max(0.01, midFeature.mid + midFeature.high) : 1;
       let sectionMovement = selectMovementPattern(section.type, sectionRms, sectionCentroid, sectionBass, false, false, 0);
-      const reseedEvery = (section.type === 'drop' || section.type === 'chorus') ? 4 : (section.type === 'build' ? 7 : 9999);
+      // Resélection du pattern sur un rythme MUSICAL (8 beats), plus sur un
+      // nombre de cues (qui dépendait de la densité de section → jusqu'à
+      // 1,1 changement/seconde en drop).
+      const reseedBeats = RESEED_BEATS[section.type] ?? 0;
+      let reseedBlock = 0;
+      // Pattern Courant de la section : il doit PERSISTER entre deux
+      // resélections (sinon la cue suivante retombait sur le pattern de
+      // section → le motif basculait aller-retour toutes les 0,2 s).
+      let currentMovement = sectionMovement;
 
       for (let i = 0; i < numCues; i++) {
         const t = section.startTime + i * localInterval;
@@ -852,9 +885,16 @@ export function genCues(
 
         // Reselection for high-energy sections to create sharp contrast between sections
         // while still giving heads time to move. Low energy sections keep stable pattern.
-        let movement = sectionMovement;
-        if (reseedEvery < 9999 && (i % reseedEvery === 0) && i > 0) {
-          movement = selectMovementPattern(section.type, rms, centroid, bassRatio, beatStrong, dropAnticipation, cueGlobalIdx + i);
+        // Le changement tombe sur une frontière de 8 beats (2 mesures).
+        let movement = currentMovement;
+        if (reseedBeats > 0) {
+          const beatPos = (t - section.startTime) / (60 / bpm);
+          const block = Math.floor(beatPos / reseedBeats);
+          if (block > reseedBlock) {
+            reseedBlock = block;
+            currentMovement = selectMovementPattern(section.type, rms, centroid, bassRatio, beatStrong, dropAnticipation, cueGlobalIdx + i);
+          }
+          movement = currentMovement;
         }
 
         // Amplitude: DMX-scale (0-255), audio-driven, section-scaled + jitter par cue pour éviter l'uniformité
@@ -1040,7 +1080,54 @@ export function genCues(
     if (cue.sectionStart === undefined || !cue.movement) continue;
     if (firstMovements[cue.sectionStart] === undefined) firstMovements[cue.sectionStart] = cue.movement;
   }
-  setSectionChain(sections, firstMovements);
+
+  // ── Enveloppes CONTINUES (vitesse + dimmer) ───────────────────────
+  // Le moteur de rejeu lit ces enveloppes :
+  //  - la VITESSE suit l'énergie locale (au lieu d'être figée par type
+  //    de section → les mouvements étaient toujours rapides) ;
+  //  - le DIMMER suit l'enveloppe RMS, respire au tempo et s'accentue sur
+  //    les beats (au lieu de tenir par paliers → aucun contraste).
+  const envelopeList: SectionEnvelope[] = [];
+  const sectionEnvIds: Record<number, number> = {};
+  const cuesBySection = new Map<number, any[]>();
+  for (const cue of deduped) {
+    if (typeof cue.sectionStart !== 'number') continue;
+    const list = cuesBySection.get(cue.sectionStart) ?? [];
+    list.push(cue);
+    cuesBySection.set(cue.sectionStart, list);
+  }
+  let prevEndLevel: number | undefined;
+  for (const section of sections) {
+    const secCues = cuesBySection.get(section.startTime) ?? [];
+    const scores = secCues.map((c: any) => INTENSITY_SCORE[c.intensity] ?? 0.5);
+    // Niveau NOMINAL de la section : la médiane des paliers (pas le
+    // dernier) → le dimmer repart du bon niveau à chaque frontière.
+    const baseScore = scores.length > 0 ? median(scores) : 0.5;
+    const band = intensityBand(scoreToIntensity(baseScore));
+    const env = buildSectionEnvelope(analysis ?? { duration: 0 }, {
+      sectionType: section.type,
+      start: section.startTime,
+      end: section.endTime,
+      bpm,
+      band,
+      startLevel: prevEndLevel,
+      floor: (SECTION_MIN_INTENSITY[section.type] ?? 60) / 255,
+    });
+    envelopeList.push(env);
+    prevEndLevel = env.dimmer[env.dimmer.length - 1];
+  }
+  // Identifiants uniques : chaque cue porte celui de sa section → deux
+  // shows peuvent coexister sans se voler leurs enveloppes.
+  const envIds = setSectionEnvelopes(envelopeList);
+  sections.forEach((section, i) => {
+    const id = envIds[i];
+    if (id === undefined) return;
+    sectionEnvIds[section.startTime] = id;
+    for (const cue of cuesBySection.get(section.startTime) ?? []) cue.envId = id;
+  });
+  // La chaîne des sections connaît les enveloppes (raccord section →
+  // section : la boucle précédente utilise SA vitesse locale).
+  setSectionChain(sections, firstMovements, sectionEnvIds);
   return deduped;
 }
 

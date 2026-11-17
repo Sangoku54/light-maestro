@@ -627,6 +627,155 @@ describe.skipIf(!fs.existsSync(PROJECT))('Yolo.lmproj — analyse des fixtures p
     expect([...overflowChannels], 'Le moteur écrit sur des canaux hors de toutes les plages fixtures').toEqual([]);
   });
 
+  it('timeline DENSE : dimmer continu, mouvement fluide, aucune valeur hors plage', () => {
+    // La sonde « sweep timeline complet » n'échantillonne qu'AUX TEMPS DES
+    // CUES : elle ne peut pas détecter un mouvement en escalier ni un
+    // dimmer figé entre deux cues. Ici on rejoue le moteur réel à 50 ms
+    // (cadence d'un frame à 20 fps) dans une section dense (drop/chorus).
+    const defs = new Map<any, any>();
+    for (const pf of patched) {
+      defs.set(pf.fixtureDefId, pf.fixtureDefId.startsWith('custom-')
+        ? customDefs.get(pf.fixtureDefId)
+        : lib.get(pf.fixtureDefId));
+    }
+    const qs = presetQ?.quickShow ?? {};
+    const cfg = {
+      musicStyle: qs.musicStyle || 'dance',
+      colorScheme: qs.colorScheme || 'auto',
+      intensity: qs.intensity || 'dynamic',
+      movement: qs.movement || 'dynamic',
+      beatDivision: qs.beatDivision || 4,
+      audioReactive: qs.audioReactive !== false,
+      sectionAware: qs.sectionAware !== false,
+      customPalette: qs.customPalette ?? [],
+    };
+    let sections: any[];
+    let bpm: number;
+    if (presetQ?.sections?.length) {
+      sections = presetQ.sections.map((s: any) => ({ type: s.type, startTime: s.startTime, endTime: s.endTime, energy: s.energy ?? 0.5, color: s.color ?? '#888' }));
+      bpm = analysis?.bpm || 120;
+    } else {
+      sections = [
+        { type: 'intro', startTime: 0, endTime: 15, energy: 0.3, color: '#888' },
+        { type: 'drop', startTime: 15, endTime: 35, energy: 0.95, color: '#888' },
+      ];
+      bpm = 120;
+    }
+
+    const cues: any[] = genCues(sections, bpm, cfg.beatDivision, cfg, [], 7, analysis);
+    expect(cues.length).toBeGreaterThan(0);
+
+    // Section la plus dense (drop/chorus/build) : c'est là que le défaut
+    // « toujours rapide, sans nuance » était le plus visible.
+    const dense = sections.find((s) => s.type === 'drop')
+      ?? sections.find((s) => s.type === 'chorus')
+      ?? sections[0];
+    const baseCue = cues.find((c) => c.sectionStart === dense.startTime) ?? cues[0];
+    expect(baseCue).toBeTruthy();
+
+    const STEP = 0.05;                       // 50 ms
+    const SPAN = Math.min(4, dense.endTime - dense.startTime);
+    const STEPS = Math.max(20, Math.floor(SPAN / STEP));
+    const dimSeq = new Map<string, number[]>();
+    const panSeq = new Map<string, number[]>();
+    const tiltSeq = new Map<string, number[]>();
+    const pushTo = (map: Map<string, number[]>, id: string, v: number) => {
+      let arr = map.get(id);
+      if (!arr) { arr = []; map.set(id, arr); }
+      arr.push(v);
+    };
+
+    const fixtures = patched.map((pf) => ({
+      pf,
+      fa: analyzeChannels(pf, defs.get(pf.fixtureDefId)),
+    }));
+
+    for (let i = 0; i <= STEPS; i++) {
+      const t = dense.startTime + i * STEP;
+      const dmx = computeDmxForCue(
+        { ...baseCue, time: t, energy: baseCue.energy },
+        patched,
+        defs,
+        [{ id: 'universe-1' }],
+        { primary: 100, secondary: 70, tertiary: 40, other: 40 } as any,
+      );
+      const written: Record<number, number> = {};
+      for (const d of dmx) Object.assign(written, d.channelValues);
+      // ── Toutes les valeurs écrites doivent être des DMX valides ──
+      for (const [addr, val] of Object.entries(written)) {
+        expect(Number.isInteger(val), `canal ${addr} : valeur non entière (${val})`).toBe(true);
+        expect(val, `canal ${addr} : valeur hors plage (${val})`).toBeGreaterThanOrEqual(0);
+        expect(val, `canal ${addr} : valeur hors plage (${val})`).toBeLessThanOrEqual(255);
+      }
+      for (const { pf, fa } of fixtures) {
+        if (fa.intensityOffset !== null) {
+          pushTo(dimSeq, pf.id, written[pf.startAddress + fa.intensityOffset] ?? 0);
+        }
+        const po = fa.panOffsets[0];
+        const to = fa.tiltOffsets[0];
+        if (po !== undefined) pushTo(panSeq, pf.id, written[pf.startAddress + po] ?? 0);
+        if (to !== undefined) pushTo(tiltSeq, pf.id, written[pf.startAddress + to] ?? 0);
+      }
+    }
+
+    const failures: string[] = [];
+    /** Ratio de paliers PLATS (valeur identique entre deux échantillons). */
+    const flatRatio = (seq: number[]): number => {
+      if (seq.length < 2) return 0;
+      let flat = 0;
+      for (let i = 1; i < seq.length; i++) if (seq[i] === seq[i - 1]) flat++;
+      return flat / (seq.length - 1);
+    };
+    for (const { pf, fa } of fixtures) {
+      if (fa.intensityOffset === null) continue;
+      const seq = dimSeq.get(pf.id) ?? [];
+      if (seq.length === 0) { failures.push(`${pf.name}: dimmer jamais écrit`); continue; }
+      const distinct = new Set(seq).size;
+      // AVANT : le dimmer tenait un palier par cue (5 valeurs max).
+      // Le correctif impose une enveloppe continue → plusieurs dizaines.
+      if (distinct < 8) failures.push(`${pf.name}: dimmer figé (${distinct} valeur(s) distinctes)`);
+      if (Math.min(...seq) <= 0) failures.push(`${pf.name}: dimmer à 0 (fixture muette)`);
+      // Le dimmer doit EVOLUER à chaque échantillon (enveloppe continue).
+      // L'ancien chemin figeait la valeur jusqu'à la cue suivante → paliers.
+      const flat = flatRatio(seq);
+      if (flat > 0.25) failures.push(`${pf.name}: dimmer en paliers (${Math.round(flat * 100)} % d'échantillons immobiles)`);
+    }
+    for (const { pf } of fixtures) {
+      for (const [axis, seq] of [['pan', panSeq.get(pf.id)], ['tilt', tiltSeq.get(pf.id)]] as const) {
+        if (!seq || seq.length === 0) continue;
+        const steps: number[] = [];
+        for (let i = 1; i < seq.length; i++) steps.push(Math.abs(seq[i] - seq[i - 1]));
+        const maxStep = Math.max(...steps);
+        const sorted = steps.slice().sort((a, b) => a - b);
+        const medianStep = sorted[Math.floor(sorted.length / 2)];
+        // Un mouvement rapide mais CONTINU (bounce, heartbeat en drop) a un
+        // pas MÉDIAN faible : la tête progresse en permanence.
+        // Un escalier (ancien `Math.floor()`) a un pas médian ÉLEVÉ : la
+        // tête ne bouge que par bonds réguliers.
+        if (medianStep > 25) failures.push(`${pf.name}: ${axis} en escalier (pas médian ${medianStep} DMX / 50 ms)`);
+        // Garde-fou : aucun saut ne doit dépasser la course utile en 50 ms.
+        if (maxStep > 60) failures.push(`${pf.name}: ${axis} saut excessif (${maxStep} DMX / 50 ms)`);
+        // NOTE : le ratio de paliers n'est PAS un critère sur pan/tilt —
+        // certains patterns (bounce, heartbeat) ne déplacent qu'un seul
+        // axe : l'autre reste légitimement immobile pendant une partie
+        // du cycle. Le test « autoscript » couvre la non-immobilité
+        // globale de chaque axe sur la timeline complète.
+      }
+    }
+
+    console.log(`[YOLO-DENSE] section=${dense.type} · ${STEPS + 1} échantillons à 50 ms · ` +
+      `${dimSeq.size} dimmers suivis`);
+    for (const { pf, fa } of fixtures) {
+      if (fa.intensityOffset === null) continue;
+      const seq = dimSeq.get(pf.id) ?? [];
+      if (!seq.length) continue;
+      console.log(`  ${pad(pf.name, 38)} dimmer ${String(Math.min(...seq)).padStart(3)}..${String(Math.max(...seq)).padStart(3)} · ` +
+        `${new Set(seq).size} valeurs · ${Math.round(flatRatio(seq) * 100)} % paliers`);
+    }
+    expect(failures.slice(0, 8)).toEqual([]);
+    expect(failures.length, `${failures.length} problème(s) sur timeline dense`).toBe(0);
+  });
+
   it('couverture : chaque canal parlant est détecté et piloté par le moteur (aucun mutisme)', () => {
     console.log('\n=== COUVERTURE CANAL-À-CANAL (auditFixtureCoverage) ===');
     for (const pf of patched) {

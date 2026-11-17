@@ -66,21 +66,54 @@ export function matchCapToCategory(capName: string, category: string): number {
   return 0;
 }
 
-export function mapIntensity(level: string, energy: number, tier: string, tierMults?: { primary: number; secondary: number; tertiary: number }): number {
-  const ABSOLUTE_MIN=0; let val: number;
-  if(level==='dynamic'){val=Math.round(Math.max(ABSOLUTE_MIN,20+energy*235));}
-  else{let lo:number,hi:number;switch(level){case'very-low':lo=40;hi=130;break;case'low':lo=100;hi=200;break;case'medium':lo=140;hi=240;break;case'high':lo=180;hi=255;break;case'very-high':lo=200;hi=255;break;default:lo=120;hi=220;break;}val=Math.round(Math.max(ABSOLUTE_MIN,lo+Math.max(0,Math.min(1,energy))*(hi-lo)));}
-  let tierMult: number;
+/**
+ * Bande d'intensité d'un niveau, normalisée 0..1.
+ *
+ * Source UNIQUE partagée par `mapIntensity` (rejeu) et par l'enveloppe
+ * continue du dimmer (autoscript-envelopes) : les deux doivent agreeing
+ * sur la plage de chaque niveau, sinon le dimmer vivant et le dimmer
+ * figé ne se rejoignent jamais.
+ */
+export function intensityBand(level: string): [number, number] {
+  switch (level) {
+    case 'very-low': return [40 / 255, 130 / 255];
+    case 'low': return [100 / 255, 200 / 255];
+    case 'medium': return [140 / 255, 240 / 255];
+    case 'high': return [180 / 255, 255 / 255];
+    case 'very-high': return [200 / 255, 255 / 255];
+    default: return [120 / 255, 220 / 255];
+  }
+}
+
+/**
+ * Multiplicateur de tier appliqué au niveau final.
+ * Exporté pour que l'enveloppe continue du dimmer applique exactement la
+ * même pondération que le chemin historique.
+ */
+export function tierIntensityMultiplier(
+  tier: string,
+  tierMults?: { primary: number; secondary: number; tertiary: number },
+): number {
   if (tierMults) {
     // Le Tier Mix utilisateur exprime directement le niveau final : 70% = 0.70.
     // L'ancien code sur-multipliait par la base structurelle (0.7 × 0.7 = 0.49
     // pour le secondaire) — faisceaux invisibles malgré un Tier Mix à 70%.
-    if (tier === 'primary' || tier === 'other') tierMult = tierMults.primary / 100;
-    else if (tier === 'secondary') tierMult = tierMults.secondary / 100;
-    else tierMult = tierMults.tertiary / 100;
-  } else {
-    tierMult = tier === 'primary' || tier === 'other' ? 1.0 : tier === 'secondary' ? 0.7 : 0.4;
+    if (tier === 'primary' || tier === 'other') return tierMults.primary / 100;
+    if (tier === 'secondary') return tierMults.secondary / 100;
+    return tierMults.tertiary / 100;
   }
+  return tier === 'primary' || tier === 'other' ? 1.0 : tier === 'secondary' ? 0.7 : 0.4;
+}
+
+export function mapIntensity(level: string, energy: number, tier: string, tierMults?: { primary: number; secondary: number; tertiary: number }): number {
+  const ABSOLUTE_MIN=0; let val: number;
+  if(level==='dynamic'){val=Math.round(Math.max(ABSOLUTE_MIN,20+energy*235));}
+  else{
+    const [lo,hi]=intensityBand(level);
+    const loD=lo*255, hiD=hi*255;
+    val=Math.round(Math.max(ABSOLUTE_MIN,loD+Math.max(0,Math.min(1,energy))*(hiD-loD)));
+  }
+  const tierMult = tierIntensityMultiplier(tier, tierMults);
   return Math.round(val*tierMult);
 }
 

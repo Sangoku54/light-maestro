@@ -19,16 +19,28 @@
  * l'appelant garde son calcul analytique historique.
  */
 import { evalEffect, type EffectPattern } from './effect-engine';
+import { getSectionEnvelope } from './autoscript-envelopes';
 
-/** Beats nécessaires pour un tour complet, par type de section. */
+/**
+ * Beats nécessaires pour un tour complet, par type de section.
+ *
+ * Ces valeurs sont le TEMPO DE BASE du mouvement ; la nuance locale vient
+ * de l'enveloppe audio (`autoscript-envelopes`) qui accélère ou ralentit
+ * la phase à l'intérieur de la section.
+ *
+ * Avant : drop = 1 beat/tour → 2 tours/seconde à 120 BPM, chorus = 2 beats
+ * → 1 tour/seconde. Le show « filait » en permanence, sans contraste.
+ * Maintenant : le drop est le moment le plus rapide mais reste humain
+ * (1 tour / 3 beats), le refrain tient 4 beats/tour, le couplet 6.
+ */
 export const SECTION_BEATS_PER_CYCLE: Record<string, number> = {
   intro: 8,
   outro: 8,
-  verse: 4,
-  bridge: 4,
-  chorus: 2,
-  build: 2,
-  drop: 1,
+  verse: 6,
+  bridge: 6,
+  chorus: 4,
+  build: 4,
+  drop: 3,
 };
 
 /** Pattern de base appliqué quand la section n'a pas de movement explicite. */
@@ -72,6 +84,8 @@ export interface SectionMoveLoop {
   /** Valeurs normalisées [-1,1] : index = motor * samples + i */
   pan: Float32Array;
   tilt: Float32Array;
+  /** Phase cumulée de la boucle, en tours (diagnostic / tests). */
+  warp: Float32Array;
   /** Part de la section couverte par le fondu depuis la fin de la précédente. */
   rampFrac: number;
   /** Boucle de la section précédente (null pour la première). */
@@ -84,19 +98,28 @@ interface LoopCue {
   sectionStart?: number;
   sectionEnd?: number;
   bpm?: number;
+  /** Identifiant de l'enveloppe audio de la section (cf. autoscript-envelopes). */
+  envId?: number;
 }
 
 let chain: SectionLike[] = [];
 let chainMovements: Record<number, string> = {};
+/** Identifiant d'enveloppe audio par section (cf. autoscript-envelopes). */
+let chainEnvIds: Record<number, number> = {};
 const cache = new Map<string, SectionMoveLoop>();
 
-/** Pose l'ordre des sections (+ movement de la 1ʳᵉ cue de chacune) et vide le cache. */
+/**
+ * Pose l'ordre des sections (+ movement de la 1ʳᵉ cue de chacune) et vide
+ * le cache. `envIds` associe à chaque section son enveloppe audio.
+ */
 export function setSectionChain(
   sections: SectionLike[],
   movements?: Record<number, string>,
+  envIds?: Record<number, number>,
 ): void {
   chain = (sections || []).slice().sort((a, b) => a.startTime - b.startTime);
   chainMovements = movements || {};
+  chainEnvIds = envIds || {};
   cache.clear();
 }
 
@@ -160,12 +183,68 @@ function patternRange(pattern: EffectPattern, cycles: number, motors: number): {
   return { panLo, panHi, tiltLo, tiltHi };
 }
 
+/**
+ * Empreinte courte d'une courbe de vitesse (pour la clé de cache).
+ */
+function curveKey(curve?: number[] | null): string {
+  if (!curve || curve.length === 0) return 'u';
+  let h = 0;
+  for (let i = 0; i < curve.length; i++) {
+    h = (h * 31 + Math.round(curve[i] * 1000)) | 0;
+  }
+  return `c${curve.length}.${h}`;
+}
+
+/**
+ * Phase cumulée d'une boucle, en tours.
+ *
+ * Sans courbe de vitesse : progression linéaire (comportement historique).
+ * Avec une courbe : la phase avance AU RYTHME de la vitesse locale → le
+ * mouvement accélère sur les pics et ralentit dans les creux, tout en
+ * bouclant exactement le même nombre de tours sur la section (la fin de
+ * section reste alignée sur le tempo).
+ */
+function buildPhaseWarp(samples: number, cycles: number, speedCurve?: number[] | null): Float32Array {
+  const warp = new Float32Array(samples);
+  if (!speedCurve || speedCurve.length < 2) {
+    for (let i = 0; i < samples; i++) warp[i] = (i / Math.max(1, samples - 1)) * cycles;
+    return warp;
+  }
+  const v = new Float32Array(samples);
+  for (let i = 0; i < samples; i++) {
+    const x = (i / Math.max(1, samples - 1)) * (speedCurve.length - 1);
+    const i0 = Math.floor(x);
+    const i1 = Math.min(speedCurve.length - 1, i0 + 1);
+    const f = x - i0;
+    v[i] = speedCurve[i0] + (speedCurve[i1] - speedCurve[i0]) * f;
+  }
+  let total = 0;
+  for (let i = 0; i < samples; i++) total += v[i];
+  if (total <= 1e-6) {
+    for (let i = 0; i < samples; i++) warp[i] = (i / Math.max(1, samples - 1)) * cycles;
+    return warp;
+  }
+  const cum = new Float32Array(samples);
+  let acc = 0;
+  for (let i = 0; i < samples; i++) {
+    acc += v[i] / 2;                       // point milieu → phase continue
+    cum[i] = acc;
+    acc += v[i] / 2;
+  }
+  // Normalisation sur le dernier point : la boucle se referme EXACTEMENT
+  // sur son nombre de tours (la fin de section reste alignée sur le tempo).
+  const denom = cum[samples - 1] || 1;
+  for (let i = 0; i < samples; i++) warp[i] = (cum[i] / denom) * cycles;
+  return warp;
+}
+
 function buildLoop(
   section: SectionLike,
   pattern: EffectPattern,
   bpm: number,
   motors: number,
   withPrev: boolean,
+  speedCurve?: number[] | null,
 ): SectionMoveLoop {
   const start = section.startTime;
   const end = section.endTime;
@@ -175,11 +254,12 @@ function buildLoop(
   const sectionBeats = (dur * bpm) / 60;
   const cycles = Math.max(1, Math.round(sectionBeats / beatsPerCycle));
   const samples = Math.min(128, Math.max(8, Math.round(cycles * 8)));
-  const key = `${pattern}|${sectionType}|${start.toFixed(3)}|${end.toFixed(3)}|${bpm}|${motors}`;
+  const key = `${pattern}|${sectionType}|${start.toFixed(3)}|${end.toFixed(3)}|${bpm}|${motors}|${curveKey(speedCurve)}`;
 
   const pan = new Float32Array(motors * samples);
   const tilt = new Float32Array(motors * samples);
   const range = patternRange(pattern, cycles, motors);
+  const warp = buildPhaseWarp(samples, cycles, speedCurve);
   const norm = (v: number, lo: number, hi: number): number => {
     const span = hi - lo;
     if (!(span > 1e-6)) return 0;
@@ -188,7 +268,7 @@ function buildLoop(
   for (let m = 0; m < motors; m++) {
     const spread = m * (Math.PI * 2) / motors;
     for (let i = 0; i < samples; i++) {
-      const phase = (i / samples) * cycles * Math.PI * 2;
+      const phase = warp[i] * Math.PI * 2;
       const [x, y] = evalEffect(pattern, phase, spread);
       const idx = m * samples + i;
       pan[idx] = norm(x, range.panLo[m], range.panHi[m]);
@@ -207,11 +287,12 @@ function buildLoop(
         resolveMovePattern(chainMovements[prevSec.startTime]) ??
         SECTION_BASE_PATTERN[prevType] ??
         pattern;
-      prev = buildLoop(prevSec, prevPattern, bpm, motors, false);
+      const prevEnv = getSectionEnvelope(chainEnvIds[prevSec.startTime]);
+      prev = buildLoop(prevSec, prevPattern, bpm, motors, false, prevEnv?.speed);
     }
   }
 
-  return { key, pattern, sectionType, start, end, cycles, samples, motors, pan, tilt, rampFrac, prev };
+  return { key, pattern, sectionType, start, end, cycles, samples, motors, pan, tilt, warp, rampFrac, prev };
 }
 
 /** Construction (cached) d'une boucle pour une section donnée. */
@@ -221,18 +302,21 @@ export function getSectionMoveLoop(
   bpm = 120,
   motors = 1,
   withPrev = true,
+  speedCurve?: number[] | null,
 ): SectionMoveLoop {
   const start = section.startTime;
   const end = section.endTime;
   const sectionType = section.type || 'verse';
-  const key = `${pattern}|${sectionType}|${start.toFixed(3)}|${end.toFixed(3)}|${bpm}|${motors}`;
+  const key = `${pattern}|${sectionType}|${start.toFixed(3)}|${end.toFixed(3)}|${bpm}|${motors}|${curveKey(speedCurve)}`;
   const hit = cache.get(key);
   if (hit) return hit;
-  const loop = buildLoop(section, pattern, bpm, motors, withPrev);
+  const loop = buildLoop(section, pattern, bpm, motors, withPrev, speedCurve);
   cache.set(key, loop);
   if (loop.prev) {
-    const prevKey = `${loop.prev.pattern}|${loop.prev.sectionType}|${loop.prev.start.toFixed(3)}|${loop.prev.end.toFixed(3)}|${bpm}|${motors}`;
-    cache.set(prevKey, loop.prev);
+    // La boucle précédente porte SA propre empreinte de vitesse (celle de
+    // sa section) : on la range sous sa clé, pas sous celle de la
+    // section courante.
+    cache.set(loop.prev.key, loop.prev);
   }
   return loop;
 }
@@ -248,7 +332,10 @@ export function sectionMoveFor(cue: LoopCue, motors: number): SectionMoveLoop | 
   const sectionType = cue.section || sectionTypeOf(start, end) || 'verse';
   const pattern = resolveMovePattern(cue.movement) ?? SECTION_BASE_PATTERN[sectionType] ?? null;
   if (!pattern) return null;
-  return getSectionMoveLoop({ type: sectionType, startTime: start, endTime: end }, pattern, bpm, motors, true);
+  // Enveloppe audio de la section → la phase est warped par la vitesse
+  // locale (accélère sur les pics, ralentit dans les creux).
+  const env = getSectionEnvelope(cue.envId);
+  return getSectionMoveLoop({ type: sectionType, startTime: start, endTime: end }, pattern, bpm, motors, true, env?.speed);
 }
 
 /** Position 0..1 dans la section (bornée). */
@@ -268,10 +355,20 @@ export function phaseToIndexOffset(offsetRad: number, loop: SectionMoveLoop): nu
   return ((idx % loop.samples) + loop.samples) % loop.samples;
 }
 
-function sampleIndex(loop: SectionMoveLoop, phase01: number, offset: number): number {
+/**
+ * Position dans la boucle : index entier + fraction pour l'interpolation.
+ *
+ * AVANT : `Math.floor()` → la tête sautait d'une position à l'autre (une
+ * frame de 16 ms en montrait une seule) → mouvement « en escalier ».
+ * MAINTENANT : la fraction est interpolée entre les deux échantillons
+ * encadrants → trajectoire continue, comme l'annonce l'en-tête du module.
+ */
+function sampleIndex(loop: SectionMoveLoop, phase01: number, offset: number): { idx: number; frac: number } {
   const p = phase01 < 0 ? 0 : phase01 > 1 ? 1 : phase01;
   const base = Math.min(loop.samples - 1, Math.max(0, Math.floor(p * loop.samples)));
-  return (base + ((offset % loop.samples) + loop.samples)) % loop.samples;
+  const frac = p * loop.samples - base;
+  const idx = (base + ((offset % loop.samples) + loop.samples)) % loop.samples;
+  return { idx, frac };
 }
 
 /** Échantillon normalisé, sans raccord. */
@@ -282,9 +379,15 @@ export function sampleSectionLoopRaw(
   offset = 0,
 ): [number, number] {
   const m = ((motorIdx % loop.motors) + loop.motors) % loop.motors;
-  const i = sampleIndex(loop, phase01, offset);
-  const idx = m * loop.samples + i;
-  return [loop.pan[idx], loop.tilt[idx]];
+  const { idx, frac } = sampleIndex(loop, phase01, offset);
+  const next = (idx + 1) % loop.samples;
+  const a = m * loop.samples + idx;
+  const b = m * loop.samples + next;
+  const f = frac < 0 ? 0 : frac > 1 ? 1 : frac;
+  return [
+    loop.pan[a] + (loop.pan[b] - loop.pan[a]) * f,
+    loop.tilt[a] + (loop.tilt[b] - loop.tilt[a]) * f,
+  ];
 }
 
 /** Échantillon normalisé avec fondu de raccord depuis la fin de la section précédente. */

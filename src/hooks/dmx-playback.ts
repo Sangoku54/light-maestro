@@ -17,7 +17,7 @@
 import { useEffect, useRef } from 'react';
 import type { PatchedFixture, FixtureGroup, FixtureTier } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureCapability } from './dmx-cues';
-import { clampStrobeLimit } from './dmx-cues';
+import { clampStrobeLimit, SECTION_MIN_INTENSITY } from './dmx-cues';
 import { resolveTrackTargets, computeEfxOverrides, type EfxTrackRef, type FixtureTrack, type MovementBlock } from './fixture-tracks';
 import { computeMatrixTrackColors, collectActiveMatrixIds, markMatrixPresetDriven, noteEngineTick } from './rgb-matrix-playback';
 
@@ -518,8 +518,9 @@ export function holdMissingChannels(
 // ─── Extracted utilities (pure functions, no React) ──────
 import { evalEffect, toDmx, type EffectPattern } from '../engine/effect-engine';
 import { sectionMoveFor, sectionPhase01, sampleSectionLoop, phaseToIndexOffset, movementAmp } from '../engine/autoscript-loops';
+import { getSectionEnvelope, sampleCurve } from '../engine/autoscript-envelopes';
 import type { RgbSegment } from '../engine/dmx-color';
-import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, findBestWheelCap, wheelDegeneratePosition } from '../engine/dmx-color';
+import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, tierIntensityMultiplier, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, findBestWheelCap, wheelDegeneratePosition } from '../engine/dmx-color';
 import type { ChannelAnalysis } from '../engine/fixture-analyzer';
 import { analyzeChannels, capMid, pickLaserModeCap, laserGateValue, mapIntensityVal, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
 import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSectionMovement, spatialPhaseFor, zeroDmxOffset, clampPanZoneDmx, clampTiltZoneDmx } from '../engine/dmx-movement';
@@ -1134,6 +1135,21 @@ export function useDmxPlayback(options: {
       setTimeout(() => { dropBoost = 0; }, 300);
     }
     const effectiveEnergy = dropBoost > 0 ? dropBoost : energy;
+    // Enveloppe CONTINUE du dimmer (autoscript) : niveau 0..1 échantillonné
+    // AU TEMPS COURANT. Sans elle, le dimmer restait figé sur le palier de
+    // la cue (escalier) — d'où l'absence totale de nuance.
+    const envelopeDimmerLevel = (() => {
+      const env = getSectionEnvelope((active as any)?.envId);
+      if (!env) return undefined;
+      const s = (active as any)?.sectionStart;
+      const e = (active as any)?.sectionEnd;
+      if (typeof s !== 'number' || typeof e !== 'number') return undefined;
+      const v = sampleCurve(env.dimmer, s, e, ct);
+      return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : undefined;
+    })();
+    // Plancher de section (identique au chemin statique) : chaque section a
+    // son minimum, pour le contraste dramatique.
+    const sectionDimmerFloor = SECTION_MIN_INTENSITY[sec] ?? 60;
     const isDrop=sec==='drop'||dropBoost>0;const isChorus=sec==='chorus';
     // Boost strobe during drop force
     const forcedStrobe = dropBoost > 0 ? true : active.forcedStrobe;
@@ -1296,7 +1312,14 @@ export function useDmxPlayback(options: {
                 }
               }
             }
-            return active.forcedDimmerVal !== undefined ? active.forcedDimmerVal : mapIntensity(active.intensity, effectiveEnergy, pf.tier, tierMultipliers);
+            if (active.forcedDimmerVal !== undefined) return active.forcedDimmerVal;
+            if (envelopeDimmerLevel !== undefined) {
+              // Enveloppe audio continue : niveau du dimmer échantillonné à
+              // l'instant présent (RMS + respiration + accents de beat).
+              const tiered = Math.round(255 * envelopeDimmerLevel * tierIntensityMultiplier(pf.tier, tierMultipliers));
+              return Math.max(tiered, sectionDimmerFloor);
+            }
+            return mapIntensity(active.intensity, effectiveEnergy, pf.tier, tierMultipliers);
           })();
           // Dimmer track override (highest priority for intensity)
           if (dimmerOverrides) {
@@ -2283,6 +2306,19 @@ export function computeDmxForCue(
   const isDrop = cue.section.toLowerCase() === 'drop';
   const isChorus = cue.section.toLowerCase() === 'chorus';
   const sec = cue.section.toLowerCase();
+  // Enveloppe CONTINUE du dimmer (autoscript) : même source que le rejeu
+  // live, échantillonnée au temps de la cue → le crossfade et la vue 3D
+  // montrent exactement le même dimmer que la sortie matérielle.
+  const envelopeDimmerLevel = (() => {
+    const env = getSectionEnvelope((cue as any).envId);
+    if (!env) return undefined;
+    const s = (cue as any).sectionStart;
+    const e = (cue as any).sectionEnd;
+    if (typeof s !== 'number' || typeof e !== 'number') return undefined;
+    const v = sampleCurve(env.dimmer, s, e, cue.time ?? 0);
+    return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : undefined;
+  })();
+  const sectionDimmerFloor = SECTION_MIN_INTENSITY[sec] ?? 60;
 
   const results: Array<{ universe: number; channelValues: Record<number, number> }> = [];
 
@@ -2298,7 +2334,12 @@ export function computeDmxForCue(
 
       let dimmerVal = (fixtureTrackOverrides?.forcedDimmers?.has(pf.id))
         ? fixtureTrackOverrides.forcedDimmers.get(pf.id)!
-        : mapIntensity(cue.intensity, energy, pf.tier, tierMultipliers);
+        : envelopeDimmerLevel !== undefined
+          ? Math.max(
+            Math.round(255 * envelopeDimmerLevel * tierIntensityMultiplier(pf.tier, tierMultipliers)),
+            sectionDimmerFloor,
+          )
+          : mapIntensity(cue.intensity, energy, pf.tier, tierMultipliers);
       // Dimmer track override (highest priority for intensity)
       const dimmerOverride = dimmerTrackOverrides?.get(pf.id);
       if (dimmerOverride) {

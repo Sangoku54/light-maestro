@@ -42,15 +42,20 @@ describe('autoscript-loops — les sections deviennent des boucles', () => {
   });
 
   it('cycles verrouillés sur les beats + échantillonnage anti-aliasé', () => {
-    const drop = sectionMoveFor(cueFor(24, 32, 'spiral', 'drop'), 1)!;   // 16 beats @120 → 1 tour/beat
-    const verse = sectionMoveFor(cueFor(8, 16, 'sweep', 'verse'), 1)!;   // 16 beats → 4 beats/tour
+    const drop = sectionMoveFor(cueFor(24, 32, 'spiral', 'drop'), 1)!;   // 16 beats @120 → 3 beats/tour
+    const verse = sectionMoveFor(cueFor(8, 16, 'sweep', 'verse'), 1)!;   // 16 beats → 6 beats/tour
     const intro = sectionMoveFor(cueFor(0, 8, 'circle', 'intro'), 1)!;   // 16 beats → 8 beats/tour
 
-    expect(SECTION_BEATS_PER_CYCLE.drop).toBe(1);
-    expect(drop.cycles).toBe(16);
-    expect(drop.samples).toBe(128);
-    expect(verse.cycles).toBe(4);
-    expect(verse.samples).toBe(32);
+    // Cadence de base : le mouvement n'est plus « toujours rapide ».
+    // À 120 BPM, 3 beats/tour = 1 tour / 1,5 s (0,67 tour/s) en drop.
+    expect(SECTION_BEATS_PER_CYCLE.drop).toBe(3);
+    expect(SECTION_BEATS_PER_CYCLE.chorus).toBe(4);
+    expect(SECTION_BEATS_PER_CYCLE.verse).toBe(6);
+    expect(SECTION_BEATS_PER_CYCLE.intro).toBe(8);
+    expect(drop.cycles).toBe(5);
+    expect(drop.samples).toBe(40);
+    expect(verse.cycles).toBe(3);
+    expect(verse.samples).toBe(24);
     expect(intro.cycles).toBe(2);
     expect(intro.samples).toBe(16);
     for (const loop of [drop, verse, intro]) {
@@ -58,6 +63,46 @@ describe('autoscript-loops — les sections deviennent des boucles', () => {
       expect(loop.samples).toBeLessThanOrEqual(128);
       expect(loop.samples).toBe(Math.min(128, Math.max(8, Math.round(loop.cycles * 8))));
     }
+  });
+
+  it('trajectoire CONTINUE : interpolation entre deux échantillons voisins', () => {
+    // Avant : `Math.floor()` → la tête sautait d'une position à l'autre
+    // (le module annonçait pourtant « interpolation au tick »).
+    const loop = sectionMoveFor(cueFor(24, 32, 'circle', 'drop'), 1)!;
+    let maxJump = 0;
+    let prev = sampleSectionLoopRaw(loop, 0, 0, 0);
+    // 60 fps sur 2 s de section
+    const steps = 120;
+    for (let i = 1; i <= steps; i++) {
+      const p = (i / steps) * (2 / 8);
+      const cur = sampleSectionLoopRaw(loop, p, 0, 0);
+      maxJump = Math.max(maxJump, Math.hypot(cur[0] - prev[0], cur[1] - prev[1]));
+      prev = cur;
+    }
+    // Sans interpolation, le saut était de ~0,78 (un échantillon entier).
+    expect(maxJump).toBeLessThan(0.12);
+  });
+
+  it('enveloppe de vitesse : la phase accélère sur les pics, ralentit dans les creux', () => {
+    // Section de 8 s : calme (0,4) puis stromal (1,6).
+    const speed = new Array(64).fill(1).map((_, i) => (i < 32 ? 0.4 : 1.6));
+    const section = { type: 'verse', startTime: 8, endTime: 16 };
+    const warped = getSectionMoveLoop(section, 'sweep', 120, 1, true, speed);
+    const uniform = getSectionMoveLoop(section, 'sweep', 120, 1, true);
+    // Le nombre de cycles est inchangé (la section boucle pareil)…
+    expect(warped.cycles).toBe(uniform.cycles);
+
+    // …mais au milieu de la section, la boucle « warpée » est en RETARD :
+    // elle a couvert moins de tours que la boucle uniforme.
+    const mid = Math.floor(uniform.samples / 2);
+    const midUniform = uniform.warp[mid];
+    const midWarped = warped.warp[mid];
+    expect(midUniform).toBeGreaterThan(uniform.cycles / 2 - 0.1);
+    expect(midUniform).toBeLessThan(uniform.cycles / 2 + 0.1);
+    expect(midWarped).toBeLessThan(midUniform - 0.1);
+    expect(midWarped).toBeGreaterThan(0);
+    // La fin de section reste alignée : le même nombre de tours au total.
+    expect(warped.warp[warped.samples - 1]).toBeCloseTo(warped.cycles, 3);
   });
 
   it('normalisation : amplitude réelle exploitéée, axe constant jamais amplifié', () => {

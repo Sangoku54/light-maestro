@@ -18,6 +18,7 @@ import type { PatchedFixture, FixtureTier } from '../stores/showStore';
 import { useShowStore, type FixtureGroup } from '../stores/showStore';
 import { analyzeFixture, capMid, pickLaserModeCap, laserGateValue, mapIntensityVal, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
 import { wheelDegeneratePosition } from '../engine/dmx-color';
+import { getSectionEnvelope, sampleCurve } from '../engine/autoscript-envelopes';
 import { computeGoboValue } from '../engine/gobo-engine';
 
 // ─── Inline fixture definition types (mirrors electron/fixtures/library.ts) ──
@@ -103,6 +104,13 @@ export interface CueInput {
   movement?: string; // MovementPattern name: 'circle'|'zigzag'|'heartbeat'|etc (not section type)
   movementAmplitude?: number; // 0-255 DMX amplitude, computed from audio features
   movementSpeed?: number; // 0-1 speed multiplier, computed from audio features
+  /** Bornes de la section (permettent la boucle de mouvement section-aware). */
+  sectionStart?: number;
+  sectionEnd?: number;
+  /** Tempo du morceau (verrouillage des boucles sur les beats). */
+  bpm?: number;
+  /** Identifiant de l'enveloppe audio continue de la section. */
+  envId?: number;
   /** Continuous 0-1 audio energy at cue time (from energyCurve).
    *  When present, overrides string intensity for DMX value computation. */
   energy?: number;
@@ -449,7 +457,7 @@ function colorNameMatchScore(capName: string, targetCat: string): number {
 // Lower values for dynamic sections (drop, build, outro) to allow more dramatic contrast,
 // higher values for stable sections (chorus, verse) to maintain energy.
 // Values are DMX 0-255 (≈% of full: 60≈23%, 128≈50%, 179≈70%).
-const SECTION_MIN_INTENSITY: Record<string, number> = {
+export const SECTION_MIN_INTENSITY: Record<string, number> = {
   intro: 70, // garder une lumière douce en début de morceau
   verse: 45, // énergie modérée pour les couplets
   chorus: 80, // plein énergie pour le refrain
@@ -702,19 +710,31 @@ export function computeDmxCues(options: ComputeDmxCuesOptions): DmxCue[] {
         // Sections differ by movement pattern and strobe, NOT by going dark.
         let computedIntensity = 0;
         {
-          let val = mapIntensity(cue.intensity, energy, cue.section);
+          // Enveloppe CONTINUE du dimmer (autoscript) : si la section en a
+          // une, le niveau vient de l'audio continu (enveloppe RMS +
+          // respiration + accents) — pas d'un palier figé.
+          const env = getSectionEnvelope(cue.envId);
+          const envLevel = env && typeof cue.sectionStart === 'number' && typeof cue.sectionEnd === 'number'
+            ? sampleCurve(env.dimmer, cue.sectionStart, cue.sectionEnd, cue.time ?? 0)
+            : NaN;
+          let val: number;
+          if (Number.isFinite(envLevel)) {
+            val = Math.round(Math.max(0, Math.min(1, envLevel)) * 255);
+          } else {
+            val = mapIntensity(cue.intensity, energy, cue.section);
 
-          // Dimmer pulse: alternate high/low or use beat-synced pump
-          if (useDimmerPulse) {
-            const sec = cue.section.toLowerCase();
-            const bpm = Math.max(60, Math.min(200, (options as any)?.bpm ?? 120));
-            // Gentle BPM-synced LFO: all sections get subtle breathing
-            if (sec === 'drop' || sec === 'chorus') {
-              val = Math.round(val * (0.7 + 0.3 * Math.abs(Math.sin(cue.time * Math.PI * 2 / (60 / bpm)))));
-            } else if (cue.dimmerPulseOnBeat) {
-              val = Math.round(val * (0.6 + 0.4 * Math.abs(Math.sin(cue.time * Math.PI * 2 / (60 / bpm)))));
-            } else {
-              val = Math.round(val * (0.85 + 0.15 * Math.sin(cue.time * Math.PI * 2 / (60 / bpm) * 0.5)));
+            // Dimmer pulse: alternate high/low or use beat-synced pump
+            if (useDimmerPulse) {
+              const sec = cue.section.toLowerCase();
+              const bpm = Math.max(60, Math.min(200, (options as any)?.bpm ?? 120));
+              // Gentle BPM-synced LFO: all sections get subtle breathing
+              if (sec === 'drop' || sec === 'chorus') {
+                val = Math.round(val * (0.7 + 0.3 * Math.abs(Math.sin(cue.time * Math.PI * 2 / (60 / bpm)))));
+              } else if (cue.dimmerPulseOnBeat) {
+                val = Math.round(val * (0.6 + 0.4 * Math.abs(Math.sin(cue.time * Math.PI * 2 / (60 / bpm)))));
+              } else {
+                val = Math.round(val * (0.85 + 0.15 * Math.sin(cue.time * Math.PI * 2 / (60 / bpm) * 0.5)));
+              }
             }
           }
 
