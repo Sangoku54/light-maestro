@@ -750,15 +750,17 @@ export function midiWidgetAction(widgetId: string, property: string, value: numb
           `[midi] widget ${widgetId} (actionType=${cfg.actionType}) : aucune action runtime connue pour ce type`
         );
       }
-    } else if (widget.type === 'slider') {
+    } else if (widget.type === 'slider' || widget.type === 'group-master') {
       // Miroir fader physique → widget virtuel : la valeur vit dans le store
       // (vcWidgetValues) pour que l'écran suive le contrôleur Akai.
-      const lo = Number.isFinite(cfg.min as number) ? Number(cfg.min) : 0;
-      const hi = Number.isFinite(cfg.max as number) ? Number(cfg.max) : 255;
+      // Le type du widget est transmis : un « group-master » route vers le
+      // plafond du groupe (et non vers un canal DMX).
+      const lo = widget.type === 'group-master' ? 0 : (Number.isFinite(cfg.min as number) ? Number(cfg.min) : 0);
+      const hi = widget.type === 'group-master' ? 255 : (Number.isFinite(cfg.max as number) ? Number(cfg.max) : 255);
       const ratio = Math.max(0, Math.min(1, Number.isFinite(value) ? value / 127 : 0));
       const v = Math.round(lo + ratio * (hi - lo));
       usePerformStore.getState().vcSetWidgetValue(widgetId, v);
-      applyWidgetSliderEffect(cfg, v, MIDI_SOURCE_ID);
+      applyWidgetSliderEffect(cfg, v, MIDI_SOURCE_ID, widget.type);
     }
   } catch (e) {
     console.warn('[midi] widget : échec', e);

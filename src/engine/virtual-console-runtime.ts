@@ -115,6 +115,16 @@ let buttonFns = {
   setChannel: (universe: number, address: number, value: number) => {
     try { dmxBridge.writeMerge(VC_SOURCE, universe, { [address]: value }); } catch { /* */ }
   },
+  /**
+   * Relâchement d'un canal DMX : on RETIRE la contribution de la source VC
+   * sur CE canal (et pas sur tout l'univers), afin que la scène/preset
+   * reprenne la main. Écrire 0 à la place figerait le canal à zéro (source
+   * VC en LTP 80, prioritaire sur le contenu HTP) → la fixture resterait
+   * éteinte même après le relâchement.
+   */
+  releaseChannel: (universe: number, address: number) => {
+    try { dmxBridge.releaseChannels(VC_SOURCE, universe, [address]); } catch { /* */ }
+  },
 };
 
 /** Test hook : remplacer les effets bouton (pas de DMX sous vitest). */
@@ -128,6 +138,9 @@ export function __setVCButtonFns(fns: Partial<typeof buttonFns> | null): void {
         },
         setChannel: (universe: number, address: number, value: number) => {
           try { dmxBridge.writeMerge(VC_SOURCE, universe, { [address]: value }); } catch { /* */ }
+        },
+        releaseChannel: (universe: number, address: number) => {
+          try { dmxBridge.releaseChannels(VC_SOURCE, universe, [address]); } catch { /* */ }
         },
       };
 }
@@ -603,7 +616,10 @@ export function vcActivateGrandMaster(widgetId: string, value255: number): boole
 
 /**
  * Bouton canal DMX : force `value` sur (univers moteur 0-based, adresse
- * 1..512) et retient la remise à zéro jouée à `vcDeactivate`.
+ * 1..512). Au relâchement, la contribution de la source VC sur CE canal est
+ * **libérée** (et non remise à 0) : le canal revient sous le contrôle de la
+ * scène/preset. Écrire 0 figerait le canal à zéro (VC = LTP 80, prioritaire
+ * sur le contenu HTP) et la fixture resterait éteinte.
  * @returns false si l'adresse est invalide (tuile non configurée).
  */
 export function vcActivateDmxChannel(
@@ -619,7 +635,7 @@ export function vcActivateDmxChannel(
   replaceRun(widgetId);
   buttonFns.setChannel(uni, addr, value);
   const run = createRun(widgetId, 'dmxchannel', {}, 0);
-  run.restore = () => buttonFns.setChannel(uni, addr, 0);
+  run.restore = () => buttonFns.releaseChannel(uni, addr);
   return true;
 }
 
@@ -736,21 +752,23 @@ export function vcButtonPress(widgetId: string, press: boolean): boolean {
  * Applique une fraction 0..1 à un widget fader (Remote web LAN, MIDI).
  * La valeur est projetée sur [min, max] du widget, stockée dans
  * `vcWidgetValues` (pour que l'UI suive) puis routée vers le DMX via
- * `applyWidgetSliderEffect` (GM ou canal, univers du widget).
- * @returns false si le widget est absent ou n'est pas un slider
+ * `applyWidgetSliderEffect` (GM, canal, univers du widget) — ou vers le
+ * plafond du groupe pour un widget « group-master ».
+ * @returns false si le widget est absent ou n'est pas un fader
  */
 export function vcSetSliderFraction(widgetId: string, fraction: number): boolean {
   const widget = usePerformStore.getState().vcWidgets.find((w) => w.id === widgetId);
-  if (!widget || widget.type !== 'slider') return false;
+  if (!widget || (widget.type !== 'slider' && widget.type !== 'group-master')) return false;
   const cfg = widget.config ?? {};
-  const min = Number(cfg.min ?? 0);
-  const max = Number(cfg.max ?? 255);
+  const isGroupMaster = widget.type === 'group-master';
+  const min = isGroupMaster ? 0 : Number(cfg.min ?? 0);
+  const max = isGroupMaster ? 255 : Number(cfg.max ?? 255);
   const lo = Math.min(min, max);
   const hi = Math.max(min, max);
   const f = Number.isFinite(fraction) ? Math.max(0, Math.min(1, fraction)) : 0;
   const value = Math.round(lo + (hi - lo) * f);
   usePerformStore.getState().vcSetWidgetValue(widgetId, value);
-  applyWidgetSliderEffect(cfg, value, VC_SOURCE);
+  applyWidgetSliderEffect(cfg, value, VC_SOURCE, widget.type);
   return true;
 }
 

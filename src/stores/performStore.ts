@@ -20,17 +20,23 @@ import { buildAkaiSurfaceWidgets, type AkaiSurfacePreset } from './vc-presets';
  * widget glissé à la souris et par un contrôleur MIDI en miroir).
  * `sourceId` permet à chaque source (vc / midi) de garder sa propre
  * contribution dans l'arbitrage `dmxBridge`.
+ *
+ * `widgetType` est le type du WIDGET (`slider`, `group-master`…). Il est
+ * indispensable : le marqueur « master de groupe » vit sur le widget
+ * (`widget.type`), pas dans sa config. Sans lui, la branche group-master
+ * était INATTEIGNABLE et le fader de groupe ne pilotait rien.
  */
 export function applyWidgetSliderEffect(
   config: ConsoleWidgetConfig,
   value: number,
   sourceId = 'vc',
+  widgetType?: WidgetType,
 ): void {
   try {
     // Master de groupe : plafonne le dimmer du groupe (submaster) via
     // groupMastersStore — la source LTP 'group-masters' matérialise le plafond
     // (matériel + 3D). value = 0..255, 255 = neutre.
-    if ((config as any).type === 'group-master' && config.groupId) {
+    if ((widgetType === 'group-master' || (config as any).type === 'group-master') && config.groupId) {
       useGroupMastersStore.getState().setMaster(config.groupId, value);
       return;
     }

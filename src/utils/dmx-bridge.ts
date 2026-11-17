@@ -137,6 +137,20 @@ export const dmxBridge = {
     }
   },
 
+  /**
+   * Remove a source's contribution on SPECIFIC channels of a universe.
+   * L'univers affected est recalculé et réinjecté (matériel + cache 3D) :
+   * le canal retombe sous le contrôle des autres sources au lieu de rester
+   * figé à la dernière valeur écrite (typo LTP persistante).
+   */
+  releaseChannels(sourceId: string, universe: number, channels: number[]) {
+    if (!outputArbiter.releaseChannels(sourceId, universe, channels)) return;
+    const buffer = outputArbiter.getBuffer(universe);
+    pushBufferToConsumers(universe, buffer);
+    recordOutputTick();
+    flushToHardware(universe, buffer);
+  },
+
   /** Toggle hardware output without stopping computation (QuickShow dry-run). */
   setDryRun(dryRun: boolean) {
     _dryRun = dryRun;

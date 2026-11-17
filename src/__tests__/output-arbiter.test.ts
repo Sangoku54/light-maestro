@@ -150,6 +150,65 @@ describe('OutputArbiter — mixed HTP+LTP on the same universe', () => {
   });
 });
 
+describe('OutputArbiter — releaseChannels (libération par canal)', () => {
+  let arb: OutputArbiter;
+
+  beforeEach(() => {
+    arb = new OutputArbiter();
+  });
+
+  it('ne libère QUE les canaux demandés : les autres canaux de la source survivent', () => {
+    arb.registerSource('vc', 'ltp', 80);
+    arb.write('vc', 0, { 1: 0, 2: 128, 3: 255 });
+
+    expect(arb.releaseChannels('vc', 0, [1])).toBe(true);
+    const buf = arb.getBuffer(0);
+    expect(buf[1]).toBeUndefined(); // canal libéré
+    expect(buf[2]).toBe(128);        // fader voisin intact
+    expect(buf[3]).toBe(255);
+  });
+
+  it('le canal libéré RETOMBE sous le contrôle du contenu (HTP)', () => {
+    arb.registerSource('song-preset', 'htp', 45);
+    arb.registerSource('vc', 'ltp', 80);
+    arb.write('song-preset', 0, { 1: 255 });
+    arb.write('vc', 0, { 1: 0 });
+    expect(arb.getBuffer(0)[1]).toBe(0); // la VC (LTP 80) masque le preset
+
+    arb.releaseChannels('vc', 0, [1]);
+    // Le preset reprend la main : c'est tout l'intérêt de libérer (écrire 0
+    // figerait le canal à zéro pour toute la durée du show).
+    expect(arb.getBuffer(0)[1]).toBe(255);
+  });
+
+  it('un univers distinct n’est pas touché', () => {
+    arb.registerSource('vc', 'ltp', 80);
+    arb.write('vc', 0, { 1: 0 });
+    arb.write('vc', 1, { 1: 0 });
+
+    arb.releaseChannels('vc', 0, [1]);
+    expect(arb.getBuffer(0)[1]).toBeUndefined();
+    expect(arb.getBuffer(1)[1]).toBe(0); // univers 1 intact
+  });
+
+  it('canal absent / source inconnue / univers inconnu → false, buffer intact', () => {
+    arb.registerSource('vc', 'ltp', 80);
+    arb.write('vc', 0, { 1: 0 });
+
+    expect(arb.releaseChannels('vc', 0, [99])).toBe(false); // canal non détenu
+    expect(arb.releaseChannels('inconnu', 0, [1])).toBe(false); // source inconnue
+    expect(arb.releaseChannels('vc', 7, [1])).toBe(false); // univers inconnu
+    expect(arb.getBuffer(0)[1]).toBe(0);
+  });
+
+  it('quand la source n’a plus aucun canal, elle est retirée de l’univers', () => {
+    arb.registerSource('vc', 'ltp', 80);
+    arb.write('vc', 0, { 1: 0 });
+    expect(arb.releaseChannels('vc', 0, [1])).toBe(true);
+    expect(arb.getSourceValues('vc', 0)).toBeUndefined();
+  });
+});
+
 describe('OutputArbiter — default buffer & edge cases (non-regression)', () => {
   it('returns an empty buffer for an unknown universe and ignores unknown sources', () => {
     const buf = outputArbiter.getBuffer(99);

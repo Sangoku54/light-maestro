@@ -126,6 +126,34 @@ export class OutputArbiter {
     }
   }
 
+  /**
+   * Remove a source's contribution on SPECIFIC channels of a universe.
+   *
+   * Utilisé par les commandes momentanées (tuile VC « canal DMX ») : au
+   * relâchement, le canal doit REDEVENIR disponible pour les autres sources
+   * au lieu de rester figé à 0 (source VC en LTP 80 → elle l'emporte sur le
+   * contenu HTP). La release globale (`release`) effacerait les autres
+   * contributions de la même source sur l'univers (faders VC voisins).
+   *
+   * @returns true si au moins un canal a été retiré.
+   */
+  releaseChannels(id: string, universe: number, channels: number[]): boolean {
+    const uni = this._values.get(universe);
+    if (!uni) return false;
+    const vals = uni.get(id);
+    if (!vals) return false;
+    let removed = false;
+    for (const ch of channels) {
+      if (ch in vals) {
+        delete vals[ch];
+        removed = true;
+      }
+    }
+    // Source vide sur cet univers → on la retire complètement.
+    if (removed && Object.keys(vals).length === 0) uni.delete(id);
+    return removed;
+  }
+
   /** Last values written by `id` on `universe` (undefined when none). */
   getSourceValues(id: string, universe: number): Record<number, number> | undefined {
     return this._values.get(universe)?.get(id);

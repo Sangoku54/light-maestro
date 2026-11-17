@@ -2211,7 +2211,7 @@ const VCSliderWidget: React.FC<{
   const handleChange = (newVal: number) => {
     const clamped = Math.max(min, Math.min(max, Math.round(newVal / step) * step));
     vcSetWidgetValue(widget.id, clamped);
-    applyWidgetSliderEffect(config, clamped, 'vc');
+    applyWidgetSliderEffect(config, clamped, 'vc', widget.type);
   };
 
   return (
@@ -2308,7 +2308,7 @@ const VCGroupMasterWidget: React.FC<{
   const handleChange = (newVal: number) => {
     const clamped = Math.max(0, Math.min(255, Math.round(newVal)));
     vcSetWidgetValue(widget.id, clamped);
-    applyWidgetSliderEffect(config, clamped, 'vc');
+    applyWidgetSliderEffect(config, clamped, 'vc', 'group-master');
   };
 
   return (

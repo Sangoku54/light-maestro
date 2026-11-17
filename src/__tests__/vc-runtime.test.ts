@@ -37,6 +37,7 @@ let sent: Sent[] = [];
 let blackoutCalls: string[] = [];
 let gmCalls: number[] = [];
 let channelCalls: Array<{ universe: number; address: number; value: number }> = [];
+let releaseCalls: Array<{ universe: number; address: number }> = [];
 let events: Array<{ id: string; running: boolean; kind: string }> = [];
 let unsubscribe: (() => void) | null = null;
 
@@ -56,6 +57,7 @@ beforeEach(() => {
   blackoutCalls = [];
   gmCalls = [];
   channelCalls = [];
+  releaseCalls = [];
   events = [];
   __setVCSender((channels) => { sent.push(channels); });
   __setVCBlackoutFns({
@@ -65,6 +67,7 @@ beforeEach(() => {
   __setVCButtonFns({
     applyGrandMaster01: (v) => { gmCalls.push(v); },
     setChannel: (universe, address, value) => { channelCalls.push({ universe, address, value }); },
+    releaseChannel: (universe, address) => { releaseCalls.push({ universe, address }); },
   });
   unsubscribe = vcOnRunChange((id, running, kind) => { events.push({ id, running, kind }); });
 
@@ -278,27 +281,26 @@ describe('runtime Console Virtuelle — bouton Grand Master', () => {
 });
 
 describe('runtime Console Virtuelle — bouton canal DMX', () => {
-  it('envoie la valeur configurée, réappui → remise à zéro du même canal', () => {
+  it('envoie la valeur configurée, réappui → LIBÉRATION du canal (pas de 0 figé)', () => {
     expect(vcButtonPress('w-dmx', true)).toBe(true);
     expect(vcIsRunning('w-dmx')).toBe(true);
     expect(channelCalls).toEqual([{ universe: 1, address: 300, value: 200 }]);
     expect(events[0]).toMatchObject({ id: 'w-dmx', running: true, kind: 'dmxchannel' });
     expect(vcButtonPress('w-dmx', true)).toBe(true);
     expect(vcIsRunning('w-dmx')).toBe(false);
-    expect(channelCalls).toEqual([
-      { universe: 1, address: 300, value: 200 },
-      { universe: 1, address: 300, value: 0 },
-    ]);
+    // Le relâchement RETIRE la contribution VC du canal (le contenu HTP
+    // reprend la main) au lieu d'écrire 0 (qui figerait le canal à zéro).
+    expect(channelCalls).toEqual([{ universe: 1, address: 300, value: 200 }]);
+    expect(releaseCalls).toEqual([{ universe: 1, address: 300 }]);
   });
 
-  it('flash : momentané (press = valeur, release = 0)', () => {
+  it('flash : momentané (press = valeur, release = libération du canal)', () => {
     vcButtonPress('w-dmx-flash', true);
     expect(channelCalls).toEqual([{ universe: 0, address: 7, value: 255 }]);
+    expect(releaseCalls).toEqual([]);
     vcButtonPress('w-dmx-flash', false);
-    expect(channelCalls).toEqual([
-      { universe: 0, address: 7, value: 255 },
-      { universe: 0, address: 7, value: 0 },
-    ]);
+    expect(channelCalls).toEqual([{ universe: 0, address: 7, value: 255 }]);
+    expect(releaseCalls).toEqual([{ universe: 0, address: 7 }]);
   });
 
   it('adresse invalide (tuile non configurée) → false, aucun run, aucun effet', () => {
@@ -307,6 +309,7 @@ describe('runtime Console Virtuelle — bouton canal DMX', () => {
     expect(vcActivateDmxChannel('w-dmx-bad', 0, 513, 255)).toBe(false);
     expect(vcIsRunning('w-dmx-bad')).toBe(false);
     expect(channelCalls).toEqual([]);
+    expect(releaseCalls).toEqual([]);
   });
 });
 

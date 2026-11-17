@@ -30,3 +30,29 @@ describe('dmx-bridge routing sans hardware', () => {
     dmxBridge.release('design-test', 0);
   });
 });
+
+describe('dmx-bridge — releaseChannels (libération par canal)', () => {
+  it('retire la contribution du canal ET met le cache 3D à jour', () => {
+    // Contenu HTP (un preset) + tuile VC en LTP qui écrase le canal.
+    dmxBridge.write('song-preset', 0, { 1: 255, 2: 120 });
+    dmxBridge.write('vc', 0, { 1: 0 });
+    expect(dmxBridge.getChannels(0)?.[1]).toBe(0); // la VC masque le preset
+
+    // Relâchement de la tuile : le canal est LIBÉRÉ (pas mis à 0).
+    dmxBridge.releaseChannels('vc', 0, [1]);
+
+    const buf = dmxBridge.getChannels(0);
+    expect(buf?.[1]).toBe(255); // le preset reprend la main
+    expect(buf?.[2]).toBe(120); // canal voisin intact
+    dmxBridge.release('vc', 0);
+    dmxBridge.release('song-preset', 0);
+  });
+
+  it('un canal absent n’entraîne aucune mise à jour inutile', () => {
+    dmxBridge.write('vc', 0, { 5: 100 });
+    const before = dmxBridge.getChannels(0);
+    dmxBridge.releaseChannels('vc', 0, [42]);
+    expect(dmxBridge.getChannels(0)).toEqual(before);
+    dmxBridge.release('vc', 0);
+  });
+});
