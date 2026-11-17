@@ -25,6 +25,20 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import type { BrowserWindow } from 'electron';
 
+/** Client connecté au Remote (téléphone/tablette) — vu par le serveur HTTP. */
+export interface RemoteClientEntry {
+  /** Adresse IP distante (sans le préfixe ::ffff: des IPv4-mapped). */
+  ip: string;
+  /** User-Agent du navigateur (pour identifier l'appareil). */
+  agent: string;
+  /** Timestamp de la 1re requête (ms). */
+  firstSeen: number;
+  /** Timestamp de la dernière requête (ms). */
+  lastSeen: number;
+  /** Nombre total de requêtes reçues. */
+  requests: number;
+}
+
 /** Statut du serveur LAN, retourné par `RemoteServer.getStatus()` et l'IPC `remote:getStatus`. */
 export interface RemoteStatus {
   running: boolean;
@@ -35,6 +49,8 @@ export interface RemoteStatus {
   startedAt: number | null;
   urls: string[];
   lastError: string | null;
+  /** Appareils actuellement connectés au Remote (IP + navigateur + activité). */
+  clients?: RemoteClientEntry[];
 }
 
 /** Entrée d'une scène dans le snapshot poussé par le renderer. */
@@ -135,6 +151,8 @@ export class RemoteServer {
   private startedAt: number | null = null;
   private lastError: string | null = null;
   private snapshot: RemoteStateSnapshot | null = null;
+  /** Appareils ayant contacté le serveur (téléphones/tablettes). */
+  private clients = new Map<string, RemoteClientEntry>();
   private mainWindow: BrowserWindow | null = null;
   /** Pont vers le moteur DMX — défini par main.ts au démarrage. */
   private dmxBridge: {
@@ -227,6 +245,7 @@ export class RemoteServer {
     // démarrage (main.ts) et doit rester identique pour que les URL d'accès
     // (QR code) déjà distribuées sur les téléphones continuent de fonctionner.
     this.snapshot = null;
+    this.clients.clear();
     if (this.onListening) srv.off('listening', this.onListening);
     if (this.onError) srv.off('error', this.onError);
     this.onListening = null;
@@ -247,6 +266,7 @@ export class RemoteServer {
       startedAt: this.startedAt,
       urls: [],
       lastError: this.lastError,
+      clients: this.getClients(),
     };
   }
 
@@ -255,6 +275,58 @@ export class RemoteServer {
   }
 
   private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+    // Suivi des clients + journalisation : c'est LA preuve qui manque quand
+    // le téléphone affiche une page vide. Si aucune ligne "[remote] 192.168.x.x
+    // GET /" n'apparaît après un scan, c'est que la requête n'est jamais
+    // arrivée au PC → le problème est réseau (routeur/Wi-Fi), pas le code.
+    const ip = this.clientIp(req);
+    const agent = String(req.headers['user-agent'] ?? '');
+    const isNewClient = this.trackClient(ip, agent);
+    try {
+      this.routeRequest(req, res);
+    } finally {
+      const status = res.statusCode || 0;
+      this.trackClient(ip, agent);
+      // On ne journalise PAS chaque poll /api/state (2 par seconde) sinon le
+      // log est inexploitable : 1re requête de l'IP, requêtes POST (commandes)
+      // et erreurs.
+      const isCommand = req.method === 'POST';
+      if (isNewClient || isCommand || status >= 400) {
+        console.log(`[remote] ${ip} ${req.method} ${req.url} → ${status}${agent ? ` (${agent.slice(0, 60)})` : ''}`);
+      }
+    }
+  }
+
+  /** Adresse IP du client (IPv4 mappée → IPv4 pur). */
+  private clientIp(req: http.IncomingMessage): string {
+    const raw = req.socket.remoteAddress || 'inconnu';
+    return raw.startsWith('::ffff:') ? raw.slice(7) : raw;
+  }
+
+  /** Enregistre / met à jour un client connecté. Retourne true si nouvel IP. */
+  private trackClient(ip: string, agent: string): boolean {
+    const now = Date.now();
+    const existing = this.clients.get(ip);
+    if (!existing) {
+      this.clients.set(ip, { ip, agent: agent.slice(0, 120), firstSeen: now, lastSeen: now, requests: 1 });
+      return true;
+    }
+    existing.lastSeen = now;
+    existing.requests += 1;
+    if (agent && !existing.agent) existing.agent = agent.slice(0, 120);
+    return false;
+  }
+
+  /** Liste des clients connus (les inactifs depuis > 10 min sont purged). */
+  getClients(): RemoteClientEntry[] {
+    const cutoff = Date.now() - 10 * 60 * 1000;
+    for (const [ip, c] of this.clients) {
+      if (c.lastSeen < cutoff) this.clients.delete(ip);
+    }
+    return [...this.clients.values()].sort((a, b) => b.lastSeen - a.lastSeen);
+  }
+
+  private routeRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
     let url: URL;
     try {
       url = new URL(req.url ?? '/', 'http://localhost');

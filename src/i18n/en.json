@@ -814,6 +814,33 @@
       "copy": "Copy",
       "copied": "Copied ✓",
       "connectHint": "Connect your phone/tablet to the same Wi-Fi and open the URL.",
+      "connectedDevices": "Connected devices",
+      "noConnectedDevices": "No device connected yet. If the phone shows a blank page after scanning, it cannot reach the PC (network/Wi-Fi).",
+      "qrTitle": "Access QR codes",
+      "qrHint": "One QR code per PC network: scan the one of the network your phone or tablet is connected to.",
+      "qrPrimary": "Recommended",
+      "networkLabels": {
+        "standalone": "Standalone network",
+        "wifi": "Wi-Fi",
+        "ethernet": "Ethernet",
+        "other": "Other network"
+      },
+      "standalone": {
+        "title": "Standalone mode (no router)",
+        "subtitle": "The PC creates its own Wi-Fi network: your tablet connects to it even without external Wi-Fi, and even when it sits on the mixer's network.",
+        "activate": "Enable",
+        "deactivate": "Disable",
+        "stateOn": "Standalone network is on",
+        "ssid": "Network name",
+        "passphrase": "Password",
+        "address": "PC address",
+        "clients": "Connected devices",
+        "hint": "Connect the tablet to the network above, then scan the \"Standalone network\" QR code.",
+        "unsupported": "This computer cannot create a Wi-Fi access point (Windows API unavailable).",
+        "errors": {
+          "toggle": "Could not change the standalone network"
+        }
+      },
       "stoppedHint": "The server is stopped. Start it to control Light Maestro from another device.",
       "start": "Start server",
       "stop": "Stop server",

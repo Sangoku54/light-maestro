@@ -27,8 +27,10 @@ import {
   buildFirewallFixScript,
   type RemoteDiagnostics,
 } from '@electron/remote/diagnostics';
+import { RemoteServer } from '@electron/remote/server';
 
 const ROOT = path.resolve(__dirname, '..', '..');
+const PORT = 18350 + Math.floor(Math.random() * 400);
 const read = (rel: string) => fs.readFileSync(path.join(ROOT, rel), 'utf-8');
 
 describe('diagnostic réseau du Remote', () => {
@@ -161,6 +163,8 @@ describe('script de réparation du pare-feu', () => {
     expect(ps).toContain("('localport=' + $port)");
     expect(ps).toContain('action=allow');
     expect(ps).toContain('dir=in');
+    // Regle de secours : tout le sous-reseau local vers le port du Remote.
+    expect(ps).toContain('remoteip=localSubnet');
     // Le chemin du programme est injecté proprement (apostrophes échappées).
     expect(ps).toContain("$prog = 'C:\\Apps\\light maestro.exe'");
     expect(ps).toContain("$port = 8080");
@@ -169,6 +173,47 @@ describe('script de réparation du pare-feu', () => {
   it('le chemin du programme est échappé (apostrophe → double apostrophe)', () => {
     const ps = buildFirewallFixScript("C:\\Apps\\l'maestro.exe", 8080, 'C:\\tmp\\res.txt');
     expect(ps).toContain("$prog = 'C:\\Apps\\l''maestro.exe'");
+  });
+});
+
+describe('suivi des clients connectés (preuve du passage du téléphone)', () => {
+  it('le serveur journalise chaque nouvelle IP et expose les clients', async () => {
+    const server = new RemoteServer();
+    process.env.LM_REMOTE_PORT = String(PORT);
+    server.start();
+    for (let i = 0; i < 150 && !server.getStatus().running; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    const token = server.getToken();
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/?token=${token}`, {
+        headers: { 'User-Agent': 'TestPhone/1.0' },
+      });
+      expect(res.status).toBe(200);
+      await res.text();
+      const clients = server.getStatus().clients ?? [];
+      expect(clients.length).toBeGreaterThan(0);
+      expect(clients[0].agent).toContain('TestPhone');
+      expect(clients[0].requests).toBeGreaterThan(0);
+    } finally {
+      server.stop();
+      delete process.env.LM_REMOTE_PORT;
+    }
+  }, 30000);
+
+  it('le panneau Remote affiche la liste des appareils connectés', () => {
+    const view = read('src/views/PerformanceView.tsx');
+    expect(view).toContain('perform.remote.connectedDevices');
+    expect(view).toContain('perform.remote.noConnectedDevices');
+    expect(view).toContain('status?.clients');
+  });
+
+  it('les clés i18n des appareils connectés existent en FR et EN', () => {
+    for (const lang of ['fr', 'en']) {
+      const dict = JSON.parse(read(`src/i18n/${lang}.json`));
+      expect(typeof dict.perform.remote.connectedDevices).toBe('string');
+      expect(typeof dict.perform.remote.noConnectedDevices).toBe('string');
+    }
   });
 });
 

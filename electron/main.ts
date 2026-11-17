@@ -7,6 +7,18 @@ import { execSync, spawn } from 'child_process';
 import { autoUpdater } from 'electron-updater';
 import { RemoteServer, type RemoteStateSnapshot } from './remote/server';
 import { getRemoteDiagnostics, ensureFirewallRule, getFirewallStatus } from './remote/diagnostics';
+import {
+  getHotspotStatus,
+  startHotspot,
+  stopHotspot,
+  setKnownHotspotCredentials,
+  getKnownHotspotCredentials,
+  findStandaloneAddress,
+} from './remote/standalone';
+import {
+  collectLanInterfaces as collectRemoteLanInterfaces,
+  type RemoteLanInterface,
+} from './remote/interfaces';
 import { OscServer } from './osc/server';
 import { DMXEngine } from './dmx/engine';
 import { FixtureLibrary } from './fixtures/library';
@@ -169,59 +181,75 @@ const oscServer = new OscServer();
 const licenseStore = new LicenseStore();
 
 /**
- * Construit les URLs d'accès LAN du serveur Remote, ORDONNÉES par pertinence.
+ * Collecte les interfaces réseau utilisables + leur URL d'accès Remote.
  *
- * Le QR code encode `urls[0]` : il doit pointer vers l'IP réellement
- * joignable depuis le téléphone. `os.networkInterfaces()` renvoie les
- * adaptateurs virtuels (Hyper-V, WSL, Docker, VMware, VPN, Teredo) dans un
- * ordre non garanti — si le premier est un adaptateur virtuel, le téléphone
- * ne peut pas joindre l'URL scannée et « ne se connecte plus ».
+ * BUG CORRIGÉ : avant, une seule URL était affichée (la première) et un seul
+ * QR code était généré. Au concert, le PC a le Wi-Fi (192.168.1.x) ET un
+ * Ethernet branché sur la mixette (192.168.0.x) : le QR pointait vers le
+ * mauvais sous-réseau et la tablette obtenait une page blanche. On expose
+ * donc TOUTES les interfaces, chacune avec son QR code et son libellé.
  *
- * Ordre retenu : Wi-Fi / Ethernet physiques d'abord, puis les autres IPv4
- * non-internal (réseaux bridés, VPN), les virtuelles exclues.
+ * La logique vit dans `electron/remote/interfaces.ts` (sans dépendance
+ * Electron → testable unitairement).
  */
-const VIRTUAL_IFACE_PATTERNS = [
-  /vethernet/i,
-  /hyper-?v/i,
-  /vmware/i,
-  /virtualbox/i,
-  /vbox/i,
-  /docker/i,
-  /\bwsl\b/i,
-  /loopback/i,
-  /pseudo/i,
-  /teredo/i,
-  /tap-?tunnel/i,
-  /bluetooth/i,
-  /npcap/i,
-  /isatap/i,
-  /software loopback/i,
-  /openvpn/i,
-  /wireguard/i,
-  /tailscale/i,
-  /zerotier/i,
-];
-const PHYSICAL_IFACE_PATTERNS = [/wi-?fi/i, /wlan\d/i, /wireless/i, /^eth\d/i, /ethernet/i];
+function collectLanInterfaces(port: number, token: string): RemoteLanInterface[] {
+  return collectRemoteLanInterfaces(port, token, findStandaloneAddress());
+}
 
+/** Liste simple des URLs (compatibilité avec l'ancien contrat). */
 function collectLanUrls(port: number, token: string): string[] {
-  const entries: { address: string; name: string }[] = [];
-  for (const [name, ifaces] of Object.entries(os.networkInterfaces())) {
-    for (const iface of ifaces ?? []) {
-      if (iface.family !== 'IPv4' || iface.internal) continue;
-      if (VIRTUAL_IFACE_PATTERNS.some((re) => re.test(name))) continue;
-      // Lien-local (APIPA 169.254.x.x) : adresse auto-attribuée, souvent
-      // inexistante sur le réseau réel → le QR pointerait dans le vide.
-      if (iface.address.startsWith('169.254.')) continue;
-      entries.push({ address: iface.address, name });
+  return collectLanInterfaces(port, token).map((i) => i.url);
+}
+
+/** SSID par défaut du réseau autonome (mode « sans routeur »). */
+const DEFAULT_HOTSPOT_SSID = 'Light Maestro';
+
+/** Mot de passe par défaut du réseau autonome (WPA2 : 8 caractères mini). */
+const DEFAULT_HOTSPOT_PASSPHRASE = 'lightmaestro';
+
+/**
+ * Identifiants du réseau autonome, persistés sur disque.
+ *
+ * Le SSID/mot de passe sont écrits par l'API WinRT de Windows : PowerShell
+ * 5.1 ne sait pas les relire (`CurrentAccessPointConfiguration` est vide à
+ * cause d'une projection WinRT incomplète). On les conserve donc dans
+ * `userData/remote-hotspot.json` pour pouvoir les réafficher après un
+ * redémarrage de l'app (le point d'accès Windows, lui, reste actif).
+ */
+interface HotspotConfig {
+  ssid: string;
+  passphrase: string;
+}
+
+function hotspotConfigPath(): string {
+  return path.join(app.getPath('userData'), 'remote-hotspot.json');
+}
+
+function loadHotspotConfig(): HotspotConfig | null {
+  try {
+    const raw = fs.readFileSync(hotspotConfigPath(), 'utf-8');
+    const parsed = JSON.parse(raw) as Partial<HotspotConfig>;
+    if (typeof parsed.ssid === 'string' && typeof parsed.passphrase === 'string') {
+      return { ssid: parsed.ssid, passphrase: parsed.passphrase };
     }
+  } catch {
+    // Fichier absent ou illisible : on repart des valeurs par défaut.
   }
-  // Physiques d'abord (le QR code pointe sur la 1re URL).
-  entries.sort((a, b) => {
-    const pa = PHYSICAL_IFACE_PATTERNS.some((re) => re.test(a.name)) ? 0 : 1;
-    const pb = PHYSICAL_IFACE_PATTERNS.some((re) => re.test(b.name)) ? 0 : 1;
-    return pa - pb;
-  });
-  return entries.map((e) => `http://${e.address}:${port}/?token=${encodeURIComponent(token)}`);
+  return null;
+}
+
+function saveHotspotConfig(config: HotspotConfig): void {
+  try {
+    fs.writeFileSync(hotspotConfigPath(), JSON.stringify(config, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('[remote] identifiants du réseau autonome non persistés :', e instanceof Error ? e.message : e);
+  }
+}
+
+// Restaure les identifiants connus (affichage UI) au démarrage de l'app.
+{
+  const saved = loadHotspotConfig();
+  if (saved) setKnownHotspotCredentials(saved.ssid, saved.passphrase);
 }
 
 /**
@@ -620,7 +648,8 @@ ipcMain.handle('remote:stop', () => {
 ipcMain.handle('remote:getStatus', () => {
   const status = remoteServer.getStatus();
   if (!status.running) return status;
-  return { ...status, urls: collectLanUrls(status.port, remoteServer.getToken()) };
+  const interfaces = collectLanInterfaces(status.port, remoteServer.getToken());
+  return { ...status, urls: interfaces.map((i) => i.url), interfaces };
 });
 // Diagnostic réseau du Remote : état du pare-feu Windows (règle "Block" qui
 // coupe le téléphone), SSID du Wi-Fi du PC, et auto-test HTTP sur l'IP du QR.
@@ -637,6 +666,29 @@ ipcMain.handle('remote:openFirewall', async () => {
   const status = remoteServer.getStatus();
   const port = status.port || RemoteServer.DEFAULT_PORT;
   return await ensureFirewallRule(port);
+});
+
+// ─── Mode autonome (le PC crée son propre réseau Wi-Fi) ─────────────────
+// Comme la Soundcraft UI16 : le PC devient un point d'accès, la tablette se
+// connecte au réseau « Light Maestro » et accède au Remote via 192.168.137.1.
+// Indispensable au concert : la tablette est sur le réseau de la mixette,
+// pas sur celui du routeur du lieu.
+ipcMain.handle('remote:hotspotStatus', async () => {
+  return await getHotspotStatus();
+});
+ipcMain.handle('remote:startHotspot', async (_event, ssid?: unknown, passphrase?: unknown) => {
+  const cleanSsid = typeof ssid === 'string' && ssid.trim() ? ssid.trim() : DEFAULT_HOTSPOT_SSID;
+  const cleanPass = typeof passphrase === 'string' ? passphrase : getKnownHotspotCredentials().passphrase ?? DEFAULT_HOTSPOT_PASSPHRASE;
+  const status = await startHotspot(cleanSsid, cleanPass);
+  if (status.state === 'On') {
+    saveHotspotConfig({ ssid: cleanSsid, passphrase: cleanPass });
+    setKnownHotspotCredentials(cleanSsid, cleanPass);
+  }
+  return status;
+});
+ipcMain.handle('remote:stopHotspot', async () => {
+  const status = await stopHotspot();
+  return status;
 });
 // Le renderer pousse le snapshot (scènes/chasers/blackout/GM) vers le cache
 // HTTP. Supporte les deux formes : { state: snapshot } ou snapshot direct.

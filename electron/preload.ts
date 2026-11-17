@@ -204,6 +204,11 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     // Répare le pare-feu (supprime les règles Block, crée la règle Allow).
     // Déclenche une invite UAC → l'utilisateur doit cliquer « Oui ».
     openFirewall: () => ipcRenderer.invoke('remote:openFirewall'),
+    // Mode autonome : le PC crée son propre réseau Wi-Fi (comme la UI16).
+    hotspotStatus: () => ipcRenderer.invoke('remote:hotspotStatus'),
+    startHotspot: (ssid: string, passphrase: string) =>
+      ipcRenderer.invoke('remote:startHotspot', ssid, passphrase),
+    stopHotspot: () => ipcRenderer.invoke('remote:stopHotspot'),
     // Commandes HTTP reçues par le serveur LAN, forwardées au renderer
     onCommand: (callback: (cmd: any) => void) => {
       const handler = (_: any, cmd: any) => callback(cmd);

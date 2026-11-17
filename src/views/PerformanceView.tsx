@@ -7,7 +7,7 @@ import {
   Plus, MousePointer2, ToggleLeft, GripHorizontal, Columns, Trash2,
   Copy, Maximize2, Minimize2, Square, Keyboard, Eye, EyeOff,
   ChevronUp, ChevronDown, Hash, Download, Upload, RotateCcw, Loader, Wifi,
-  Timer as TimerIcon, Radio, Pencil, Gauge, ShieldAlert, ShieldCheck
+  Timer as TimerIcon, Radio, Pencil, Gauge, ShieldAlert, ShieldCheck, Router
 } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { useShowStore, type SavedCueList, type CueListCue, type SongPreset, findBestSongPreset, presetHasAudio, type FixturePos } from '../stores/showStore';
@@ -3555,6 +3555,40 @@ const MIDIMappingPanel: React.FC = () => {
  * renvoie les urls remplies côté main ; `remote:start`/`remote:stop` renvoient
  * un statut à urls vides → relecture via getStatus() après start/stop.
  */
+/** Client connecté au Remote (téléphone/tablette) — miroir de electron/remote/server.ts. */
+interface RemoteClientEntry {
+  ip: string;
+  agent: string;
+  firstSeen: number;
+  lastSeen: number;
+  requests: number;
+}
+
+/** Nature du réseau transportant une URL d'accès au Remote. */
+type RemoteNetworkKind = 'standalone' | 'wifi' | 'ethernet' | 'other';
+
+/** Une interface réseau + l'URL d'accès correspondante (un QR par interface). */
+interface RemoteLanInterface {
+  url: string;
+  address: string;
+  interfaceName: string;
+  kind: RemoteNetworkKind;
+}
+
+/** État opérationnel du point d'accès Wi-Fi créé par le PC. */
+type RemoteHotspotState = 'On' | 'Off' | 'InTransition' | 'Unknown';
+
+/** Statut du mode autonome (« sans routeur ») — miroir de electron/remote/standalone.ts. */
+interface RemoteHotspotStatus {
+  supported: boolean;
+  state: RemoteHotspotState;
+  ssid: string | null;
+  passphrase: string | null;
+  clients: number;
+  address: string | null;
+  message: string | null;
+}
+
 interface RemoteStatus {
   running: boolean;
   /** Vrai pendant la fenêtre asynchrone listen() (avant l'event listening/error). */
@@ -3563,6 +3597,10 @@ interface RemoteStatus {
   startedAt: number | null;
   urls: string[];
   lastError?: string | null;
+  /** Appareils actuellement connectés au Remote (IP + navigateur + activité). */
+  clients?: RemoteClientEntry[];
+  /** Une entrée par interface réseau utilisable (QR code + libellé). */
+  interfaces?: RemoteLanInterface[];
 }
 
 /** Règle entrante du pare-feu Windows (miroir de electron/remote/diagnostics.ts). */
@@ -3620,6 +3658,9 @@ interface RemoteApiContract {
   stop: () => Promise<RemoteStatus>;
   diagnostics: () => Promise<RemoteDiagnostics>;
   openFirewall: () => Promise<{ ok: boolean; message: string; status: RemoteFirewallStatus }>;
+  hotspotStatus: () => Promise<RemoteHotspotStatus>;
+  startHotspot: (ssid: string, passphrase: string) => Promise<RemoteHotspotStatus>;
+  stopHotspot: () => Promise<RemoteHotspotStatus>;
 }
 
 /**
@@ -3664,9 +3705,15 @@ const RemotePanel: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [copiedToken, setCopiedToken] = useState(false);
+  const [copiedPassword, setCopiedPassword] = useState(false);
   const [diag, setDiag] = useState<RemoteDiagnostics | null>(null);
   const [fixing, setFixing] = useState(false);
   const [diagMessage, setDiagMessage] = useState<string | null>(null);
+  // Mode autonome : le PC crée son propre réseau Wi-Fi (comme la UI16).
+  const [hotspot, setHotspot] = useState<RemoteHotspotStatus | null>(null);
+  const [hotspotBusy, setHotspotBusy] = useState(false);
+  const [hotspotSsid, setHotspotSsid] = useState('Light Maestro');
+  const [hotspotPass, setHotspotPass] = useState('lightmaestro');
   const copyTimer = useRef<number | null>(null);
   const lastStatus = useRef<RemoteStatus | null>(null);
 
@@ -3730,6 +3777,36 @@ const RemotePanel: React.FC = () => {
 
     refreshDiag();
     const id = window.setInterval(refreshDiag, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  // Mode autonome : état du point d'accès Wi-Fi créé par le PC.
+  // Le script PowerShell de lecture prend ~0,6 s : on ne l'interroge pas
+  // toutes les 3 s (comme le statut), mais toutes les 15 s, et immédiatement
+  // après un démarrage/arrêt demandé par l'utilisateur.
+  useEffect(() => {
+    const api = getRemoteApi();
+    if (!api) return;
+    let cancelled = false;
+
+    const refreshHotspot = async () => {
+      try {
+        const h = await api.hotspotStatus();
+        if (cancelled) return;
+        setHotspot(h);
+        if (h.ssid) setHotspotSsid(h.ssid);
+        if (h.passphrase) setHotspotPass(h.passphrase);
+      } catch {
+        // Module indisponible (autre plateforme / erreur) : on conserve
+        // l'affichage précédent au lieu d'afficher une fausse erreur.
+      }
+    };
+
+    refreshHotspot();
+    const id = window.setInterval(refreshHotspot, 15000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
@@ -3808,15 +3885,42 @@ const RemotePanel: React.FC = () => {
     }
   };
 
-  const handleCopy = async (text: string, kind: 'url' | 'token', urlId?: string) => {
+  /**
+   * Démarre / arrête le réseau autonome (point d'accès Wi-Fi du PC).
+   *
+   * Indispensable au concert : la tablette est sur le réseau de la mixette,
+   * pas sur celui du routeur du lieu → sans ce mode, le téléphone n'atteint
+   * jamais le PC et la page reste blanche.
+   */
+  const handleToggleHotspot = async () => {
+    const api = getRemoteApi();
+    if (!api || hotspotBusy) return;
+    setHotspotBusy(true);
+    setDiagMessage(null);
+    try {
+      const next = hotspot?.state === 'On'
+        ? await api.stopHotspot()
+        : await api.startHotspot(hotspotSsid, hotspotPass);
+      setHotspot(next);
+      if (next.message) setDiagMessage(next.message);
+    } catch {
+      setDiagMessage(t('perform.remote.standalone.errors.toggle'));
+    } finally {
+      setHotspotBusy(false);
+    }
+  };
+
+  const handleCopy = async (text: string, kind: 'url' | 'token' | 'password', urlId?: string) => {
     const ok = await copyTextToClipboard(text);
     if (!ok) return;
     if (kind === 'url') setCopiedUrl(urlId ?? null);
+    else if (kind === 'password') setCopiedPassword(true);
     else setCopiedToken(true);
     if (copyTimer.current) window.clearTimeout(copyTimer.current);
     copyTimer.current = window.setTimeout(() => {
       setCopiedUrl(null);
       setCopiedToken(false);
+      setCopiedPassword(false);
     }, 1800);
   };
 
@@ -3853,6 +3957,18 @@ const RemotePanel: React.FC = () => {
     ? t('perform.remote.network.probeOk', { ms: probe.latencyMs ?? 0 })
     : t('perform.remote.network.probeKo');
   const fwNeedsFix = !!fw && (fw.blocked || !fw.allowed);
+
+  /** Libellé d'une interface réseau (« Wi-Fi », « Ethernet », « Réseau autonome »). */
+  const networkKindLabel = (kind: RemoteNetworkKind, interfaceName: string) => {
+    const base = kind === 'standalone'
+      ? t('perform.remote.networkLabels.standalone')
+      : kind === 'wifi'
+        ? t('perform.remote.networkLabels.wifi')
+        : kind === 'ethernet'
+          ? t('perform.remote.networkLabels.ethernet')
+          : t('perform.remote.networkLabels.other');
+    return interfaceName && interfaceName !== base ? `${base} · ${interfaceName}` : base;
+  };
 
   return (
     <div className="h-full p-8 overflow-y-auto">
@@ -3946,49 +4062,177 @@ const RemotePanel: React.FC = () => {
               </div>
             )}
 
-            {/* ── QR Code ───────────────────────────────────────────── */}
-            {status && status.urls.length > 0 && (() => {
-              const primaryUrl = status.urls[0];
-              return (
-                <div className="flex flex-col items-center gap-3 py-2">
-                  <div className="bg-white rounded-2xl p-4 shadow-lg shadow-purple-500/10">
-                    <QRCodeSVG
-                      value={primaryUrl}
-                      size={200}
-                      level="M"
-                      includeMargin={false}
-                      fgColor="#1e1e2c"
-                      bgColor="#ffffff"
-                    />
+            {/* ── Mode autonome (sans routeur) ───────────────────────── */}
+            {/* Le PC crée son propre réseau Wi-Fi (point d'accès Windows) :
+                la tablette s'y connecte même si le lieu n'a aucun Wi-Fi
+                utilisable, et même si elle est sur le réseau de la mixette. */}
+            <div className="rounded-xl border border-gray-800/60 bg-[#0a0a0f] px-3 py-3 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-gray-200 flex items-center gap-1.5">
+                    <Router size={14} className="text-purple-400" />
+                    {t('perform.remote.standalone.title')}
                   </div>
-                  <p className="text-[11px] text-gray-400 text-center leading-relaxed">
-                    📱 Scanne ce QR code avec ta tablette ou ton téléphone
+                  <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                    {t('perform.remote.standalone.subtitle')}
                   </p>
                 </div>
-              );
-            })()}
-
-            {/* ── URLs & token (fallback textuel) ─────────────────── */}
-            <div>
-              <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-2">{t('perform.remote.controlUrls')}</div>
-              <div className="space-y-1.5">
-                {status && status.urls.length === 0 ? (
-                  <div className="text-xs text-gray-600">{t('perform.remote.noUrls')}</div>
-                ) : (
-                  status?.urls.map((url) => (
-                    <div key={url} className="flex items-center gap-2 bg-[#0a0a0f] border border-gray-800/60 rounded-lg px-3 py-2">
-                      <span className="flex-1 min-w-0 text-xs font-mono text-purple-300 truncate" title={url}>{url}</span>
-                      <button
-                        onClick={() => handleCopy(url, 'url', url)}
-                        className="shrink-0 px-2 py-1 text-[10px] rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
-                      >
-                        {copiedUrl === url ? t('perform.remote.copied') : t('perform.remote.copy')}
-                      </button>
-                    </div>
-                  ))
-                )}
+                <button
+                  onClick={handleToggleHotspot}
+                  disabled={hotspotBusy || hotspot?.supported === false}
+                  className={`shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-semibold border disabled:opacity-50 inline-flex items-center gap-1.5 ${
+                    hotspot?.state === 'On'
+                      ? 'border-red-500/30 text-red-300 hover:bg-red-500/10'
+                      : 'bg-purple-600/25 text-purple-200 border-purple-500/40 hover:bg-purple-600/40'
+                  }`}
+                >
+                  {hotspotBusy ? <Loader size={12} className="animate-spin" /> : <Router size={12} />}
+                  {hotspotBusy
+                    ? t('perform.remote.working')
+                    : hotspot?.state === 'On'
+                      ? t('perform.remote.standalone.deactivate')
+                      : t('perform.remote.standalone.activate')}
+                </button>
               </div>
+
+              {hotspot?.state === 'On' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-[11px] text-emerald-300">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    {t('perform.remote.standalone.stateOn')}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="flex items-center gap-2 bg-[#0d0d14] border border-gray-800/60 rounded-lg px-3 py-2">
+                      <span className="text-[10px] text-gray-500 shrink-0">{t('perform.remote.standalone.ssid')}</span>
+                      <span className="flex-1 min-w-0 text-xs font-mono text-gray-200 truncate">{hotspot.ssid ?? '—'}</span>
+                      {hotspot.ssid && (
+                        <button
+                          onClick={() => handleCopy(hotspot.ssid as string, 'url', 'hotspot-ssid')}
+                          className="shrink-0 px-2 py-0.5 text-[10px] rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
+                        >
+                          {copiedUrl === 'hotspot-ssid' ? t('perform.remote.copied') : t('perform.remote.copy')}
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 bg-[#0d0d14] border border-gray-800/60 rounded-lg px-3 py-2">
+                      <span className="text-[10px] text-gray-500 shrink-0">{t('perform.remote.standalone.passphrase')}</span>
+                      <span className="flex-1 min-w-0 text-xs font-mono text-gray-200 truncate">{hotspot.passphrase ?? '—'}</span>
+                      {hotspot.passphrase && (
+                        <button
+                          onClick={() => handleCopy(hotspot.passphrase as string, 'password')}
+                          className="shrink-0 px-2 py-0.5 text-[10px] rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
+                        >
+                          {copiedPassword ? t('perform.remote.copied') : t('perform.remote.copy')}
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 bg-[#0d0d14] border border-gray-800/60 rounded-lg px-3 py-2">
+                      <span className="text-[10px] text-gray-500 shrink-0">{t('perform.remote.standalone.address')}</span>
+                      <span className="flex-1 min-w-0 text-xs font-mono text-gray-200 truncate">{hotspot.address ?? '—'}</span>
+                    </div>
+                    <div className="flex items-center gap-2 bg-[#0d0d14] border border-gray-800/60 rounded-lg px-3 py-2">
+                      <span className="text-[10px] text-gray-500 shrink-0">{t('perform.remote.standalone.clients')}</span>
+                      <span className="flex-1 min-w-0 text-xs font-mono text-gray-200 truncate">{hotspot.clients}</span>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-gray-600 leading-relaxed">
+                    {t('perform.remote.standalone.hint')}
+                  </p>
+                </div>
+              )}
+
+              {hotspot && hotspot.state !== 'On' && hotspot.supported && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] text-gray-500">{t('perform.remote.standalone.ssid')}</span>
+                    <input
+                      value={hotspotSsid}
+                      maxLength={32}
+                      onChange={(e) => setHotspotSsid(e.target.value)}
+                      className="bg-[#0d0d14] border border-gray-800/60 rounded-lg px-2.5 py-1.5 text-xs font-mono text-gray-200 focus:border-purple-500/50 focus:outline-none"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] text-gray-500">{t('perform.remote.standalone.passphrase')}</span>
+                    <input
+                      value={hotspotPass}
+                      maxLength={63}
+                      onChange={(e) => setHotspotPass(e.target.value)}
+                      className="bg-[#0d0d14] border border-gray-800/60 rounded-lg px-2.5 py-1.5 text-xs font-mono text-gray-200 focus:border-purple-500/50 focus:outline-none"
+                    />
+                  </label>
+                </div>
+              )}
+
+              {hotspot && !hotspot.supported && (
+                <p className="text-[11px] text-amber-300">{t('perform.remote.standalone.unsupported')}</p>
+              )}
             </div>
+
+            {/* ── QR codes : UN PAR INTERFACE RÉSEAU ───────────────────── */}
+            {/* BUG CORRIGÉ : avant, un seul QR code (la 1re URL) était
+                affiché. Au concert, le PC a le Wi-Fi ET un Ethernet branché
+                sur la mixette : le QR pointait vers le mauvais sous-réseau
+                et la tablette obtenait une page blanche. */}
+            {status && status.interfaces && status.interfaces.length > 0 ? (
+              <div>
+                <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-1">
+                  {t('perform.remote.qrTitle')}
+                </div>
+                <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">
+                  {t('perform.remote.qrHint')}
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {status.interfaces.map((iface, idx) => (
+                    <div
+                      key={iface.url}
+                      className={`flex flex-col items-center gap-2 rounded-xl border px-3 py-3 ${
+                        idx === 0
+                          ? 'border-purple-500/40 bg-purple-500/5'
+                          : 'border-gray-800/60 bg-[#0a0a0f]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 w-full">
+                        <span className="text-[11px] font-medium text-gray-300 truncate">
+                          {networkKindLabel(iface.kind, iface.interfaceName)}
+                        </span>
+                        {idx === 0 && (
+                          <span className="ml-auto text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 shrink-0">
+                            {t('perform.remote.qrPrimary')}
+                          </span>
+                        )}
+                      </div>
+                      <div className="bg-white rounded-xl p-3 shadow-lg shadow-purple-500/10">
+                        <QRCodeSVG
+                          value={iface.url}
+                          size={150}
+                          level="M"
+                          includeMargin={false}
+                          fgColor="#1e1e2c"
+                          bgColor="#ffffff"
+                        />
+                      </div>
+                      <div className="w-full flex items-center gap-2">
+                        <span className="flex-1 min-w-0 text-[10px] font-mono text-purple-300 truncate" title={iface.url}>
+                          {iface.url}
+                        </span>
+                        <button
+                          onClick={() => handleCopy(iface.url, 'url', iface.url)}
+                          className="shrink-0 px-2 py-1 text-[10px] rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
+                        >
+                          {copiedUrl === iface.url ? t('perform.remote.copied') : t('perform.remote.copy')}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-2">{t('perform.remote.controlUrls')}</div>
+                <div className="text-xs text-gray-600">{t('perform.remote.noUrls')}</div>
+              </div>
+            )}
 
             {tokenFromUrls && (
               <div>
@@ -4006,6 +4250,32 @@ const RemotePanel: React.FC = () => {
             )}
 
             <p className="text-[10px] text-gray-600">{t('perform.remote.connectHint')}</p>
+
+            {/* ── Appareils connectés ───────────────────────────────────── */}
+            {/* Preuve directe : si le téléphone scanne le QR et que la page
+                reste blanche, cette liste reste vide → la requête n'arrive
+                jamais au PC (problème réseau, pas le code). */}
+            <div>
+              <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-2">
+                {t('perform.remote.connectedDevices')}
+              </div>
+              {status?.clients && status.clients.length > 0 ? (
+                <div className="space-y-1.5">
+                  {status.clients.map((c) => (
+                    <div key={c.ip} className="flex items-center gap-2 bg-[#0a0a0f] border border-gray-800/60 rounded-lg px-3 py-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+                      <span className="text-xs font-mono text-green-300 shrink-0">{c.ip}</span>
+                      <span className="flex-1 min-w-0 text-[10px] text-gray-500 truncate" title={c.agent}>{c.agent || '—'}</span>
+                      <span className="text-[10px] text-gray-600 shrink-0">{c.requests}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-[11px] text-gray-600">
+                  {t('perform.remote.noConnectedDevices')}
+                </div>
+              )}
+            </div>
           </div>
         ) : (
           <div className="px-4 py-6 text-xs text-gray-600">{t('perform.remote.stoppedHint')}</div>

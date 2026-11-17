@@ -57,6 +57,56 @@ export interface SacnNetworkStatus {
 // Miroir du contrat défini dans le main process : les types y sont définis
 // dans electron/remote/server.ts et servis par l'IPC `remote:getStatus`.
 
+/** Client connecté au Remote (téléphone/tablette) — vu par le serveur HTTP. */
+export interface RemoteClientEntry {
+  /** Adresse IP distante. */
+  ip: string;
+  /** User-Agent du navigateur (pour identifier l'appareil). */
+  agent: string;
+  /** Timestamp de la 1re requête (ms). */
+  firstSeen: number;
+  /** Timestamp de la dernière requête (ms). */
+  lastSeen: number;
+  /** Nombre total de requêtes reçues. */
+  requests: number;
+}
+
+/** Nature du réseau transportant une URL d'accès au Remote. */
+export type RemoteNetworkKind = 'standalone' | 'wifi' | 'ethernet' | 'other';
+
+/** Une interface réseau + l'URL d'accès correspondante (un QR par interface). */
+export interface RemoteLanInterface {
+  /** URL complète `http://<ip>:<port>/?token=<token>`. */
+  url: string;
+  /** Adresse IPv4 de l'interface. */
+  address: string;
+  /** Nom de l'interface tel que Windows l'affiche (« Wi-Fi », « Ethernet »…). */
+  interfaceName: string;
+  /** Nature du réseau (Wi-Fi, Ethernet, réseau autonome…). */
+  kind: RemoteNetworkKind;
+}
+
+/** État opérationnel du point d'accès Wi-Fi créé par le PC. */
+export type RemoteHotspotState = 'On' | 'Off' | 'InTransition' | 'Unknown';
+
+/** Statut du mode autonome (« sans routeur ») renvoyé par les IPC `remote:hotspot*`. */
+export interface RemoteHotspotStatus {
+  /** L'API Windows de partage de connexion est disponible sur ce poste. */
+  supported: boolean;
+  /** État opérationnel du point d'accès. */
+  state: RemoteHotspotState;
+  /** SSID du réseau autonome (celui configuré par l'app), null si inconnu. */
+  ssid: string | null;
+  /** Mot de passe WPA2 du réseau autonome, null si inconnu. */
+  passphrase: string | null;
+  /** Nombre d'appareils actuellement connectés au point d'accès. */
+  clients: number;
+  /** IP du PC sur le réseau autonome (192.168.137.1), null si absent. */
+  address: string | null;
+  /** Message lisible en cas de problème, null sinon. */
+  message: string | null;
+}
+
 /** Statut du serveur LAN retourné par `remote.getStatus()`. */
 export interface RemoteStatus {
   running: boolean;
@@ -69,6 +119,10 @@ export interface RemoteStatus {
   urls: string[];
   /** Erreur du dernier démarrage (ex. EADDRINUSE), null si aucun souci. */
   lastError: string | null;
+  /** Appareils actuellement connectés au Remote (IP + navigateur + activité). */
+  clients?: RemoteClientEntry[];
+  /** Une entrée par interface réseau utilisable (QR code + libellé). */
+  interfaces?: RemoteLanInterface[];
 }
 
 /** Règle entrante du pare-feu Windows concernant l'exécutable de l'app. */
@@ -385,6 +439,12 @@ interface LightMaestroAPI {
     diagnostics: () => Promise<RemoteDiagnostics>;
     /** Répare le pare-feu (supprime les règles Block, crée la règle Allow). */
     openFirewall: () => Promise<RemoteFirewallFix>;
+    /** Mode autonome : statut du point d'accès Wi-Fi créé par le PC. */
+    hotspotStatus: () => Promise<RemoteHotspotStatus>;
+    /** Mode autonome : démarre le point d'accès (SSID + mot de passe WPA2). */
+    startHotspot: (ssid: string, passphrase: string) => Promise<RemoteHotspotStatus>;
+    /** Mode autonome : arrête le point d'accès. */
+    stopHotspot: () => Promise<RemoteHotspotStatus>;
     /** Commande reçue par le serveur LAN, forwardée au renderer (désabonnement). */
     onCommand: (callback: (cmd: unknown) => void) => () => void;
     /** Snapshot d'état poussé par le renderer vers le serveur LAN (cache HTTP). */

@@ -386,6 +386,22 @@ if (-not $hasAllow) {
   $created = $true
 }
 $lines += ('allow-created:' + $created)
+
+# 3b) Regle de secours : TOUT le sous-reseau local vers le port du Remote,
+# quel que soit le programme. Couvre le cas ou le chemin de l'executable
+# change a chaque lancement (build portable) et le cas ou le filtrage par
+# programme ne s'applique pas au processus qui ecoute.
+$subnetName = 'Light Maestro (Remote LAN - sous-reseau)'
+$hasSubnet = $false
+foreach ($r in $fw.Rules) {
+  if ([string]$r.Name -eq $subnetName) { $hasSubnet = $true; break }
+}
+if (-not $hasSubnet) {
+  & netsh advfirewall firewall add rule ('name=' + $subnetName) 'dir=in' 'action=allow' 'protocol=TCP' ('localport=' + $port) 'remoteip=localSubnet' 'profile=any' 'enable=yes' | Out-Null
+  $lines += 'allow-subnet-created:True'
+} else {
+  $lines += 'allow-subnet-created:False'
+}
 $lines += 'done'
 ($lines -join [Environment]::NewLine) | Set-Content -Path $res -Encoding UTF8
 `;

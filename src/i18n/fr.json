@@ -814,6 +814,33 @@
       "copy": "Copier",
       "copied": "Copié ✓",
       "connectHint": "Connectez votre téléphone/tablette au même Wi-Fi et ouvrez l'URL.",
+      "connectedDevices": "Appareils connectés",
+      "noConnectedDevices": "Aucun appareil connecté pour l'instant. Si le téléphone affiche une page blanche après le scan, c'est qu'il n'atteint pas le PC (réseau/Wi-Fi).",
+      "qrTitle": "QR codes d'accès",
+      "qrHint": "Un QR code par réseau du PC : scannez celui du réseau où se trouve votre téléphone ou tablette.",
+      "qrPrimary": "Recommandé",
+      "networkLabels": {
+        "standalone": "Réseau autonome",
+        "wifi": "Wi-Fi",
+        "ethernet": "Ethernet",
+        "other": "Autre réseau"
+      },
+      "standalone": {
+        "title": "Mode autonome (sans routeur)",
+        "subtitle": "Le PC crée son propre réseau Wi-Fi : votre tablette s'y connecte même sans Wi-Fi externe, et même si elle est sur le réseau de la mixette.",
+        "activate": "Activer",
+        "deactivate": "Désactiver",
+        "stateOn": "Réseau autonome actif",
+        "ssid": "Nom du réseau",
+        "passphrase": "Mot de passe",
+        "address": "Adresse du PC",
+        "clients": "Appareils connectés",
+        "hint": "Connectez la tablette au réseau ci-dessus, puis scannez le QR code « Réseau autonome ».",
+        "unsupported": "Ce poste ne permet pas de créer un point d'accès Wi-Fi (API Windows indisponible).",
+        "errors": {
+          "toggle": "Impossible de modifier le réseau autonome"
+        }
+      },
       "stoppedHint": "Le serveur est arrêté. Démarrez-le pour contrôler Light Maestro depuis un autre appareil.",
       "start": "Démarrer le serveur",
       "stop": "Arrêter le serveur",
