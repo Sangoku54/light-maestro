@@ -721,6 +721,14 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
     });
   }
 
+  // Couleur de tuile VC : valide avant injection dans un attribut style.
+  // Une couleur corrompue (projet importé/édité à la main) contenant un
+  // guillemet aurait cassé l'attribut HTML → injection dans la page mobile.
+  function safeColor(c) {
+    var s = String(c == null ? '' : c).trim();
+    return /^#[0-9a-fA-F]{3,8}$/.test(s) ? s : '#a855f7';
+  }
+
   // ── Onglets ──────────────────────────────────────
   var tabButtons = document.querySelectorAll('.tab');
   Array.prototype.forEach.call(tabButtons, function (btn) {
@@ -883,7 +891,7 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
   };
 
   function vcButtonTile(w) {
-    var color = w.color || '#a855f7';
+    var color = safeColor(w.color);
     var on = w.active ? ' on' : '';
     var bg = w.active ? color + '55' : color + '18';
     var bd = w.active ? color : color + '55';
@@ -967,7 +975,7 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
       if (!refs) return;
       if (w.type === 'button') {
         if (!refs.btn) return;
-        var color = w.color || '#a855f7';
+        var color = safeColor(w.color);
         refs.btn.classList.toggle('on', !!w.active);
         refs.btn.style.background = w.active ? color + '55' : color + '18';
         refs.btn.style.borderColor = w.active ? color : color + '55';

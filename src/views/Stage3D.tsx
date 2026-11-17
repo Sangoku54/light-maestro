@@ -773,31 +773,22 @@ export const Stage3D: React.FC<{
     musicianPositionsRef.current = { ...defaults, ...musicianPositionsRef.current };
   }, [musicians]);
 
-  // Clear any stale test state when the 3D view opens so fixtures start dark
-  useEffect(() => {
-    try { fixtureTestState.clearAll(); } catch {}
-    // Full reset of the DMX bridge � clears cache, releases all LTP sources,
-    // and cancels pending transients. Guarantees a clean (all-zeros) state.
-    try { dmxBridge.clearAll(); } catch {}
-    // Also clear the persisted channelData in appStore so the mirror starts clean
-    const app = useAppStore.getState();
-    for (let i = 0; i < (app.dmx?.universes?.length ?? 0); i++) {
-      try { app.setUniverseData(i, {}); } catch {}
-    }
-    // �puis restaure l'�tat LIVE du programmeur (faders) : le wipe ci-dessus
-    // survient � chaque (re)montage de la vue ; sans re-push, une sortie faders
-    // active mourrait au moindre remontage (onglets, modale) jusqu'au prochain
-    // mouvement de fader. Programmeur vide ? reste �teint (comportement inchang�).
-    try {
-      const prog = useProgrammerStore.getState().channels;
-      if (Object.keys(prog).length > 0) {
-        const show = useShowStore.getState();
-        void sendChannelsToHardwareAndStore(
-          { ...prog }, show.patchedFixtures, show.universes, 'programmer',
-        ).catch(() => {});
-      }
-    } catch {}
-  }, []);
+  // La vue 3D est un LECTEUR : elle ne modifie jamais l'etat DMX global.
+  // Historique : au montage, la vue faisait `dmxBridge.clearAll()` (liberait
+  // TOUTES les sources DMX) puis tentait de vider le miroir appStore.
+  // Trois bugs corriges ici :
+  //   1) ouvrir/fermer la 3D pendant un show coupait la sortie DMX
+  //      (noir scene + scintillement) ; le clearAll etait appele a chaque
+  //      remount (onglets, modale 2D, passage Design/Quick/Perform) ;
+  //   2) le "wipe" du miroir etait un NO-OP : setUniverseData() fusionne
+  //      au lieu de remplacer, donc `setUniverseData(i, {})` ne vidait
+  //      rien -> le miroir gardait des valeurs perimees et la 3D
+  //      affichait des fixtures allumees a tort ;
+  //   3) une 2e instance de Stage3D (modale) effacait l'etat "Allumer"
+  //      de la vue principale.
+  // Au demarrage aucune source n'a encore ecrit : la 3D est donc
+  // naturellement eteinte, et elle suit la sortie live des que le show
+  // tourne. Rien a pushing ici.
 
   const trussBeamsRef = useRef<{ back: THREE.Object3D | null; front: THREE.Object3D | null; left: THREE.Object3D | null; right: THREE.Object3D | null; poles: THREE.Object3D[] }>({ back: null, front: null, left: null, right: null, poles: [] });
   const [selectedFixtureId, setSelectedFixtureId] = useState<string | null>(null);
@@ -879,8 +870,6 @@ export const Stage3D: React.FC<{
    const [fixtureSearch, setFixtureSearch] = useState('');
    // Panneau fixtures RETRACTÉ par défaut (toujours fermé au démarrage)
    const [leftDockCollapsed, setLeftDockCollapsed] = useState(true);
-   // Affichage DMX en 3D : désactivé par défaut (fixtures éteintes au démarrage)
-   const [showDmxIn3D, setShowDmxIn3D] = useState(false);
   // Dock droit "Sc�ne & EFX" repliable (mode Sc�nes), repli� par d�faut comme
   // celui des fixtures : la sc�ne physique reste centr�e et lisible, et on
   // ne d�plie un panneau que pour s'en servir.
@@ -2836,7 +2825,6 @@ export const Stage3D: React.FC<{
 
   // -- DMX update function (called from render loop) ---
   const updateDmxState = useCallback(() => {
-        if (!showDmxIn3D) return; // DMX display disabled -> fixtures stay off
     const dmxState = useAppStore.getState().dmx;
     // Use arbitrated buffer (LTP fid�le: auto-loop LTP75 > quickshow HTP40) au lieu de channelData brut
     const bridged: Record<number, Uint8Array | number[]> = {};
@@ -4909,15 +4897,6 @@ export const Stage3D: React.FC<{
           <List size={12} /> {t('stage3D.fixtures')}
         </button>
 
-        <button
-          onClick={() => setShowDmxIn3D(v => !v)}
-          className={`px-2 py-1 rounded text-[10px] flex items-center gap-1 transition-colors ${
-            showDmxIn3D ? 'bg-green-600/25 text-green-300 border-green-500/50' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/30'
-          }`}
-          title={showDmxIn3D ? t('stage3D.dmxOnTitle') : t('stage3D.dmxOffTitle')}
-        >
-          <Zap size={12} /> {showDmxIn3D ? t('stage3D.dmxOn') : t('stage3D.dmxOff')}
-        </button>
 
         <div className="flex-1" />
 

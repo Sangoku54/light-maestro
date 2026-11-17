@@ -95,22 +95,30 @@ describe('page web Remote', () => {
 
   it('le script appelle uniquement des endpoints existants', () => {
     const called = new Set<string>();
-    const re = /post\(\s*'(api\/[a-z]+)/g;
+    // post('api/xxx', ...) — endpoints littéraux
+    const re = /post\(\s*'(api\/[\w]+)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(script)) !== null) called.add(m[1]);
+    // bindActions('conteneur', 'api/xxx') — endpoints paramétrés (Cue Lists,
+    // Presets) : l'ancien regex ne les voyait pas du tout.
+    const re2 = /bindActions\(\s*'[a-zA-Z]+'\s*,\s*'(api\/[\w]+)/g;
+    while ((m = re2.exec(script)) !== null) called.add(m[1]);
     expect(called.size).toBeGreaterThan(0);
     for (const ep of called) {
-      expect(ep).toMatch(/^api\/(blackout|grandmaster|stopall|scene|chaser|widget)$/);
+      expect(ep).toMatch(/^api\/(blackout|grandmaster|stopall|scene|chaser|widget|cueList|songPreset)$/);
     }
+    // Les onglets à contenu dynamique doivent tous être câblés.
+    expect(called).toContain('api/cueList');
+    expect(called).toContain('api/songPreset');
   });
 
   it('la page expose les onglets + la console virtuelle', () => {
     // Onglets
-    for (const tab of ['scenes', 'chasers', 'console']) {
+    for (const tab of ['scenes', 'chasers', 'cueLists', 'presets', 'console']) {
       expect(html).toContain(`data-tab="${tab}"`);
     }
     // Sections
-    for (const id of ['panel-scenes', 'panel-chasers', 'panel-console']) {
+    for (const id of ['panel-scenes', 'panel-chasers', 'panel-cueLists', 'panel-presets', 'panel-console']) {
       expect(html).toContain(`id="${id}"`);
     }
     // Console : pages + widgets + faders
@@ -124,6 +132,15 @@ describe('page web Remote', () => {
     const tabsIdx = html.indexOf('class="tabs"');
     expect(blackoutIdx).toBeGreaterThan(-1);
     expect(tabsIdx).toBeGreaterThan(blackoutIdx);
+  });
+
+  it('la couleur des tuiles VC est validée avant injection dans un attribut style', () => {
+    // Une couleur corrompue (projet importé/édité à la main) contenant un
+    // guillemet cassait l'attribut style="..." → injection HTML dans la page
+    // mobile. La couleur doit passer par safeColor().
+    expect(script).toContain('function safeColor');
+    expect(script).toContain('safeColor(w.color)');
+    expect(script).not.toMatch(/var color = w\.color \|\|/);
   });
 
   it('le script interroge /api/state (synchronisation)', () => {

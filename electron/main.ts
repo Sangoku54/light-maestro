@@ -208,6 +208,9 @@ function collectLanUrls(port: number, token: string): string[] {
     for (const iface of ifaces ?? []) {
       if (iface.family !== 'IPv4' || iface.internal) continue;
       if (VIRTUAL_IFACE_PATTERNS.some((re) => re.test(name))) continue;
+      // Lien-local (APIPA 169.254.x.x) : adresse auto-attribuée, souvent
+      // inexistante sur le réseau réel → le QR pointerait dans le vide.
+      if (iface.address.startsWith('169.254.')) continue;
       entries.push({ address: iface.address, name });
     }
   }

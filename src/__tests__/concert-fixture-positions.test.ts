@@ -3,7 +3,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { unpackProject } from '../../electron/project-envelope';
 
-describe('Concert.lmproj fixture positions', () => {
+// .lmproj local de diagnostic (exclu du repo) : skip si absent du disque.
+describe.skipIf(!fs.existsSync(path.join(process.cwd(), 'LM', 'concert.lmproj')))('Concert.lmproj fixture positions', () => {
   beforeAll(async () => {
     const PROJECT = path.join(process.cwd(), 'LM', 'concert.lmproj');
     expect(fs.existsSync(PROJECT)).toBe(true);
