@@ -819,6 +819,23 @@
       "stop": "Stop server",
       "working": "Working…",
       "unavailable": "Remote module unavailable (preload not connected)",
+      "firewall": {
+        "blockedTitle": "Windows Firewall: access blocked",
+        "blockedHint": "Windows blocks incoming connections to Light Maestro, so the phone only gets a blank page. Click \"Allow\" and accept the Windows prompt.",
+        "warningTitle": "Windows Firewall: authorization to confirm",
+        "warningHint": "No incoming rule explicitly allows the server port. Click \"Allow\" to avoid a blank page on the phone.",
+        "okTitle": "Windows Firewall: access allowed",
+        "okHint": "The port is allowed inbound: the phone can connect to the PC.",
+        "allow": "Allow in firewall",
+        "failed": "Could not open Windows Firewall"
+      },
+      "network": {
+        "info": "PC: {{ssid}} · IP {{ip}} · server {{probe}}",
+        "ssidUnknown": "unknown Wi-Fi",
+        "probeOk": "reachable ({{ms}} ms)",
+        "probeKo": "unreachable",
+        "sameWifi": "The phone must be connected to the same Wi-Fi network as the PC."
+      },
       "errors": {
         "start": "Failed to start the server (port in use?)",
         "stop": "Failed to stop the server",

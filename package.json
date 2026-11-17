@@ -108,7 +108,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Light Maestro"
+      "shortcutName": "Light Maestro",
+      "include": "build/installer.nsh"
     },
     "mac": {
       "target": "dmg"

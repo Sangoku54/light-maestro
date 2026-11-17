@@ -199,6 +199,11 @@ contextBridge.exposeInMainWorld('lightMaestro', {
     getStatus: () => ipcRenderer.invoke('remote:getStatus'),
     start: () => ipcRenderer.invoke('remote:start'),
     stop: () => ipcRenderer.invoke('remote:stop'),
+    // Diagnostic réseau : pare-feu Windows, SSID du Wi-Fi, auto-test LAN.
+    diagnostics: () => ipcRenderer.invoke('remote:diagnostics'),
+    // Répare le pare-feu (supprime les règles Block, crée la règle Allow).
+    // Déclenche une invite UAC → l'utilisateur doit cliquer « Oui ».
+    openFirewall: () => ipcRenderer.invoke('remote:openFirewall'),
     // Commandes HTTP reçues par le serveur LAN, forwardées au renderer
     onCommand: (callback: (cmd: any) => void) => {
       const handler = (_: any, cmd: any) => callback(cmd);

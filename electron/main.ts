@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, crashReporter, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, crashReporter, shell, Notification } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import { execSync, spawn } from 'child_process';
 import { autoUpdater } from 'electron-updater';
 import { RemoteServer, type RemoteStateSnapshot } from './remote/server';
+import { getRemoteDiagnostics, ensureFirewallRule, getFirewallStatus } from './remote/diagnostics';
 import { OscServer } from './osc/server';
 import { DMXEngine } from './dmx/engine';
 import { FixtureLibrary } from './fixtures/library';
@@ -397,6 +398,39 @@ function createWindow() {
     console.warn('[remote] démarrage auto impossible :', e instanceof Error ? e.message : e);
   }
 
+  // Pare-feu : si Windows bloque l'exécutable, le téléphone qui scanne le QR
+  // n'obtient qu'une page blanche. On le signale tout de suite (notification
+  // non intrusive) au lieu d'attendre que l'utilisateur ouvre le panneau
+  // Remote et se demande pourquoi son téléphone ne marche pas.
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const status = remoteServer.getStatus();
+        if (!status.running) return;
+        const fw = await getFirewallStatus(status.port);
+        if (!fw.blocked && fw.allowed) return;
+        if (Notification.isSupported()) {
+          const n = new Notification({
+            title: 'Remote LAN : accès bloqué',
+            body: fw.blocked
+              ? `Windows Firewall bloque les connexions entrantes (port ${status.port}). Le téléphone affichera une page vide. Ouvre Perform → Remote → « Autoriser dans le pare-feu ».`
+              : `Aucune règle entrante n'autorise le port ${status.port} : le téléphone risque d'afficher une page vide. Ouvre Perform → Remote pour autoriser.`,
+          });
+          n.on('click', () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.show();
+              mainWindow.focus();
+            }
+          });
+          n.show();
+        }
+        console.warn('[remote] pare-feu :', fw.message);
+      } catch (e) {
+        console.warn('[remote] diagnostic pare-feu impossible :', e instanceof Error ? e.message : e);
+      }
+    })();
+  }, 4000);
+
   // Show the main window once its first frame is painted, keeping the
   // animated splash visible until then (with a minimum display time so the
   // intro animation is actually seen, plus a safety fallback in case the
@@ -588,12 +622,35 @@ ipcMain.handle('remote:getStatus', () => {
   if (!status.running) return status;
   return { ...status, urls: collectLanUrls(status.port, remoteServer.getToken()) };
 });
+// Diagnostic réseau du Remote : état du pare-feu Windows (règle "Block" qui
+// coupe le téléphone), SSID du Wi-Fi du PC, et auto-test HTTP sur l'IP du QR.
+ipcMain.handle('remote:diagnostics', async () => {
+  const status = remoteServer.getStatus();
+  const port = status.port || RemoteServer.DEFAULT_PORT;
+  const token = remoteServer.getToken();
+  const urls = status.running ? collectLanUrls(port, token) : [];
+  return await getRemoteDiagnostics(port, urls);
+});
+// Réparation du pare-feu : supprime les règles "Block" et crée la règle
+// "Allow" entrante TCP. Déclenche une invite UAC (clic « Oui » requis).
+ipcMain.handle('remote:openFirewall', async () => {
+  const status = remoteServer.getStatus();
+  const port = status.port || RemoteServer.DEFAULT_PORT;
+  return await ensureFirewallRule(port);
+});
 // Le renderer pousse le snapshot (scènes/chasers/blackout/GM) vers le cache
 // HTTP. Supporte les deux formes : { state: snapshot } ou snapshot direct.
 // Le push est fire-and-forget (ipcRenderer.send) → on utilise ipcMain.on.
 ipcMain.on('remote:state', (_event, payload: unknown) => {
-  const wrapped = payload as { state?: unknown } | null;
-  remoteServer.setSnapshot((wrapped && 'state' in wrapped ? wrapped.state : payload) as RemoteStateSnapshot | null);
+  // Garde : `in` sur un non-objet (ex. pushState(42)) levait un TypeError
+  // dans le main → app.quit() via le handler global d'exception.
+  if (typeof payload !== 'object' || payload === null) {
+    console.warn('[remote] snapshot ignoré : payload non-objet');
+    return;
+  }
+  const wrapped = payload as { state?: unknown };
+  const inner = 'state' in wrapped ? wrapped.state : payload;
+  remoteServer.setSnapshot((typeof inner === 'object' && inner !== null ? inner : null) as RemoteStateSnapshot | null);
 });
 
 // ████████ IPC Handlers: OSC entrant ████████████████████████████████████

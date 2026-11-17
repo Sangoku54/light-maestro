@@ -162,4 +162,16 @@ describe('page web Remote', () => {
     expect(script).toContain("sessionStorage.removeItem('lmToken')");
     expect(script).toMatch(/re-?scannez/i);
   });
+
+  it('les erreurs HTTP et réseau sont affichées (plus de silence)', () => {
+    // Avant : les réponses 400 / 413 / 503 étaient traitées comme des
+    // succès (le .json() renvoyait le message d'erreur et l'UI restait
+    // muette) → l'utilisateur croyait que la commande passait. Et une panne
+    // réseau (serveur arrêté / pare-feu bloquant) n'affichait rien non plus.
+    expect(script).toContain('if (!res.ok)');
+    expect(script).toContain('Commande refusée par le PC');
+    expect(script).toContain('Connexion au PC impossible');
+    // Le rejet réseau est traité via le 2e argument de then() (network fail).
+    expect(script).toMatch(/\.then\(function \(res\) \{[\s\S]*?\}, function \(err\) \{/);
+  });
 });

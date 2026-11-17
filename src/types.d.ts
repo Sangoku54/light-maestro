@@ -71,6 +71,73 @@ export interface RemoteStatus {
   lastError: string | null;
 }
 
+/** Règle entrante du pare-feu Windows concernant l'exécutable de l'app. */
+export interface RemoteFirewallRule {
+  /** Identifiant interne de la règle (GUID). */
+  name: string;
+  /** Nom affiché de la règle. */
+  displayName: string;
+  /** 'Allow' | 'Block'. */
+  action: string;
+  /** Profils concernés ('Any', 'Public'…). */
+  profile: string;
+  enabled: boolean;
+  /** 'TCP' | 'UDP' | 'Any'. */
+  protocol: string;
+  /** Port local ('8080', 'Any'…). */
+  localPort: string;
+  /** Chemin du programme filtré. */
+  program: string;
+}
+
+/** État du pare-feu vis-à-vis de l'exécutable de l'app. */
+export interface RemoteFirewallStatus {
+  platform: string;
+  /** Exécutable réellement filtré par le pare-feu. */
+  program: string;
+  /** Une règle "Block" entrante concerne le programme → le téléphone est coupé. */
+  blocked: boolean;
+  /** Une règle "Allow" entrante TCP couvre le programme ET le port. */
+  allowed: boolean;
+  rules: RemoteFirewallRule[];
+  /** L'exécutable tourne depuis un dossier temporaire (build portable). */
+  portable: boolean;
+  /** Message lisible si un blocage est détecté, sinon null. */
+  message: string | null;
+}
+
+/** Informations réseau du PC (à comparer avec le réseau du téléphone). */
+export interface RemoteNetworkInfo {
+  /** SSID du Wi-Fi (null si Ethernet / Wi-Fi éteint / réseau masqué). */
+  ssid: string | null;
+  interfaceName: string | null;
+  ipv4: string[];
+  hostname: string;
+}
+
+/** Résultat de l'auto-test HTTP sur l'IP affichée dans le QR code. */
+export interface RemoteLanProbe {
+  url: string | null;
+  ok: boolean;
+  status: number | null;
+  latencyMs: number | null;
+  error: string | null;
+}
+
+/** Diagnostic complet renvoyé par l'IPC `remote:diagnostics`. */
+export interface RemoteDiagnostics {
+  firewall: RemoteFirewallStatus;
+  network: RemoteNetworkInfo;
+  probe: RemoteLanProbe;
+}
+
+/** Résultat de la tentative de réparation du pare-feu. */
+export interface RemoteFirewallFix {
+  ok: boolean;
+  message: string;
+  status: RemoteFirewallStatus;
+}
+
 /** Entrée d'une scène dans le snapshot poussé au serveur HTTP. */
 export interface RemoteSceneEntry {
   id: string;
@@ -314,6 +381,10 @@ interface LightMaestroAPI {
     start: () => Promise<RemoteStatus>;
     /** Arrête le serveur HTTP embarqué. */
     stop: () => Promise<RemoteStatus>;
+    /** Diagnostic réseau : pare-feu Windows, SSID du Wi-Fi, auto-test LAN. */
+    diagnostics: () => Promise<RemoteDiagnostics>;
+    /** Répare le pare-feu (supprime les règles Block, crée la règle Allow). */
+    openFirewall: () => Promise<RemoteFirewallFix>;
     /** Commande reçue par le serveur LAN, forwardée au renderer (désabonnement). */
     onCommand: (callback: (cmd: unknown) => void) => () => void;
     /** Snapshot d'état poussé par le renderer vers le serveur LAN (cache HTTP). */

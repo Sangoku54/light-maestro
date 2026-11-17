@@ -7,7 +7,7 @@ import {
   Plus, MousePointer2, ToggleLeft, GripHorizontal, Columns, Trash2,
   Copy, Maximize2, Minimize2, Square, Keyboard, Eye, EyeOff,
   ChevronUp, ChevronDown, Hash, Download, Upload, RotateCcw, Loader, Wifi,
-  Timer as TimerIcon, Radio, Pencil, Gauge
+  Timer as TimerIcon, Radio, Pencil, Gauge, ShieldAlert, ShieldCheck
 } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { useShowStore, type SavedCueList, type CueListCue, type SongPreset, findBestSongPreset, presetHasAudio, type FixturePos } from '../stores/showStore';
@@ -3565,10 +3565,61 @@ interface RemoteStatus {
   lastError?: string | null;
 }
 
+/** Règle entrante du pare-feu Windows (miroir de electron/remote/diagnostics.ts). */
+interface RemoteFirewallRule {
+  name: string;
+  displayName: string;
+  action: string;
+  profile: string;
+  enabled: boolean;
+  protocol: string;
+  localPort: string;
+  program: string;
+}
+
+/** État du pare-feu vis-à-vis de l'exécutable de l'app. */
+interface RemoteFirewallStatus {
+  platform: string;
+  program: string;
+  /** Une règle "Block" entrante concerne le programme → le téléphone est coupé. */
+  blocked: boolean;
+  /** Une règle "Allow" entrante TCP couvre le programme ET le port. */
+  allowed: boolean;
+  rules: RemoteFirewallRule[];
+  portable: boolean;
+  message: string | null;
+}
+
+/** Informations réseau du PC (à comparer avec le réseau du téléphone). */
+interface RemoteNetworkInfo {
+  ssid: string | null;
+  interfaceName: string | null;
+  ipv4: string[];
+  hostname: string;
+}
+
+/** Auto-test HTTP sur l'IP affichée dans le QR code. */
+interface RemoteLanProbe {
+  url: string | null;
+  ok: boolean;
+  status: number | null;
+  latencyMs: number | null;
+  error: string | null;
+}
+
+/** Diagnostic complet renvoyé par l'IPC `remote:diagnostics`. */
+interface RemoteDiagnostics {
+  firewall: RemoteFirewallStatus;
+  network: RemoteNetworkInfo;
+  probe: RemoteLanProbe;
+}
+
 interface RemoteApiContract {
   getStatus: () => Promise<RemoteStatus>;
   start: () => Promise<RemoteStatus>;
   stop: () => Promise<RemoteStatus>;
+  diagnostics: () => Promise<RemoteDiagnostics>;
+  openFirewall: () => Promise<{ ok: boolean; message: string; status: RemoteFirewallStatus }>;
 }
 
 /**
@@ -3613,6 +3664,9 @@ const RemotePanel: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [copiedToken, setCopiedToken] = useState(false);
+  const [diag, setDiag] = useState<RemoteDiagnostics | null>(null);
+  const [fixing, setFixing] = useState(false);
+  const [diagMessage, setDiagMessage] = useState<string | null>(null);
   const copyTimer = useRef<number | null>(null);
   const lastStatus = useRef<RemoteStatus | null>(null);
 
@@ -3654,6 +3708,33 @@ const RemotePanel: React.FC = () => {
       if (copyTimer.current) window.clearTimeout(copyTimer.current);
     };
   }, [t]);
+
+  // Diagnostic réseau (pare-feu Windows + SSID du Wi-Fi + auto-test LAN).
+  // Volontairement moins fréquent que le polling du statut : la lecture du
+  // pare-feu lance PowerShell (~300 ms), on ne veut pas le lancer toutes les
+  // 3 s. 15 s suffisent : le blocage est statique.
+  useEffect(() => {
+    const api = getRemoteApi();
+    if (!api) return;
+    let cancelled = false;
+
+    const refreshDiag = async () => {
+      try {
+        const d = await api.diagnostics();
+        if (!cancelled) setDiag(d);
+      } catch {
+        // Diagnostic indisponible (module absent / erreur) : on conserve
+        // l'affichage précédent plutôt que d'afficher une fausse erreur.
+      }
+    };
+
+    refreshDiag();
+    const id = window.setInterval(refreshDiag, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
 
   // Persiste la préférence de démarrage auto : le main la lit au lancement
   // (`remote-prefs.json` dans userData) pour démarrer (ou non) le serveur LAN
@@ -3704,6 +3785,29 @@ const RemotePanel: React.FC = () => {
     }
   };
 
+  /**
+   * Répare le pare-feu Windows : supprime les règles "Block" (créées quand
+   * l'utilisateur a refusé l'invite Windows) et crée la règle "Allow" entrante
+   * sur le port du serveur. Déclenche une invite UAC → l'utilisateur clique
+   * « Oui ». Sans ça, le téléphone obtient une page web vide.
+   */
+  const handleFixFirewall = async () => {
+    const api = getRemoteApi();
+    if (!api || fixing) return;
+    setFixing(true);
+    setDiagMessage(null);
+    try {
+      const res = await api.openFirewall();
+      setDiagMessage(res.message);
+      const d = await api.diagnostics();
+      setDiag(d);
+    } catch {
+      setDiagMessage(t('perform.remote.firewall.failed'));
+    } finally {
+      setFixing(false);
+    }
+  };
+
   const handleCopy = async (text: string, kind: 'url' | 'token', urlId?: string) => {
     const ok = await copyTextToClipboard(text);
     if (!ok) return;
@@ -3735,6 +3839,20 @@ const RemotePanel: React.FC = () => {
     if (!first) return null;
     try { return new URL(first).searchParams.get('token'); } catch { return null; }
   })();
+
+  // ── Diagnostic réseau (bandeau sous le QR code) ────────────────────────
+  // Le téléphone qui affiche une page blanche = le HTML n'est jamais arrivé.
+  // Deux causes : pare-feu Windows bloquant l'app, ou téléphone hors du même
+  // réseau. On affiche les DEUX informations pour lever le doute en un coup.
+  const fw = diag?.firewall ?? null;
+  const net = diag?.network ?? null;
+  const probe = diag?.probe ?? null;
+  const netSsid = net?.ssid ?? t('perform.remote.network.ssidUnknown');
+  const netIp = net?.ipv4[0] ?? '—';
+  const probeLabel = probe?.ok
+    ? t('perform.remote.network.probeOk', { ms: probe.latencyMs ?? 0 })
+    : t('perform.remote.network.probeKo');
+  const fwNeedsFix = !!fw && (fw.blocked || !fw.allowed);
 
   return (
     <div className="h-full p-8 overflow-y-auto">
@@ -3775,6 +3893,59 @@ const RemotePanel: React.FC = () => {
           <div className="px-4 py-6 text-xs text-gray-600">{t('perform.remote.unavailable')}</div>
         ) : running ? (
           <div className="p-4 space-y-4">
+            {/* ── Diagnostic réseau + pare-feu ───────────────────────── */}
+            {diag && (
+              <div
+                className={`rounded-xl border px-3 py-2.5 text-xs ${
+                  fw?.blocked
+                    ? 'bg-red-500/10 border-red-500/40 text-red-300'
+                    : fwNeedsFix
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+                      : 'bg-emerald-500/5 border-emerald-500/20 text-gray-300'
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  {fwNeedsFix
+                    ? <ShieldAlert size={15} className="mt-0.5 shrink-0" />
+                    : <ShieldCheck size={15} className="mt-0.5 shrink-0 text-emerald-400" />}
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <div className="font-semibold">
+                      {fw?.blocked
+                        ? t('perform.remote.firewall.blockedTitle')
+                        : fwNeedsFix
+                          ? t('perform.remote.firewall.warningTitle')
+                          : t('perform.remote.firewall.okTitle')}
+                    </div>
+                    <div className="text-[11px] leading-relaxed opacity-90">
+                      {fw?.blocked
+                        ? t('perform.remote.firewall.blockedHint')
+                        : fwNeedsFix
+                          ? t('perform.remote.firewall.warningHint')
+                          : t('perform.remote.firewall.okHint')}
+                    </div>
+                    <div className="text-[11px] leading-relaxed opacity-80">
+                      {t('perform.remote.network.info', { ssid: netSsid, ip: netIp, probe: probeLabel })}
+                      <br />
+                      {t('perform.remote.network.sameWifi')}
+                    </div>
+                    {fwNeedsFix && (
+                      <button
+                        onClick={handleFixFirewall}
+                        disabled={fixing}
+                        className="px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-purple-600/25 text-purple-200 border border-purple-500/40 hover:bg-purple-600/40 disabled:opacity-50 inline-flex items-center gap-1.5"
+                      >
+                        {fixing ? <Loader size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
+                        {fixing ? t('perform.remote.working') : t('perform.remote.firewall.allow')}
+                      </button>
+                    )}
+                    {diagMessage && (
+                      <div className="text-[11px] leading-relaxed text-purple-200">{diagMessage}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ── QR Code ───────────────────────────────────────────── */}
             {status && status.urls.length > 0 && (() => {
               const primaryUrl = status.urls[0];

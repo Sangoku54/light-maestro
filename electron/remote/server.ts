@@ -697,8 +697,24 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
         sessionStorage.removeItem('lmToken');
         throw new Error('unauthorized');
       }
+      // 400 / 413 / 503 : la commande a été REFUSÉE. Avant, ces codes were
+      // traités comme des succès (le .json() renvoyait le message d'erreur et
+      // l'UI restait muette) → l'utilisateur croyait que la commande passait.
+      if (!res.ok) {
+        showError(res.status === 503
+          ? 'Light Maestro est indisponible (fermeture en cours). Relance le logiciel sur le PC.'
+          : res.status === 413
+            ? 'Requête refusée par le PC (trop volumineuse).'
+            : 'Commande refusée par le PC (erreur ' + res.status + ').');
+        throw new Error('http ' + res.status);
+      }
       hideError();
       return res.json().catch(function () { return {}; });
+    }, function (err) {
+      // Panne réseau : le PC ne répond plus (serveur arrêté, Wi-Fi coupé,
+      // pare-feu bloquant). On l'affiche au lieu de laisser un écran muet.
+      showError('Connexion au PC impossible — vérifie que le téléphone est sur le même Wi-Fi et que le serveur Remote est démarré.');
+      throw err;
     });
   }
   function post(path, body) {

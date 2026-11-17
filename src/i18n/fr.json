@@ -819,6 +819,23 @@
       "stop": "Arrêter le serveur",
       "working": "En cours…",
       "unavailable": "Module Remote indisponible (preload non connecté)",
+      "firewall": {
+        "blockedTitle": "Pare-feu Windows : accès bloqué",
+        "blockedHint": "Windows bloque les connexions entrantes de Light Maestro : le téléphone n'obtient qu'une page blanche. Clique sur « Autoriser » et accepte l'invite Windows.",
+        "warningTitle": "Pare-feu Windows : autorisation à confirmer",
+        "warningHint": "Aucune règle entrante n'autorise explicitement le port du serveur. Clique sur « Autoriser » pour éviter une page blanche sur le téléphone.",
+        "okTitle": "Pare-feu Windows : accès autorisé",
+        "okHint": "Le port est autorisé en entrée : le téléphone peut se connecter au PC.",
+        "allow": "Autoriser dans le pare-feu",
+        "failed": "Impossible d'ouvrir le pare-feu Windows"
+      },
+      "network": {
+        "info": "PC : {{ssid}} · IP {{ip}} · serveur {{probe}}",
+        "ssidUnknown": "Wi-Fi inconnu",
+        "probeOk": "joignable ({{ms}} ms)",
+        "probeKo": "injoignable",
+        "sameWifi": "Le téléphone doit être connecté au même réseau Wi-Fi que le PC."
+      },
       "errors": {
         "start": "Impossible de démarrer le serveur (port occupé ?)",
         "stop": "Impossible d'arrêter le serveur",
