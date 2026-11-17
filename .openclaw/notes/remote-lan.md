@@ -103,6 +103,14 @@ pour cliquer un onglet, `Page.captureScreenshot` pour la capture. Indispensable
 pour vérifier un panneau (le `PrintWindow` de Windows renvoie du blanc sur
 Chromium, et `SetForegroundWindow` échoue si une autre fenêtre est au-dessus).
 
+**Pièges DevTools** :
+- si l'utilisateur a ouvert la fenêtre DevTools, `type === 'page'` renvoie
+  **la fenêtre DevTools** au lieu de l'app → filtrer sur l'URL
+  `dist/renderer/index.html` ;
+- la Console Virtuelle est en mode **placement** après « Ajouter Widget » :
+  la tuile n'existe qu'après un clic sur le canvas ;
+- le layout de la Console Virtuelle n'est **pas persisté** au redémarrage.
+
 ## 5. Un QR code par interface réseau
 
 Le PC a souvent **plusieurs IPv4** (Wi-Fi + Ethernet branché sur la mixette).
@@ -127,3 +135,23 @@ exclu (IP APIPA morte).
 - `src/__tests__/remote-diagnostics.test.ts` — pare-feu, réseau, probe, clients.
 - `src/__tests__/remote-page-html.test.ts` — garde de la page web mobile.
 - `src/__tests__/remote-standalone.test.ts` — mode autonome + interfaces.
+- `src/__tests__/remote-commands.test.ts` — flash différé, group-master.
+- `src/__tests__/remote-rate-limit.test.ts` — 429 + `Retry-After`.
+
+## 8. Sémantique des commandes (pièges corrigés le 2026-11-17)
+
+- **Relâchement d'une tuile « canal DMX » = LIBÉRER le canal**, pas écrire 0.
+  La source VC est en LTP 80 : écrire 0 figeait le canal et la fixture
+  restait éteinte. `outputArbiter.releaseChannels(source, univers, canaux[])`
+  (une release globale effacerait les faders voisins de la même source).
+- **Flash = release différé** : un tap mobile fait press + release dans la
+  même frame → la scène est annulée avant le moindre rendu. Maintien =
+  `fadeIn + 150 ms` (borné 200..3000), chaser 1000 ms, autre 250 ms.
+- **Le marqueur `group-master` vit sur le widget** (`widget.type`), pas dans
+  sa config → `applyWidgetSliderEffect` reçoit le `widgetType`.
+- **Rate-limit POST + coalescence client vont ensemble** : un tactile 120 Hz
+  déclenche > 100 `input`/s sur un `<input type=range>`. La page mobile
+  envoie donc **1 POST / 40 ms** (la dernière valeur est toujours envoyée) ;
+  le serveur bride à 120 en rafale / 60 par seconde (429 + `Retry-After`).
+  Sans la coalescence, le fader saccade et le téléphone affiche une erreur.
+
