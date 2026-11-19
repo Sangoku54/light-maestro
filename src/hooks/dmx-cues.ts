@@ -17,7 +17,8 @@
 import type { PatchedFixture, FixtureTier } from '../stores/showStore';
 import { useShowStore, type FixtureGroup } from '../stores/showStore';
 import { analyzeFixture, capMid, pickLaserModeCap, laserGateValue, mapIntensityVal, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
-import { wheelDegeneratePosition } from '../engine/dmx-color';
+import { wheelDegeneratePosition, splitRgbw, type RgbSegment } from '../engine/dmx-color';
+import { writeCapabilityChannels, writeAxisPair, snapValueToCaps, writeLaserGates, writeRgbSegment, writeNominalChannels, writeFinePairs, writeCmyChannels, writeWhitePixels, writeExtraColourChannels, writeAuxColourChannels } from '../engine/fixture-writers';
 import { getSectionEnvelope, sampleCurve } from '../engine/autoscript-envelopes';
 import { computeGoboValue } from '../engine/gobo-engine';
 
@@ -765,7 +766,7 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
           ? cue.colors[tierColorIdx]
           : undefined;
 
-        if (fa.rgbOffsets && paletteColor) {
+        if ((fa.rgbSegments.length > 0 || fa.rgbOffsets) && paletteColor) {
           let [r, g, b] = hexToRgb(paletteColor);
           const rawRgb = [r, g, b];
           // Apply color temperature shift
@@ -790,16 +791,38 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
               r = 255;
               g = 255;
             }
-          } else if (fa.intensityOffset === null) {
-            // Scale RGB by intensity when fixture has no master dimmer (wash/par without dedicated dimmer channel)
-            const scale = computedIntensity / 255;
-            r = Math.round(r * scale);
-            g = Math.round(g * scale);
-            b = Math.round(b * scale);
+            if (fa.rgbOffsets[0] !== undefined) channelValues[pf.startAddress + fa.rgbOffsets[0]] = r;
+            if (fa.rgbOffsets[1] !== undefined) channelValues[pf.startAddress + fa.rgbOffsets[1]] = g;
+            if (fa.rgbOffsets[2] !== undefined) channelValues[pf.startAddress + fa.rgbOffsets[2]] = b;
+          } else {
+            // TOUS les segments RGB sont écrits (barre 24 canaux, 6 ARM 3
+            // familles) : l'ancien code n'écrivait que le 1er triplet → les
+            // autres familles restaient muettes.
+            const segs: RgbSegment[] = fa.rgbSegments.length > 0
+              ? fa.rgbSegments
+              : [{ r: fa.rgbOffsets![0], g: fa.rgbOffsets![1], b: fa.rgbOffsets![2] ?? null, w: null }];
+            let sr = r, sg = g, sb = b;
+            if (fa.intensityOffset === null) {
+              // Scale RGB by intensity when fixture has no master dimmer (wash/par without dedicated dimmer channel)
+              const scale = computedIntensity / 255;
+              sr = Math.round(r * scale);
+              sg = Math.round(g * scale);
+              sb = Math.round(b * scale);
+            }
+            for (const seg of segs) {
+              // RGBW : composante achromatique vers le canal W (couleur
+              // identique, 4 canaux pilotes au lieu de 3).
+              let vr = sr, vg = sg, vb = sb, vw = 0;
+              if (seg.w !== null) {
+                const sp = splitRgbw(sr, sg, sb, seg.b !== null);
+                vr = sp.r; vg = sp.g; vb = sp.b; vw = sp.w;
+              }
+              // Coarse + LSB 16 bits (le « fine » porte la fraction).
+              writeRgbSegment(channelValues, pf.startAddress, seg, vr, vg, vb, vw);
+            }
           }
-          if (fa.rgbOffsets[0] !== undefined) channelValues[pf.startAddress + fa.rgbOffsets[0]] = r;
-          if (fa.rgbOffsets[1] !== undefined) channelValues[pf.startAddress + fa.rgbOffsets[1]] = g;
-          if (fa.rgbOffsets[2] !== undefined) channelValues[pf.startAddress + fa.rgbOffsets[2]] = b;
+          // Gates couleur laser (« Red laser », « Green laser ») : binaire 0/255.
+          writeLaserGates(channelValues, pf.startAddress, fa, paletteColor);
         } else if (fa.wheelOffset !== null && paletteColor) {
           // Roue dégénérée (toutes caps même couleur, ex. Mini MH « CHOISE COLOR
           // 0-139 #ff0000 » sur une vraie roue) : piloter par POSITION pour que
@@ -853,6 +876,29 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
             : 128;
           channelValues[pf.startAddress + fa.wheelOffset] = wheelVal;
           }
+        }
+
+        // ── 2b-bis. Fixture CMY (Cyan / Magenta / Yellow) ───────────
+        // Couleur soustractive : C=255-R, M=255-G, Y=255-B. Sans ca, les
+        // canaux CMY d'une fixture restaient muets (et le fallback RGB
+        // envoyait du cyan sur le canal rouge).
+        if (fa.cmyOffsets.c !== null || fa.cmyOffsets.m !== null || fa.cmyOffsets.y !== null) {
+          const [cr, cg, cb] = paletteColor ? hexToRgb(paletteColor) : [255, 255, 255];
+          writeCmyChannels(channelValues, pf.startAddress, fa, cr, cg, cb);
+        }
+
+        // ── 2b-ter. Pixels blancs autonomes ────────────────────────
+        // Composante achromatique de la palette (min R,G,B).
+        if (fa.whitePixels.length > 0) {
+          const [wr, wg, wb] = paletteColor ? hexToRgb(paletteColor) : [255, 255, 255];
+          writeWhitePixels(channelValues, pf.startAddress, fa, wr, wg, wb);
+        }
+
+        // ── 2b-quater. Canaux couleur en doublon (2e zone / LED) ──
+        if (fa.extraColourChannels.length > 0) {
+          const [er, eg, eb] = paletteColor ? hexToRgb(paletteColor) : [255, 255, 255];
+          const dScaleX = fa.intensityOffset === null ? computedIntensity / 255 : 1;
+          writeExtraColourChannels(channelValues, pf.startAddress, fa, er, eg, eb, dScaleX);
         }
 
         // ── 2b. LED intensity channels: fixtures with individual LED dimmers (no RGB, no color wheel)
@@ -929,13 +975,19 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
           const isTiltOnly = fa.panOffset === null && fa.tiltOffset !== null;
           if (fa.panOffset !== null) {
             const centerX = movementConfig.centerX;
-            const pan = Math.round(centerX + (movement.pan - centerX) * tierMovMult);
-            for (const po of fa.panOffsets.length > 0 ? fa.panOffsets : [fa.panOffset]) {
-              channelValues[pf.startAddress + po] = Math.max(0, Math.min(255, pan));
-            }
-            if (fa.panFineOffset !== null) {
-              channelValues[pf.startAddress + fa.panFineOffset] = pan;
-            }
+            const pan = centerX + (movement.pan - centerX) * tierMovMult;
+            // Canaux « fine » 16 bits : la fraction part dans le fine (l'ancien
+            // code recopiait la valeur GROSSIÈRE dans le fine).
+            const panOffs = fa.panOffsets.length > 0 ? fa.panOffsets : [fa.panOffset];
+            panOffs.forEach((po, i) => {
+              const fo = fa.panFineOffsets[i] ?? null;
+              writeAxisPair(
+                channelValues,
+                pf.startAddress + po,
+                fo !== null ? pf.startAddress + fo : null,
+                pan,
+              );
+            });
           }
           if (fa.tiltOffset !== null) {
             const centerY = movementConfig.centerY;
@@ -951,12 +1003,15 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
               tilt = Math.round(centerY + (movement.tilt - centerY) * tierMovMult);
             }
             const tiltOffs = fa.tiltOffsets.length > 0 ? fa.tiltOffsets : [fa.tiltOffset];
-            for (const to of tiltOffs) {
-              channelValues[pf.startAddress + to] = Math.max(0, Math.min(255, tilt));
-            }
-            if (fa.tiltFineOffset !== null) {
-              channelValues[pf.startAddress + fa.tiltFineOffset] = tilt;
-            }
+            tiltOffs.forEach((to, i) => {
+              const fo = fa.tiltFineOffsets[i] ?? null;
+              writeAxisPair(
+                channelValues,
+                pf.startAddress + to,
+                fo !== null ? pf.startAddress + fo : null,
+                tilt,
+              );
+            });
           } else if (fa.tiltFineOffset !== null) {
             channelValues[pf.startAddress + fa.tiltFineOffset] = 128;
           }
@@ -1008,6 +1063,24 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
           channelValues[pf.startAddress + fa.beamOffset] = Math.max(0, Math.min(255, beamVal));
         }
 
+        // ── 8b. Zoom / Frost / Iris / Focus — jamais écrits dans le preset ──
+        // Ces 4 canaux existaient dans l'analyse mais n'étaient écrits ni en
+        // live... ni en preset : le preset les laissait à 128 (état arbitraire).
+        if (fa.zoomOffset !== null) {
+          const zoomVal = isDrop || isChorus ? 220 : sectionKey === 'bridge' ? 128 : 40;
+          channelValues[pf.startAddress + fa.zoomOffset] = snapValueToCaps(zoomVal, fa.zoomCaps);
+        }
+        if (fa.frostOffset !== null) {
+          const frostVal = sectionKey === 'bridge' ? 220 : isDrop ? 0 : 120;
+          channelValues[pf.startAddress + fa.frostOffset] = snapValueToCaps(frostVal, fa.frostCaps);
+        }
+        if (fa.irisOffset !== null) {
+          channelValues[pf.startAddress + fa.irisOffset] = snapValueToCaps(isDrop || isChorus ? 40 : 220, fa.irisCaps);
+        }
+        if (fa.focusOffset !== null) {
+          channelValues[pf.startAddress + fa.focusOffset] = snapValueToCaps(128, fa.focusCaps);
+        }
+
         // ── 9. Speed - vary pan/tilt & effect speed by section ──
         if (fa.speedOffset !== null) {
           const speedVal = isDrop ? 220 + Math.round(energy * 35)
@@ -1031,6 +1104,30 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
           // (a) Mode : toujours un mode pilotable en DMX (jamais sound/off).
           if (fa.laserModeOffset !== null) {
             channelValues[pf.startAddress + fa.laserModeOffset] = capMid(pickLaserModeCap(fa.laserModeCaps));
+          }
+
+          // (a2) Master : toujours OUVERT (max de la cap « ON »). Sans ça, le
+          // preset matérialisé laissait le laser éteint (0 = OFF).
+          if (fa.laserMasterOffset !== null) {
+            const masterOn = fa.laserMasterCaps.find(c => !/off|closure|closed|stop/i.test(c.name ?? ''))
+              ?? fa.laserMasterCaps.find(c => c.min > 0)
+              ?? fa.laserMasterCaps[0];
+            channelValues[pf.startAddress + fa.laserMasterOffset] = masterOn
+              ? Math.max(0, Math.min(255, masterOn.max))
+              : 255;
+          }
+
+          // (a3) Gate couleur mono-canal (« Laser » : Red / Green / …).
+          if (fa.laserColorMode === 'gate' && fa.laserColorGateOffset !== null
+              && channelValues[pf.startAddress + fa.laserColorGateOffset] === undefined) {
+            const colorCaps = fa.laserColorGateCaps.filter(c =>
+              /(red|green|blue|amber|cyan|magenta|yellow|white)/i.test(c.name ?? '') && !/blackout|off|closed|none/i.test(c.name ?? ''));
+            let target = colorCaps[0];
+            if (paletteColor) {
+              const [gr, gg, gb] = hexToRgb(paletteColor);
+              target = colorCaps.find(c => (gr > 122 && /red/i.test(c.name!)) || (gg > 122 && /green/i.test(c.name!)) || (gb > 122 && /blue/i.test(c.name!))) ?? colorCaps[0];
+            }
+            if (target) channelValues[pf.startAddress + fa.laserColorGateOffset] = capMid(target);
           }
 
           // (b) Pattern : cycle un motif toutes les LASER_PATTERN_BEATS beats.
@@ -1082,19 +1179,38 @@ val = Math.round(val * getTierIntensityMultiplier(pf.tier, tierMultipliers));
           }
         }
 
+        // ── Canaux à capacités sans rôle dédié : état déterministe ─────
+        writeCapabilityChannels(channelValues, pf.startAddress, fa);
+
+        // Canaux couleur auxiliaires (orange, violet, bleu de fond) : écrits
+        // à 0 (éteints) → aucune couleur non demandée n'est ajoutée.
+        writeAuxColourChannels(channelValues, pf.startAddress, fa);
+
+        // ── Canaux nominaux (rôle deduit du LIBELLE) ───────────────
+        // + octets LSB 16 bits (canaux « fine » apparies).
+        writeNominalChannels(channelValues, pf.startAddress, fa, {
+          time: cue.time ?? 0,
+          energy,
+        });
+        writeFinePairs(channelValues, pf.startAddress, fa);
+
         // Safety net: set unrecognized channels to safe neutral (128)
         // Prevents fixtures from being stuck in bad states when channel types aren't detected.
         // Macro channels are excluded - they are user-configured only.
+        // Canaux de mode/programme (Auto / Sound / Reset…) → 0 : 128 tombait
+        // dans une zone « AUTO MODE 3 » et déclenchait un programme interne.
         // Lasers : 0 (off/neutre) au lieu de 128 — sur un laser, 128 = strobe ou
         // macro autonome (Galaxian R/G et Macros), jamais un état neutre.
         if (fa.channelCount > 0) {
           const macroSet = new Set(fa.macroOffsets);
+          const presetSet = new Set(fa.presetOverrideOffsets);
           for (let c = 0; c < fa.channelCount; c++) {
             if (macroSet.has(c)) continue;
             if (fa.strobeOffset === c) continue; // écrit par le bloc strobe dédié (off/rate)
             const addr = pf.startAddress + c;
             if (channelValues[addr] === undefined) {
-              channelValues[addr] = fa.isLaser ? 0 : 128;
+              if (presetSet.has(c)) channelValues[addr] = 0;
+              else channelValues[addr] = fa.isLaser ? 0 : 128;
             }
           }
         }

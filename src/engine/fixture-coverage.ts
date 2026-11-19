@@ -31,29 +31,49 @@ const SILENT_RISK_TYPE_RE =
   /^(Intensity|Colour|Gobo|Shutter|Strobe|Prism|Zoom|Frost|Focus|Iris|Pan|Tilt|Beam)$/;
 
 /** Récupère toutes les offsets que le moteur écrira selon l'analyse (canaux
- *  détectés + segments RGB + offsets laser). */
-function collectWrittenOffsets(fa: FixtureChannelAnalysis): Set<number> {
+ *  détectés + segments RGB + offsets laser + canaux à capacités). */
+export function collectWrittenOffsets(fa: FixtureChannelAnalysis): Set<number> {
   const offsets = new Set<number>();
   const add = (o: number | null | undefined) => {
     if (o !== null && o !== undefined) offsets.add(o);
   };
   const addAll = (arr: number[] | null | undefined) => (arr || []).forEach(add);
 
-  add(fa.intensityOffset); addAll(fa.ledIntensityOffsets);
+  add(fa.intensityOffset); addAll(fa.ledIntensityOffsets); add(fa.intensityFineOffset);
   add(fa.shutterOffset); add(fa.strobeOffset); add(fa.effectOffset);
   add(fa.wheelOffset); add(fa.goboOffset);
   add(fa.zoomOffset); add(fa.frostOffset); add(fa.irisOffset); add(fa.focusOffset); add(fa.beamOffset);
-  add(fa.prismOffset); add(fa.speedOffset);
+  add(fa.prismOffset);
+  // TOUTES les vitesses (pas seulement la première)
+  addAll(fa.speedOffsets);
   addAll(fa.panOffsets); addAll(fa.tiltOffsets);
+  // Canaux « fine » 16 bits
+  addAll(fa.panFineOffsets); addAll(fa.tiltFineOffsets);
   addAll(fa.rgbOffsets);
   for (const seg of fa.rgbSegments) {
-    add(seg.r); add(seg.g); add(seg.b); add(seg.w);
+    add(seg.r); add(seg.g); add(seg.b); add(seg.w); add(seg.a); add(seg.uv);
+    // Octets LSB 16 bits (canaux « fine » couleur)
+    add(seg.rFine); add(seg.gFine); add(seg.bFine); add(seg.wFine);
   }
   // Laser
   add(fa.laserModeOffset); add(fa.laserColorGateOffset); add(fa.laserMasterOffset);
   add(fa.patternOffset); add(fa.scanXOffset); add(fa.scanYOffset);
   add(fa.laserSpeedScanOffset); add(fa.laserSpeedPatternOffset); add(fa.blankOffset);
   addAll(fa.laserRotationOffsets);
+  addAll(fa.laserGateOffsets.map(g => g.offset));
+  // Mélangeur CMY
+  add(fa.cmyOffsets?.c); add(fa.cmyOffsets?.m); add(fa.cmyOffsets?.y);
+  // Pixels blancs autonomes + doublons couleur
+  addAll(fa.whitePixels);
+  for (const c of fa.extraColourChannels) add(c.offset);
+  // Canaux nominaux (2e zoom, 2e gobo, rotation, CTO…) + paires fine/coarse
+  for (const n of fa.nominalChannels) add(n.offset);
+  for (const p of fa.finePairs) add(p.fineOffset);
+  // Canaux à capacités sans rôle dédié → état déterministe écrit
+  for (const c of fa.capabilityChannels) add(c.offset);
+  // Canaux couleur AUXILIAIRES : écrits à 0 (éteints) → ils sont pilotés,
+  // pas muets (l'audit doit les compter comme écrits).
+  addAll(fa.auxColourChannels);
   return offsets;
 }
 
@@ -77,13 +97,14 @@ export interface FixtureCoverageReport {
 
 function classifyChannel(
   ch: DmxFixtureChannel,
+  offset: number,
   written: Set<number>,
   presetOffsets: number[],
   macroOffsets: number[],
 ): FixtureCoverageChannel['status'] {
-  if (written.has(ch.offset ?? 0)) return 'written';
-  if (presetOffsets.includes(ch.offset ?? 0)) return 'preset';
-  if (macroOffsets.includes(ch.offset ?? 0)) return 'macro';
+  if (written.has(offset)) return 'written';
+  if (presetOffsets.includes(offset)) return 'preset';
+  if (macroOffsets.includes(offset)) return 'macro';
   const name = ch.name ?? '';
   const type = String(ch.type ?? '');
   if (SILENT_BENIGN_TYPE_RE.test(type) || SILENT_BENIGN_NAME_RE.test(name)) return 'silent-benign';
@@ -103,10 +124,14 @@ export function auditFixtureCoverage(
   const presetOffsets = fa?.presetOverrideOffsets ?? [];
   const macroOffsets = fa?.macroOffsets ?? [];
 
-  const report: FixtureCoverageChannel[] = channels.map((ch) => {
-    const status = classifyChannel(ch, written, presetOffsets, macroOffsets);
+  const report: FixtureCoverageChannel[] = channels.map((ch, idx) => {
+    // L'offset réel d'un canal de bibliothèque est son INDEX dans le mode
+    // (les parseurs n'exposent pas de numéro DMX) : `ch.offset ?? 0` traitait
+    // tous les canaux comme étant l'offset 0 → l'audit était faux.
+    const offset = ch.offset ?? idx;
+    const status = classifyChannel(ch, offset, written, presetOffsets, macroOffsets);
     return {
-      offset: ch.offset ?? 0,
+      offset,
       name: ch.name ?? '',
       type: String(ch.type ?? ''),
       status,

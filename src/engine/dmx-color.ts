@@ -11,6 +11,11 @@ export interface RgbSegment {
   a?: number | null;
   /** UV (RGBAUUV) - offset DMX, null si absent. */
   uv?: number | null;
+  /** LSB 16 bits (canal « … fine ») apparié au canal coarse. */
+  rFine?: number | null;
+  gFine?: number | null;
+  bFine?: number | null;
+  wFine?: number | null;
 }
 
 export function hexToRgb(hex: string): [number, number, number] {
@@ -168,16 +173,95 @@ export function enrichWheelCaps(caps: DmxFixtureCapability[] | null | undefined)
 }
 
 /**
- * v2 : regroupe les canaux couleur par FAMILLE de nom (le nom sans son mot
- * couleur) pour ne jamais mélanger deux jeux (ex : « Bee eye red » avec
- * « Beam green »), puis tolère les lasers RG sans bleu (b: null).
+ * Mots-couleur explicites (multi-lettres) → clé de canal.
+ */
+const COLOR_KEYS: Record<string, 'r' | 'g' | 'b' | 'w' | 'a' | 'uv'> = {
+  red: 'r', green: 'g', blue: 'b', white: 'w', amber: 'a', uv: 'uv',
+  rouge: 'r', vert: 'g', bleu: 'b', blanc: 'w', ambre: 'a',
+  rojo: 'r', verde: 'g', azul: 'b', blanco: 'w',
+};
+
+/**
+ * Mot-couleur STRICT d'un nom de canal.
+ *
+ * Règle : on retient le DERNIER mot couleur explicite (« B EYE RED » → RED,
+ * « Bee eye blue » → BLUE). Les mots d'UNE lettre (R/G/B/W/A) ne comptent
+ * que si le nom est réduit à ce seul mot (« R », « R1 ») — sinon « B EYE RED »
+ * était détecté comme du BLEU (le « B » isolé matchait /\bblue|b\b/) et le
+ * canal bleu réel n'était jamais piloté, tandis que le canal rouge recevait
+ * aussi la valeur de bleu.
+ */
+export function colorKeyOf(name: string): 'r' | 'g' | 'b' | 'w' | 'a' | 'uv' | null {
+  // Les noms « camelCase » sont découpés : « uRed » → [u, red] → RED.
+  // Sans ce découpage, « uRed » était un mot inconnu (« ured ») et le
+  // canal ultra-rouge d'une fixture RGB+ n'était jamais piloté.
+  const spaced = name.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  const tokens = spaced.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (tokens.length === 0) return null;
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const k = COLOR_KEYS[tokens[i]];
+    if (k) return k;
+  }
+  if (tokens.length === 1) {
+    const t = tokens[0];
+    if (t === 'r') return 'r';
+    if (t === 'g') return 'g';
+    if (t === 'b') return 'b';
+    if (t === 'w') return 'w';
+    if (t === 'a') return 'a';
+  }
+  return null;
+}
+
+/** Un canal « fine » (sous-résolution) n'est jamais le canal principal. */
+export function isFineChannelName(name: string): boolean {
+  return /\bfine\b/i.test(name);
+}
+
+/** Nom de canal couleur « simple » : « Blue », « Blue 1 », « Red 2 »…
+ *  C'est le format des canaux couleur d'un pixel (« Blue 1 » du 1ᵉʳ
+ *  pixel). Un nom plus bavard (« Intensity of the blue LED background
+ *  illumination ») désigne autre chose qu'un canal couleur de pixel. */
+const SIMPLE_COLOUR_NAME_RE = /^\s*(red|green|blue|white|amber|uv)\s*\d*\s*$/i;
+
+/**
+ * v3 : regroupe les canaux couleur par FAMILLE de nom (le nom sans son mot
+ * couleur) puis en extrait un segment par PIXEL.
+ *
+ * Trois défauts corrigés par rapport à v2 :
+ *
+ * 1. Un canal « fine » ne peut PLUS créer un segment à lui seul. En v2, une
+ *    famille contenant Red/Green/Blue/White + Red fine/Green fine/Blue fine
+ *    (7 canaux) déclenchait le regroupement « > 6 canaux » qui construisait un
+ *    segment PARADOXAL { r: « Red fine », g: « Green fine », b: « Blue fine » } :
+ *    le moteur écrivait alors la couleur sur les octets de SUB-RÉSOLUTION.
+ *    Les fines sont désormais APPARIÉS à leur coarse (octet LSB).
+ *
+ * 2. Une famille qui contient N fois Rouge, N fois Vert, N fois Bleu
+ *    (barre à pixels dont les canaux portent le MÊME nom : « Red Pixel null »
+ *    répété 30 fois) ne produit plus qu'UN segment : elle en produit N.
+ *    Sans ça, 29 pixels sur 30 restaient muets.
+ *
+ * 3. Le blanc est accepté même sans bleu (fixtures RGW), et l'achromatique
+ *    est calculé sans le bleu (splitRgbw a un paramètre dedicated).
  */
 export function buildRgbSegments(colourChannels: Array<{offset:number;name:string}>): RgbSegment[] {
-  const used = new Set<number>();
-  const segments: RgbSegment[] = [];
-  const FAMILY_STRIP = /\b(red|green|blue|white|amber|uv|rouge|vert|bleu|blanc|ambre|rojo|verde|azul|blanco|fine)(?=\d|\b)/gi;
-  const familyOf = (name: string): string =>
-    name.toLowerCase().replace(FAMILY_STRIP, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  // Famille = nom SANS les mots couleur (et sans les mots d'une lettre
+  // isolés) : « Red1 » → « 1 », « B EYE RED » → « eye », « Red » → « ».
+  const familyOf = (name: string): string => {
+    // Lettres et chiffres séparés : « Red1 » → [red, 1] (sinon « red1 » et
+    // « green1 » seraient deux familles différentes → aucun segment).
+    // Les noms « camelCase » sont aussi découpés : « uRed » → [u, red]
+    // (sinon « ured » formait une famille à lui seul et le jeu uRed/uGreen/
+    // uBlue n'était jamais exploité).
+    const spaced = name.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+    const tokens = (spaced.toLowerCase().match(/[a-z]+|\d+/g) ?? []);
+    const kept = tokens.filter((t) => !(t in COLOR_KEYS)
+      && !/^(r|g|b|w|a)$/.test(t)
+      && t !== 'fine');
+    return kept.join(' ');
+  };
+
   const families = new Map<string, number[]>();
   for (let j = 0; j < colourChannels.length; j++) {
     const fam = familyOf(colourChannels[j].name);
@@ -185,57 +269,195 @@ export function buildRgbSegments(colourChannels: Array<{offset:number;name:strin
     list.push(j);
     families.set(fam, list);
   }
-  // Fix: canaux numérotés type Red1/Green1/Blue1 — /\b(red)\b/ ne matche pas "Red1" (chiffre = \w, pas de frontière)
-  const stripDigits = (s: string) => s.toLowerCase().replace(/\d+/g, ' ').replace(/\s+/g,' ').trim();
-  const matches = (name: string, re: RegExp): boolean => re.test(name) || re.test(stripDigits(name));
-  const pickIn = (fam: number[], re: RegExp): number =>
-    fam.find((j) => !used.has(j) && matches(colourChannels[j].name, re)) ?? -1;
 
-  // Pour chaque famille, on extrait les triplets R/G/B.
-  // Si une famille contient beaucoup de canaux (ex: "Red", "Green", "Blue" répétés
-  // sans numéro de pixel), on les regroupe par triplets consécutifs triés par offset.
+  const segments: RgbSegment[] = [];
+  /** Indices des canaux déjà absorbés par un segment. */
+  const usedIdx = new Set<number>();
+
   for (const fam of families.values()) {
-    // Trier par offset pour respecter l'ordre DMX
-    fam.sort((a, b) => colourChannels[a].offset - colourChannels[b].offset);
-    // Essai 1 : matching classique par nom (R, G, B distincts)
-    let ri = pickIn(fam, isRed);
-    if (ri >= 0) {
-      let gi = pickIn(fam, isGreen);
-      if (gi < 0) continue;
-      let bi = pickIn(fam, isBlue);
-      const wi = bi >= 0 ? pickIn(fam, isWhite) : -1;
-      const ai = bi >= 0 ? pickIn(fam, isAmber) : -1;
-      const uvi = bi >= 0 ? pickIn(fam, isUv) : -1;
-      if (bi < 0 && wi >= 0) continue;
-      used.add(ri); used.add(gi);
-      if (bi >= 0) used.add(bi);
-      if (wi >= 0) used.add(wi);
-      if (ai >= 0) used.add(ai);
-      if (uvi >= 0) used.add(uvi);
+    // 1) Séparation coarse / fine, indexation par mot-couleur.
+    const coarseByKey = new Map<string, number[]>();
+    const fineByKey = new Map<string, number[]>();
+    for (const j of fam) {
+      const key = colorKeyOf(colourChannels[j].name);
+      if (!key) continue;
+      const target = isFineChannelName(colourChannels[j].name) ? fineByKey : coarseByKey;
+      const list = target.get(key) ?? [];
+      list.push(j);
+      target.set(key, list);
+    }
+    const byOffset = (a: number, b: number) => colourChannels[a].offset - colourChannels[b].offset;
+    const rs = (coarseByKey.get('r') ?? []).sort(byOffset);
+    const gs = (coarseByKey.get('g') ?? []).sort(byOffset);
+    const bs = (coarseByKey.get('b') ?? []).sort(byOffset);
+    const ws = (coarseByKey.get('w') ?? []).sort(byOffset);
+    const as = (coarseByKey.get('a') ?? []).sort(byOffset);
+    const uvs = (coarseByKey.get('uv') ?? []).sort(byOffset);
+
+    if (rs.length === 0 || gs.length === 0) continue;
+    // Un segment exige un triplet complet (R+G+B) ; sans bleu on accepte le
+    // couple R+G (lasers RG) et on laisse le blanc de côté s'il n'y a pas de
+    // base RGB complète... non : le blanc est utile même en RGW.
+    const hasBlue = bs.length > 0;
+    const count = hasBlue
+      ? Math.min(rs.length, gs.length, bs.length)
+      : Math.min(rs.length, gs.length);
+    if (count === 0) continue;
+
+    // 2) Appariement fine ↔ coarse : le fine appartient au coarse qui le
+    //    précède le plus immédiatement (convention DMX 16 bits).
+    const pairFine = (coarseIdx: number[], fineIdx: number[]): Map<number, number> => {
+      const map = new Map<number, number>();
+      for (const f of fineIdx) {
+        let best = -1;
+        for (const c of coarseIdx) {
+          if (colourChannels[c].offset < colourChannels[f].offset) best = c;
+          else break;
+        }
+        if (best >= 0 && !map.has(best)) map.set(best, f);
+      }
+      return map;
+    };
+    const rFineMap = pairFine(rs, (fineByKey.get('r') ?? []).sort(byOffset));
+    const gFineMap = pairFine(gs, (fineByKey.get('g') ?? []).sort(byOffset));
+    const bFineMap = pairFine(bs, (fineByKey.get('b') ?? []).sort(byOffset));
+    const wFineMap = pairFine(ws, (fineByKey.get('w') ?? []).sort(byOffset));
+
+    // 3) Un segment par pixel : le kᵉ rouge, le kᵉ vert, le kᵉ bleu…
+    for (let k = 0; k < count; k++) {
+      const ri = rs[k], gi = gs[k];
+      const bi = hasBlue ? bs[k] : -1;
+      const wi = ws.length > k ? ws[k] : -1;
+      const ai = bi >= 0 && as.length > k ? as[k] : -1;
+      const uvi = bi >= 0 && uvs.length > k ? uvs[k] : -1;
+      usedIdx.add(ri); usedIdx.add(gi);
+      if (bi >= 0) usedIdx.add(bi);
+      if (wi >= 0) usedIdx.add(wi);
+      if (ai >= 0) usedIdx.add(ai);
+      if (uvi >= 0) usedIdx.add(uvi);
+      for (const m of [rFineMap.get(ri), gFineMap.get(gi), bi >= 0 ? bFineMap.get(bi) : undefined, wi >= 0 ? wFineMap.get(wi) : undefined]) {
+        if (m !== undefined) usedIdx.add(m);
+      }
       segments.push({
-        r: colourChannels[ri].offset, g: colourChannels[gi].offset,
+        r: colourChannels[ri].offset,
+        g: colourChannels[gi].offset,
         b: bi >= 0 ? colourChannels[bi].offset : null,
         w: wi >= 0 ? colourChannels[wi].offset : null,
         a: ai >= 0 ? colourChannels[ai].offset : null,
         uv: uvi >= 0 ? colourChannels[uvi].offset : null,
+        rFine: rFineMap.has(ri) ? colourChannels[rFineMap.get(ri)!].offset : null,
+        gFine: gFineMap.has(gi) ? colourChannels[gFineMap.get(gi)!].offset : null,
+        bFine: bi >= 0 && bFineMap.has(bi) ? colourChannels[bFineMap.get(bi)!].offset : null,
+        wFine: wi >= 0 && wFineMap.has(wi) ? colourChannels[wFineMap.get(wi)!].offset : null,
       });
-      // Si la famille contient encore beaucoup de canaux non utilisés,
-      //.on les regroupe par triplets consécutifs (barre LED sans numérotation).
-      if (fam.length > 6) {
-        const remaining = fam.filter(j => !used.has(j));
-        for (let k = 0; k + 2 < remaining.length; k += 3) {
-          const [ri2, gi2, bi2] = [remaining[k], remaining[k+1], remaining[k+2]];
-          if (matches(colourChannels[ri2].name, isRed) &&
-              matches(colourChannels[gi2].name, isGreen) &&
-              matches(colourChannels[bi2].name, isBlue)) {
-            used.add(ri2); used.add(gi2); used.add(bi2);
-            segments.push({ r: colourChannels[ri2].offset, g: colourChannels[gi2].offset, b: colourChannels[bi2].offset, w: null, a: null, uv: null });
-          }
-        }
+    }
+  }
+
+  // ── Passe RÉSIDUELLE : triplets par ORDRE DMX ────────────────────
+  // Certaines fixtures nomment leurs canaux couleur avec des coordonnées
+  // (« Red (0,0) », « Green (0,1) », « Blue (1,0) » — matrice de pixels) :
+  // chaque canal forme alors sa propre « famille » et le regroupement par
+  // famille ne produit AUCUN segment → la moitié de la matrice reste muette.
+  //
+  // On rattrape ces canaux par un balayage EN ORDRE DMX : rouge → vert →
+  // bleu (le premier bleu qui suit), avec le blanc adjacent si présent.
+  // Seuls les canaux encore libres sont concernés (les segments déjà
+  // construits gardent la priorité).
+  {
+    const residual = colourChannels
+      .map((c, j) => j)
+      .filter((j) => !usedIdx.has(j) && !isFineChannelName(colourChannels[j].name))
+      .sort((a, b) => colourChannels[a].offset - colourChannels[b].offset);
+    const keyAt = (j: number) => colorKeyOf(colourChannels[j].name);
+    let i = 0;
+    while (i < residual.length) {
+      const riPos = residual.findIndex((j, k) => k >= i && keyAt(j) === 'r');
+      if (riPos < 0) break;
+      const giPos = residual.findIndex((j, k) => k > riPos && keyAt(j) === 'g');
+      if (giPos < 0) { i = riPos + 1; continue; }
+      const biPos = residual.findIndex((j, k) => k > giPos && keyAt(j) === 'b');
+      if (biPos < 0) { i = riPos + 1; continue; }
+      // Blanc ADJACENT (offset juste après le bleu) : même pixel RGBW.
+      const wi = residual.find((j, k) =>
+        k === biPos + 1 && keyAt(j) === 'w'
+        && colourChannels[j].offset === colourChannels[biPos].offset + 1);
+      const ri = residual[riPos], gi = residual[giPos], bi = residual[biPos];
+      usedIdx.add(ri); usedIdx.add(gi); usedIdx.add(bi);
+      if (wi !== undefined) usedIdx.add(wi);
+      segments.push({
+        r: colourChannels[ri].offset,
+        g: colourChannels[gi].offset,
+        b: colourChannels[bi].offset,
+        w: wi !== undefined ? colourChannels[wi].offset : null,
+        a: null,
+        uv: null,
+        rFine: null, gFine: null, bFine: null, wFine: null,
+      });
+      i = biPos + 1;
+    }
+  }
+
+  // ── Remplissage des segments INCOMPLETS ──────────────────────
+  // Un segment peut manquer un slot (souvent le bleu) parce que le canal
+  // correspondant a été rangé dans une AUTRE famille : « Red 1/Colour
+  // Select » + « Green 1/Colour Select » d'un côté (famille « 1 colour
+  // select »), « Blue 1 » de l'autre (famille « 1 »). Sans ce remplissage,
+  // le bleu du 1ᵉʳ pixel n'était JAMAIS piloté → le pixel n'était qu'un
+  // dégradé rouge/vert.
+  //
+  // On n'accepte qu'un canal au nom couleur SIMPLE (« Blue », « Blue 1 ») :
+  // « Intensity of the blue LED background illumination » d'un laser n'est
+  // PAS le bleu du faisceau, c'est l'intensité d'un LED de fond.
+  {
+    const free = colourChannels
+      .map((c, j) => j)
+      .filter((j) => !usedIdx.has(j) && !isFineChannelName(colourChannels[j].name));
+    const SLOTS = ['b', 'w'] as const;
+    for (const seg of segments) {
+      for (const slot of SLOTS) {
+        if (seg[slot] !== null) continue;
+        const members = [seg.r, seg.g, seg.b, seg.w].filter((v): v is number => v !== null);
+        if (members.length === 0) continue;
+        const minOff = Math.min(...members);
+        const maxOff = Math.max(...members);
+        const cand = free
+          .map((j) => ({ j, off: colourChannels[j].offset }))
+          .filter((c) => colorKeyOf(colourChannels[c.j].name) === slot)
+          .filter((c) => SIMPLE_COLOUR_NAME_RE.test(colourChannels[c.j].name))
+          .filter((c) => c.off >= minOff && c.off <= maxOff + 3)
+          .sort((a, b) => a.off - b.off)[0];
+        if (!cand) continue;
+        seg[slot] = colourChannels[cand.j].offset;
+        usedIdx.add(cand.j);
+        const at = free.indexOf(cand.j);
+        if (at >= 0) free.splice(at, 1);
       }
     }
   }
+
+  // Ordre déterministe : par offset minimal du segment.
+  segments.sort((a, b) => Math.min(a.r, a.g) - Math.min(b.r, b.g));
   return segments;
+}
+
+/**
+ * Décomposition RGB → RGBW PRÉSERVANT la couleur.
+ *
+ * Sur une fixture RGBW, la LED blanche (W) est une resource au même titre
+ * que R/G/B : la laisser à 0 revient à piloter 3 canaux sur 4. On extrait
+ * la composante achromatique (le MIN de R/G/B) vers W, ce qui rend EXACTEMENT
+ * la même couleur (même teinte, même luminance) mais en pilotant les 4 canaux.
+ * Le blanc pur (255,255,255) devient W=255, RGB=0 → le vrai blanc de la
+ * fixture au lieu d'un blanc « simulé » par 3 LEDs saturées.
+ *
+ * `hasBlue = false` (fixture RGW / laser RG) : l'achromatique de référence est
+ * min(R,G) — le bleu n'existe pas sur le matériel, l'inclure ferait une
+ * extraction trop faible (le blanc ne serait jamais atteint).
+ */
+export function splitRgbw(r: number, g: number, b: number, hasBlue = true): { r: number; g: number; b: number; w: number } {
+  const w = hasBlue ? Math.min(r, g, b) : Math.min(r, g);
+  if (w <= 0) return { r, g, b, w: 0 };
+  return { r: r - w, g: g - w, b: hasBlue ? b - w : b, w };
 }
 
 import type { DmxFixtureCapability } from '../hooks/dmx-cues';

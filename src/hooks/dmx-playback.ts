@@ -520,9 +520,10 @@ import { evalEffect, toDmx, type EffectPattern } from '../engine/effect-engine';
 import { sectionMoveFor, sectionPhase01, sampleSectionLoop, phaseToIndexOffset, movementAmp } from '../engine/autoscript-loops';
 import { getSectionEnvelope, sampleCurve } from '../engine/autoscript-envelopes';
 import type { RgbSegment } from '../engine/dmx-color';
-import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, tierIntensityMultiplier, startsWithRgb, hasColorWord, isRed, isGreen, isBlue, isWhite, isPresetMode, buildRgbSegments, findBestWheelCap, wheelDegeneratePosition } from '../engine/dmx-color';
+import { hexToRgb, applyHueShift, TIER_HUE, classifyColor, mapIntensity, tierIntensityMultiplier, findBestWheelCap, wheelDegeneratePosition, splitRgbw } from '../engine/dmx-color';
 import type { ChannelAnalysis } from '../engine/fixture-analyzer';
 import { analyzeChannels, capMid, pickLaserModeCap, laserGateValue, mapIntensityVal, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
+import { writeCapabilityChannels, writeAxisPair, snapValueToCaps, writeLaserGates, writeRgbSegment, scaleRgbSegment, writeNominalChannels, writeFinePairs, writeCmyChannels, writeWhitePixels, writeExtraColourChannels, writeAuxColourChannels } from '../engine/fixture-writers';
 import { clampPanToStage, clampTiltToStage, SMART_MOVEMENTS, DEFAULT_SMART_MOVEMENTS, getSectionMovement, spatialPhaseFor, zeroDmxOffset, clampPanZoneDmx, clampTiltZoneDmx } from '../engine/dmx-movement';
 import { computeGoboValue } from '../engine/gobo-engine';
 import { useAppStore } from '../stores/appStore';
@@ -733,8 +734,10 @@ export function useDmxPlayback(options: {
         def={id:pf.fixtureDefId,manufacturer:pf.manufacturer||'Unknown',model:pf.model||pf.name,fixtureType:pf.fixtureType||'Unknown',modes,wheels:[]} as any;
       }
       const fa=analyzeChannels(pf,def);
-      fa.universeIndex=uniIds.indexOf(pf.universeId);
-      if(fa.universeIndex<0)fa.universeIndex=0;
+      // Univers inexistant (projet rechargé, univers supprimé) → la fixture est
+      // IGNORÉE. L'ancien repli sur l'univers 0 la faisait piloter par erreur
+      // les adresses d'autres fixtures (fixture parasite).
+      fa.universeIndex=pf.universeId?uniIds.indexOf(String(pf.universeId)):0;
       analyses.push(fa);
     }
     const byUniverse=new Map<number,ChannelAnalysis[]>();
@@ -1441,43 +1444,63 @@ if (fa.isLaser) {
               if (seg.w !== null) colorAddrs.add(pf.startAddress + seg.w);
             }
             if (fa.wheelOffset !== null) colorAddrs.add(pf.startAddress + fa.wheelOffset);
+            // Pixels blancs autonomes et mélangeurs CMY = canaux couleur
+            // aussi : le takeover du chaser doit les respecter.
+            for (const o of fa.whitePixels) colorAddrs.add(pf.startAddress + o);
+            for (const o of fa.extraColourChannels) colorAddrs.add(pf.startAddress + o.offset);
+            if (fa.cmyOffsets.c !== null) colorAddrs.add(pf.startAddress + fa.cmyOffsets.c);
+            if (fa.cmyOffsets.m !== null) colorAddrs.add(pf.startAddress + fa.cmyOffsets.m);
+            if (fa.cmyOffsets.y !== null) colorAddrs.add(pf.startAddress + fa.cmyOffsets.y);
             for (const addrStr in chaserMapForColor) {
               if (colorAddrs.has(Number(addrStr))) { chaserOwnsColor = true; break; }
             }
           }
-          if(fa.rgbSegments.length>0&&effPaletteColor&&!chaserOwnsColor&&!_fixtureInactive){
-            let[r,g,b]=hexToRgb(effPaletteColor);
+          // Couleur EFFECTIVE de la palette (décalage de tier + modulation
+          // d'énergie) — partagée par les écritures RGB, CMY et pixels blancs
+          // pour que les 3tress rendent EXACTEMENT la même couleur.
+          const paletteRgbOf = (hex: string): [number, number, number] => {
+            let [rr, gg, bb] = hexToRgb(hex);
             // Only apply tier hue shift to cue colors, NOT to user-specified color track colors
             if (!isColorTrack) {
-              [r,g,b] = applyHueShift([r,g,b], TIER_HUE[pf.tier]);
+              [rr, gg, bb] = applyHueShift([rr, gg, bb], TIER_HUE[pf.tier]);
               // Dynamic palette by energy: modulate saturation based on intensity
-              const grayVal = Math.round(r * 0.299 + g * 0.587 + b * 0.114);
+              const grayVal = Math.round(rr * 0.299 + gg * 0.587 + bb * 0.114);
               if (effectiveEnergy < 0.3) {
                 // Low energy: desaturate toward gray
                 const desat = 1 - effectiveEnergy * 3;
-                r = Math.round(r + (grayVal - r) * desat);
-                g = Math.round(g + (grayVal - g) * desat);
-                b = Math.round(b + (grayVal - b) * desat);
+                rr = Math.round(rr + (grayVal - rr) * desat);
+                gg = Math.round(gg + (grayVal - gg) * desat);
+                bb = Math.round(bb + (grayVal - bb) * desat);
                 // Cool shift on intros/outros
                 if (!isDrop && !isChorus) {
-                  r = Math.round(r * (1 - (0.3 - effectiveEnergy) * 0.8));
-                  b = Math.min(255, Math.round(b * (1 + (0.3 - effectiveEnergy) * 0.5)));
+                  rr = Math.round(rr * (1 - (0.3 - effectiveEnergy) * 0.8));
+                  bb = Math.min(255, Math.round(bb * (1 + (0.3 - effectiveEnergy) * 0.5)));
                 }
               } else if (effectiveEnergy > 0.6) {
                 // High energy: boost saturation (push away from gray)
                 const boost = (effectiveEnergy - 0.6) * 0.4;
-                r = Math.min(255, Math.round(r + (r - grayVal) * boost * 2.5));
-                g = Math.min(255, Math.round(g + (g - grayVal) * boost * 2.5));
-                b = Math.min(255, Math.round(b + (b - grayVal) * boost * 2.5));
+                rr = Math.min(255, Math.round(rr + (rr - grayVal) * boost * 2.5));
+                gg = Math.min(255, Math.round(gg + (gg - grayVal) * boost * 2.5));
+                bb = Math.min(255, Math.round(bb + (bb - grayVal) * boost * 2.5));
               }
             }
+            return [rr, gg, bb];
+          };
+          if(fa.rgbSegments.length>0&&effPaletteColor&&!chaserOwnsColor&&!_fixtureInactive){
+            const [r,g,b]=paletteRgbOf(effPaletteColor);
             for(const po of fa.presetOverrideOffsets){chVals[pf.startAddress+po]=0;}
             if(fa.intensityOffset!==null){const addr=pf.startAddress+fa.intensityOffset;if(_dimmerTrackActive){chVals[addr]=mapIntensityVal(dimmerVal,fa);}else if(!chVals[addr]||dimmerVal>chVals[addr])chVals[addr]=mapIntensityVal(dimmerVal,fa);}
             // Per-pixel RGB: barre LED / wall wash multi-segments → chase color + wave
             // Tous les canaux RGB de la fixture sont exploités (8×3=24 pour Wall Washer)
             {
               const segCount = fa.rgbSegments.length;
-              const isMultiPixel = segCount > 1;
+              // Le chase par pixel (teinte + vague d'intensité) suppose des
+              // segments = pixels INDÉPENDANTS (barre à pixels, matrice).
+              // Une fixture à 2 jeux de LED (RGB + « uRed/uGreen/uBlue » d'une
+              // Ovation E-910FC, par ex.) aurait sinon sa 2e moitié pilotée
+              // en teinte COMPLEMENTAIRE -> couleur fausse. On reserve donc
+              // le chase aux fixtures à 3 segments et plus.
+              const isMultiPixel = segCount >= 3;
               for(let sIdx=0; sIdx<segCount; sIdx++){
                 const seg = fa.rgbSegments[sIdx];
                 let pr=r,pg=g,pb=b;
@@ -1491,41 +1514,23 @@ if (fa.isLaser) {
                   const wave = 0.75 + 0.25 * Math.sin((ct*2*Math.PI*0.8) + sIdx * (Math.PI*2/segCount));
                   pr = Math.round(pr * wave); pg = Math.round(pg * wave); pb = Math.round(pb * wave);
                 }
-                const key=pf.id+'_'+seg.r;let cur=fadeState.get(key);if(!cur){cur={r:pr,g:pg,b:pb};fadeState.set(key,cur);}else{const _fa=colorFadeMsRef.current>0?1-Math.exp(Math.log(0.1)/(colorFadeMsRef.current/16.67)):0.98;cur.r=Math.round(cur.r+(pr-cur.r)*_fa);cur.g=Math.round(cur.g+(pg-cur.g)*_fa);cur.b=Math.round(cur.b+(pb-cur.b)*_fa);}chVals[pf.startAddress+seg.r]=cur.r;chVals[pf.startAddress+seg.g]=cur.g;if(seg.b!==null)chVals[pf.startAddress+seg.b]=cur.b;if(seg.w!==null)chVals[pf.startAddress+seg.w]=0;
-                if(seg.a!==null) chVals[pf.startAddress+seg.a]=0;
-                if(seg.uv!==null) chVals[pf.startAddress+seg.uv]=0;
+                const key=pf.id+'_'+seg.r;let cur=fadeState.get(key);if(!cur){cur={r:pr,g:pg,b:pb};fadeState.set(key,cur);}else{const _fa=colorFadeMsRef.current>0?1-Math.exp(Math.log(0.1)/(colorFadeMsRef.current/16.67)):0.98;cur.r=Math.round(cur.r+(pr-cur.r)*_fa);cur.g=Math.round(cur.g+(pg-cur.g)*_fa);cur.b=Math.round(cur.b+(pb-cur.b)*_fa);}
+                // RGBW : la composante achromatique part sur le canal W → les
+                // 4 canaux sont pilotés ET la couleur est EXACTEMENT la même
+                // (même teinte, même luminance). Sans canal W, le triplet est
+                // écrit tel quel (le split décalerait la teinte).
+                let wr=cur.r,wg=cur.g,wb=cur.b,ww=0;
+                if(seg.w!==null){const sp=splitRgbw(cur.r,cur.g,cur.b,seg.b!==null);wr=sp.r;wg=sp.g;wb=sp.b;ww=sp.w;}
+                // Écriture coarse + LSB 16 bits (le « fine » porte la fraction,
+                // jamais la valeur grossière).
+                writeRgbSegment(chVals, pf.startAddress, seg, wr, wg, wb, ww);
               }
             }
+            // Gates couleur laser (« Red laser », « Green laser ») : binaire
+            // 0/255, jamais une valeur continue (zone fermée/stroboscope).
+            writeLaserGates(chVals, pf.startAddress, fa, effPaletteColor);
             // Apply dimmer track/cue dimmer to RGB when no dedicated intensity channel
-            if(fa.intensityOffset===null){const dScale=dimmerVal/255;for(const seg of fa.rgbSegments){chVals[pf.startAddress+seg.r]=Math.round((chVals[pf.startAddress+seg.r]??0)*dScale);chVals[pf.startAddress+seg.g]=Math.round((chVals[pf.startAddress+seg.g]??0)*dScale);if(seg.b!==null)chVals[pf.startAddress+seg.b]=Math.round((chVals[pf.startAddress+seg.b]??0)*dScale);if(seg.w!==null)chVals[pf.startAddress+seg.w]=Math.round((chVals[pf.startAddress+seg.w]??0)*dScale);}}
-            // Exploit remaining generic channels (Effect / Speed / Beam / Zoom / Frost ...) pour exploitation maximale
-            // Wall Washer / LED Bar : Effect (macros Point-to-Point) et Speed doivent bouger, pas rester à 0
-            if(!fa.isLaser){
-              if(fa.effectOffset!==null){
-                const caps = fa.effectCaps;
-                if(caps.length>0){
-                  // Basse énergie → No function (0), haute énergie → cycle macros
-                  let effVal:number;
-                  if(effectiveEnergy < 0.3){
-                    const off = caps.find(c=>c.min===0) || caps[0];
-                    effVal = capMid(off);
-                  } else {
-                    const idx = Math.floor((ct*0.7) % caps.length);
-                    effVal = capMid(caps[idx]);
-                  }
-                  chVals[pf.startAddress+fa.effectOffset]=effVal;
-                } else {
-                  chVals[pf.startAddress+fa.effectOffset]=0;
-                }
-              }
-              if(fa.speedOffset!==null){
-                chVals[pf.startAddress+fa.speedOffset]= Math.max(0, Math.min(255, Math.round(50 + effectiveEnergy*150 + Math.sin(ct*3)*10)));
-              }
-              if(fa.beamOffset!==null){
-                // Beam générique : exploité comme zoom/focus léger si pas déjà géré par les FX dédiés
-                if(chVals[pf.startAddress+fa.beamOffset]===undefined) chVals[pf.startAddress+fa.beamOffset]= Math.round(100 + effectiveEnergy*80);
-              }
-            }
+            if(fa.intensityOffset===null){const dScale=dimmerVal/255;for(const seg of fa.rgbSegments){scaleRgbSegment(chVals, pf.startAddress, seg, dScale);}}
 
           }else if(fa.wheelOffset!==null){
             const caps=fa.wheelCaps;
@@ -1549,6 +1554,81 @@ if (fa.isLaser) {
                 : 0;
               chVals[pf.startAddress+fa.wheelOffset] = capMid(caps[idx]);
             }
+          }
+
+          // ── Canaux couleur en doublon (2e zone / LED) ───────────
+          // Ex. « Green 2 (inner leds) » : meme composante que le vert
+          // principal -> la zone interne suit la couleur du show.
+          if (fa.extraColourChannels.length > 0) {
+            if (!chaserOwnsColor && !_fixtureInactive) {
+              const [er, eg, eb]: [number, number, number] = effPaletteColor
+                ? paletteRgbOf(effPaletteColor)
+                : [255, 255, 255];
+              const dScaleX = fa.intensityOffset === null ? dimmerVal / 255 : 1;
+              writeExtraColourChannels(chVals, pf.startAddress, fa, er, eg, eb, dScaleX);
+            }
+          }
+
+          // ── Fixture CMY (Cyan / Magenta / Yellow) ─────────────────
+          // Couleur soustractive : C=255-R, M=255-G, Y=255-B. Sans ca, les
+          // canaux CMY d'une fixture (Ayrton Domino) restaient muets, et le
+          // fallback RGB envoyait du cyan sur le canal rouge.
+          if (fa.cmyOffsets.c !== null || fa.cmyOffsets.m !== null || fa.cmyOffsets.y !== null) {
+            if (!chaserOwnsColor && !_fixtureInactive) {
+              const [cr, cg, cb]: [number, number, number] = effPaletteColor
+                ? paletteRgbOf(effPaletteColor)
+                : [255, 255, 255];
+              writeCmyChannels(chVals, pf.startAddress, fa, cr, cg, cb);
+            }
+          }
+
+          // ── Pixels blancs autonomes ───────────────────────────────
+          // Barre a pixels blancs (sans triplet RGB associe) : ils recoivent
+          // la composante achromatique de la palette (min R,G,B) -> une
+          // palette blanche les allume, une palette saturee les laisse
+          // eteints (la couleur reste celle de la palette).
+          if (fa.whitePixels.length > 0) {
+            if (!chaserOwnsColor && !_fixtureInactive) {
+              const [wr, wg, wb]: [number, number, number] = effPaletteColor
+                ? paletteRgbOf(effPaletteColor)
+                : [255, 255, 255];
+              writeWhitePixels(chVals, pf.startAddress, fa, wr, wg, wb);
+            }
+          }
+
+          // ── Canaux génériques (Effect / Speed / Beam) ─────────────────
+          // Exploitation maximale : ces canaux doivent être pilotés pour
+          // TOUTES les fixtures (roue, macro, laser). Ils étaient dans la
+          // seule branche RGB → une fixture à roue (moving head classique)
+          // n'avait jamais son canal Effect/Speed/Beam écrit : vitesse
+          // minimale et macros d'effet inactives pendant tout le show.
+          if(fa.effectOffset!==null){
+            const caps = fa.effectCaps;
+            if(caps&&caps.length>0){
+              // Basse énergie → cap « no function » (0), haute énergie → cycle macros
+              let effVal:number;
+              if(effectiveEnergy < 0.3){
+                const off = caps.find(c=>c.min===0) || caps[0];
+                effVal = capMid(off);
+              } else {
+                const idx = Math.floor((ct*0.7) % caps.length);
+                effVal = capMid(caps[idx]);
+              }
+              chVals[pf.startAddress+fa.effectOffset]=effVal;
+            } else {
+              chVals[pf.startAddress+fa.effectOffset]=0;
+            }
+          }
+          // TOUTES les vitesses (pan/tilt, couleur, effet, rotation) : le
+          // premier reste `speedOffset`, les autres suivent avec un léger
+          // déphasage (sinon ils portent tous la même valeur).
+          fa.speedOffsets.forEach((off,i)=>{
+            const phase = ct*3 + i*0.9;
+            chVals[pf.startAddress+off]= Math.max(0, Math.min(255, Math.round(50 + effectiveEnergy*150 + Math.sin(phase)*10)));
+          });
+          if(fa.beamOffset!==null){
+            // Beam générique : exploité comme zoom/focus léger si pas déjà géré par les FX dédiés
+            if(chVals[pf.startAddress+fa.beamOffset]===undefined) chVals[pf.startAddress+fa.beamOffset]= Math.round(100 + effectiveEnergy*80);
           }
 
           // Strobe decision (partagée shutter + canal strobe dédié) — strobe track prioritaire même avec dimmer track
@@ -1610,8 +1690,11 @@ if (fa.isLaser) {
           // d'oscillation 255/0 qui produirait un double effet). Jamais 255.
           if(fa.strobeOffset!==null){
             const stAddr=pf.startAddress+fa.strobeOffset;
+            // Valeur = vitesse du strobe mappée sur la plage 0-255 du canal
+            // (30 Hz = 255). L'ancien 8+speed*20 envoyait 208 pour une limite
+            // de 10 Hz → le double de la vitesse photosensible demandée.
             chVals[stAddr]=useStrobe
-              ? Math.min(250,Math.max(8,Math.round(8+strobeSpeed*20)))
+              ? Math.min(250,Math.max(8,Math.round(strobeSpeed*255/30)))
               : 0;
           }
           // No dedicated shutter channel: simulate strobe by oscillating dimmer/intensity
@@ -1854,6 +1937,16 @@ if (fa.isLaser) {
                   // Une visée délibérée (centre capturé) bypass le clamp.
                   if (!(zeroPd !== 0 && fp)) pv = clampPanZoneDmx(pv, fa.panMaxDeg ?? 540, fp?.zeroPan);
                   chVals[pf.startAddress+fa.panOffsets[m]] = pv;
+                  // Canal "fine" 16 bits : la fraction de la position cible
+                  // part dans le canal fine (le coarse porte la partie entiere).
+                  const panFineOff = fa.panFineOffsets[m] ?? null;
+                  if(panFineOff!==null){
+                    if(pv===raw){
+                      writeAxisPair(chVals, pf.startAddress+fa.panOffsets[m], pf.startAddress+panFineOff, 128+zeroPd + px*ampPan);
+                    } else {
+                      chVals[pf.startAddress+panFineOff] = 0;
+                    }
+                  }
                   if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: pv, tilt: 128 }), pan: pv });
                 }
                 if(m<tiltCount){
@@ -1865,9 +1958,18 @@ if (fa.isLaser) {
                   // Zone TILT moteur (miroir 3D) : ground jamais sous l'horizon.
                   if (!(zeroTd !== 0 && fp)) tv = clampTiltZoneDmx(tv, fa.tiltMaxDeg ?? 180, fp?.mountMode, fp?.tilt, fp?.zeroTilt);
                   chVals[pf.startAddress+fa.tiltOffsets[m]] = tv;
+                  // Canal "fine" 16 bits (idem pan).
+                  const tiltFineOff = fa.tiltFineOffsets[m] ?? null;
+                  if(tiltFineOff!==null){
+                    if(tv===raw){
+                      writeAxisPair(chVals, pf.startAddress+fa.tiltOffsets[m], pf.startAddress+tiltFineOff, 128+zeroTd + py*ampTilt);
+                    } else {
+                      chVals[pf.startAddress+tiltFineOff] = 0;
+                    }
+                  }
                   if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: 128, tilt: tv }), tilt: tv });
                 }}
-              }else{const fp = fixturePositions?.[pf.id];const mountMode = fp?.mountMode || (fp?.y !== undefined ? (fp.y > 0.75 ? 'rear' : fp.y < 0.25 ? 'ground' : fp.x < 0.25 || fp.x > 0.75 ? 'ground' : 'hanging') : 'top');const mountTd = (mountMode === 'rear' || mountMode === 'ground' || mountMode === 'hanging') ? -64 : 0;for(const po of fa.panOffsets)chVals[pf.startAddress+po]=Math.round(Math.max(0,Math.min(255,128+zeroPd)));for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=Math.round(Math.max(0,Math.min(255,128+zeroTd+mountTd)));}
+              }else{const fp = fixturePositions?.[pf.id];const mountMode = fp?.mountMode || (fp?.y !== undefined ? (fp.y > 0.75 ? 'rear' : fp.y < 0.25 ? 'ground' : fp.x < 0.25 || fp.x > 0.75 ? 'ground' : 'hanging') : 'top');const mountTd = (mountMode === 'rear' || mountMode === 'ground' || mountMode === 'hanging') ? -64 : 0;for(const po of fa.panOffsets)chVals[pf.startAddress+po]=Math.round(Math.max(0,Math.min(255,128+zeroPd)));for(const pfo of fa.panFineOffsets)if(pfo!==null)chVals[pf.startAddress+pfo]=0;for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=Math.round(Math.max(0,Math.min(255,128+zeroTd+mountTd)));for(const tfo of fa.tiltFineOffsets)if(tfo!==null)chVals[pf.startAddress+tfo]=0;}
               // Cible manuelle (target depuis la modale 3D) : verrouille pan/tilt
           // tant que l'utilisateur n'a pas reposé la cible ailleurs. Prend le
           // pas sur le mouvement autoscript et sur le neutre 128+zero.
@@ -1878,6 +1980,10 @@ if (fa.isLaser) {
             const mountTd2 = (mountMode2 === 'rear' || mountMode2 === 'ground' || mountMode2 === 'hanging') ? -64 : 0;
             for (const po of fa.panOffsets) chVals[pf.startAddress + po] = manual.pan;
             for (const to of fa.tiltOffsets) chVals[pf.startAddress + to] = Math.max(0, Math.min(255, manual.tilt + mountTd2));
+            // Canaux "fine" 16 bits : la cible manuelle est une position
+            // entiere → le fine vaut 0 (sinon la tete reste decalee).
+            for (const pfo of fa.panFineOffsets) if (pfo !== null) chVals[pf.startAddress + pfo] = 0;
+            for (const tfo of fa.tiltFineOffsets) if (tfo !== null) chVals[pf.startAddress + tfo] = 0;
           }
         } // fin else autoscript (chaser freeze ci-dessus)
             }
@@ -1913,20 +2019,48 @@ const _FXPROF: Record<string, [number, number, number, number]> = {
             }
           }
           if(fa.prismOffset!==null){const pAddr=pf.startAddress+fa.prismOffset;
-            chVals[pAddr]=Math.round(Math.max(0,Math.min(255,64+Math.sin(fxPhase2*0.7)*128*fxEnergy)));
+            // Valeur ramenee dans une cap reelle (ex. Open 0-9 / Prism In
+            // 10-63 / CW 64-159) : sinon le prisme reste en rotation CW.
+            chVals[pAddr]=snapValueToCaps(64+Math.sin(fxPhase2*0.7)*128*fxEnergy, fa.prismCaps);
           }
           if(fa.zoomOffset!==null){const zAddr=pf.startAddress+fa.zoomOffset;
-            chVals[zAddr]=Math.round(Math.max(0,Math.min(255,64+Math.sin(fxPhase2*0.4)*96*(_fxP[1]+(_fxP[2]-_fxP[1])*fxEnergy)+64*fxEnergy)));
+            chVals[zAddr]=snapValueToCaps(64+Math.sin(fxPhase2*0.4)*96*(_fxP[1]+(_fxP[2]-_fxP[1])*fxEnergy)+64*fxEnergy, fa.zoomCaps);
           }
           if(fa.frostOffset!==null){const fAddr=pf.startAddress+fa.frostOffset;
-            chVals[fAddr]=Math.round(Math.max(0,Math.min(255,(255-fxEnergy*255)*(1-_fxP[3])+_fxP[3]*200)));
+            chVals[fAddr]=snapValueToCaps((255-fxEnergy*255)*(1-_fxP[3])+_fxP[3]*200, fa.frostCaps);
           }
           if(fa.irisOffset!==null){const iAddr=pf.startAddress+fa.irisOffset;
-            chVals[iAddr]=Math.round(40+fxEnergy*200+Math.sin(fxPhase2*0.5)*15*fxEnergy);
+            chVals[iAddr]=snapValueToCaps(40+fxEnergy*200+Math.sin(fxPhase2*0.5)*15*fxEnergy, fa.irisCaps);
           }
           if(fa.focusOffset!==null){const fcAddr=pf.startAddress+fa.focusOffset;
-            chVals[fcAddr]=Math.round(80+fxEnergy*120+Math.sin(fxPhase2*0.3)*30);
+            chVals[fcAddr]=snapValueToCaps(80+fxEnergy*120+Math.sin(fxPhase2*0.3)*30, fa.focusCaps);
           }
+
+          // ── Canaux à capacités sans rôle dédié ───────────────────────
+          // Rotation, polarité, direction, taille de motif… : ces canaux
+          // n'ont pas de rôle dédié mais portent un ETAT (mode, vitesse,
+          // sens). On leur écrit un état déterministe et connu plutôt que
+          // de laisser le hardware figé sur une valeur arbitraire.
+          writeCapabilityChannels(chVals, pf.startAddress, fa);
+
+          // ── Canaux couleur AUXILIAIRES (orange, violet, bleu de fond) ──
+          // Éteints (0) : les allumer ajouterait une couleur non demandée
+          // et modifierait la couleur du show (validée par l'utilisateur).
+          writeAuxColourChannels(chVals, pf.startAddress, fa);
+
+          // ── Canaux nominaux (rôle deduit du LIBELLE) ───────────────
+          // 2e zoom qui suit le 1er, 2e roue de gobo a l'etat neutre,
+          // vitesse/rotation animees : plus aucun canal « parlant » muet.
+          writeNominalChannels(chVals, pf.startAddress, fa, {
+            time: ct,
+            energy: effectiveEnergy,
+          });
+
+          // ── Octets LSB 16 bits (canaux « fine » apparies) ──────────
+          // Le coarse porte une valeur entiere -> son LSB vaut 0. On
+          // l'ecrit explicitement pour que la fixture lise une valeur
+          // 16 bits stable (et non une valeur arbitraire).
+          writeFinePairs(chVals, pf.startAddress, fa);
 
           // ─── Laser : bloc live du tick (même logique que computeDmxForCue) ───
           // Le tick principal ne calculait AUCUN canal laser (mode/pattern/scan/
@@ -1935,10 +2069,12 @@ const _FXPROF: Record<string, [number, number, number, number]> = {
           // brève au crossfade » (le bloc n'existait que dans computeDmxForCue,
           // appelé uniquement lors des fondus < 0,3 s). Appliqué à chaque frame.
           if (fa.isLaser) {
-            if (_fixtureInactive) {
-              // Fixture hors tiers actifs : éteindre TOUS les canaux laser
-              // (mode, pattern, scan, rotation, blanking, gates couleur) pour
-              // que le laser ne reste pas allumé en intro/outro/bridge.
+            if (_fixtureInactive || blackoutActive) {
+              // Fixture hors tiers actifs OU en blackout : eteindre TOUS les
+              // canaux laser (mode, pattern, scan, rotation, blanking, gates
+              // couleur) pour que le laser ne reste pas allume. Avant, le bloc
+              // laser réécrivait le master après le blackout → le faisceau
+              // réapparaissait pendant un blackout.
               if (fa.laserModeOffset !== null) chVals[pf.startAddress + fa.laserModeOffset] = 0;
               if (fa.laserMasterOffset !== null) chVals[pf.startAddress + fa.laserMasterOffset] = 0;
               if (fa.patternOffset !== null) chVals[pf.startAddress + fa.patternOffset] = 0;
@@ -2181,10 +2317,15 @@ export function computeLaserChannels(
   }
   // Master/power switch : toujours OUVERT (cap non-off), sinon le laser risque
   // de rester éteint faute de valeur écrite (0 = OFF sur beaucoup de defs).
+  // La valeur écrite est le MAX de la cap « ON » (et non son milieu) : un
+  // master à mi-course = laser à 50 % de puissance en permanence.
   if (fa.laserMasterOffset !== null) {
+    const masterOn = fa.laserMasterCaps.find(c => !/off|closure|closed|stop/i.test(c.name ?? ''))
+      ?? fa.laserMasterCaps.find(c => c.min > 0)
+      ?? fa.laserMasterCaps[0];
     chVals[pf.startAddress + fa.laserMasterOffset] = options?.blankWhenStrobe
       ? 0
-      : capMid(pickLaserModeCap(fa.laserMasterCaps));
+      : (masterOn ? Math.max(0, Math.min(255, masterOn.max)) : 255);
   }
   // Pattern : cycle un motif toutes les ~2 s.
   if (fa.patternOffset !== null && fa.patternCaps.length > 0) {
@@ -2286,8 +2427,8 @@ export function computeDmxForCue(
   for (const pf of patchedFixtures) {
     const def = fixtureDefs.get(pf.fixtureDefId);
     const fa = analyzeChannels(pf, def);
-    fa.universeIndex = uniIds.indexOf(pf.universeId);
-    if (fa.universeIndex < 0) fa.universeIndex = 0;
+    // Univers inexistant → fixture ignorée (pas de parasite sur l'univers 0).
+    fa.universeIndex = pf.universeId ? uniIds.indexOf(String(pf.universeId)) : 0;
     analyses.push(fa);
   }
   const byUniverse = new Map<number, ChannelAnalysis[]>();
@@ -2388,49 +2529,25 @@ export function computeDmxForCue(
               const segHue = (sIdx * hueStep * 0.6) % 360;
               [pr,pg,pb] = applyHueShift([r,g,b], segHue * 0.35);
             }
-            chVals[pf.startAddress + seg.r] = pr;
-            chVals[pf.startAddress + seg.g] = pg;
-            if (seg.b !== null) chVals[pf.startAddress + seg.b] = pb;
-            if (seg.w !== null) chVals[pf.startAddress + seg.w] = 0;
-            if ((seg as any).a !== null && (seg as any).a !== undefined) chVals[pf.startAddress + (seg as any).a] = 0;
-            if ((seg as any).uv !== null && (seg as any).uv !== undefined) chVals[pf.startAddress + (seg as any).uv] = 0;
+            // RGBW : composante achromatique vers le canal W (couleur
+            // identique, 4 canaux pilotes au lieu de 3).
+            let sr=pr,sg=pg,sb=pb,sw=0;
+            if (seg.w !== null) { const sp=splitRgbw(pr,pg,pb,seg.b!==null); sr=sp.r; sg=sp.g; sb=sp.b; sw=sp.w; }
+            // Coarse + LSB 16 bits.
+            writeRgbSegment(chVals, pf.startAddress, seg, sr, sg, sb, sw);
           }
         }
+        // Gates couleur laser (« Red laser », « Green laser ») : binaire 0/255.
+        writeLaserGates(chVals, pf.startAddress, fa, effPaletteColor);
         // Apply dimmer track/cue dimmer to RGB when no dedicated intensity channel
         if (fa.intensityOffset === null) {
           const dScale = dimmerVal / 255;
           for (const seg of fa.rgbSegments) {
-            chVals[pf.startAddress + seg.r] = Math.round((chVals[pf.startAddress + seg.r] ?? 0) * dScale);
-            chVals[pf.startAddress + seg.g] = Math.round((chVals[pf.startAddress + seg.g] ?? 0) * dScale);
-            if (seg.b !== null) chVals[pf.startAddress + seg.b] = Math.round((chVals[pf.startAddress + seg.b] ?? 0) * dScale);
-            if (seg.w !== null) chVals[pf.startAddress + seg.w] = Math.round((chVals[pf.startAddress + seg.w] ?? 0) * dScale);
+            scaleRgbSegment(chVals, pf.startAddress, seg, dScale);
           }
         }
         // Exploit remaining generic channels pour snapshot (même logique que tick live, base cue.time)
-        if(!fa.isLaser){
-          if(fa.effectOffset!==null){
-            const caps = fa.effectCaps;
-            if(caps.length>0){
-              let effVal:number;
-              if(energy < 0.3){
-                const off = caps.find(c=>c.min===0) || caps[0];
-                effVal = capMid(off);
-              } else {
-                const idx = Math.floor(((cue as any).time*0.7) % caps.length);
-                effVal = capMid(caps[idx]);
-              }
-              chVals[pf.startAddress+fa.effectOffset]=effVal;
-            } else {
-              chVals[pf.startAddress+fa.effectOffset]=0;
-            }
-          }
-          if(fa.speedOffset!==null){
-            chVals[pf.startAddress+fa.speedOffset]= Math.max(0, Math.min(255, Math.round(50 + energy*150)));
-          }
-          if(fa.beamOffset!==null && chVals[pf.startAddress+fa.beamOffset]===undefined){
-            chVals[pf.startAddress+fa.beamOffset]= Math.round(100 + energy*80);
-          }
-        }
+        // → déplacé hors de la branche RGB (voir bloc commun plus bas).
       } else if (fa.wheelOffset !== null && paletteColor && (() => {
         // Snapshot path : ne pas écraser la couleur du chaser (roue) par l'autoscript
         const cmap = chaserTakeover?.get(pf.id);
@@ -2451,6 +2568,64 @@ export function computeDmxForCue(
         }
         chVals[pf.startAddress + fa.wheelOffset] = wheelVal;
         }
+      }
+
+      // Couleur effective (meme decalage de tier que la branche RGB) :
+      // partagee par les écritures CMY et pixels blancs.
+      const effPaletteRgb = (hex: string): [number, number, number] => {
+        let [rr, gg, bb] = hexToRgb(hex);
+        if (!colorTrackColors?.has(pf.id)) {
+          [rr, gg, bb] = applyHueShift([rr, gg, bb], TIER_HUE[pf.tier]);
+        }
+        return [rr, gg, bb];
+      };
+
+      // ── Fixture CMY (Cyan / Magenta / Yellow) ─────────────────
+      // Couleur soustractive : C=255-R, M=255-G, Y=255-B.
+      if (fa.cmyOffsets.c !== null || fa.cmyOffsets.m !== null || fa.cmyOffsets.y !== null) {
+        const [cr, cg, cb] = effPaletteColor ? effPaletteRgb(effPaletteColor) : [255, 255, 255];
+        writeCmyChannels(chVals, pf.startAddress, fa, cr, cg, cb);
+      }
+
+      // ── Pixels blancs autonomes ───────────────────────────────
+      // Composante achromatique de la palette (min R,G,B).
+      if (fa.whitePixels.length > 0) {
+        const [wr, wg, wb] = effPaletteColor ? effPaletteRgb(effPaletteColor) : [255, 255, 255];
+        writeWhitePixels(chVals, pf.startAddress, fa, wr, wg, wb);
+      }
+
+      // ── Canaux couleur en doublon (2e zone / LED) ─────────────
+      if (fa.extraColourChannels.length > 0) {
+        const [er, eg, eb] = effPaletteColor ? effPaletteRgb(effPaletteColor) : [255, 255, 255];
+        const dScaleX = fa.intensityOffset === null ? dimmerVal / 255 : 1;
+        writeExtraColourChannels(chVals, pf.startAddress, fa, er, eg, eb, dScaleX);
+      }
+
+      // ── Canaux génériques (Effect / Speed / Beam) ───────────────────
+      // Hors de la branche RGB : une fixture à roue (moving head classique)
+      // n'avait jamais son canal Effect/Speed/Beam écrit.
+      if(fa.effectOffset!==null){
+        const caps = fa.effectCaps;
+        if(caps&&caps.length>0){
+          let effVal:number;
+          if(energy < 0.3){
+            const off = caps.find(c=>c.min===0) || caps[0];
+            effVal = capMid(off);
+          } else {
+            const idx = Math.floor(((cue as any).time*0.7) % caps.length);
+            effVal = capMid(caps[idx]);
+          }
+          chVals[pf.startAddress+fa.effectOffset]=effVal;
+        } else {
+          chVals[pf.startAddress+fa.effectOffset]=0;
+        }
+      }
+      fa.speedOffsets.forEach((off,i)=>{
+        const phase = ((cue as any).time ?? 0)*3 + i*0.9;
+        chVals[pf.startAddress+off]= Math.max(0, Math.min(255, Math.round(50 + energy*150 + Math.sin(phase)*10)));
+      });
+      if(fa.beamOffset!==null && chVals[pf.startAddress+fa.beamOffset]===undefined){
+        chVals[pf.startAddress+fa.beamOffset]= Math.round(100 + energy*80);
       }
 
       if (fa.shutterOffset !== null) {
@@ -2486,7 +2661,8 @@ export function computeDmxForCue(
           : (cue as any).forcedStrobe !== undefined ? (cue as any).forcedStrobe : ((isDrop || isChorus) && cue.strobe && pf.tier === 'primary');
         if (useStrobe2) {
           const speed2 = Math.min(strobeTrackStrobe2?.speed || trackStrobe2?.speed || (cue as any).strobeSpeed || 10, clampStrobeLimit(strobeLimit ?? 10));
-          chVals[stAddr2] = Math.min(250, Math.max(8, Math.round(8 + speed2 * 20)));
+          // Même mapping que le live : la limite photosensible est respectée.
+          chVals[stAddr2] = Math.min(250, Math.max(8, Math.round(speed2 * 255 / 30)));
         } else {
           chVals[stAddr2] = 0;
         }
@@ -2584,6 +2760,12 @@ export function computeDmxForCue(
               // Zone 180° moteur (option B) — bypass si centre capturé (visée délibérée)
               if (!(zPd !== 0 && fp)) pv = clampPanZoneDmx(pv, fa.panMaxDeg ?? 540, fp?.zeroPan);
               chVals[pf.startAddress + fa.panOffsets[m]] = pv;
+              // Canal "fine" 16 bits : la fraction de la cible part dans le fine.
+              const pFine = fa.panFineOffsets[m] ?? null;
+              if (pFine !== null) {
+                if (pv === raw) writeAxisPair(chVals, pf.startAddress + fa.panOffsets[m], pf.startAddress + pFine, 128 + zPd + px * ampPan);
+                else chVals[pf.startAddress + pFine] = 0;
+              }
             }
             if (m < tiltCount) {
               const rp = fixturePositions?.[pf.id];
@@ -2595,11 +2777,19 @@ export function computeDmxForCue(
               // Zone TILT moteur (miroir 3D) — bypass si centre capturé
               if (!(zTd !== 0 && fp)) tv = clampTiltZoneDmx(tv, fa.tiltMaxDeg ?? 180, fp?.mountMode, fp?.tilt, fp?.zeroTilt);
               chVals[pf.startAddress + fa.tiltOffsets[m]] = tv;
+              // Canal "fine" 16 bits (idem pan).
+              const tFine = fa.tiltFineOffsets[m] ?? null;
+              if (tFine !== null) {
+                if (tv === raw) writeAxisPair(chVals, pf.startAddress + fa.tiltOffsets[m], pf.startAddress + tFine, 128 + zTd + py * ampTilt);
+                else chVals[pf.startAddress + tFine] = 0;
+              }
             }
           }
         } else {
           for (const po of fa.panOffsets) chVals[pf.startAddress + po] = 128;
           for (const to of fa.tiltOffsets) chVals[pf.startAddress + to] = 128;
+          for (const pfo of fa.panFineOffsets) if (pfo !== null) chVals[pf.startAddress + pfo] = 0;
+          for (const tfo of fa.tiltFineOffsets) if (tfo !== null) chVals[pf.startAddress + tfo] = 0;
         }
       }
 
@@ -2631,24 +2821,38 @@ export function computeDmxForCue(
       }
 
       if (fa.prismOffset !== null) {
-        chVals[pf.startAddress + fa.prismOffset] = Math.round(Math.max(0, Math.min(255, 64 + Math.sin(fxPhase2 * 0.7) * 128 * fxEnergy)));
+        chVals[pf.startAddress + fa.prismOffset] = snapValueToCaps(64 + Math.sin(fxPhase2 * 0.7) * 128 * fxEnergy, fa.prismCaps);
       }
 
       if (fa.zoomOffset !== null) {
-        chVals[pf.startAddress + fa.zoomOffset] = Math.round(Math.max(0, Math.min(255, 64 + Math.sin(fxPhase2 * 0.4) * 96 * (_fxP[1] + (_fxP[2] - _fxP[1]) * fxEnergy) + 64 * fxEnergy)));
+        chVals[pf.startAddress + fa.zoomOffset] = snapValueToCaps(64 + Math.sin(fxPhase2 * 0.4) * 96 * (_fxP[1] + (_fxP[2] - _fxP[1]) * fxEnergy) + 64 * fxEnergy, fa.zoomCaps);
       }
 
       if (fa.frostOffset !== null) {
-        chVals[pf.startAddress + fa.frostOffset] = Math.round(Math.max(0, Math.min(255, (255 - fxEnergy * 255) * (1 - _fxP[3]) + _fxP[3] * 200)));
+        chVals[pf.startAddress + fa.frostOffset] = snapValueToCaps((255 - fxEnergy * 255) * (1 - _fxP[3]) + _fxP[3] * 200, fa.frostCaps);
       }
 
       if (fa.irisOffset !== null) {
-        chVals[pf.startAddress + fa.irisOffset] = Math.round(40 + fxEnergy * 200 + Math.sin(fxPhase2 * 0.5) * 15 * fxEnergy);
+        chVals[pf.startAddress + fa.irisOffset] = snapValueToCaps(40 + fxEnergy * 200 + Math.sin(fxPhase2 * 0.5) * 15 * fxEnergy, fa.irisCaps);
       }
 
       if (fa.focusOffset !== null) {
-        chVals[pf.startAddress + fa.focusOffset] = Math.round(80 + fxEnergy * 120 + Math.sin(fxPhase2 * 0.3) * 30);
+        chVals[pf.startAddress + fa.focusOffset] = snapValueToCaps(80 + fxEnergy * 120 + Math.sin(fxPhase2 * 0.3) * 30, fa.focusCaps);
       }
+
+      // Canaux à capacités sans rôle dédié : état déterministe écrit.
+      writeCapabilityChannels(chVals, pf.startAddress, fa);
+
+      // Canaux couleur auxiliaires : éteints (0) — la couleur du show est
+      // validée par l'utilisateur, on n'ajoute aucune couleur.
+      writeAuxColourChannels(chVals, pf.startAddress, fa);
+
+      // Canaux nominaux (rôle deduit du LIBELLE) + octets LSB 16 bits.
+      writeNominalChannels(chVals, pf.startAddress, fa, {
+        time: cue.time ?? 0,
+        energy,
+      });
+      writeFinePairs(chVals, pf.startAddress, fa);
 
       // ── Laser : exploitation live (mode, pattern, scan, vitesses, rotations, blanking) ──
       // Jamais statique, jamais synchrone : phase par fixture, cercle ou

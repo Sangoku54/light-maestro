@@ -892,6 +892,224 @@ describe.skipIf(!fs.existsSync(PROJECT))('Yolo.lmproj — analyse des fixtures p
       `strobe/respiration 13/13 sans muet`,
     );
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // EXPLOITATION MAXIMALE — audit fin de chaque canal sur le show réel
+  //
+  // Ce bloc complète l'audit de couverture (« le canal est-il écrit ? ») par
+  // l'audit de QUALITÉ (« le canal est-il piloté UTILEMENT ? ») :
+  //   - pan/tilt 16 bits : le « fine » porte la sous-résolution (pas le coarse)
+  //   - RGBW : le canal blanc est écrit sur une palette blanche
+  //   - vitesses multiples : TOUTES les vitesse sont écrites
+  //   - effet : écrit même hors RGB, et il VARIE
+  //   - gates laser : binaires (0 / 255), jamais une valeur continue
+  //   - master laser : ouvert (255)
+  //   - presets/modes : JAMAIS écrits, et surtout jamais à 128
+  // ───────────────────────────────────────────────────────────────────────────
+  it('exploitation maximale : 16 bits, RGBW, vitesses, effet, gates laser, master, presets', () => {
+    const defs = new Map<any, any>();
+    for (const pf of patched) {
+      defs.set(pf.fixtureDefId, pf.fixtureDefId.startsWith('custom-')
+        ? customDefs.get(pf.fixtureDefId)
+        : lib.get(pf.fixtureDefId));
+    }
+    const fixtures = patched.map((pf) => ({
+      pf, fa: analyzeChannels(pf, defs.get(pf.fixtureDefId)),
+    }));
+
+    // ── Timeline dense (50 ms) sur la section la plus dense ─────────────
+    const qs = presetQ?.quickShow ?? {};
+    const cfg = {
+      musicStyle: qs.musicStyle || 'dance',
+      colorScheme: qs.colorScheme || 'auto',
+      intensity: qs.intensity ?? 'dynamic',
+      movement: qs.movement ?? 'dynamic',
+      beatDivision: qs.beatDivision ?? 4,
+      audioReactive: qs.audioReactive !== false,
+      sectionAware: qs.sectionAware !== false,
+      customPalette: qs.customPalette ?? [],
+    };
+    const sections = presetQ?.sections?.length
+      ? presetQ.sections.map((s: any) => ({ type: s.type, startTime: s.startTime, endTime: s.endTime, energy: s.energy ?? 0.5, color: s.color ?? '#888' }))
+      : [{ type: 'chorus', startTime: 0, endTime: 20, energy: 0.8, color: '#888' }];
+    const cues: any[] = genCues(sections, analysis?.bpm || 120, cfg.beatDivision, cfg, [], 7, analysis);
+    expect(cues.length).toBeGreaterThan(0);
+    const dense = sections.find((s) => s.type === 'drop')
+      ?? sections.find((s) => s.type === 'chorus')
+      ?? sections[0];
+    const baseCue = cues.find((c) => c.sectionStart === dense.startTime) ?? cues[0];
+
+    // Séquence par fixture / offset : toutes les valeurs écrites.
+    const seqs = new Map<string, number[]>();
+    const key = (pfId: string, off: number) => `${pfId}|${off}`;
+    const STEP = 0.05;
+    const SPAN = Math.min(4, dense.endTime - dense.startTime);
+    const STEPS = Math.max(20, Math.floor(SPAN / STEP));
+    for (let i = 0; i <= STEPS; i++) {
+      const t = dense.startTime + i * STEP;
+      const dmx = computeDmxForCue(
+        { ...baseCue, time: t, energy: baseCue.energy },
+        patched, defs, [{ id: 'universe-1' }],
+        { primary: 100, secondary: 70, tertiary: 40, other: 40 } as any,
+      );
+      const written: Record<number, number> = {};
+      for (const d of dmx) Object.assign(written, d.channelValues);
+      for (const { pf } of fixtures) {
+        for (let off = 0; off < pf.channelCount; off++) {
+          const v = written[pf.startAddress + off];
+          if (v === undefined) continue;
+          const k = key(pf.id, off);
+          const arr = seqs.get(k) ?? [];
+          arr.push(v);
+          seqs.set(k, arr);
+        }
+      }
+    }
+    const seqOf = (pfId: string, off: number | null | undefined) =>
+      off === null || off === undefined ? [] : (seqs.get(key(pfId, off)) ?? []);
+
+    const failures: string[] = [];
+
+    // ── 1. Pan/tilt 16 bits : le « fine » est écrit et porte la fraction ──
+    for (const { pf, fa } of fixtures) {
+      for (const [axis, coarseArr, fineArr] of [
+        ['pan', fa.panOffsets, fa.panFineOffsets],
+        ['tilt', fa.tiltOffsets, fa.tiltFineOffsets],
+      ] as const) {
+        for (let arm = 0; arm < coarseArr.length; arm++) {
+          const coarseOff = coarseArr[arm];
+          const fineOff = fineArr[arm];
+          if (fineOff === null || fineOff === undefined) continue;
+          const coarse = seqOf(pf.id, coarseOff);
+          const fine = seqOf(pf.id, fineOff);
+          if (fine.length === 0) {
+            failures.push(`${pf.name}: ${axis} fine ch${fineOff} jamais écrit`);
+            continue;
+          }
+          if (coarse.length === 0) {
+            failures.push(`${pf.name}: ${axis} coarse ch${coarseOff} jamais écrit`);
+            continue;
+          }
+          // 16 bits : coarse = partie entière, fine = fraction × 255.
+          for (let k = 0; k < Math.min(coarse.length, fine.length); k++) {
+            expect(fine[k], `${pf.name}: ${axis} fine hors plage`).toBeGreaterThanOrEqual(0);
+            expect(fine[k], `${pf.name}: ${axis} fine hors plage`).toBeLessThanOrEqual(255);
+            expect(coarse[k], `${pf.name}: ${axis} coarse hors plage`).toBeGreaterThanOrEqual(0);
+            expect(coarse[k], `${pf.name}: ${axis} coarse hors plage`).toBeLessThanOrEqual(255);
+            // Le « fine » ne doit jamais recopier le coarse (inversion 16 bits).
+            if (fine[k] === coarse[k] && coarse[k] !== 0) {
+              failures.push(`${pf.name}: ${axis} fine ch${fineOff} recopie le coarse (${coarse[k]})`);
+              break;
+            }
+          }
+          // La sous-résolution est réellement utilisée (≥ 2 valeurs distinctes).
+          if (new Set(fine).size < 2) {
+            failures.push(`${pf.name}: ${axis} fine ch${fineOff} figé (${new Set(fine).size} valeur(s))`);
+          }
+        }
+      }
+    }
+
+    // ── 2. RGBW : le canal blanc est écrit sur une palette BLANCHE ──────
+    const rgbw = fixtures.filter((f) => f.fa.rgbSegments.some((s) => s.w !== null));
+    for (const { pf, fa } of rgbw) {
+      const whiteCue = {
+        ...baseCue, time: dense.startTime + 0.5, energy: baseCue.energy,
+        color: '#ffffff', colors: ['#ffffff'], section: 'chorus',
+      } as any;
+      const dmx = computeDmxForCue(
+        whiteCue, patched, defs, [{ id: 'universe-1' }],
+        { primary: 100, secondary: 70, tertiary: 40, other: 40 } as any,
+      );
+      const written: Record<number, number> = {};
+      for (const d of dmx) Object.assign(written, d.channelValues);
+      for (const seg of fa.rgbSegments) {
+        if (seg.w === null) continue;
+        const w = written[pf.startAddress + seg.w];
+        if (w === undefined) {
+          failures.push(`${pf.name}: canal blanc ch${seg.w} jamais écrit`);
+          continue;
+        }
+        // Palette blanche → le W doit être nettement alimenté (et pas figé à 0).
+        if (w < 16) failures.push(`${pf.name}: canal blanc ch${seg.w} quasi éteint sur palette blanche (${w})`);
+      }
+    }
+
+    // ── 3. TOUTES les vitesses sont écrites (une fixture peut en avoir 2) ─
+    for (const { pf, fa } of fixtures) {
+      for (const off of fa.speedOffsets) {
+        const seq = seqOf(pf.id, off);
+        if (seq.length === 0) failures.push(`${pf.name}: vitesse ch${off} jamais écrite`);
+        else if (new Set(seq).size < 2) failures.push(`${pf.name}: vitesse ch${off} figée (${seq[0]})`);
+      }
+    }
+
+    // ── 4. Effet : écrit même HORS RGB (et animé s'il a des capacités) ─
+    for (const { pf, fa } of fixtures) {
+      if (fa.effectOffset === null) continue;
+      const seq = seqOf(pf.id, fa.effectOffset);
+      if (seq.length === 0) {
+        failures.push(`${pf.name}: effet ch${fa.effectOffset} jamais écrit`);
+      } else if ((fa.effectCaps?.length ?? 0) > 0 && new Set(seq).size < 2) {
+        // Avec des capabilities déclarées, le moteur DOIT parcourir les
+        // slots (sinon l'effet est figé). Sans capabilities, la seule valeur
+        // sûre est le neutre 0 (une valeur continue modifierait la couleur
+        // sur les canaux « Hue » / « Color Temperature »).
+        failures.push(`${pf.name}: effet ch${fa.effectOffset} figé (${seq[0]})`);
+      } else if ((fa.effectCaps?.length ?? 0) === 0 && seq.some((v) => v !== 0)) {
+        failures.push(`${pf.name}: effet ch${fa.effectOffset} sans caps mais non neutre (${[...new Set(seq)].join(',')})`);
+      }
+    }
+
+    // ── 5. Gates laser : BINAIRES (0 / 255), jamais une valeur continue ──
+    for (const { pf, fa } of fixtures) {
+      for (const gate of fa.laserGateOffsets) {
+        const seq = seqOf(pf.id, gate.offset);
+        if (seq.length === 0) {
+          failures.push(`${pf.name}: gate laser ch${gate.offset} jamais écrit`);
+          continue;
+        }
+        for (const v of seq) {
+          if (v !== 0 && v !== 255) {
+            failures.push(`${pf.name}: gate laser ch${gate.offset} non binaire (${v})`);
+            break;
+          }
+        }
+      }
+      // ── 6. Master laser : toujours OUVERT (255) ───────────────────────
+      if (fa.laserMasterOffset !== null) {
+        const seq = seqOf(pf.id, fa.laserMasterOffset);
+        if (seq.length === 0) failures.push(`${pf.name}: master laser jamais écrit`);
+        else if (Math.max(...seq) !== 255) {
+          failures.push(`${pf.name}: master laser jamais ouvert (max=${Math.max(...seq)})`);
+        }
+      }
+    }
+
+    // ── 7. Presets / modes : JAMAIS pilotés (jamais de valeur non nulle,
+    //       et surtout JAMAIS à 128 qui tomberait dans une zone « AUTO
+    //       MODE 3 » ou « RESET ») ──────────────────────────────────────
+    for (const { pf, fa } of fixtures) {
+      for (const off of fa.presetOverrideOffsets) {
+        const seq = seqOf(pf.id, off);
+        if (seq.length === 0) continue; // attendu : jamais écrit
+        for (const v of seq) {
+          if (v !== 0) {
+            failures.push(`${pf.name}: preset/mode ch${off} PILOTÉ (${v})`);
+            break;
+          }
+        }
+        if (seq.includes(128)) {
+          failures.push(`${pf.name}: preset/mode ch${off} écrit à 128 (valeur neutre parasite)`);
+        }
+      }
+    }
+
+    console.log(`[YOLO-EXPLOIT] ${fixtures.length} fixtures · ${STEPS + 1} échantillons · ` +
+      `${rgbw.length} fixtures RGBW · ${failures.length} anomalie(s)`);
+    expect(failures.slice(0, 10)).toEqual([]);
+    expect(failures.length, `${failures.length} anomalie(s) d'exploitation`).toBe(0);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
