@@ -18,6 +18,7 @@ import type { FixtureTrack, ColorBlock, DimmerBlock, StrobeBlock, MovementBlock 
 import { useTranslation } from 'react-i18next';
 import { resolveTrackTargets, createFixtureTrack } from '../hooks/fixture-tracks';
 import { useAppStore } from '../stores/appStore';
+import { useShowStore } from '../stores/showStore';
 
 // ─── Tier hue-shift helpers ────────────────────────────────
 
@@ -2890,7 +2891,7 @@ if (editBlock) { setEditBlock(null); return; }
           if (!tf || tf.type === 'all') {
             targets = true;
           } else if (tf.type === 'group') {
-            const store = (window as any).__useShowStore?.getState?.();
+            const store = useShowStore.getState();
             const groups = store?.fixtureGroups || [];
             targets = groups.find((g: any) => g.id === tf.groupId)?.fixtureIds.includes(fixture.id) ?? false;
           } else if (tf.type === 'fixture') {

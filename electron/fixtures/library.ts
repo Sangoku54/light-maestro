@@ -913,26 +913,30 @@ export class FixtureLibrary {
           : chAny.capability ? [chAny.capability] : [];
 
         for (const cap of capList) {
-          const dmxRange = cap.dmxRange || [0, 255];
-          const capName = cap.comment || cap.effectName || cap.type || '';
-          const capObj: FixtureCapability = {
-            min: dmxRange[0] ?? 0,
-            max: dmxRange[1] ?? 255,
-            name: capName,
-          };
+          try {
+            const dmxRange = cap?.dmxRange || [0, 255];
+            const capName = cap?.comment || cap?.effectName || cap?.type || '';
+            const capObj: FixtureCapability = {
+              min: Array.isArray(dmxRange) ? (dmxRange[0] ?? 0) : 0,
+              max: Array.isArray(dmxRange) ? (dmxRange[1] ?? 255) : 255,
+              name: capName,
+            };
 
-          // Color info
-          if (cap.color) {
-            capObj.color = cap.color;
-          }
-          if (cap.colorsStart && Array.isArray(cap.colorsStart) && cap.colorsStart.length > 0) {
-            capObj.color = cap.colorsStart[0];
-          }
-          if (cap.colorsEnd && Array.isArray(cap.colorsEnd) && cap.colorsEnd.length > 0) {
-            capObj.color2 = cap.colorsEnd[0];
-          }
+            // Color info
+            if (cap?.color) {
+              capObj.color = cap.color;
+            }
+            if (Array.isArray(cap?.colorsStart) && cap.colorsStart.length > 0) {
+              capObj.color = cap.colorsStart[0];
+            }
+            if (Array.isArray(cap?.colorsEnd) && cap.colorsEnd.length > 0) {
+              capObj.color2 = cap.colorsEnd[0];
+            }
 
-          capabilities.push(capObj);
+            capabilities.push(capObj);
+          } catch (e) {
+            console.warn(`OFL capability parse error for ${chName}:`, e);
+          }
         }
 
         channelDefs.set(chName.toLowerCase(), {

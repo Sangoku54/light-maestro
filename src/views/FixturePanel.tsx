@@ -30,11 +30,13 @@ const FixtureItem = memo(({
   index,
   isSel,
   onSelect,
+  onAddToSelection,
 }: {
   fixture: PatchedFixture;
   index: number;
   isSel: boolean;
   onSelect: (id: string) => void;
+  onAddToSelection: (id: string) => void;
 }) => {
   const { t } = useTranslation();
   const color = getFixtureColor(index);
@@ -42,7 +44,7 @@ const FixtureItem = memo(({
   const handleSelect = (e: React.MouseEvent) => {
     // Si Shift est maintenu, on ajoute la fixture sans enlever les précédentes
     if (e.shiftKey) {
-      onSelect(fixture.id);
+      onAddToSelection(fixture.id);
       // Empêcher le comportement par défaut de la propagation Shift
       e.stopPropagation();
       return;
@@ -212,7 +214,7 @@ export const FixturePanel = memo(function FixturePanel({
         {/* Unpatch button when multiple fixtures selected */}
         {multiSelectedIds.size > 1 && (
           <div className="mt-2 pt-2 border-t border-gray-800/50 flex items-center justify-between">
-            <span className="text-[10px] text-gray-500">{t('stage3D.selectedCount', { count: multiSelectedIds.size })}</span>
+            <span className="text-[10px] text-gray-500">{t('selectedCount', { count: multiSelectedIds.size })}</span>
             <button
               onClick={() => setShowUnpatchConfirm(true)}
               className="px-2 py-1 rounded text-[10px] bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600/30 hover:border-red-500/50 transition-colors"
@@ -279,6 +281,7 @@ export const FixturePanel = memo(function FixturePanel({
               index={idx}
               isSel={selectedFixtureId === f.id || multiSelectedIds.has(f.id)}
               onSelect={onSelect}
+              onAddToSelection={onAddToSelection}
             />
           ))
         )}

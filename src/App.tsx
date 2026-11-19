@@ -35,6 +35,8 @@ import { collectCustomFixtureDefs, importCustomFixtureDefs } from './utils/custo
 import { externalizeProjectAudio, writeAudioBlobs, resolveProjectAudio, resolveWidgetAudio, audioKeyOf, type ExtractedBlob } from './utils/project-audio';
 import { stripUncloneable } from './utils/ipc-safe';
 import { createSaveQueue, type SaveOutcome } from './utils/save-queue';
+import { clearAllSceneAims } from './utils/sceneAim';
+import { clearAllManualTargets } from './utils/manualTarget';
 import { version as appVersion } from '../package.json';
 import './styles/global.css';
 
@@ -511,6 +513,10 @@ const App: React.FC = () => {
           ss.setShows(resolvedShows);
           ss.setSongPresets(resolvedPresets);
           if (data.showStore.mtcMarkers) ss.setMtcMarkers(data.showStore.mtcMarkers);
+          // Nettoyage des cibles et aims du projet précédent — un nouveau projet
+          // ne doit pas hériter de visées manuelles ou de scènes actives.
+          clearAllSceneAims();
+          clearAllManualTargets();
         }
         if (data.appStore) {
           // Don't restore session-only fields from project file

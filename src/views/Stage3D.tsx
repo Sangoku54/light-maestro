@@ -5301,9 +5301,9 @@ export const Stage3D: React.FC<{
                 </RichTooltip>
                 <RichTooltip content={{ title: t('stage3D.heightHighTipTitle'), text: t('stage3D.heightHighTipText'), tone: 'info' }}>
                   <button
-                    onClick={() => setFixturePosition(selectedFixture.id, { h: 5 })}
+                    onClick={() => setFixturePosition(selectedFixture.id, { h: 4 })}
                     className={`flex-1 px-2 py-1 rounded text-[9px] transition-colors ${
-                      Math.abs(selectedPos.h - 5) < 0.01
+                      Math.abs(selectedPos.h - 4) < 0.01
                         ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
                         : 'bg-gray-800/50 text-gray-500 hover:text-gray-300 border border-gray-700'
                     }`}
