@@ -2150,10 +2150,19 @@ const VCButtonWidget: React.FC<{
               : '🎛 Banque pré-programmée') :
            scenes.find((s) => s.id === config.sceneId)?.name || 'Button'}
         </span>
-        {config.actionType === 'playSong' && audioStatus === 'missing' && (
-          <button onClick={(e) => { e.stopPropagation(); handleReassignAudio(e); }} className="absolute top-1 right-1 text-[9px] text-orange-400 hover:text-orange-300 bg-orange-600/10 rounded px-1 py-0">🔧</button>
-        )}
       </button>
+
+      {/* Ré-association audio — bouton FRÈRE du bouton principal (jamais imbriqué :
+          un <button> dans un <button> est invalide en HTML et déclenche
+          l'avertissement React validateDOMNesting). */}
+      {config.actionType === 'playSong' && audioStatus === 'missing' && (
+        <button
+          onClick={(e) => { e.stopPropagation(); handleReassignAudio(e); }}
+          className="absolute top-1 right-1 z-20 text-[9px] text-orange-400 hover:text-orange-300 bg-orange-600/10 rounded px-1 py-0"
+        >
+          🔧
+        </button>
+      )}
 
       {/* 3D view shortcut — visible when widget is active */}
       {active && onShow3D && (

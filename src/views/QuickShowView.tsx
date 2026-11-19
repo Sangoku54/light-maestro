@@ -2893,6 +2893,12 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
   const fixturePositions = useShowStore(s => s.fixturePositions);
   const fixturePositionsRef = useRef(fixturePositions);
   fixturePositionsRef.current = fixturePositions;
+  const stageDims = useShowStore(s => s.stageDims);
+  const stageDimsRef = useRef(stageDims);
+  stageDimsRef.current = stageDims;
+  const stageDecks = useShowStore(s => s.stageDecks);
+  const stageDecksRef = useRef(stageDecks);
+  stageDecksRef.current = stageDecks;
   useDmxPlayback({
     isPlaying: audioFile.isPlaying,
     currentTimeRef: currentTimeRef,
@@ -2923,6 +2929,8 @@ const AutoScriptPanel: React.FC<{ audioFile: ReturnType<typeof useAudioFileLoade
     disabledFixturesRef: disabledFixturesRef as any,
     panTiltLimitsRef,
     fixturePositionsRef,
+    stageDimsRef,
+    stageDecksRef,
     colorFadeMs: qs.colorFadeMs ?? 250,
     strobeLimit: qs.strobeLimit || 10,
     frozenRef: frozenRef as React.MutableRefObject<boolean>,

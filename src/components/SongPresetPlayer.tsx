@@ -75,6 +75,12 @@ export const SongPresetPlayer: React.FC<{
   const fixturePositions = useShowStore((s) => s.fixturePositions);
   const fixturePositionsRef = useRef(fixturePositions);
   fixturePositionsRef.current = fixturePositions;
+  const stageDims = useShowStore((s) => s.stageDims);
+  const stageDimsRef = useRef(stageDims);
+  stageDimsRef.current = stageDims;
+  const stageDecks = useShowStore((s) => s.stageDecks);
+  const stageDecksRef = useRef(stageDecks);
+  stageDecksRef.current = stageDecks;
   const universes = useShowStore((s) => s.universes);
   const fixtureGroups = useShowStore((s) => s.fixtureGroups);
   const effects = useShowStore((s) => s.effects);
@@ -318,6 +324,8 @@ export const SongPresetPlayer: React.FC<{
     chasersRef,
     scenesRef,
     fixturePositionsRef,
+    stageDimsRef,
+    stageDecksRef,
   });
 
   return null;

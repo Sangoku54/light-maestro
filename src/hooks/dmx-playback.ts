@@ -533,6 +533,64 @@ import { recordAudioTick } from '../utils/latency-meter';
 import { manualTargetRef } from '../utils/manualTarget';
 import { computeBlackoutTrackOverrides, type BlackoutTrackRef } from '../utils/blackoutTrack';
 import { hasSceneAim, getSceneAim, computeAimDMX } from '../utils/sceneAim';
+import { deckTopAt, type StageDeck } from '../utils/stage-decks';
+
+/**
+ * Canaux pan/tilt d'une fixture (analyse moteur) — sous-ensemble necessaire
+ * pour appliquer une visée 3D.
+ */
+export interface AimTargetChannels {
+  panOffsets: number[];
+  panFineOffsets: (number | null)[];
+  tiltOffsets: number[];
+  tiltFineOffsets: (number | null)[];
+}
+
+/**
+ * Applique une visée 3D aux canaux pan/tilt d'une fixture.
+ *
+ * Ordre de priorité (source de vérité unique) :
+ *   1. la cible MANUELLE (clic Target de la modale 3D) : elle a été résolue
+ *      avec la pose EXACTE du renderer 3D → on la rejoue telle quelle, par
+ *      offset de canal (les fixtures multi-bras ont un tilt par tête) ;
+ *   2. sinon la cible de SCÈNE, recalculée depuis la pose réelle de la fixture
+ *      (dimensions de scène, hauteur de plateau, heading effectif, courses
+ *      mécaniques).
+ *
+ * Aucune compensation « montage » n'est appliquée ici : le solveur du Target
+ * retire déjà le mountTilt, le réappliquer décalait le faisceau de 45°.
+ *
+ * Retourne les valeurs effectivement appliquées, ou null si aucune visée
+ * n'est active (les pan/tilt restent alors animés par l'autoscript).
+ */
+export function applyAimTarget(
+  chVals: Record<number, number>,
+  startAddress: number,
+  fixtureId: string,
+  channels: AimTargetChannels,
+  resolveSceneAim?: () => { pan: number; tilt: number } | null,
+): { pan: number; tilt: number } | null {
+  const manual = manualTargetRef.get(fixtureId);
+  if (manual) {
+    for (const po of channels.panOffsets) chVals[startAddress + po] = manual.pan;
+    for (const to of channels.tiltOffsets) {
+      const v = manual.tiltByOffset?.[to] ?? manual.tilt;
+      chVals[startAddress + to] = v;
+    }
+    // Canaux "fine" 16 bits : la cible est une position entière -> fine = 0.
+    for (const pfo of channels.panFineOffsets) if (pfo !== null) chVals[startAddress + pfo] = 0;
+    for (const tfo of channels.tiltFineOffsets) if (tfo !== null) chVals[startAddress + tfo] = 0;
+    return { pan: manual.pan, tilt: manual.tilt };
+  }
+  if (!resolveSceneAim) return null;
+  const aim = resolveSceneAim();
+  if (!aim) return null;
+  for (const po of channels.panOffsets) chVals[startAddress + po] = aim.pan;
+  for (const to of channels.tiltOffsets) chVals[startAddress + to] = aim.tilt;
+  for (const pfo of channels.panFineOffsets) if (pfo !== null) chVals[startAddress + pfo] = 0;
+  for (const tfo of channels.tiltFineOffsets) if (tfo !== null) chVals[startAddress + tfo] = 0;
+  return aim;
+}
 
 
 /**
@@ -646,6 +704,10 @@ export function useDmxPlayback(options: {
   matricesRef?: React.MutableRefObject<any[]>; // Définitions de matrices RGB sauvegardées
   disabledFixturesRef?: React.MutableRefObject<Set<string>>; // Disabled fixture IDs
   fixturePositionsRef?: React.MutableRefObject<Record<string, { x: number; y: number; h?: number; zeroPan?: number; zeroTilt?: number; centerPan?: number; centerTilt?: number; mountMode?: string; tilt?: number; heading?: number }>>; // For stage-aware pan/tilt + centre du mouvement (capture)
+  /** Dimensions réelles de la scène 3D (mètres) — pour le recalcul des cibles. */
+  stageDimsRef?: React.MutableRefObject<{ width: number; depth: number }>;
+  /** Plateaux de scène — pour la hauteur de départ des fixtures en 3D. */
+  stageDecksRef?: React.MutableRefObject<StageDeck[]>;
   panTiltLimitsRef?: React.MutableRefObject<{ pan: number; tilt: number; perFixture?: Record<string, { pan: number; tilt: number }> }>; // DMX half-amplitude limits for autoscript movement (128 = full)
   onVirtualDmx?: (universe: number, channelValues: Record<number, number>) => void; // Mirror for 3D view
   dryRunMode?: boolean; // Skip hardware DMX output, keep store/3D updates
@@ -653,7 +715,7 @@ export function useDmxPlayback(options: {
   forceDropRef?: React.MutableRefObject<boolean>; // Force next tick to use drop parameters
   arbiterSource?: string; // Output-arbiter source id this engine writes as (default 'quickshow')
 }): void {
-  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,blackoutTracksRef,chaserTracksRef,chasersRef,scenesRef,showTracksRef,showsRef,sceneTracksRef,matrixTracksRef,matricesRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,panTiltLimitsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource,sceneLiveOverridesRef}=options;
+  const {isPlaying,currentTimeRef,cues,patchedFixtures,fixtureDefs,universes,dmxOutputEnabled,tierMultipliers,strobeLimit=10,colorFadeMs=250,overrideCuesRef,fixtureTracksRef,efxTracksRef,effectsRef,fixtureGroupsRef,colorTracksRef,strobeTracksRef,dimmerTracksRef,blackoutTracksRef,chaserTracksRef,chasersRef,scenesRef,showTracksRef,showsRef,sceneTracksRef,matrixTracksRef,matricesRef,onVirtualDmx,disabledFixturesRef,fixturePositionsRef,stageDimsRef,stageDecksRef,panTiltLimitsRef,dryRunMode=false,frozenRef,forceDropRef,arbiterSource,sceneLiveOverridesRef}=options;
   // Sécurité photosensibilité : le plafond utilisateur est lui-même plafonné
   // (vieux projet, preset ou entrée MIDI ne doivent jamais dépasser le max UI).
   const strobeLimitSafe = clampStrobeLimit(strobeLimit);
@@ -1763,31 +1825,48 @@ if (fa.isLaser) {
             }
           }
           if(panCount>0||tiltCount>0){
-            // ── Cible de scène (aiming 3D) : priorité sur l'autoscript,
-            // sous le chaser. Quand une cible est définie pour la fixture,
-            // les pan/tilt sont calculés par solvePanTilt pour viser le point
-            // 3D, pas par un pattern abstrait.
+            // ── Visée 3D : cible MANUELLE (clic Target de la modale 3D) puis
+            // cible de SCÈNE. Elles sont PRIORITAIRES sur l'autoscript.
+            // La cible manuelle a été résolue au clic avec la pose EXACTE du
+            // renderer 3D : on la rejoue telle quelle (par offset de canal
+            // pour les fixtures multi-bras). Aucune compensation "mount" ici :
+            // le solveur du Target a deja retire le mountTilt, le reappliquer
+            // decalait le faisceau de 45 deg et faisait deriver la fixture.
             let aimWritten = false;
-            if (hasSceneAim(pf.id)) {
+            const resolveSceneAim = (): { pan: number; tilt: number } | null => {
+              if (!hasSceneAim(pf.id)) return null;
               const aimPos = fixturePositions?.[pf.id];
-              if (aimPos) {
-                const aim = computeAimDMX(
-                  aimPos.x,
-                  aimPos.y,
-                  aimPos.h ?? 0,
-                  getSceneAim(pf.id)!,
-                  aimPos.heading ?? 0,
-                  aimPos.mountMode ?? 'top',
-                  aimPos.zeroPan,
-                  aimPos.zeroTilt
-                );
-                if (aim) {
-                  for (const po of fa.panOffsets) chVals[pf.startAddress + po] = aim.pan;
-                  for (const to of fa.tiltOffsets) chVals[pf.startAddress + to] = aim.tilt;
-                  chaserHoldRef.current.set(pf.id, { pan: aim.pan, tilt: aim.tilt });
-                  aimWritten = true;
-                }
-              }
+              if (!aimPos) return null;
+              // Pose REELLE de la fixture : dimensions de scene, hauteur du
+              // plateau et heading effectif par zone (les memes donnees que
+              // le renderer 3D). Sans cela, le recalcul visait de travers et
+              // la fixture derivait des le premier tick de playback.
+              const dims = stageDimsRef?.current ?? { width: 10, depth: 8 };
+              const deckHeight = stageDecksRef?.current
+                ? deckTopAt(stageDecksRef.current, aimPos.x, aimPos.y)
+                : 0;
+              return computeAimDMX(getSceneAim(pf.id)!, {
+                pos: {
+                  x: aimPos.x,
+                  y: aimPos.y,
+                  h: aimPos.h ?? 0,
+                  heading: aimPos.heading,
+                  tilt: aimPos.tilt,
+                  zeroPan: aimPos.zeroPan,
+                  zeroTilt: aimPos.zeroTilt,
+                  mountMode: aimPos.mountMode,
+                },
+                stageDims: dims,
+                deckHeight,
+                hasPanTilt: fa.panOffsets.length > 0 || fa.tiltOffsets.length > 0,
+                panMaxDeg: fa.panMaxDeg,
+                tiltMaxDeg: fa.tiltMaxDeg,
+              });
+            };
+            const aimApplied = applyAimTarget(chVals, pf.startAddress, pf.id, fa, resolveSceneAim);
+            if (aimApplied) {
+              chaserHoldRef.current.set(pf.id, { pan: aimApplied.pan, tilt: aimApplied.tilt });
+              aimWritten = true;
             }
             if (aimWritten) {
               // Cible appliquée : sauter le mouvement autoscript ci-dessous.
@@ -1969,22 +2048,7 @@ if (fa.isLaser) {
                   }
                   if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: 128, tilt: tv }), tilt: tv });
                 }}
-              }else{const fp = fixturePositions?.[pf.id];const mountMode = fp?.mountMode || (fp?.y !== undefined ? (fp.y > 0.75 ? 'rear' : fp.y < 0.25 ? 'ground' : fp.x < 0.25 || fp.x > 0.75 ? 'ground' : 'hanging') : 'top');const mountTd = (mountMode === 'rear' || mountMode === 'ground' || mountMode === 'hanging') ? -64 : 0;for(const po of fa.panOffsets)chVals[pf.startAddress+po]=Math.round(Math.max(0,Math.min(255,128+zeroPd)));for(const pfo of fa.panFineOffsets)if(pfo!==null)chVals[pf.startAddress+pfo]=0;for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=Math.round(Math.max(0,Math.min(255,128+zeroTd+mountTd)));for(const tfo of fa.tiltFineOffsets)if(tfo!==null)chVals[pf.startAddress+tfo]=0;}
-              // Cible manuelle (target depuis la modale 3D) : verrouille pan/tilt
-          // tant que l'utilisateur n'a pas reposé la cible ailleurs. Prend le
-          // pas sur le mouvement autoscript et sur le neutre 128+zero.
-          const manual = manualTargetRef.get(pf.id);
-          if (manual) {
-            const fp2 = fixturePositions?.[pf.id];
-            const mountMode2 = fp2?.mountMode || (fp2?.y !== undefined ? (fp2.y > 0.75 ? 'rear' : fp2.y < 0.25 ? 'ground' : fp2.x < 0.25 || fp2.x > 0.75 ? 'ground' : 'hanging') : 'top');
-            const mountTd2 = (mountMode2 === 'rear' || mountMode2 === 'ground' || mountMode2 === 'hanging') ? -64 : 0;
-            for (const po of fa.panOffsets) chVals[pf.startAddress + po] = manual.pan;
-            for (const to of fa.tiltOffsets) chVals[pf.startAddress + to] = Math.max(0, Math.min(255, manual.tilt + mountTd2));
-            // Canaux "fine" 16 bits : la cible manuelle est une position
-            // entiere → le fine vaut 0 (sinon la tete reste decalee).
-            for (const pfo of fa.panFineOffsets) if (pfo !== null) chVals[pf.startAddress + pfo] = 0;
-            for (const tfo of fa.tiltFineOffsets) if (tfo !== null) chVals[pf.startAddress + tfo] = 0;
-          }
+              }else{const fp = fixturePositions?.[pf.id];for(const po of fa.panOffsets)chVals[pf.startAddress+po]=Math.round(Math.max(0,Math.min(255,128+zeroPd)));for(const pfo of fa.panFineOffsets)if(pfo!==null)chVals[pf.startAddress+pfo]=0;for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=Math.round(Math.max(0,Math.min(255,128+zeroTd)));for(const tfo of fa.tiltFineOffsets)if(tfo!==null)chVals[pf.startAddress+tfo]=0;}
         } // fin else autoscript (chaser freeze ci-dessus)
             }
           }
@@ -2104,6 +2168,42 @@ const _FXPROF: Record<string, [number, number, number, number]> = {
                 ?Math.round(chVals[ch]*(1-crossfadeT)+nextCh[ch]*crossfadeT)
                 :Math.round(nextCh[ch]*crossfadeT);
             }
+          }
+        }
+
+        // ── Les visées 3D priment sur le crossfade ──
+        // Le blend mélange les pan/tilt de l'autoscript avec ceux de la cue
+        // suivante : sans cette ré-application, une visée Target se diluait à
+        // chaque transition de cue et la fixture dérivait de sa cible.
+        if (crossfadeT > 0) {
+          for (const fa of fixtures) {
+            const pfx = fa.fixture;
+            const aimPos = fixturePositions?.[pfx.id];
+            const resolver = (): { pan: number; tilt: number } | null => {
+              if (!hasSceneAim(pfx.id) || !aimPos) return null;
+              const dims = stageDimsRef?.current ?? { width: 10, depth: 8 };
+              const deckHeight = stageDecksRef?.current
+                ? deckTopAt(stageDecksRef.current, aimPos.x, aimPos.y)
+                : 0;
+              return computeAimDMX(getSceneAim(pfx.id)!, {
+                pos: {
+                  x: aimPos.x,
+                  y: aimPos.y,
+                  h: aimPos.h ?? 0,
+                  heading: aimPos.heading,
+                  tilt: aimPos.tilt,
+                  zeroPan: aimPos.zeroPan,
+                  zeroTilt: aimPos.zeroTilt,
+                  mountMode: aimPos.mountMode,
+                },
+                stageDims: dims,
+                deckHeight,
+                hasPanTilt: fa.panOffsets.length > 0 || fa.tiltOffsets.length > 0,
+                panMaxDeg: fa.panMaxDeg,
+                tiltMaxDeg: fa.tiltMaxDeg,
+              });
+            };
+            applyAimTarget(chVals, pfx.startAddress, pfx.id, fa, resolver);
           }
         }
 

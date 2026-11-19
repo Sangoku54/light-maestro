@@ -8,6 +8,11 @@
  * Ces fonctions résolvent exactement l'inverse — couvert par des tests
  * round-trip qui réémettent la direction depuis les valeurs DMX résolues.
  * Fonctions pures, sans dépendance three.js (tests déterministes).
+ *
+ * IMPORTANT : la course pan/tilt reelle de la fixture doit etre fournie via
+ * `panSpanRad` / `tiltSpanRad` (cf. `cm.panMaxDeg` / `cm.tiltMaxDeg`), sinon
+ * le solveur suppose 540/180 deg et vise de travers sur les fixtures dont la
+ * mecanique est differente.
  */
 
 export interface Vec3 {
@@ -19,14 +24,27 @@ export interface Vec3 {
 export interface PanTiltOpts {
   /** Rotation Y du groupe (heading, radians). */
   headingRad: number;
-  /** Compensation de montage (_mountTilt, radians) : π en ground, 0 sinon. */
+  /**
+   * Compensation de montage (radians) : PI/2 pour rear/ground/hanging
+   * (au neutre le faisceau est horizontal vers le public), 0 pour top.
+   */
   mountTilt: number;
-  /** Tare visuelle (_staticTilt, radians). */
+  /** Tare visuelle du tilt (radians) : _staticTilt + _zeroTiltDeg. */
   staticTilt: number;
-  /** Rotation X de l'arm (0, ou -π/2 en rear, radians). */
+  /** Rotation X de l'arm (radians). Le renderer de production la force a 0. */
   armRotX: number;
   /** Valeur DMX pan actuelle (0-255) pour choisir la copie équivalente la plus proche. */
   panCurrent?: number;
+  /**
+   * Course pan TOTALE de la fixture (radians) repartie sur 0-255.
+   * Defaut : 540 deg. Doit correspondre a `cm.panMaxDeg` du renderer 3D.
+   */
+  panSpanRad?: number;
+  /**
+   * Course tilt TOTALE de la fixture (radians) repartie sur 0-255.
+   * Defaut : 180 deg. Doit correspondre a `cm.tiltMaxDeg` du renderer 3D.
+   */
+  tiltSpanRad?: number;
 }
 
 export interface PanTiltResult {
@@ -40,6 +58,24 @@ export const PAN_FULL_SPAN = Math.PI * 3; // 540° → 255
 export const TILT_FULL_SPAN = Math.PI;    // 180° → 255
 /** Un tour complet de pan (2π) en unités DMX : 2π / 3π * 255 = 170. */
 export const PAN_FULL_TURN_DMX = 170;
+
+/** Nombre d'unites DMX par tour complet pour une course pan donnee. */
+export function panTurnDmxUnits(panSpanRad: number): number {
+  const span = Number.isFinite(panSpanRad) && panSpanRad > 0 ? panSpanRad : PAN_FULL_SPAN;
+  return Math.round((255 * 2 * Math.PI) / span);
+}
+
+/** Course pan effective (radians) avec repli sur la valeur historique. */
+function resolvePanSpan(o: PanTiltOpts): number {
+  const s = o.panSpanRad;
+  return Number.isFinite(s) && (s as number) > 0 ? (s as number) : PAN_FULL_SPAN;
+}
+
+/** Course tilt effective (radians) avec repli sur la valeur historique. */
+function resolveTiltSpan(o: PanTiltOpts): number {
+  const s = o.tiltSpanRad;
+  return Number.isFinite(s) && (s as number) > 0 ? (s as number) : TILT_FULL_SPAN;
+}
 
 export function clampDMX(v: number): number {
   return Math.max(0, Math.min(255, Math.round(v)));
@@ -94,10 +130,12 @@ export function solvePanTilt(origin: Vec3, target: Vec3, o: PanTiltOpts): PanTil
   }
 
   const dmxTilt = alpha - o.armRotX - o.mountTilt - o.staticTilt;
-  const panBase = (wrapPi(phi - o.headingRad) / PAN_FULL_SPAN + 0.5) * 255;
+  const panSpan = resolvePanSpan(o);
+  const tiltSpan = resolveTiltSpan(o);
+  const panBase = (wrapPi(phi - o.headingRad) / panSpan + 0.5) * 255;
   return {
-    pan: nearestDmx(panBase, o.panCurrent),
-    tilt: clampDMX((dmxTilt / TILT_FULL_SPAN + 0.5) * 255),
+    pan: nearestDmx(panBase, o.panCurrent, panTurnDmxUnits(panSpan)),
+    tilt: clampDMX((dmxTilt / tiltSpan + 0.5) * 255),
     phi,
     alpha,
   };
@@ -129,8 +167,9 @@ export function solveTiltForFixedPan(
   const alpha = Math.atan2(-vz, -ny);
 
   const dmxTilt = alpha - o.armRotX - o.mountTilt - o.staticTilt;
+  const tiltSpan = resolveTiltSpan(o);
   return {
-    tilt: clampDMX((dmxTilt / TILT_FULL_SPAN + 0.5) * 255),
+    tilt: clampDMX((dmxTilt / tiltSpan + 0.5) * 255),
     alpha,
   };
 }

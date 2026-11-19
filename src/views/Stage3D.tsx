@@ -23,6 +23,12 @@ import { useShowStore, getFixtureColor, type PatchedFixture, type FixturePos, ty
 import { FixturePanel } from './FixturePanel';
 import { analyzeFixtureChannels, type FixtureChannelAnalysis } from '../engine/fixture-analyzer';
 import { solvePanTilt, solveTiltForFixedPan } from '../engine/aim-target';
+import {
+  headingRadForPos,
+  hasPanTiltChannels,
+  mountTiltForMode,
+  type FixtureAimPose,
+} from '../utils/fixture-pose';
 import { generateEfxPanTilt } from '../hooks/fixture-tracks';
 import { useAppStore } from '../stores/appStore';
 import { dmxBridge } from '../utils/dmx-bridge';
@@ -35,7 +41,7 @@ import {
   type DmxFixtureCapability,
 } from '../hooks/dmx-cues';
 import { useTranslation } from 'react-i18next';
-import { Eye, Camera, Maximize2, Minimize2, ChevronUp, PanelTop, PanelBottom, PanelRight, Users, GripVertical, X, LayoutGrid, Music, Zap, List, Search, Crosshair, Sparkles, LampDesk, Undo2, RotateCcw, Home, ArrowLeft, Layers } from 'lucide-react';
+import { Eye, Camera, Maximize2, Minimize2, ChevronUp, PanelTop, PanelBottom, PanelRight, Users, GripVertical, X, LayoutGrid, Music, Zap, List, Search, Crosshair, Sparkles, LampDesk, Undo2, RotateCcw, Home, ArrowLeft, Layers, Unlock } from 'lucide-react';
 import { DEFAULT_POSITIONS, MUSICIAN_KINDS, isRosterEmpty, normalizeRoster, rosterTotal, type MusicianKind, type MusicianRoster } from '../utils/musicians';
 import { SUPPORT_KINDS, isBarSupport, needsSupportGeometry, resolveSupportKind, supportColumnHeight, DEFAULT_BAR_SPAN, BAR_HUNG_DEFAULT, BAR_DROP, BAR_CABLE_LEN, type FixtureSupport } from '../utils/supports';
 import { deckTopAt, deckRectMeters, deckToMeters, deckFromMeters, type StageDeck } from '../utils/stage-decks';
@@ -54,8 +60,8 @@ import { fixtureTestState } from '../utils/fixture-test-state';
 import { generateAllThumbnails, getVariantsForCategory } from '../utils/fixtureThumbnails';
 import { useProgrammerStore } from '../stores/programmerStore';
 import { applyTrussVisibility } from '../utils/stage-truss-visibility';
-import { setManualTarget } from '../utils/manualTarget';
-import { setSceneAim } from '../utils/sceneAim';
+import { setManualTarget, clearManualTarget, hasManualTarget } from '../utils/manualTarget';
+import { setSceneAim, clearSceneAim, hasSceneAim } from '../utils/sceneAim';
 
 // --- Constants -----------------------------------------------
 
@@ -799,6 +805,11 @@ export const Stage3D: React.FC<{
   const [targetMode, setTargetMode] = useState(false);
   const targetModeRef = useRef(false);
   const targetMarkerRef = useRef<THREE.Group | null>(null);
+  // Compteur d'invalidation : les cibles vivent dans des Maps module-level
+  // (hors React) -> on force un re-render pour rafraichir l'indicateur
+  // « cible active » et l'etat du bouton « liberer ».
+  const [targetsVersion, setTargetsVersion] = useState(0);
+  const bumpTargets = useCallback(() => setTargetsVersion((v) => v + 1), []);
 
   // Miroirs du s�lection courante pour les callbacks (pas de re-cr�ation).
   useEffect(() => { selectedFixtureIdRef.current = selectedFixtureId; }, [selectedFixtureId]);
@@ -839,6 +850,35 @@ export const Stage3D: React.FC<{
     if (selectedFixtureId) return [selectedFixtureId];
     return [];
   }, [selectedFixtureId]);
+
+  /** Une fixture de la selection porte-t-elle une cible (manuelle ou scene) ? */
+  const selectionHasTarget = useCallback((): boolean => {
+    for (const fid of getActionFixtureIds()) {
+      if (hasManualTarget(fid) || hasSceneAim(fid)) return true;
+    }
+    return false;
+  }, [getActionFixtureIds]);
+
+  /**
+   * Libere la cible des fixtures selectionnees : le playback reprend la main
+   * (autoscript / neutre) au lieu de rester verrouille sur la visee.
+   */
+  const releaseTargets = useCallback(() => {
+    const ids = getActionFixtureIds();
+    if (ids.length === 0) return;
+    for (const fid of ids) {
+      clearManualTarget(fid);
+      clearSceneAim(fid);
+    }
+    bumpTargets();
+  }, [getActionFixtureIds, bumpTargets]);
+
+  /** Indicateur « cible active » pour la selection (recalcule a chaque invalidation). */
+  const hasActiveTarget = useMemo(
+    () => selectionHasTarget(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectionHasTarget, targetsVersion, selectedFixtureId, multiSelectedIds],
+  );
 
   const applyHexColorToFixture = useCallback((fid: string, hex: string) => {
     const f3d = fixturesRef.current.get(fid);
@@ -896,16 +936,24 @@ export const Stage3D: React.FC<{
   // Ctrl+V : coller (dupliquer) fixture du presse-papier
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Ne JAMAIS intercepter une saisie en cours (champ de texte, input
+      // nombre, select, contenteditable) : sinon Ctrl+C / Ctrl+V / Shift+G
+      // cassent la copie, le collage et la saisie dans les panneaux 3D.
+      const tgt = e.target as HTMLElement | null;
+      if (tgt) {
+        const tag = (tgt.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || tgt.isContentEditable) return;
+      }
       const st = useShowStore.getState();
       // Ctrl+C : copier la fixture s�lectionn�e
-      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && selectedFixtureId) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C') && selectedFixtureId) {
         e.preventDefault();
         st.copyFixtureId(selectedFixtureId);
         try { (window as any).__lm_toast?.('Copi�', 'info'); } catch {}
         return;
       }
       // Ctrl+V : coller/dupliquer
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
         e.preventDefault();
         const result = st.pasteFixture();
         if ('error' in result) {
@@ -918,7 +966,7 @@ export const Stage3D: React.FC<{
         return;
       }
       // Shift+G : bascule snap grid
-      if (e.key === 'g' && e.shiftKey) {
+      if ((e.key === 'g' || e.key === 'G') && e.shiftKey) {
         e.preventDefault();
         _snapGrid = !_snapGrid;
         try {
@@ -1054,6 +1102,24 @@ export const Stage3D: React.FC<{
   // is never synced � using it here broke the 3D mirror whenever showStore
   // universes differed (multi-universe shows, renamed universes).
   const universes = useShowStore((s) => s.universes);
+
+  // -- Miroirs « live » ---------------------------------
+  // La boucle de rendu 3D est creee UNE fois (effet de scene, deps
+  // [stageDims, deckGeoKey]) et capture alors les valeurs de closure.
+  // Sans ces refs, une fixture patchee APRES la creation de la scene
+  // restait MUETTE en 3D (la closure conservait l'ancien `patchedFixtures`
+  // -> `pf` undefined -> fixture ignoree), et les options d'affichage
+  // (faisceaux) et les positions restaient figees.
+  const patchedFixturesRef = useRef(patchedFixtures);
+  patchedFixturesRef.current = patchedFixtures;
+  const fixturePositionsRef = useRef(fixturePositions);
+  fixturePositionsRef.current = fixturePositions;
+  const universesRef = useRef(universes);
+  universesRef.current = universes;
+  const showBeamsRef = useRef(showBeams);
+  showBeamsRef.current = showBeams;
+  const showSmokeRef = useRef(showSmoke);
+  showSmokeRef.current = showSmoke;
 
   // -- Init fixture positions for new fixtures ------------
   useEffect(() => {
@@ -1902,7 +1968,7 @@ export const Stage3D: React.FC<{
       controls.update();
 
       // Animate smoke particles
-      if (showSmoke && particles.visible) {
+      if (showSmokeRef.current && particles.visible) {
         const posArr = particles.geometry.attributes.position.array as Float32Array;
         const vels = particles.userData.velocities as Float32Array;
         for (let i = 0; i < particleCount; i++) {
@@ -2538,10 +2604,14 @@ export const Stage3D: React.FC<{
         f3d._headingRad = phi1;
         if (pos.mountMode) {
           f3d.mountMode = pos.mountMode;
-          // Reset _baseTilt and headGroup rotation to match new mount mode
-          const newBaseTilt = (pos.mountMode === 'rear' || pos.mountMode === 'ground' || pos.mountMode === 'hanging') ? Math.PI / 2 : 0;
+          // Reset _baseTilt et resynchronise les compensations de montage.
+          // Les tetes supplementaires ont LEUR PROPRE _mountTilt : sans cette
+          // resync, un changement de mode laissait les bras supplementaires
+          // compiles avec l'ancienne compensation (faisceau decale de 45 deg).
+          const newBaseTilt = mountTiltForMode(pos.mountMode);
           f3d._baseTilt = newBaseTilt;
-          if (f3d.headGroup) f3d.headGroup.rotation.x = newBaseTilt;
+          f3d._mountTilt = newBaseTilt;
+          for (const eh of f3d.extraHeads ?? []) eh._mountTilt = newBaseTilt;
         }
         // fitMountRotation supprimé : mount géré dans la boucle de rendu via mountComp
         f3d.group.rotation.x = 0;
@@ -2628,9 +2698,10 @@ export const Stage3D: React.FC<{
       f3d._headingRad = phi2;
       if (pos.mountMode) {
         f3d.mountMode = pos.mountMode;
-        const newBaseTilt = (pos.mountMode === 'rear' || pos.mountMode === 'ground' || pos.mountMode === 'hanging') ? Math.PI / 2 : 0;
+        const newBaseTilt = mountTiltForMode(pos.mountMode);
         f3d._baseTilt = newBaseTilt;
-        if (f3d.headGroup) f3d.headGroup.rotation.x = newBaseTilt;
+        f3d._mountTilt = newBaseTilt;
+        for (const eh of f3d.extraHeads ?? []) eh._mountTilt = newBaseTilt;
       }
       // fitMountRotation supprimé : mount géré dans la boucle de rendu via mountComp
       f3d.group.rotation.x = 0;
@@ -2831,7 +2902,7 @@ export const Stage3D: React.FC<{
     // Records creux 1-based par univers : l'ABSENCE d'une adresse = jamais
     // �crite par aucune source ? pan/tilt neutres (128), pas 0 (fond gauche/bas).
     const bridgedSparse: Record<number, Record<number, number>> = {};
-    const uniCount = universes.length || 1;
+    const uniCount = universesRef.current.length || 1;
     for (let u = 0; u < uniCount; u++) {
       const buf = dmxBridge.getChannels(u);
       if (buf) {
@@ -2862,7 +2933,7 @@ export const Stage3D: React.FC<{
         // Merge test values over real data when available (keeps engine/modale pan-tilt).
         // Otherwise start from a neutral buffer with pan/tilt centered (128) so the beam
         // points forward instead of defaulting to DMX 0 (pointing down).
-        const pfOv = patchedFixtures.find(f => f.id === f3d.id);
+        const pfOv = patchedFixturesRef.current.find(f => f.id === f3d.id);
         const cmOv = f3d.channelMap;
         const baseAddrOv = pfOv ? pfOv.startAddress - 1 : 0;
         const base = rawData instanceof Uint8Array ? rawData : (rawData ? normalizeDmxBuffer(rawData) : undefined);
@@ -2930,7 +3001,7 @@ export const Stage3D: React.FC<{
       // every index, muting fixtures. Expand explicitly instead.
       const data = normalizeDmxBuffer(rawData);
 
-      const pf = patchedFixtures.find(f => f.id === f3d.id);
+      const pf = patchedFixturesRef.current.find(f => f.id === f3d.id);
       if (!pf) continue;
 
       const baseAddr = pf.startAddress - 1;
@@ -3091,10 +3162,10 @@ export const Stage3D: React.FC<{
       const tiltRangeRad = ((cm.tiltMaxDeg ?? 180) * Math.PI) / 180;
       // Si aucune valeur DMX n'a �t� lue (buffer frais), ne pas �craser le
       // heading de zone : conserver l'orientation par d�faut de la fixture.
+      const freeAim = targetModeRef.current && (selectedFixtureIdRef.current === f3d.id || multiSelectedIdsRef.current.has(f3d.id));
       if (panVal !== null && tiltVal !== null) {
         // Mode Target : PRIORITAIRE sur tout blocage de zone � la fixture suit
         // librement le marqueur (pleine course pan/tilt, m�me derri�re/au sol).
-        const freeAim = targetModeRef.current && (selectedFixtureIdRef.current === f3d.id || multiSelectedIdsRef.current.has(f3d.id));
         if (f3d.armGroup) {
           // Z�ro VISUEL (rendu) : d�calage persistant du faisceau (tare � DMX=128).
           // Zone PAN : �90� autour de la direction par d�faut (jamais derri�re)
@@ -3134,9 +3205,10 @@ export const Stage3D: React.FC<{
         // Tilt: only for arm-based extra heads (has valid tiltOffset > 0 or from tiltOffsets)
         if (eh.rgbSegmentIdx === undefined && eh.tiltOffset > 0) {
           const ehTiltVal = panTiltRead(eh.tiltOffset);
-          const dmxTilt = ((ehTiltVal / 255) - 0.5) * Math.PI;
-          const ehElevation = clampTiltZone(dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180, f3d.mountMode);
-          const ehTarget = eh._mountTilt + ehElevation;
+          const dmxTilt = ((ehTiltVal / 255) - 0.5) * tiltRangeRad;
+          const rawEhElev = dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180;
+          const ehElevation = freeAim ? rawEhElev : clampTiltZone(rawEhElev, f3d.mountMode);
+          const ehTarget = (eh._mountTilt ?? 0) + ehElevation;
           const ehDelta = ehTarget - eh.headGroup.rotation.x;
           const ehMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
           eh.headGroup.rotation.x += Math.abs(ehDelta) > ehMaxStep
@@ -3165,13 +3237,13 @@ export const Stage3D: React.FC<{
           eh.pointLight.intensity = visIntensity * 55;
           // �teinte = retir�e du setup de lights (le forward renderer paie
           // chaque PointLight sur chaque fragment, m�me � intensit� 0).
-          eh.pointLight.visible = showBeams && visIntensity > 0.005;
+          eh.pointLight.visible = showBeamsRef.current && visIntensity > 0.005;
         }
         if (eh.beamCone) {
           const m = eh.beamCone.material as THREE.MeshBasicMaterial;
           m.color.copy(ehColor);
           m.opacity = visIntensity * 0.75;
-          eh.beamCone.visible = showBeams && visIntensity > 0.005;
+          eh.beamCone.visible = showBeamsRef.current && visIntensity > 0.005;
         }
       }
 
@@ -3228,7 +3300,7 @@ export const Stage3D: React.FC<{
        if (f3d.pointLight) {
          f3d.pointLight.color.copy(color);
          f3d.pointLight.intensity = visIntensity * 55;
-         f3d.pointLight.visible = showBeams && visIntensity > 0.005;
+         f3d.pointLight.visible = showBeamsRef.current && visIntensity > 0.005;
        }
 
         // --- LED Bar : un faisceau ind�pendant par pixel ---
@@ -3267,11 +3339,11 @@ export const Stage3D: React.FC<{
             const m = Math.max(pixR, pixG, pixB);
             px.light.color.setRGB(pixR, pixG, pixB);
             px.light.intensity = m > 0.01 ? visIntensity * 40 : 0;
-            px.light.visible = showBeams && m > 0.005;
+            px.light.visible = showBeamsRef.current && m > 0.005;
             const cm2 = px.cone.material as THREE.MeshBasicMaterial;
             cm2.color.setRGB(pixR, pixG, pixB);
             cm2.opacity = m * 0.75;
-            px.cone.visible = showBeams && m > 0.005;
+            px.cone.visible = showBeamsRef.current && m > 0.005;
             if (px.seg) {
               const sm = px.seg.material as THREE.MeshStandardMaterial;
               sm.emissive.setRGB(pixR, pixG, pixB);
@@ -3289,7 +3361,7 @@ export const Stage3D: React.FC<{
       // (plateau/plancher) au lieu d'un cercle flottant en plein air, et la
       // texture de fondu (map) �teint le faisceau progressivement.
       const fixFloorY = (() => {
-        const posNow = fixturePositions[pf.id];
+        const posNow = fixturePositionsRef.current[pf.id];
         try { return Math.max(0, deckTopAt(stageDecksRef.current, posNow?.x ?? 0.5, posNow?.y ?? 0.5)); }
         catch { return 0; }
       })();
@@ -3306,7 +3378,7 @@ export const Stage3D: React.FC<{
         const mat = f3d.beamCone.material as THREE.MeshBasicMaterial;
         mat.color.copy(color);
         mat.opacity = visIntensity * 0.75;
-        f3d.beamCone.visible = showBeams && visIntensity > 0.005;
+        f3d.beamCone.visible = showBeamsRef.current && visIntensity > 0.005;
         applyBeamLength(f3d.beamCone);
       }
 
@@ -3334,7 +3406,7 @@ export const Stage3D: React.FC<{
           mat.map = getGoboTexture(slotName);
           mat.needsUpdate = true;
           mat.opacity = visIntensity * 0.95;
-          f3d.goboDisc.visible = showBeams && visIntensity > 0.02;
+          f3d.goboDisc.visible = showBeamsRef.current && visIntensity > 0.02;
         } else {
           f3d.goboDisc.visible = false;
         }
@@ -3362,7 +3434,7 @@ export const Stage3D: React.FC<{
         }
       }
     }
-  }, [patchedFixtures, showBeams]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // -- Camera presets ----------------------------------
   // -- Camera presets ----------------------------------
@@ -3481,8 +3553,14 @@ export const Stage3D: React.FC<{
       if (obj instanceof THREE.Mesh || obj instanceof THREE.Sprite) pick.push(obj);
     });
     const hits = raycasterRef.current.intersectObjects(pick, false);
-    if (hits.length === 0) return null;
-    return hits[0].point.clone();
+    if (hits.length > 0) return hits[0].point.clone();
+    // Repli : aucun mesh touche (clic dans le vide, sur la grille ou sur le
+    // fond de scene) -> on vise l'intersection du rayon avec le plan du sol
+    // (y = 0). Sans ce repli, le clic cible ne faisait RIEN.
+    const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const groundPoint = new THREE.Vector3();
+    if (raycasterRef.current.ray.intersectPlane(groundPlane, groundPoint)) return groundPoint.clone();
+    return null;
   }, []);
 
   const ensureTargetMarker = useCallback(() => {
@@ -3535,15 +3613,31 @@ export const Stage3D: React.FC<{
       const curPan = prog[panAddr] ?? 128;
       const exitPos = new THREE.Vector3();
       f3d.lightTarget.getWorldPosition(exitPos);
+      // POSE CANONIQUE : exactement celle du renderer 3D (baseTilt, tares,
+      // courses mecaniques reelles). Aucune compensation "mount" supplementaire
+      // ici : le solveur retire deja mountTilt, l'appliquer une seconde fois
+      // decalait le faisceau de 45 deg sur les montages rear/ground/hanging.
+      const pose: FixtureAimPose = {
+        headingRad: f3d._headingRad,
+        mountTilt: f3d._baseTilt ?? 0,
+        staticTilt: f3d._staticTilt ?? 0,
+        zeroPanRad: (f3d._zeroPanDeg * Math.PI) / 180,
+        zeroTiltRad: (f3d._zeroTiltDeg * Math.PI) / 180,
+        armRotX: f3d.armGroup?.rotation.x ?? 0,
+        panSpanRad: ((cm.panMaxDeg ?? 540) * Math.PI) / 180,
+        tiltSpanRad: ((cm.tiltMaxDeg ?? 180) * Math.PI) / 180,
+      };
       const solved = solvePanTilt(
         { x: exitPos.x, y: exitPos.y, z: exitPos.z },
         { x: point.x, y: point.y, z: point.z },
         {
-          headingRad: f3d.group.rotation.y + (f3d._zeroPanDeg * Math.PI) / 180,
-          mountTilt: f3d._mountTilt ?? 0,
-          staticTilt: (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180,
-          armRotX: f3d.armGroup?.rotation.x ?? 0,
+          headingRad: pose.headingRad + pose.zeroPanRad,
+          mountTilt: pose.mountTilt,
+          staticTilt: pose.staticTilt + pose.zeroTiltRad,
+          armRotX: pose.armRotX,
           panCurrent: curPan,
+          panSpanRad: pose.panSpanRad,
+          tiltSpanRad: pose.tiltSpanRad,
         },
       );
       if (!solved) continue;
@@ -3556,16 +3650,16 @@ export const Stage3D: React.FC<{
         for (const off of (cm.tiltOffsets ?? [])) setCh(pf.startAddress + off, v);
         if (cm.tiltOffset !== null && !(cm.tiltOffsets ?? []).includes(cm.tiltOffset)) setCh(pf.startAddress + cm.tiltOffset, v);
       };
-      // Compensation matériel rear/ground/hanging : le tilt DMX résolu par
-      // solvePanTilt est relatif à la monture (0 = horizontal monture), mais
-      // le matériel interprète DMX 128 = horizontal sol. Pour une fixture
-      // rear, il faut -64 (DMX 64 au lieu de 128) pour viser le public.
-      const mountTd = (f3d.mountMode === 'rear' || f3d.mountMode === 'ground' || f3d.mountMode === 'hanging') ? -64 : 0;
+      // Valeurs conservees PAR OFFSET : une fixture multi-bras (Tonio 6 arm)
+      // a un tilt different par tete ; une valeur unique les aplatirait.
+      const tiltByOffset: Record<number, number> = {};
+      for (const off of (cm.tiltOffsets ?? [])) tiltByOffset[off] = solved.tilt;
+      if (cm.tiltOffset !== null && !(cm.tiltOffsets ?? []).includes(cm.tiltOffset)) tiltByOffset[cm.tiltOffset] = solved.tilt;
       writePan(solved.pan);
-      writeTilt(Math.max(0, Math.min(255, solved.tilt + mountTd)));
+      writeTilt(solved.tilt);
       // Verrouille la position visée : le playback ne doit plus écraser
       // ces pan/tilt avec le neutre ou un mouvement autoscript.
-      setManualTarget(fid, solved.pan, Math.max(0, Math.min(255, solved.tilt + mountTd)));
+      setManualTarget(fid, solved.pan, solved.tilt, tiltByOffset);
       // Stocke aussi la cible 3D pour le playback (scène aiming) — cohérence
       // entre le clic cible modale et le calcul DMX pan/tilt.
       setSceneAim(fid, point.x, point.y, point.z);
@@ -3598,16 +3692,25 @@ export const Stage3D: React.FC<{
           { x: point.x, y: point.y, z: point.z },
           solved.phi,
           {
-            headingRad: f3d.group.rotation.y + (f3d._zeroPanDeg * Math.PI) / 180,
-            mountTilt: eh._mountTilt ?? f3d._mountTilt ?? 0,
-            staticTilt: (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180,
-            armRotX: f3d.armGroup.rotation.x ?? 0,
+            headingRad: pose.headingRad + pose.zeroPanRad,
+            mountTilt: eh._mountTilt ?? pose.mountTilt,
+            staticTilt: pose.staticTilt + pose.zeroTiltRad,
+            armRotX: pose.armRotX,
+            panSpanRad: pose.panSpanRad,
+            tiltSpanRad: pose.tiltSpanRad,
           },
         );
-        if (sub) setCh(pf.startAddress + eh.tiltOffset, Math.max(0, Math.min(255, sub.tilt + mountTd)));
+        if (sub) {
+          setCh(pf.startAddress + eh.tiltOffset, sub.tilt);
+          tiltByOffset[eh.tiltOffset] = sub.tilt;
+        }
       }
+      // Le verrou manuel doit refleter les tilts par tete (multi-bras).
+      setManualTarget(fid, solved.pan, solved.tilt, tiltByOffset);
     }
-  }, [patchedFixtures]);
+    // Rafraichit l'indicateur « cible active » / l'etat du bouton « liberer ».
+    bumpTargets();
+  }, [patchedFixtures, bumpTargets]);
 
   // -- Canvas click handler (raycasting) -----------------
   const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -3677,8 +3780,8 @@ export const Stage3D: React.FC<{
     if (intersects.length > 0) {
       let obj: THREE.Object3D | null = intersects[0].object;
       while (obj && !obj.userData?.fixtureId) obj = obj.parent;
-      if (obj?.userData?.fixtureId) {
-        const fid = obj.userData.fixtureId as string;
+      const fid = obj?.userData?.fixtureId as string | undefined;
+      if (fid) {
         const additive = e.shiftKey || e.ctrlKey || e.metaKey;
         if (additive) {
           selectedFixtureIdRef.current = fid;
@@ -3693,8 +3796,10 @@ export const Stage3D: React.FC<{
           setMultiSelectedIds(new Set([fid]));
           if (fid !== selectedFixtureId) setSelectedFixtureId(fid);
         }
-        // Direct mode : init pan/tilt drag on mousedown over selected fixture
-        if (directMode && fid === selectedFixtureId) {
+        // Mode Direct : drag pan/tilt. On arme sur le PREMIER clic (la fixture
+        // vient d'etre selectionnee) : comparer avec l'ancien `selectedFixtureId`
+        // (state React d'avant le clic) exigeait deux clics.
+        if (directMode) {
           const f3d = fixturesRef.current.get(fid);
           if (f3d) {
             const pf = patchedFixtures.find(f => f.id === fid);
@@ -3707,6 +3812,16 @@ export const Stage3D: React.FC<{
             if (controlsRef.current) controlsRef.current.enabled = false;
             e.preventDefault();
           }
+        } else if (!leftDockCollapsed) {
+          // Panneau fixtures ouvert + clic simple : drag de POSITION de la
+          // fixture. Cette branche etait placee APRES le `if (intersects.length
+          // > 0)` : elle ne pouvait jamais etre atteinte (le code mort du
+          // drag de fixture + le snap 1 m qui ne s'appliquait jamais).
+          const st = useShowStore.getState();
+          const pos = st.fixturePositions[fid];
+          fixtureDragRef.current = { id: fid, startX: e.clientX, startY: e.clientY, prevX: pos?.x ?? 0.5, prevY: pos?.y ?? 0.3 };
+          if (controlsRef.current) controlsRef.current.enabled = false;
+          e.preventDefault();
         }
       }
     } else if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -3747,20 +3862,6 @@ export const Stage3D: React.FC<{
             e.preventDefault();
           }
         }
-      }
-    } else if (!leftDockCollapsed && intersects.length > 0) {
-      // Panneau fixtures ouvert + clic simple : drag la fixture
-      let obj: THREE.Object3D | null = intersects[0].object;
-      while (obj && !obj.userData?.fixtureId) obj = obj.parent;
-      const fid = obj?.userData?.fixtureId as string | undefined;
-      if (fid && fid !== selectedFixtureId) {
-        selectSingleFixture(fid);
-        const st = useShowStore.getState();
-        const pos = st.fixturePositions[fid];
-        fixtureDragRef.current = { id: fid, startX: e.clientX, startY: e.clientY, prevX: pos?.x ?? 0.5, prevY: pos?.y ?? 0.3 };
-        if (controlsRef.current) controlsRef.current.enabled = false;
-        e.preventDefault();
-        return;
       }
     } else {
       // Clic � c�t� du panneau : on ne d�s�lectionne PAS � la modale reste
@@ -5380,6 +5481,17 @@ export const Stage3D: React.FC<{
                     <Crosshair size={12} /> {targetMode ? t('stage3D.targetActive') : t('stage3D.targetBtn')}
                   </button>
                 </RichTooltip>
+                {hasActiveTarget && (
+                  <RichTooltip content={{ title: t('stage3D.releaseTargetTipTitle'), text: t('stage3D.releaseTargetTipText'), tone: 'info' }}>
+                    <button
+                      onClick={releaseTargets}
+                      className="mt-1 w-full px-2.5 py-1.5 rounded-md text-[10px] font-bold flex items-center justify-center gap-1.5 border border-amber-500/40 bg-amber-600/20 text-amber-200 hover:bg-amber-600/30 transition-all"
+                      title={t('stage3D.releaseTarget')}
+                    >
+                      <Unlock size={12} /> {t('stage3D.releaseTarget')}
+                    </button>
+                  </RichTooltip>
+                )}
                 <div className="text-[9px] text-gray-500">{t('stage3D.directHint')}</div>
                 <div className="flex gap-1.5">
                   <RichTooltip content={{ title: t('stage3D.recSceneTipTitle'), text: t('stage3D.recSceneTipText'), example: t('stage3D.recSceneTipExample'), tone: 'success' }}>
@@ -6005,79 +6117,10 @@ function updateFixtureSupport(
   f3d.supportKey = key;
 }
 
-/**
- * Yaw (rotation Y) d'installation d'une fixture � convention � vue audience �
- * (le public est c�t� -Z, l'arri�re de sc�ne c�t� +Z).
- *
- * Direction par d�faut PAR ZONE, faisceaux PARALL�LES au sol (pas de
- * convergence vers un point) :
- *   - devant   (y = 0.25) ? +Z  (vers l'arri�re de sc�ne)
- *   - arri�re  (y = 0.75) ? -Z  (vers le public)
- *   - c�t� -X  (x = 0.25) ? +X  (vers le centre, direction pure)
- *   - c�t� +X  (x = 0.75) ? -X  (vers le centre, direction pure)
- *   - centre              ? -Z (vers le public)
- *
- * La r�gle de zone GAGNE TOUJOURS pour les fixtures motoris�es (pan/tilt DMX) :
- * la vis�e fine se fait via l'outil Aim / les faders pan/tilt (canaux DMX),
- * jamais via le heading � sinon un heading h�rit� d'une ancienne session
- * renvoie les faisceaux dos au public dans toutes les sc�nes.
- * Pour une fixture SANS pan/tilt (par, bar�), le heading (drag de rotation)
- * reste le seul outil d'aim ? respect� si ? 0.
- */
-export function headingRadForPos(pos: FixturePos, mountMode: string, stageDims: { width: number; depth: number }, hasPanTilt = true): number {
-   if (!hasPanTilt && pos.heading) return ((pos.heading ?? 0) * Math.PI) / 180;
-   // Règle d'orientation : toutes les fixtures visent le CENTRE de la scène.
-   //
-   // mountMode peut être obsolète (fixtures créées avant ce fix) : on le
-   // ré-derive depuis la position quand il s'agit d'une valeur par défaut.
-   // Si le mode est déjà explicite ('top' ou 'rear'), on le respecte.
-   let mode = mountMode;
-   if (mode !== 'top' && mode !== 'rear') {
-     if (pos.y > 0.75) mode = 'rear';
-     else if (pos.y < 0.25) mode = 'ground';
-     else if (pos.x < 0.25 || pos.x > 0.75) mode = 'ground';
-     // sinon reste hanging
-   }
-   if (mode === 'top') {
-     // top : faisceau vers le bas, heading indifferent
-     return 0;
-   }
-   // rear / ground / hanging : viser le centre de la scène avec convergence
-   // modérée. Sur un stage étroit (ex. 2×20), atan2(lateral, |y-0.5|*depth)
-   // diverge vers ±π/2 quand y→0.5 (composante profondeur → 0). On ajoute un
-   // plancher proportional à la profondeur du stage pour garder une visée
-   // globalement orientée vers le public, avec une convergence latérale
-   // modérée (max ±90°).
-   //
-   // clamp 自适应：上限 = atan2(stage_width, stage_depth)
-   //   — 宽舞台 (10×6) → cap≈84°，允许大侧偏（保留原始发散特性）
-   //   — 窄舞台 (2×20) → cap≈11°，防止 y≈0.5 处发散到 ±90°
-   const lateral = (pos.x - 0.5) * stageDims.width;
-   const longitudinal = Math.abs(pos.y - 0.5) * stageDims.depth;  // fixture à droite (x>0.5) doit viser le centre (-X) → angle négatif
-   // Plancher = min(w,d)*0.4：对窄舞台取 depth*0.4，对宽舞台取 width*0.4
-   // 确保 y≈0.5 时纵向分量不至于太小导致 phi 发散
-   const floor = Math.min(stageDims.width, stageDims.depth) * 0.4;
-   let phi = Math.atan2(lateral, Math.max(longitudinal, floor));
-   // 自适应 clamp：基于舞台宽高比动态调整最大偏转角
-   // 公式：atan2(width, max(1, width/depth)) = atan2(width*depth, max(depth, width))
-   // 等价于 atan(aspectRatio) 弧度
-   const maxPhiRad = Math.atan2(stageDims.width, Math.max(1, stageDims.width / stageDims.depth));
-   phi = Math.max(-maxPhiRad, Math.min(maxPhiRad, phi));
-   // Les fixtures au sol devant (y < 0.25) pointent vers l'arrière (centre de scène),
-   // pas vers le public. Inverser phi : phi -> π - phi (inverse Z, garde X vers le centre).
-   if (mode === 'ground' && pos.y < 0.25) {
-     phi = Math.PI - phi;
-     while (phi > Math.PI) phi -= 2 * Math.PI;
-     while (phi < -Math.PI) phi += 2 * Math.PI;
-   }
-   return phi;
-}
-/** True si la fixture a au moins un canal pan/tilt DMX (fixture motoris�e). */
-export function hasPanTiltChannels(cm: { panOffsets?: number[]; panOffset?: number | null; tiltOffsets?: number[]; tiltOffset?: number | null; scanXOffset?: number | null; scanYOffset?: number | null }): boolean {
-  return (cm.panOffsets?.length ?? 0) > 0 || cm.panOffset !== null
-    || (cm.tiltOffsets?.length ?? 0) > 0 || cm.tiltOffset !== null
-    || cm.scanXOffset !== null || cm.scanYOffset !== null;
-}
+/** Re-export : les definitions canoniques vivent dans utils/fixture-pose.ts
+ *  (partagees par le renderer 3D, l'outil Target et le playback DMX). */
+export { headingRadForPos, hasPanTiltChannels };
+
 
 /**
  * Zone d'�clairage utile � clamp du c�ne de balayage (relatif � la direction
@@ -6103,28 +6146,3 @@ export function clampTiltZone(elevRad: number, mountMode: string): number {
   return e;
 }
 
-function fitMountRotation(f3d: Fixture3D, mode: string): void {
-  // Reset complet : pas de rotation statique sur armGroup.
-  f3d.group.rotation.x = 0;
-  if (f3d.armGroup) f3d.armGroup.rotation.x = 0;
-  f3d._mountTilt = 0;
-
-  // À tilt DMX neutre (elevation = 0), le faisceau doit pointer horizontalement
-  // vers l'avant (-Z, public). Le faisceau sort le long de -Y local, donc il
-  // faut +π/2 autour de X pour transformer (0,-1,0) en (0,0,-1).
-  if (f3d.headGroup) {
-    if (mode === 'rear' || mode === 'ground' || mode === 'hanging') {
-      f3d.headGroup.rotation.x = Math.PI / 2;
-      f3d._mountTilt = Math.PI / 2;
-    }
-    // mode 'top' : rotation.x reste 0 → faisceau vers le bas (-Y)
-  }
-
-  // Extra heads suivent la même compensation
-  for (const eh of f3d.extraHeads ?? []) {
-    eh._mountTilt = f3d._mountTilt;
-    if (eh.headGroup) {
-      eh.headGroup.rotation.x = f3d._mountTilt;
-    }
-  }
-}
