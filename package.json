@@ -121,6 +121,11 @@
       {
         "provider": "github",
         "releaseType": "release"
+      },
+      {
+        "provider": "generic",
+        "url": "https://ton-domaine.lws.to/download/",
+        "channel": "latest"
       }
     ]
   }
