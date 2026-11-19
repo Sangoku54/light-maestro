@@ -30,7 +30,11 @@ export interface Vec3 {
 export interface PosePos {
   /** X normalise (0.5 = centre). */
   x: number;
-  /** Y normalise (profondeur : 0 = fond de scene, 1 = public). */
+  /**
+   * Y normalise (profondeur) : 0 = bord PUBLIC, 1 = fond de scene.
+   * Repere monde Stage3D : z = (y - 0.5) * profondeur, le public est en -Z
+   * (camera audience en -depth/2 - 4, `lip` en -depth/2).
+   */
   y: number;
   /** Hauteur au-dessus du plateau, en metres. */
   h: number;

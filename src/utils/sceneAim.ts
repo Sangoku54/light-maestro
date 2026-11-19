@@ -33,7 +33,11 @@ export interface AimTarget {
   x: number;
   /** Y en mètres (hauteur au-dessus du sol) */
   y: number;
-  /** Z en mètres sur la scène (0 = centre, négatif = vers l'arrière, positif = vers le public) */
+  /**
+   * Z en mètres sur la scène (0 = centre).
+   * Repère monde Stage3D : négatif = vers le PUBLIC (-Z), positif = vers le fond
+   * de scène (+Z). La caméra « audience » est en -depth/2 - 4.
+   */
   z: number;
 }
 
@@ -104,7 +108,7 @@ export interface AimFixtureContext {
  * Position monde (mètres) de la fixture — identique au calcul du renderer 3D :
  *   x = (pos.x - 0.5) * largeur
  *   y = hauteur du plateau + pos.h
- *   z = (pos.y - 0.5) * profondeur
+ *   z = (pos.y - 0.5) * profondeur   (public en -Z, fond de scène en +Z)
  */
 export function aimOriginMeters(
   pos: PosePos,
