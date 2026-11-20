@@ -246,6 +246,11 @@ export interface RemoteWidgetEntry {
   max?: number;
   value?: number;
   active: boolean;
+  /** Géométrie de la tuile sur le canvas du PC (px) — même disposition sur la tablette. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 /**

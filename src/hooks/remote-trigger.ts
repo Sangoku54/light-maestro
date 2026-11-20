@@ -143,6 +143,15 @@ export interface RemoteWidgetEntry {
   value?: number;
   /** Tuile « allumée » (scène en cours, preset en lecture…). */
   active: boolean;
+  /**
+   * Géométrie EXACTE de la tuile sur le canvas du PC (px). Elle permet au
+   * Remote de reproduire la disposition de la Console Virtuelle à l'identique
+   * au lieu de recomposer les tuiles en flux libre (grille auto-fill).
+   */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 /** Intervalle de push du snapshot (500 ms, throttlé avec garde anti-recouvrement). */
@@ -487,6 +496,12 @@ export function buildWidgetSnapshot(): RemoteWidgetEntry[] {
         max: isSlider ? max : undefined,
         value: isSlider ? (typeof value === 'number' ? value : min) : undefined,
         active: activeIds.has(w.id),
+        // Géométrie du canvas du PC : c'est elle qui permet au Remote de
+        // dessiner la console avec la MÊME disposition que sur le PC.
+        x: Number(w.x) || 0,
+        y: Number(w.y) || 0,
+        width: Number(w.width) || 0,
+        height: Number(w.height) || 0,
       };
     });
 }

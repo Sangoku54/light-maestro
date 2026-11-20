@@ -120,6 +120,15 @@ export interface RemoteWidgetEntry {
   max?: number;
   value?: number;
   active: boolean;
+  /**
+   * Géométrie de la tuile sur le canvas du PC (px). Optionnelle : un PC
+   * antérieur (avant 1.0.47) n'envoie pas ces champs → le Remote retombe
+   * alors sur la disposition en grille historique.
+   */
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
 }
 
 export type RemoteCommand =
@@ -701,21 +710,34 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
   .btn.nav { background: #4a2d7a; border-color: var(--purple); color: #ede9fe; }
   .row { display: flex; gap: 6px; }
 
-  /* ── Console virtuelle ── */
+  /* ── Console virtuelle : MÊME disposition que sur le PC ── */
   .pages { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
   .page-chip { padding: 8px 14px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid #33334d; background: #1a1a26; color: #8b8ba3; cursor: pointer; touch-action: manipulation; }
   .page-chip.on { background: #26263a; color: #fff; border-color: #55557a; }
-  .vc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
-  .vc-btn { position: relative; border-radius: 12px; padding: 16px 12px; font-size: 13px; font-weight: 700; text-align: center; cursor: pointer; touch-action: manipulation; border: 2px solid #26263a; background: #1a1a26; color: #e8e8f0; overflow: hidden; transition: transform .1s, filter .1s; min-height: 64px; display: flex; align-items: center; justify-content: center; }
-  .vc-btn:active { transform: scale(.95); }
-  .vc-btn .lbl { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .vc-btn.on { color: #fff; }
-  .vc-btn .badge { position: absolute; top: 6px; right: 8px; font-size: 9px; opacity: .8; font-weight: 600; }
-  .vc-fader { background: #15151f; border: 1px solid #26263a; border-radius: 12px; padding: 10px 12px; }
-  .vc-fader .fhead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 4px; }
-  .vc-fader .fname { font-size: 12px; font-weight: 600; color: #b8b8cc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .vc-fader .fval { font-size: 13px; font-weight: 800; color: var(--amber); flex-shrink: 0; }
-  .vc-fader input[type="range"] { width: 100%; height: 38px; }
+
+  /* Canvas : les tuiles sont placees en position ABSOLUE (x/y du PC), donc
+     la disposition est identique a celle du PC. L'echelle est calculee pour
+     tenir dans la largeur de l'appareil ; si les tuiles deviennent trop
+     petites pour le doigt, on grossit au-dela et on laisse defiler
+     horizontalement (jamais de cible tactile < 44 px). */
+  .vc-scroll { overflow-x: auto; overflow-y: hidden; border: 1px solid #26263a; border-radius: 12px; background-color: #08080c; background-image: linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px); background-size: 24px 24px; }
+  .vc-canvas { position: relative; min-height: 80px; }
+  .vc-layer { position: relative; transform-origin: 0 0; }
+
+  .vc-tile { position: absolute; border-radius: 12px; border: 2px solid; font-weight: 600; font-size: 12px; line-height: 1.25; display: flex; align-items: center; justify-content: center; text-align: center; padding: 4px 6px; overflow: hidden; cursor: pointer; touch-action: manipulation; transition: filter .1s; }
+  .vc-tile:active { filter: brightness(1.25); }
+  .vc-tile .lbl { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; word-break: break-word; }
+  .vc-tile .badge { position: absolute; top: 4px; right: 6px; font-size: 9px; opacity: .75; font-weight: 600; }
+
+  /* Fader vertical, comme sur le PC (piste ronde, remplissage par le bas). */
+  .vc-fader { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .vc-fader .track { position: relative; flex: 1; width: 32px; max-width: 92%; border-radius: 999px; background: rgba(31,41,55,.5); border: 1px solid rgba(75,85,99,.55); overflow: hidden; touch-action: none; cursor: pointer; }
+  .vc-fader .fill { position: absolute; bottom: 0; left: 0; right: 0; background: #a855f7; opacity: .6; }
+  .vc-fader .fill.gm { background: #22d3ee; }
+  .vc-fader .thumb { position: absolute; left: 50%; width: 20px; height: 20px; margin-left: -10px; border-radius: 999px; border: 2px solid #c084fc; background: #9333ea; box-shadow: 0 2px 6px rgba(0,0,0,.5); }
+  .vc-fader .thumb.gm { border-color: #a5f3fc; background: #0891b2; }
+  .vc-fader .fval { font-size: 10px; font-weight: 700; color: var(--amber); font-variant-numeric: tabular-nums; }
+  .vc-fader .fname { font-size: 9px; color: #71717a; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .empty { color: #8b8ba3; font-size: 13px; text-align: center; padding: 16px 0; }
   #error { position: fixed; left: 12px; right: 12px; bottom: 12px; background: #7f1d1d; color: #fee2e2; border: 1px solid var(--red); border-radius: 10px; padding: 12px 14px; font-size: 13px; font-weight: 600; z-index: 99; }
   .hidden { display: none !important; }
@@ -762,7 +784,8 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
   </div>
   <div id="panel-console" class="hidden">
     <div class="pages" id="vcPages"></div>
-    <div class="vc-grid" id="vcWidgets"></div>
+    <div class="vc-scroll" id="vcScroll"><div class="vc-canvas" id="vcCanvas"><div class="vc-layer" id="vcWidgets"></div></div></div>
+    <div class="empty hidden" id="vcEmpty">Aucun widget dans cette page</div>
   </div>
 </main>
 <div id="error" hidden></div>
@@ -872,7 +895,19 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
       document.getElementById('panel-cueLists').classList.toggle('hidden', activeTab !== 'cueLists');
       document.getElementById('panel-presets').classList.toggle('hidden', activeTab !== 'presets');
       document.getElementById('panel-console').classList.toggle('hidden', activeTab !== 'console');
+      // L'onglet Console devient visible : sa largeur n'etait pas mesurable
+      // tant qu'il etait masque (clientWidth = 0) -> on remets l'echelle.
+      if (activeTab === 'console') renderConsole();
     });
+  });
+
+  // Rotation de la tablette / redimensionnement de la fenetre : on recalcule
+  // l'echelle du canvas de la Console Virtuelle.
+  window.addEventListener('resize', function () {
+    if (activeTab === 'console') renderConsole();
+  });
+  window.addEventListener('orientationchange', function () {
+    if (activeTab === 'console') renderConsole();
   });
 
   // ── Blackout ─────────────────────────────────────
@@ -1020,32 +1055,97 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
     loadShow: 'Show'
   };
 
-  function vcButtonTile(w) {
+  // ── Canvas de la Console Virtuelle ────────────────────────────────────
+  // Le PC place chaque widget en position ABSOLUE (x/y/width/height) sur son
+  // canvas. On reproduit cette disposition a l'identique : la tablette montre
+  // la meme console que le PC, pas une grille recomposee au hasard.
+  var VC_MIN_TOUCH = 44; // px : cible tactile de reference (Apple HIG)
+
+  /**
+   * Geometrie d'un widget. Si le PC n'envoie pas de geometrie (build
+   * anterieur), on retombe sur une grille 4 colonnes plutot que d'afficher
+   * des tuiles de taille nulle.
+   */
+  function vcGeom(w, idx) {
+    var ww = Number(w.width) || 0;
+    var hh = Number(w.height) || 0;
+    if (ww > 0 && hh > 0) {
+      return { x: Number(w.x) || 0, y: Number(w.y) || 0, w: ww, h: hh };
+    }
+    var cols = 4, cw = 120, ch = 80, gap = 10;
+    return { x: (idx % cols) * (cw + gap), y: Math.floor(idx / cols) * (ch + gap), w: cw, h: ch };
+  }
+
+  /** Tuile bouton : meme aspect que sur le PC (bordure coloree, halo quand allume). */
+  function vcButtonTile(w, g) {
     var color = safeColor(w.color);
-    var on = w.active ? ' on' : '';
-    var bg = w.active ? color + '55' : color + '18';
-    var bd = w.active ? color : color + '55';
     var badge = ACTION_LABELS[w.actionType] || '';
-    return '<button class="vc-btn' + on + '" type="button" data-id="' + esc(w.id) + '"'
-      + ' style="background:' + bg + ';border-color:' + bd + (w.active ? ';box-shadow:0 0 18px ' + color + '66' : '') + '">'
-      + '<span class="lbl">' + esc(w.label || w.id) + '</span>'
+    return '<button class="vc-tile" type="button" data-id="' + esc(w.id) + '"'
+      + ' style="left:' + g.x + 'px;top:' + g.y + 'px;width:' + g.w + 'px;height:' + g.h + 'px"'
+      + '><span class="lbl">' + esc(w.label || w.id) + '</span>'
       + (badge ? '<span class="badge">' + esc(badge) + '</span>' : '')
       + '</button>';
   }
 
-  function vcFaderTile(w) {
+  /** Fader vertical : meme principe que sur le PC (piste ronde, remplissage par le bas). */
+  function vcFaderTile(w, g) {
     var min = Number(w.min == null ? 0 : w.min);
     var max = Number(w.max == null ? 255 : w.max);
     var val = Number(w.value == null ? min : w.value);
     var lo = Math.min(min, max);
     var hi = Math.max(min, max);
     var span = hi - lo;
-    var pct = span > 0 ? Math.round(((val - lo) / span) * 100) : 0;
-    return '<div class="vc-fader" data-id="' + esc(w.id) + '">'
-      + '<div class="fhead"><span class="fname">' + esc(w.label || w.id) + '</span>'
-      + '<span class="fval" data-v="' + esc(w.id) + '">' + val + '</span></div>'
-      + '<input type="range" data-fader="' + esc(w.id) + '" min="0" max="100" value="' + pct + '">'
+    var pct = span > 0 ? ((val - lo) / span) * 100 : 0;
+    var isGm = w.actionType === 'groupMaster';
+    return '<div class="vc-fader" data-id="' + esc(w.id) + '"'
+      + ' style="left:' + g.x + 'px;top:' + g.y + 'px;width:' + g.w + 'px;height:' + g.h + 'px">'
+      + '<div class="track" data-track="' + esc(w.id) + '">'
+      + '<div class="fill' + (isGm ? ' gm' : '') + '" style="height:' + pct + '%"></div>'
+      + '<div class="thumb' + (isGm ? ' gm' : '') + '" style="bottom:calc(' + pct + '% - 10px)"></div>'
+      + '</div>'
+      + '<span class="fval" data-v="' + esc(w.id) + '">' + Math.round(val) + '</span>'
+      + '<span class="fname">' + esc(w.label || w.id) + '</span>'
       + '</div>';
+  }
+
+  /**
+   * Met le canvas a l'echelle : la console tient dans la largeur de l'appareil
+   * si possible ; sinon on defile horizontalement plutot que de reduire les
+   * tuiles sous une taille illisible (bouton < 40 px de haut, fader < 28 px
+   * de large).
+   */
+  function layoutConsole(items) {
+    var scrollEl = document.getElementById('vcScroll');
+    var canvasEl = document.getElementById('vcCanvas');
+    var layerEl = document.getElementById('vcWidgets');
+    if (!items.length) {
+      canvasEl.style.width = '0px';
+      canvasEl.style.height = '0px';
+      return;
+    }
+    var maxX = 0, maxY = 0, minBtnH = Infinity, minFaderW = Infinity;
+    items.forEach(function (it) {
+      maxX = Math.max(maxX, it.g.x + it.g.w);
+      maxY = Math.max(maxY, it.g.y + it.g.h);
+      if (it.w.type === 'slider') minFaderW = Math.min(minFaderW, it.g.w);
+      else minBtnH = Math.min(minBtnH, it.g.h);
+    });
+    if (!isFinite(minBtnH) || minBtnH <= 0) minBtnH = 64;
+    if (!isFinite(minFaderW) || minFaderW <= 0) minFaderW = 32;
+
+    var avail = scrollEl.clientWidth - 2;
+    var fit = maxX > 0 && avail > 0 ? avail / maxX : 1;
+    if (fit > 1) fit = 1; // une console plus petite que l'ecran n'est pas agrandie
+    // Lisibilite tactile : on ne reduit pas sous ces bornes.
+    var touchScale = Math.max(40 / minBtnH, 28 / minFaderW);
+    var scale = Math.max(fit, touchScale);
+    if (scale > 1.25) scale = 1.25;
+
+    layerEl.style.width = maxX + 'px';
+    layerEl.style.height = maxY + 'px';
+    layerEl.style.transform = 'scale(' + scale + ')';
+    canvasEl.style.width = Math.round(maxX * scale) + 'px';
+    canvasEl.style.height = Math.round(maxY * scale) + 'px';
   }
 
   function renderConsole() {
@@ -1056,8 +1156,14 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
     // DOM (le fader reste sous le doigt, pas de clignotement).
     var structSig = pages.join(',') + '#' + vcPage + '#';
     widgets.forEach(function (w) {
-      structSig += w.id + '|' + w.type + '|' + (w.label || '') + '|' + (w.color || '') + '|' + w.pageIndex + ';';
+      structSig += w.id + '|' + w.type + '|' + (w.label || '') + '|' + (w.color || '') + '|' + w.pageIndex + '|'
+        + (w.x || 0) + ',' + (w.y || 0) + ',' + (w.width || 0) + ',' + (w.height || 0) + ';';
     });
+
+    var visible = widgets.filter(function (w) {
+      return pages.length > 1 ? w.pageIndex === vcPage : true;
+    });
+    var items = visible.map(function (w, i) { return { w: w, g: vcGeom(w, i) }; });
 
     if (structSig !== consoleSig) {
       consoleSig = structSig;
@@ -1071,57 +1177,59 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
           }).join('')
         : '';
 
-      var visible = widgets.filter(function (w) {
-        return pages.length > 1 ? w.pageIndex === vcPage : true;
-      });
-      var buttons = visible.filter(function (w) { return w.type === 'button'; });
-      var sliders = visible.filter(function (w) { return w.type === 'slider'; });
-
       var html = '';
-      if (buttons.length) {
-        html += '<div class="vc-grid">' + buttons.map(vcButtonTile).join('') + '</div>';
-      }
-      if (sliders.length) {
-        html += '<div class="vc-grid" style="margin-top:10px">' + sliders.map(vcFaderTile).join('') + '</div>';
-      }
-      if (!html) html = '<div class="empty">Aucun widget dans cette page</div>';
-      document.getElementById('vcWidgets').innerHTML = html;
-
-      var grid = document.getElementById('vcWidgets');
-      Array.prototype.forEach.call(grid.querySelectorAll('.vc-btn'), function (el) {
-        vcEls[el.getAttribute('data-id')] = { btn: el };
+      items.forEach(function (it) {
+        html += it.w.type === 'slider' ? vcFaderTile(it.w, it.g) : vcButtonTile(it.w, it.g);
       });
-      Array.prototype.forEach.call(grid.querySelectorAll('input[data-fader]'), function (el) {
-        var id = el.getAttribute('data-fader');
+      document.getElementById('vcWidgets').innerHTML = html;
+      document.getElementById('vcEmpty').classList.toggle('hidden', html !== '');
+
+      var layer = document.getElementById('vcWidgets');
+      Array.prototype.forEach.call(layer.querySelectorAll('.vc-tile'), function (el) {
+        vcEls[el.getAttribute('data-id')] = { tile: el };
+      });
+      Array.prototype.forEach.call(layer.querySelectorAll('.vc-fader'), function (el) {
+        var id = el.getAttribute('data-id');
         vcEls[id] = vcEls[id] || {};
-        vcEls[id].input = el;
-        vcEls[id].val = grid.querySelector('[data-v="' + id + '"]');
+        vcEls[id].fader = el;
+        vcEls[id].track = el.querySelector('.track');
+        vcEls[id].fill = el.querySelector('.fill');
+        vcEls[id].thumb = el.querySelector('.thumb');
+        vcEls[id].val = el.querySelector('[data-v]');
       });
     }
+
+    // Mise a l'echelle : refaite a chaque push (la largeur peut avoir change)
+    // et au moment ou l'onglet Console devient visible.
+    layoutConsole(items);
 
     // Mise a jour de l'etat EN PLACE (allumage, valeur du fader).
     widgets.forEach(function (w) {
       var refs = vcEls[w.id];
       if (!refs) return;
       if (w.type === 'button') {
-        if (!refs.btn) return;
+        if (!refs.tile) return;
         var color = safeColor(w.color);
-        refs.btn.classList.toggle('on', !!w.active);
-        refs.btn.style.background = w.active ? color + '55' : color + '18';
-        refs.btn.style.borderColor = w.active ? color : color + '55';
-        refs.btn.style.boxShadow = w.active ? '0 0 18px ' + color + '66' : 'none';
+        // Mêmes couleurs que le PC : fond color+'10' éteint / color+'30' allume,
+        // bordure color+'30' / color+'80', texte #888 / color.
+        refs.tile.classList.toggle('on', !!w.active);
+        refs.tile.style.background = w.active ? color + '30' : color + '10';
+        refs.tile.style.borderColor = w.active ? color + '80' : color + '30';
+        refs.tile.style.color = w.active ? color : '#888';
+        refs.tile.style.boxShadow = w.active ? '0 0 20px ' + color + '40, inset 0 0 20px ' + color + '20' : 'none';
       } else if (w.type === 'slider') {
-        if (!refs.input || typeof w.value !== 'number') return;
+        if (!refs.fill || typeof w.value !== 'number') return;
         var lo = Math.min(Number(w.min == null ? 0 : w.min), Number(w.max == null ? 255 : w.max));
         var hi = Math.max(Number(w.min == null ? 0 : w.min), Number(w.max == null ? 255 : w.max));
         var span = hi - lo;
-        var pct = span > 0 ? Math.round(((w.value - lo) / span) * 100) : 0;
+        var pct = span > 0 ? ((w.value - lo) / span) * 100 : 0;
         // On n'ecrase PAS la position si l'utilisateur est en train de
         // glisser le curseur : sinon le fader revient en arriere sous le doigt.
         var pending = Date.now() - (vcPending[w.id] || 0) < 2000;
-        if (!dragging && !pending && document.activeElement !== refs.input) {
-          refs.input.value = pct;
-          if (refs.val) refs.val.textContent = String(w.value);
+        if (!dragging && !pending) {
+          refs.fill.style.height = pct + '%';
+          refs.thumb.style.bottom = 'calc(' + pct + '% - 10px)';
+          if (refs.val) refs.val.textContent = String(Math.round(w.value));
         }
       }
     });
@@ -1129,7 +1237,7 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
 
   // Actions console : bouton (toggle) et fader (slider).
   document.getElementById('vcWidgets').addEventListener('click', function (ev) {
-    var btn = ev.target.closest('.vc-btn');
+    var btn = ev.target.closest('.vc-tile');
     if (!btn) return;
     var id = btn.getAttribute('data-id');
     if (!id) return;
@@ -1173,20 +1281,54 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
       .catch(function () {});
   }
 
-  document.getElementById('vcWidgets').addEventListener('input', function (ev) {
-    var input = ev.target.closest('input[data-fader]');
-    if (!input) return;
-    var id = input.getAttribute('data-fader');
+  /**
+   * Fader tactile : on calcule la fraction a partir de la position Y du
+   * pointeur DANS LA PISTE (coordonnees ecran, donc deja mises a l'echelle).
+   */
+  function faderFraction(track, clientY) {
+    var rect = track.getBoundingClientRect();
+    if (!rect || rect.height <= 0) return 0;
+    var pct = 1 - (clientY - rect.top) / rect.height;
+    return Math.max(0, Math.min(1, pct));
+  }
+
+  function faderSet(id, fraction) {
     var widget = (state.widgets || []).filter(function (w) { return w.id === id; })[0];
     if (!widget) return;
     var lo = Math.min(Number(widget.min == null ? 0 : widget.min), Number(widget.max == null ? 255 : widget.max));
     var hi = Math.max(Number(widget.min == null ? 0 : widget.min), Number(widget.max == null ? 255 : widget.max));
-    var fraction = Number(input.value) / 100;
     var value = Math.round(lo + (hi - lo) * fraction);
     var label = document.querySelector('[data-v="' + id + '"]');
     if (label) label.textContent = String(value);
+    var refs = vcEls[id];
+    if (refs && refs.fill) {
+      refs.fill.style.height = (fraction * 100) + '%';
+      refs.thumb.style.bottom = 'calc(' + (fraction * 100) + '% - 10px)';
+    }
     vcPending[id] = Date.now();
     sendFader(id, fraction);
+  }
+
+  document.getElementById('vcWidgets').addEventListener('pointerdown', function (ev) {
+    var track = ev.target.closest('.vc-fader .track');
+    if (!track) return;
+    ev.preventDefault();
+    dragging = true;
+    var id = track.getAttribute('data-track');
+    if (!id) return;
+    if (track.setPointerCapture) {
+      try { track.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+    }
+    faderSet(id, faderFraction(track, ev.clientY));
+    var move = function (e) { faderSet(id, faderFraction(track, e.clientY)); };
+    var up = function () {
+      track.removeEventListener('pointermove', move);
+      track.removeEventListener('pointerup', up);
+      track.removeEventListener('pointercancel', up);
+    };
+    track.addEventListener('pointermove', move);
+    track.addEventListener('pointerup', up);
+    track.addEventListener('pointercancel', up);
   });
 
   document.getElementById('vcPages').addEventListener('click', function (ev) {
@@ -1200,9 +1342,6 @@ const REMOTE_PAGE_HTML = `<!DOCTYPE html>
   // Drapeau "l'utilisateur bouge un fader" : le snapshot ne doit pas
   // repositionner le curseur sous son doigt.
   var dragging = false;
-  document.getElementById('vcWidgets').addEventListener('pointerdown', function (ev) {
-    if (ev.target.closest('input[data-fader]')) dragging = true;
-  });
   window.addEventListener('pointerup', function () { dragging = false; });
   window.addEventListener('pointercancel', function () { dragging = false; });
 

@@ -166,3 +166,29 @@ describe('Remote — master de groupe', () => {
     ).not.toThrow();
   });
 });
+
+describe('Remote — géométrie de la Console Virtuelle', () => {
+  it('le snapshot expose position et taille : la tablette reproduit la disposition du PC', () => {
+    usePerformStore.setState({
+      vcWidgets: [
+        { ...button('w-a', { actionType: 'scene', sceneId: 's-1' }), x: 40, y: 12, width: 120, height: 56 },
+        { ...slider('w-b', 'slider', { sliderFunction: 'channel', channelAddress: 7 }), x: 200, y: 8, width: 32, height: 160 },
+      ],
+    } as any);
+
+    const entries = buildWidgetSnapshot();
+    expect(entries.find((e) => e.id === 'w-a')).toMatchObject({ x: 40, y: 12, width: 120, height: 56 });
+    expect(entries.find((e) => e.id === 'w-b')).toMatchObject({ x: 200, y: 8, width: 32, height: 160 });
+  });
+
+  it('un widget sans géométrie expose des nombres finis (jamais NaN dans le payload)', () => {
+    usePerformStore.setState({
+      vcWidgets: [{ id: 'w-x', type: 'button', pageIndex: 0, config: { actionType: 'scene', sceneId: 's-1' } }],
+    } as any);
+    const e = buildWidgetSnapshot().find((x) => x.id === 'w-x')!;
+    expect(Number.isFinite(e.x)).toBe(true);
+    expect(Number.isFinite(e.y)).toBe(true);
+    expect(Number.isFinite(e.width)).toBe(true);
+    expect(Number.isFinite(e.height)).toBe(true);
+  });
+});
