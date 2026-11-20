@@ -10,6 +10,17 @@ Quand on **patche une fixture**, ou qu'on **ouvre un nouveau projet / preset** :
 4. Les tests de référence pour cette validation sont dans `src/__tests__/yolo-fixture-probe.test.ts` (analyse moteur + sweep timeline complet). Les étendre quand de nouvelles fixtures arrivent.
 5. Ne jamais committer un patch de fixture sans avoir rejoué cette validation et `npm run check` (tsc + tsc electron + vitest).
 
+## Release / auto-update LWS — runbook obligatoire
+
+Avant tout build de release, lire `.openclaw/notes/release-runbook.md`. En bref :
+
+1. **Jamais d'instructions d'upload "au large"** — mesurer d'abord : `git diff --stat <commit-du-dernier-upload> HEAD -- site/`. Le résultat EST la liste d'upload.
+2. **`build.publish` : provider `generic` (LWS) en PREMIER** — `app-update.yml` embarqué prend `publishConfigs[0]`, sinon l'app cherche les MAJ sur GitHub au lieu de LWS.
+3. **Noms d'artefacts SANS espaces** (`nsis.artifactName` / `portable.artifactName`) — sinon `latest.yml` référence un fichier fantôme (espaces → tirets) et l'auto-update fait un 404.
+4. **Zéro placeholder** (`ton-domaine`, `example.com`) dans `package.json` / `app-update.yml` — le domaine réel est `https://light-maestro.com/`.
+5. Après `npm run dist`, vérifier : `app-update.yml` = generic/LWS · `latest.yml` → fichier + blockmap existants sur disque · pas de sous-dossier `release/generic/`.
+6. **Un texte i18n décrivant un comportement doit être validé contre le code du moteur**, pas contre une note ou un souvenir (piège : `mountGroundTipText` inversé alors que `clampTiltZone` interdit de tirer sous l'horizon).
+
 ## Contexte technique
 - OS : Windows / PowerShell 5.1. Pas de DMX réel sur ce PC — validation virtuelle uniquement (les tests réels se font sur le PC live).
 - Projet de référence : `LM/Yolo.lmproj` (13 fixtures patchées, universes COM3) + `LM/Yolo.lmpreset` (17 sections, bpm=120, ~294s).
