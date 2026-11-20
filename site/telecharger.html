@@ -56,10 +56,10 @@
           <a id="dl-btn-setup" class="btn btn-primary" style="flex:1" disabled>Télécharger (installateur)</a>
         </div>
         <div class="meta" style="margin-top:10px">
-          <div class="mono" style="font-size:12px; color:#a1a1aa">Light-Maestro-1.0.46.exe (portable)</div>
-          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 5998E2D3852636D8786229722D3722F5D30C962AA3CE0AECD96A3AEF950FB7F6</div>
-          <div class="mono" style="font-size:12px; color:#a1a1aa; margin-top:8px">Light-Maestro-Setup-1.0.46.exe (installateur)</div>
-          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : F5DAD6D2B1CF407C967A1755F20D4472380058442F72491B76DDBB420C51DEC3</div>
+          <div class="mono" style="font-size:12px; color:#a1a1aa">Light-Maestro-1.0.47.exe (portable)</div>
+          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : E451C26CF7BD7A2E0BBF2FC64CA90BB388AC24D80E7645D77D9F5CF4C683C687</div>
+          <div class="mono" style="font-size:12px; color:#a1a1aa; margin-top:8px">Light-Maestro-Setup-1.0.47.exe (installateur)</div>
+          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : FE78CD58676755E70467885EECAF26A29418FAEF36EE99785C815D6945D299E9</div>
         </div>
       </div>
     </div>
@@ -86,12 +86,13 @@
 <section class="section">
   <div class="wrap">
     <div class="card">
-      <h3 class="h3">Notes de version — v1.0.46</h3>
+      <h3 class="h3">Notes de version — v1.0.47</h3>
       <ul style="margin-top:8px; color:#d1d5db; font-size:13px; line-height:1.7; padding-left:18px">
+        <li><b style="color:white">La console de la tablette est identique à celle du PC :</b> les tuiles apparaissent aux mêmes positions et avec les mêmes couleurs que sur l'ordinateur — la console que vous dessinez sur PC est celle que vous touchez sur la tablette.</li>
+        <li><b style="color:white">Faders verticaux :</b> la piste se pilote au doigt (appui puis glisser), exactement comme sur PC.</li>
+        <li><b style="color:white">Mise à l'échelle intelligente :</b> la console tient dans la largeur de l'appareil ; si elle est plus large, on défile horizontalement plutôt que de rendre les tuiles illisibles.</li>
         <li><b style="color:white">Mises à jour automatiques fiabilisées :</b> si le canal principal est momentanément indisponible, l'application bascule automatiquement sur le canal de secours. Une mise à jour ne peut plus être manquée parce qu'un fichier n'a pas été déposé sur le serveur.</li>
         <li><b style="color:white">Positions de fixtures cohérentes partout :</b> le calcul DMX utilise désormais toujours les positions réelles de la scène (Performance et Quick Show), donc les limites de balayage restent identiques dans tous les modes.</li>
-        <li><b style="color:white">Limites de balayage à source unique :</b> la vue 3D et le moteur partagent le même code de clamp — plus aucune divergence possible entre le faisceau affiché et le faisceau envoyé au matériel.</li>
-        <li><b style="color:white">Audit automatique des fixtures :</b> chaque build est contrôlé pour vérifier que les canaux de chaque luminaire de vos projets (couleur, mouvement, rotation, intensité) sont bien alimentés, sans canal muet.</li>
       </ul>
     </div>
     <div class="notice" style="margin-top:16px">
@@ -113,7 +114,7 @@
 </footer>
 <script>
   // ── Version du build (à mettre à jour à chaque release) ───────────────────
-  const APP_VERSION = '1.0.46';
+  const APP_VERSION = '1.0.47';
   const FILE_PORTABLE = './download/Light-Maestro-' + APP_VERSION + '.exe';
   const FILE_SETUP    = './download/Light-Maestro-Setup-' + APP_VERSION + '.exe';
   // ─────────────────────────────────────────────────────────────────────────────
