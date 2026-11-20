@@ -1420,6 +1420,70 @@ function sendUpdateStatus(status: UpdateStatus): void {
   }
 }
 
+// ─── Repli auto-update : canal GitHub ────────────────────────────────────
+// Le canal principal est le `generic` (LWS) embarque dans app-update.yml.
+// Il depend d'un UPLOAD MANUEL : si l'utilisateur oublie de deposer
+// latest.yml + .exe sur le serveur, l'app ne propose RIEN (symptome
+// « je suis en 1.0.44 et aucune mise a jour n'est proposee »).
+//
+// Repli : la release GitHub de la meme version, publiee en meme temps que
+// le tag. Si le canal principal echoue (404, reseau, LWS indisponible),
+// on bascule le feed sur GitHub et on rejoue le check.
+//
+// ATTENTION : le depot peut etre RENOMME (il l'a ete : light-maestro ->
+// 1.0.45). On resout `full_name` via l'API plutot que de coder owner/repo
+// en dur : le repli survit a un renommage.
+const GITHUB_REPO_ALIAS = 'Sangoku54/light-maestro';
+
+let githubFeedCache: { owner: string; repo: string } | null = null;
+let githubFallbackTried = false;
+
+async function resolveGithubFeed(): Promise<{ owner: string; repo: string } | null> {
+  if (githubFeedCache) return githubFeedCache;
+  try {
+    const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO_ALIAS}`, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'light-maestro-updater',
+      },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { full_name?: string };
+    const [owner, repo] = (data?.full_name ?? '').split('/');
+    if (!owner || !repo) return null;
+    githubFeedCache = { owner, repo };
+    return githubFeedCache;
+  } catch {
+    return null;
+  }
+}
+
+/** Bascule le feed sur la release GitHub et rejoue le check. */
+async function fallbackToGithubFeed(reason: string): Promise<void> {
+  const feed = await resolveGithubFeed();
+  if (!feed) {
+    console.error('[autoUpdater] Repli GitHub impossible (depot introuvable)');
+    sendUpdateStatus({ state: 'not-available' });
+    return;
+  }
+  console.log(
+    `[autoUpdater] Canal principal indisponible (${reason}) — repli sur la release GitHub ${feed.owner}/${feed.repo}`,
+  );
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: feed.owner,
+    repo: feed.repo,
+    channel: 'latest',
+  });
+  try {
+    await autoUpdater.checkForUpdatesAndNotify();
+  } catch (err) {
+    const msg = String((err as { message?: string })?.message || err);
+    console.error('[autoUpdater] Repli GitHub en echec:', msg);
+    sendUpdateStatus({ state: 'not-available' });
+  }
+}
+
 function setupAutoUpdater(): void {
   if (!app.isPackaged) {
     console.log('[autoUpdater] Dev mode — auto-update disabled');
@@ -1473,6 +1537,16 @@ function setupAutoUpdater(): void {
   autoUpdater.on('error', (err) => {
     const msg = String(err?.message || err);
     console.error('[autoUpdater] Error:', msg);
+    // Repli GitHub : le canal principal (generic/LWS) depend d'un UPLOAD
+    // MANUEL et peut etre indisponible (404, LWS down, manifest absent).
+    // On tente alors la release GitHub de la meme version AVANT de conclure
+    // « a jour » — sans ce repli, une version deja installee ne voit jamais
+    // la suivante si l'upload LWS a ete oublie.
+    if (!githubFallbackTried) {
+      githubFallbackTried = true;
+      void fallbackToGithubFeed(msg);
+      return;
+    }
     // « Aucun canal de mise à jour » n'est PAS une erreur utilisateur :
     // repo privé sans release publiée, 404, rate limit, token absent… Dans ces
     // cas on affiche « à jour » au lieu d'un badge d'erreur permanent que
@@ -1489,6 +1563,8 @@ function setupAutoUpdater(): void {
   autoUpdater.checkForUpdatesAndNotify().catch((err) => {
     const msg = String(err?.message || err);
     console.error('[autoUpdater] checkForUpdatesAndNotify failed:', msg);
+    // Le repli GitHub est deja en cours : c'est lui qui publishera le statut.
+    if (githubFallbackTried) return;
     if (/no published versions|404|not found|unauthorized|401|403|rate limit|ETIMEDOUT|ENOTFOUND/i.test(msg)) {
       sendUpdateStatus({ state: 'not-available' });
     }

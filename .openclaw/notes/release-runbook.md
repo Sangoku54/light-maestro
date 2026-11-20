@@ -60,7 +60,62 @@ référence toujours le fichier réellement produit.
 
 ---
 
-## 2. Vérifications OBLIGATOIRES après `npm run dist`
+## 1 bis. Auto-update : le canal d'une version DÉJÀ INSTALLÉE est figé dans son binaire
+
+**Piège majeur (1.0.45) :** l'utilisateur était en **1.0.44** et l'app ne lui a
+proposé aucune mise à jour. Diagnostic :
+
+1. `app-update.yml` est écrit **au moment du build** dans l'exe. La 1.0.44 a
+   été compilée quand `build.publish` ne contenait **que** `github` → son canal
+   est GitHub, **pour toujours**. Elle ne regardera jamais LWS.
+2. Or aucune **release** GitHub `v1.0.45` n'existait (seulement `v1.0.43` et
+   `v1.0.44`) : l'updater lit `/releases/latest` → `v1.0.44` → « à jour ».
+3. Et LWS était **vide** : `/download/latest.yml` et `/download/*.exe` en 404
+   (les boutons de téléchargement du site étaient donc cassés aussi).
+
+### Règles
+
+- **Chaque release doit être publiée sur GitHub ET déposée sur LWS.**
+  - GitHub = le canal que connaissent les versions déjà installées (1.0.43,
+    1.0.44) et le repli automatique des versions ≥ 1.0.46.
+  - LWS = le canal principal des versions ≥ 1.0.45 (provider `generic`).
+- Le repli GitHub automatique est dans `electron/main.ts`
+  (`fallbackToGithubFeed`) : si le canal principal échoue (404 / LWS down /
+  manifest absent), l'app bascule sur la release GitHub **sans attendre**.
+- La release GitHub doit contenir **exactement** :
+  `latest.yml` (celui de la RACINE de `release/`), `Light-Maestro-Setup-<v>.exe`,
+  `Light-Maestro-Setup-<v>.exe.blockmap`, `Light-Maestro-<v>.exe` (portable).
+  Le `latest.yml` doit pointer vers le setup (`path:` / `files[].url`).
+
+### Piège : le dépôt a été RENOMMÉ (`light-maestro` → `1.0.45`)
+
+- L'ancien nom **redirige** (téléchargements, atom feed, API GET) → les
+  anciennes versions installées continuent de fonctionner.
+- Mais **écrire** via l'API sur l'ancien nom échoue : le POST reçoit un **301**
+  et **PowerShell 5.1 transforme le POST en GET** → il renvoie l'objet *dépôt*
+  au lieu de créer la release (échec SILENCIEUX : `tag_name` vide).
+  → Toujours résoudre `full_name` (`GET /repos/Sangoku54/light-maestro` →
+  `full_name`) et écrire dessus.
+- Et l'URL doit contenir `/releases` : un POST sur `/repos/<owner>/<repo>`
+  ne crée rien.
+
+### Piège : `target_commitish` invalide
+
+Un SHA court (`161f527`) est refusé par GitHub (422 `invalid`). Si le tag
+existe déjà (poussé sur `origin`), **ne pas envoyer** `target_commitish`.
+
+### Vérifier ce que voit vraiment l'app installée
+
+```powershell
+# 1. le dernier tag publie (ce que lit electron-updater)
+Invoke-RestMethod "https://api.github.com/repos/Sangoku54/light-maestro/releases/latest" -Headers @{ 'User-Agent'='x' } | Select-Object tag_name
+# 2. le manifest telecharge par l'app, via l'ancien nom (redirection)
+Invoke-WebRequest "https://github.com/Sangoku54/light-maestro/releases/download/v1.0.45/latest.yml" -UseBasicParsing | Select-Object StatusCode
+# 3. le binaire telechargeable (taille == latest.yml `size:`)
+Invoke-WebRequest "https://github.com/Sangoku54/light-maestro/releases/download/v1.0.45/Light-Maestro-Setup-1.0.45.exe" -Method Head -UseBasicParsing | Select-Object Headers
+```
+
+---
 
 Ne pas livrer un build sans ces 3 vérifications.
 
@@ -141,6 +196,8 @@ Chercher la fonction qui implémente le comportement, et lire ses tests.
 - [ ] Vérif 2b (latest.yml → fichier + blockmap existants)
 - [ ] Vérif 2c (pas de sous-dossier provider)
 - [ ] Vérif 3 (zéro placeholder)
+- [ ] **Release GitHub publiée** (tag + latest.yml + setup exe + blockmap + portable) → sans quoi les versions déjà installées ne voient JAMAIS la nouvelle version
+- [ ] **Upload LWS** (`/download/`) mesuré via `git diff --stat` → sans quoi le canal principal est en 404 et les boutons du site sont cassés
 - [ ] `git diff --stat <dernier-upload> HEAD -- site/` → liste d'upload exacte
 - [ ] SHA256 du site = SHA256 réel du fichier
 - [ ] Lister les fichiers à **supprimer** sur le serveur (obsolètes)

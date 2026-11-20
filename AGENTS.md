@@ -20,7 +20,12 @@ Avant tout build de release, lire `.openclaw/notes/release-runbook.md`. En bref 
 3. **Noms d'artefacts SANS espaces** (`nsis.artifactName` / `portable.artifactName`) — sinon `latest.yml` référence un fichier fantôme (espaces → tirets) et l'auto-update fait un 404.
 4. **Zéro placeholder** (`ton-domaine`, `example.com`) dans `package.json` / `app-update.yml` — le domaine réel est `https://light-maestro.com/`.
 5. Après `npm run dist`, vérifier : `app-update.yml` = generic/LWS · `latest.yml` → fichier + blockmap existants sur disque · pas de sous-dossier `release/generic/`.
-6. **Un texte i18n décrivant un comportement doit être validé contre le code du moteur**, pas contre une note ou un souvenir (piège : `mountGroundTipText` inversé alors que `clampTiltZone` interdit de tirer sous l'horizon).
+6. **Deux canaux, deux publics** — une release doit être publiée sur **GitHub** (release + `latest.yml` + setup + blockmap) ET déposée sur **LWS** (`/download/`) :
+   - le canal d'une version **déjà installée** est figé dans son binaire (la 1.0.43/1.0.44 pointe GitHub, elle ne verra jamais LWS) ;
+   - sans release GitHub, une version installée ne propose **jamais** la suivante ;
+   - sans upload LWS, le canal principal est en 404 (boutons du site cassés) — le repli GitHub automatique (`electron/main.ts` → `fallbackToGithubFeed`) prend le relais pour les versions ≥ 1.0.46.
+7. **Le dépôt GitHub a été renommé** (`light-maestro` → `1.0.45`) : l'ancien nom redirige (lecture OK), mais pour **écrire** via l'API il faut résoudre `full_name` (un POST sur l'ancien nom suit le 301 et PowerShell transforme le POST en GET → rien n'est créé, silencieusement). Le tag doit pointer sur le commit du build.
+8. **Un texte i18n décrivant un comportement doit être validé contre le code du moteur**, pas contre une note ou un souvenir (piège : `mountGroundTipText` inversé alors que `clampTiltZone` interdit de tirer sous l'horizon).
 
 ## Contexte technique
 - OS : Windows / PowerShell 5.1. Pas de DMX réel sur ce PC — validation virtuelle uniquement (les tests réels se font sur le PC live).
