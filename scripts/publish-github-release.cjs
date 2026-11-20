@@ -119,14 +119,14 @@ async function uploadAsset(repo, releaseId, name, file) {
   if (repo !== REPO_ALIAS) say(`           ATTENTION : le depot a ete renomme — le nom historique redirige.`);
 
   // 2. Tag.
-  const localTags = git('tag', '--list', TAG).trim();
+  const localTags = git(['tag', '--list', TAG]).trim();
   if (!localTags) {
     const target = tagCommit || 'HEAD';
     git(['tag', '-a', TAG, target, '-m', `Light Maestro ${TAG}`]);
     git(['push', 'origin', `refs/tags/${TAG}`]);
     ok(`tag ${TAG} cree et pousse (${target})`);
   } else {
-    ok(`tag ${TAG} deja present (sha ${git('rev-list', '-n', '1', TAG).trim().slice(0, 7)})`);
+    ok(`tag ${TAG} deja present (sha ${git(['rev-list', '-n', '1', TAG]).trim().slice(0, 7)})`);
   }
 
   // 3. Release.

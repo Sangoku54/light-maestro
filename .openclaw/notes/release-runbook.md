@@ -126,6 +126,22 @@ proposé aucune mise à jour. Diagnostic :
 Un SHA court (`161f527`) est refusé par GitHub (422 `invalid`). Si le tag
 existe déjà (poussé sur `origin`), **ne pas envoyer** `target_commitish`.
 
+### Pièges du script `npm run publish:github` (rencontrés en 1.0.46)
+
+Ces deux bugs ont fait échouer le script **avant toute écriture** (donc sans
+état partiel) — ils sont corrigés, mais ils rappellent deux règles :
+
+- **Portée des variables** : une fonction de module ne voit pas une `const`
+  déclarée dans une closure. `TOKEN` doit être un `let` **au niveau module**,
+  sinon `api()` / `uploadAsset()` lèvent `ReferenceError: TOKEN is not defined`
+  au premier appel.
+- **Signature du helper `git()`** : il attend **un tableau**
+  (`git(['tag', '--list', TAG])`), pas des arguments séparés
+  (`git('tag', '--list', TAG)` → `TypeError: The "args" argument must be of
+  type object`).
+- Toujours passer par `node --check scripts/publish-github-release.cjs`
+  avant de lancer la publication.
+
 ### Vérifier ce que voit vraiment l'app installée
 
 ```powershell
