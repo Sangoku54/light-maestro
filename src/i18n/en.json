@@ -1091,7 +1091,7 @@
     "mount": "Mount",
     "mountGround": "Ground",
     "mountGroundTipExample": "Parapet feet, flat wash mounted at floor level.",
-    "mountGroundTipText": "On the floor, beam down (ceiling → floor).",
+    "mountGroundTipText": "Laid on the floor, head flat: the beam goes up (floor → ceiling). Never points below the horizon.",
     "mountGroundTipTitle": "Ground — floor",
     "mountHanging": "Hanging",
     "mountHangingTipExample": "Movers hung from the truss, head flipped. Then use the Target tool to aim precisely.",

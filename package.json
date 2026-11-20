@@ -109,7 +109,11 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Light Maestro",
-      "include": "build/installer.nsh"
+      "include": "build/installer.nsh",
+      "artifactName": "Light-Maestro-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Light-Maestro-${version}.${ext}"
     },
     "mac": {
       "target": "dmg"
@@ -119,13 +123,13 @@
     },
     "publish": [
       {
-        "provider": "github",
-        "releaseType": "release"
+        "provider": "generic",
+        "url": "https://light-maestro.com/download/",
+        "channel": "latest"
       },
       {
-        "provider": "generic",
-        "url": "https://ton-domaine.lws.to/download/",
-        "channel": "latest"
+        "provider": "github",
+        "releaseType": "release"
       }
     ]
   }

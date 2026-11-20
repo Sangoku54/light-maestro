@@ -1091,7 +1091,7 @@
     "mount": "Mount",
     "mountGround": "Ground",
     "mountGroundTipExample": "Pieds de parapède, wash plat monté à ras du sol.",
-    "mountGroundTipText": "Au sol, faisceau vers le bas (plafond → sol).",
+    "mountGroundTipText": "Posé au sol, tête à plat : le faisceau part vers le haut (sol → plafond). Ne descend jamais sous l'horizon.",
     "mountGroundTipTitle": "Ground — sol",
     "mountHanging": "Hanging",
     "mountHangingTipExample": "Movers suspendus au truss, tête retournée. Utilisez ensuite l'outil Target pour orienter précisément.",
