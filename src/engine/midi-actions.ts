@@ -33,9 +33,23 @@ import type { SavedChaser } from '../stores/showStore';
 import { useShowStore } from '../stores/showStore';
 import { useAppStore } from '../stores/appStore';
 import { usePerformStore, applyWidgetSliderEffect } from '../stores/performStore';
+import { useClockStore, masterClockTotalBeats } from '../stores/clockStore';
 import { vcPressWidget } from './virtual-console-runtime';
 import { sendChannelsToHardwareAndStore } from '../utils/dmx-helpers';
 import { dmxBridge } from '../utils/dmx-bridge';
+
+// ─── Environnement (node-safe : tests sans DOM) ────────────
+// Même pattern que virtual-console-runtime.ts : en node (tests),
+// requestAnimationFrame n'existe pas → repli sur setTimeout(16).
+const hasRaf = typeof globalThis.requestAnimationFrame === 'function';
+const frame = (cb: () => void): number =>
+  hasRaf
+    ? globalThis.requestAnimationFrame(() => cb())
+    : (setTimeout(cb, 16) as unknown as number);
+const unframe = (h: number) => {
+  if (hasRaf) globalThis.cancelAnimationFrame(h);
+  else clearTimeout(h as unknown as ReturnType<typeof setTimeout>);
+};
 
 // ─── Contrat de types (miroir de electron/midi/manager.ts L18-38) ─────────
 // NOTE : tant que l'agent « MIDI cœur main » n'a pas synchronisé
@@ -150,7 +164,7 @@ const activeScenes = new Map<string, SceneHandle>();
 
 function cancelSceneHandle(handle: SceneHandle | undefined): void {
   if (!handle) return;
-  if (handle.raf) cancelAnimationFrame(handle.raf);
+  if (handle.raf) unframe(handle.raf);
   if (handle.timer) clearTimeout(handle.timer);
 }
 
@@ -201,10 +215,10 @@ export function midiPlayScene(sceneId: string, sourceId: string = MIDI_SOURCE_ID
         const anim = () => {
           const p = Math.min(1, (performance.now() - start) / fadeOut);
           applySceneLevel(1 - p, channels, sourceId);
-          if (p < 1) handle.raf = requestAnimationFrame(anim);
+          if (p < 1) handle.raf = frame(anim);
           else done();
         };
-        handle.raf = requestAnimationFrame(anim);
+        handle.raf = frame(anim);
       } else {
         done();
       }
@@ -216,13 +230,13 @@ export function midiPlayScene(sceneId: string, sourceId: string = MIDI_SOURCE_ID
     const anim = () => {
       const p = Math.min(1, (performance.now() - start) / fadeIn);
       applySceneLevel(p, channels, sourceId);
-      if (p < 1) handle.raf = requestAnimationFrame(anim);
+      if (p < 1) handle.raf = frame(anim);
       else {
         applySceneLevel(1, channels, sourceId);
         if (!infinite) scheduleFadeOut(hold);
       }
     };
-    handle.raf = requestAnimationFrame(anim);
+    handle.raf = frame(anim);
   } else {
     applySceneLevel(1, channels, sourceId);
     if (!infinite) scheduleFadeOut(hold);
@@ -313,12 +327,13 @@ const activeChasers = new Map<string, ChaserHandle>();
 
 function cancelChaserStep(handle: ChaserHandle): void {
   if (handle.timer) clearTimeout(handle.timer);
-  if (handle.raf) cancelAnimationFrame(handle.raf);
+  if (handle.raf) unframe(handle.raf);
   handle.timer = null;
   handle.raf = 0;
 }
 
-function nextStepIndex(chaser: SavedChaser, handle: ChaserHandle): number {
+/** Index du step suivant (moteur libre ET moteur verrouillé). */
+function nextStepIndex(chaser: SavedChaser, handle: { stepIndex: number; dir: 1 | -1 }): number {
   const n = chaser.steps.length;
   if (n === 0) return 0;
   const dir =
@@ -386,10 +401,10 @@ function runChaserStep(chaserId: string, startIndex: number, sourceId: string = 
         const anim = () => {
           const p = Math.min(1, (performance.now() - start) / fadeOut);
           applyLevel(1 - p);
-          if (p < 1) handle.raf = requestAnimationFrame(anim);
+          if (p < 1) handle.raf = frame(anim);
           else next();
         };
-        handle.raf = requestAnimationFrame(anim);
+        handle.raf = frame(anim);
       } else {
         next();
       }
@@ -401,13 +416,13 @@ function runChaserStep(chaserId: string, startIndex: number, sourceId: string = 
     const anim = () => {
       const p = Math.min(1, (performance.now() - start) / fadeIn);
       applyLevel(p);
-      if (p < 1) handle.raf = requestAnimationFrame(anim);
+      if (p < 1) handle.raf = frame(anim);
       else {
         applyLevel(1);
         onHold();
       }
     };
-    handle.raf = requestAnimationFrame(anim);
+    handle.raf = frame(anim);
   } else {
     applyLevel(1);
     onHold();
@@ -426,6 +441,29 @@ export function midiPlayChaser(chaserId: string, sourceId: string = MIDI_CHASER_
     console.warn(`[midi] chaser "${chaser.name}" : aucun step`);
     return;
   }
+  // Horloge externe active (MIDI clock / Link d'un logiciel DJ) → moteur
+  // VERROUILLÉ : les steps tombent sur les temps du DJ (pas de dérive).
+  if (externalClockActive()) {
+    // Si un chaser LIBRE tournait déjà (play avant l'arrivée du MIDI clock),
+    // il faut l'arrêter : deux moteurs écrivant les mêmes canaux en même
+    // temps = fights DMX. Le moteur verrouillé prend le relais.
+    const running = activeChasers.get(chaserId);
+    if (running) {
+      cancelChaserStep(running);
+      activeChasers.delete(chaserId);
+      console.debug(`[midi] chaser libre "${chaserId}" arrêté → bascule en mode VERROUILLÉ`);
+    }
+    startLockedChaser(chaserId, 0, sourceId);
+    console.debug(`[midi] chaser play VERROUILLÉ : "${chaser.name}" (${chaserId}) steps=${chaser.steps.length} source=${sourceId}`);
+    return;
+  }
+  // Pas d'horloge externe : si un chaser VERROUILLÉ tournait (le DJ a mis en
+  // pause puis la source a disparu), on l'arrête avant de repartir en libre.
+  const locked = lockedChasers.get(chaserId);
+  if (locked) {
+    cancelLockedRaf(locked);
+    lockedChasers.delete(chaserId);
+  }
   // Si déjà actif, on repart du step courant (relance proprement)
   const existing = activeChasers.get(chaserId);
   runChaserStep(chaserId, existing ? existing.stepIndex : 0, sourceId);
@@ -433,9 +471,26 @@ export function midiPlayChaser(chaserId: string, sourceId: string = MIDI_CHASER_
 }
 
 export function midiStopChaser(chaserId: string): void {
+  // Moteur verrouillé (horloge externe) — à arrêter aussi.
+  const locked = lockedChasers.get(chaserId);
+  if (locked) {
+    cancelLockedRaf(locked);
+    lockedChasers.delete(chaserId);
+    const { chasers, scenes } = getShowState();
+    const chaser = chasers.find((c) => c.id === chaserId);
+    if (chaser) {
+      const all: Record<number, number> = {};
+      for (const step of chaser.steps) {
+        const scene = scenes.find((s) => s.id === step.sceneId);
+        if (scene) Object.assign(all, toChannelMap(scene.channels));
+      }
+      flushZeros(all, locked.sourceId);
+    }
+    console.debug(`[midi] chaser stop (verrouillé) : ${chaserId}`);
+  }
   const handle = activeChasers.get(chaserId);
   if (!handle) {
-    console.debug(`[midi] chaser stop : rien en cours pour ${chaserId}`);
+    if (!locked) console.debug(`[midi] chaser stop : rien en cours pour ${chaserId}`);
     return;
   }
   cancelChaserStep(handle);
@@ -458,6 +513,14 @@ export function midiChaserNext(chaserId: string, sourceId: string = MIDI_CHASER_
   const { chasers } = getShowState();
   const chaser = chasers.find((c) => c.id === chaserId);
   if (!chaser || chaser.steps.length === 0) return;
+  const locked = lockedChasers.get(chaserId);
+  if (locked) {
+    // En mode verrouillé : saut au step suivant, sur la prochaine frontière
+    // de temps (le chaser reste sur le beat).
+    const idx = (locked.stepIndex + 1) % chaser.steps.length;
+    startLockedChaser(chaserId, idx, locked.sourceId);
+    return;
+  }
   const handle = activeChasers.get(chaserId);
   if (!handle) {
     runChaserStep(chaserId, 0, sourceId); // pas en cours → démarrer au premier step
@@ -470,12 +533,237 @@ export function midiChaserPrevious(chaserId: string, sourceId: string = MIDI_CHA
   const { chasers } = getShowState();
   const chaser = chasers.find((c) => c.id === chaserId);
   if (!chaser || chaser.steps.length === 0) return;
+  const locked = lockedChasers.get(chaserId);
+  if (locked) {
+    const idx = (locked.stepIndex - 1 + chaser.steps.length) % chaser.steps.length;
+    startLockedChaser(chaserId, idx, locked.sourceId);
+    return;
+  }
   const handle = activeChasers.get(chaserId);
   if (!handle) {
     runChaserStep(chaserId, chaser.steps.length - 1, sourceId); // pas en cours → dernier step
     return;
   }
   runChaserStep(chaserId, (handle.stepIndex - 1 + chaser.steps.length) % chaser.steps.length, handle.sourceId);
+}
+
+/** Test-only : état des moteurs de chaser (libre / verrouillé). */
+export function __chaserEngineState(): { free: string[]; locked: string[] } {
+  return { free: [...activeChasers.keys()], locked: [...lockedChasers.keys()] };
+}
+
+// ═══════════════════════════════════════════════════════════
+// Chaser VERROUILLÉ sur l'horloge externe (MIDI clock / Link)
+// ═══════════════════════════════════════════════════════════
+//
+// QUAND une source externe tourne (MIDI clock d'un logiciel DJ), le chaser
+// n'utilise PLUS ses timers indépendants : chaque step est QUANTIFIÉ en
+// temps (beats) et démarre sur une frontière de temps de l'horloge maître.
+// Résultat : le chaser reste exactement sur le beat du DJ.
+//
+// Sans source externe, le moteur historique (timers) est INCHANGÉ : aucun
+// comportement existant n'est modifié.
+//
+// Pourquoi quantifier : à 128 BPM, un step authoring « 2000 ms » (4 temps à
+// 120 BPM) doit durer 4 temps de 128 BPM (1875 ms), pas 2000 ms — sinon le
+// chaser glisse sur le beat quelques secondes après le début.
+
+interface LockedChaserHandle {
+  raf: number;
+  stepIndex: number;
+  dir: 1 | -1;
+  sourceId: string;
+  chaserId: string;
+  /** Temps absolu (beat fractionnaire) du début du step courant. */
+  stepStartBeat: number;
+  /** Durée du step en temps (quantifiée). */
+  stepBeats: number;
+  /** Fronts du step (ms, recalculés à chaque step). */
+  fadeInMs: number;
+  holdMs: number;
+  fadeOutMs: number;
+  totalMs: number;
+  /** Canaux de la scène cible (adresse → valeur). */
+  channels: Record<number, number>;
+  /** Derniers octets écrits (évite de réécrire 60×/s pendant le hold). */
+  lastValues: Record<number, number>;
+}
+
+const lockedChasers = new Map<string, LockedChaserHandle>();
+
+function cancelLockedRaf(handle: LockedChaserHandle): void {
+  if (handle.raf) unframe(handle.raf);
+  handle.raf = 0;
+}
+
+/** Vrai quand une horloge EXTERNE (MIDI clock / Link) pilote ET joue. */
+function externalClockActive(): boolean {
+  const s = useClockStore.getState();
+  return (s.source === 'midi' || s.source === 'link') && s.externalRunning;
+}
+
+interface LockedPlan {
+  fadeInMs: number;
+  holdMs: number;
+  fadeOutMs: number;
+  totalMs: number;
+  stepBeats: number;
+}
+
+/**
+ * Convertit les durées ms d'un step en un plan quantifié sur la grille de
+ * temps de l'horloge maître.
+ *
+ * Exportée pour les tests : la quantification est la garantie mathématique
+ * que le chaser tombe sur les temps du DJ.
+ */
+export function planLockedStep(
+  step: { fadeIn?: number; hold?: number; fadeOut?: number },
+  scene: { fadeIn?: number; fadeOut?: number; duration?: number },
+  bpm: number,
+): LockedPlan {
+  const fadeIn = Math.max(0, step.fadeIn ?? scene.fadeIn ?? 0);
+  const fadeOut = Math.max(0, step.fadeOut ?? scene.fadeOut ?? 0);
+  const hold = Math.max(
+    0,
+    step.hold ?? (scene.duration > 0 ? Math.max(0, scene.duration - fadeIn - fadeOut) : 500),
+  );
+  const nominal = fadeIn + hold + fadeOut;
+  const beatMs = 60000 / bpm;
+  // Durée musicale conservée : les durées authoring sont exprimées à 120 BPM.
+  const musicalMs = nominal * (120 / bpm);
+  const beats = Math.max(1, Math.round(musicalMs / beatMs));
+  const totalMs = beats * beatMs;
+  const k = nominal > 0 ? totalMs / musicalMs : 0;
+  return {
+    fadeInMs: fadeIn * k,
+    holdMs: hold * k,
+    fadeOutMs: fadeOut * k,
+    totalMs,
+    stepBeats: beats,
+  };
+}
+
+/** Prépare le step courant du handle (index + temps de départ). */
+function setupLockedStep(
+  handle: LockedChaserHandle,
+  stepIndex: number,
+  startBeat: number,
+): boolean {
+  const { chasers, scenes } = getShowState();
+  const chaser = chasers.find((c) => c.id === handle.chaserId);
+  if (!chaser || chaser.steps.length === 0) return false;
+  const step = chaser.steps[stepIndex];
+  const scene = scenes.find((s) => s.id === step.sceneId);
+  const bpm = Math.max(20, useClockStore.getState().bpm);
+  const plan = planLockedStep(step, scene ?? {}, bpm);
+  handle.stepIndex = stepIndex;
+  handle.stepStartBeat = startBeat;
+  handle.stepBeats = plan.stepBeats;
+  handle.fadeInMs = plan.fadeInMs;
+  handle.holdMs = plan.holdMs;
+  handle.fadeOutMs = plan.fadeOutMs;
+  handle.totalMs = plan.totalMs;
+  handle.channels = scene ? toChannelMap(scene.channels) : {};
+  handle.lastValues = {};
+  return true;
+}
+
+/** Niveau (0..1) du step à l'instant `elapsedMs`. */
+function lockedLevel(handle: LockedChaserHandle, elapsedMs: number): number {
+  const { fadeInMs, holdMs, fadeOutMs } = handle;
+  if (fadeInMs > 0 && elapsedMs < fadeInMs) return elapsedMs / fadeInMs;
+  const afterFadeIn = elapsedMs - fadeInMs;
+  if (afterFadeIn < holdMs) return 1;
+  const afterHold = afterFadeIn - holdMs;
+  if (fadeOutMs > 0 && afterHold < fadeOutMs) return 1 - afterHold / fadeOutMs;
+  return 0;
+}
+
+/**
+ * Boucle du chaser verrouillé : le temps est celui de l'horloge MAÎTRE
+ * (elle-même recalee sur la phase du DJ) → le chaser ne dérive pas.
+ */
+function lockedLoop(handle: LockedChaserHandle): void {
+  handle.raf = frame(() => lockedLoop(handle));
+
+  const { chasers, scenes, fixtures, universes } = getShowState();
+  const chaser = chasers.find((c) => c.id === handle.chaserId);
+  if (!chaser || chaser.steps.length === 0) {
+    cancelLockedRaf(handle);
+    lockedChasers.delete(handle.chaserId);
+    return;
+  }
+  const clock = useClockStore.getState();
+  if (!clock.isPlaying) return; // horloge INTERNE en pause (bouton Pause) : look figé
+
+  const bpm = Math.max(20, clock.bpm);
+  const beatMs = 60000 / bpm;
+  const nowBeat = masterClockTotalBeats();
+  const elapsedMs = Math.max(0, (nowBeat - handle.stepStartBeat) * beatMs);
+
+  // Écriture du niveau (identique au moteur libre : LTP + miroir store).
+  const level = lockedLevel(handle, elapsedMs);
+  if (Object.keys(handle.channels).length > 0) {
+    const scaled: Record<number, number> = {};
+    let changed = false;
+    for (const [addrStr, val] of Object.entries(handle.channels)) {
+      const addr = Number(addrStr);
+      const v = Math.round(Number(val) * level);
+      scaled[addr] = v;
+      if (handle.lastValues[addr] !== v) changed = true;
+    }
+    // Pendant le HOLD le niveau ne change pas : inutile de réécrire 60×/s.
+    if (changed) {
+      handle.lastValues = scaled;
+      sendChannelsToHardwareAndStore(scaled, fixtures, universes, handle.sourceId).catch(() => {});
+    }
+  }
+
+  if (elapsedMs >= handle.totalMs) {
+    // Step suivant : on repart EXACTEMENT au temps suivant (pas de dérive).
+    const nextIndex = nextStepIndex(chaser, handle);
+    const nextBeat = handle.stepStartBeat + handle.stepBeats;
+    setupLockedStep(handle, nextIndex, nextBeat);
+  }
+}
+
+/**
+ * Démarre (ou redémarre) un chaser en mode verrouillé. Le premier step
+ * commence sur la PROCHAINE frontière de temps → il tombe sur le beat.
+ */
+function startLockedChaser(chaserId: string, startIndex: number, sourceId: string): void {
+  const { chasers } = getShowState();
+  const chaser = chasers.find((c) => c.id === chaserId);
+  if (!chaser || chaser.steps.length === 0) return;
+  let handle = lockedChasers.get(chaserId);
+  if (!handle) {
+    handle = {
+      raf: 0,
+      stepIndex: 0,
+      dir: 1,
+      sourceId,
+      chaserId,
+      stepStartBeat: 0,
+      stepBeats: 1,
+      fadeInMs: 0,
+      holdMs: 0,
+      fadeOutMs: 0,
+      totalMs: 0,
+      channels: {},
+      lastValues: {},
+    };
+    lockedChasers.set(chaserId, handle);
+  } else {
+    handle.sourceId = sourceId;
+  }
+  cancelLockedRaf(handle);
+  const startBeat = Math.ceil(masterClockTotalBeats() + 1e-6);
+  if (!setupLockedStep(handle, startIndex, startBeat)) {
+    lockedChasers.delete(chaserId);
+    return;
+  }
+  handle.raf = frame(() => lockedLoop(handle));
 }
 
 // ═══════════════════════════════════════════════════════════

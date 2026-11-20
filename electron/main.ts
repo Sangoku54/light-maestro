@@ -1196,7 +1196,9 @@ midiManager.on('disconnected', () => {
 });
 
 // Forward MIDI clock (throttled ~4 Hz) and mapping changes to renderer
-midiManager.on('clock', (clock: { bpm: number; running: boolean }) => {
+// `phase` = position dans la noire (0..1) mesurée côté main : c'est elle qui
+// permet au renderer de se verrouiller sur le temps du logiciel DJ.
+midiManager.on('clock', (clock: { bpm: number; running: boolean; phase?: number }) => {
   mainWindow?.webContents.send('midi:clock', clock);
 });
 midiManager.on('mappingChanged', (mapping: MidiMapping[]) => {

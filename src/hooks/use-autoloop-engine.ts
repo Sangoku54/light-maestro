@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShowStore } from '../stores/showStore';
-import { useClockStore } from '../stores/clockStore';
+import { useClockStore, masterClockTotalBeats } from '../stores/clockStore';
 import { loadFixtureDefinitions, type DmxFixtureDefinition } from './dmx-cues';
 import {
   toAutoloopFixtures,
@@ -26,6 +26,32 @@ import { generateAutoscript } from '../engine/autoscript-generator';
 import type { AutoloopFixture, AutoloopTimeline, RepeatMode } from '../engine/autoloop-types';
 
 const BEATS_PER_BAR = 4;
+
+/**
+ * Temps écoulé de l'autoloop, en temps (monotone).
+ *
+ * L'autoloop suit l'HORLOGE MAÎTRE (position continue en temps), elle-même
+ * recalee sur la phase du logiciel DJ → l'autoloop tombe sur le beat.
+ * Quand l'horloge maître est en pause (bouton Pause du bandeau Clock),
+ * on avance sur l'horloge murale et on MEMORISE ce temps (`pausedBeats`) :
+ * à la reprise, l'autoloop continue EXACTEMENT où il en était (pas de saut
+ * en avant ni en arrière).
+ *
+ * Fonction pure (testable sans DOM).
+ */
+export function autoloopElapsedBeats(
+  masterTotalBeats: number,
+  startBeat: number,
+  pausedBeats: number,
+  pausedWallMs: number,
+  beatMs: number,
+): { totalBeats: number; pausedBeats: number } {
+  const extra = beatMs > 0 ? pausedWallMs / beatMs : 0;
+  return {
+    totalBeats: masterTotalBeats - startBeat + pausedBeats + extra,
+    pausedBeats: pausedBeats + extra,
+  };
+}
 
 export interface AutoloopEngineApi {
   /** Le patch est prêt et une banque a été construite. */
@@ -66,6 +92,10 @@ export function useAutoloopEngine(bpm = 120): AutoloopEngineApi {
   const bpmRef = useRef(bpm);
   const rafRef = useRef(0);
   const startRef = useRef(0);
+  /** Position de départ dans l'horloge MAÎTRE (temps continus). */
+  const startBeatRef = useRef(0);
+  /** Temps muraux écoulés pendant les pauses de l'horloge maître (temps). */
+  const pausedBeatsRef = useRef(0);
   const masterBpm = useClockStore((s) => s.bpm);
   const { i18n } = useTranslation();
   const masterPhase = useClockStore((s) => s.phase);
@@ -141,13 +171,34 @@ export function useAutoloopEngine(bpm = 120): AutoloopEngineApi {
     setPlaying(true);
 
     stopClock();
+    // Deux bases de temps :
+    //  - l'HORLOGE MAÎTRE (position continue en temps) : c'est elle qui est
+    //    recalee sur la phase du logiciel DJ → l'autoloop tombe sur le beat ;
+    //  - l'horloge murale : repli quand l'horloge maître est en pause (le
+    //    bouton Play/Pause du bandeau Clock ne doit ni figer l'autoloop ni
+    //    le faire sauter en arrière à la reprise).
     startRef.current = performance.now();
+    startBeatRef.current = masterClockTotalBeats();
+    pausedBeatsRef.current = 0;
     const tick = (now: number) => {
       const e = engineRef.current;
       if (!e) return;
-      const elapsed = now - startRef.current;
       const beatMs = 60000 / Math.max(1, bpmRef.current);
-      const totalBeats = elapsed / beatMs;
+      const clockPlaying = useClockStore.getState().isPlaying;
+      // Delta mural depuis la frame précédente (la 1re frame après `play()`
+      // est proche de 0 : startRef vient d'être positionné).
+      const dtWall = Math.max(0, now - startRef.current);
+      startRef.current = now;
+      // Temps mural à ajouter UNIQUEMENT quand l'horloge maître est en pause.
+      const pausedWallMs = clockPlaying ? 0 : dtWall;
+      const { totalBeats, pausedBeats } = autoloopElapsedBeats(
+        masterClockTotalBeats(),
+        startBeatRef.current,
+        pausedBeatsRef.current,
+        pausedWallMs,
+        beatMs,
+      );
+      pausedBeatsRef.current = pausedBeats;
       const bar = Math.floor(totalBeats / BEATS_PER_BAR);
       const beat = totalBeats - bar * BEATS_PER_BAR;
       e.onBarBeat(bar, beat);

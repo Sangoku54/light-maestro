@@ -123,16 +123,19 @@ export function useMidiTriggers(): void {
       cleanups.push(unsubscribe);
     }
 
-    // M5 — MIDI clock → tempo des chasers actifs (midi-actions scale les
-    // durées de steps : 120 BPM = nominal, 240 BPM = ×0,5). Le main émet
-    // midi:clock { bpm, running } (manager : ignoreTypes(true,false,true) + parse 0xF8).
+    // M5 — MIDI clock → tempo + PHASE des chasers actifs (midi-actions scale
+    // les durées de steps : 120 BPM = nominal, 240 BPM = ×0,5) ET verrouillage
+    // de la phase sur le temps du logiciel DJ (la phase reçue recale le
+    // compteur de temps de l'horloge maître → plus de dérive).
+    // Le main émet midi:clock { bpm, running, phase } (manager : parse 0xF8 +
+    // comptage des pulses = position dans la noire).
     if (midi.onClock) {
-      const clockHandler = (clock: { bpm: number; running: boolean }): void => {
+      const clockHandler = (clock: { bpm: number; running: boolean; phase?: number }): void => {
         midiSetClock(clock.bpm, clock.running);
         // Master clock : le BPM reçu (Ableton/Triton/…) devient la source
         // pendant le transport. À l'arrêt (running=false) on rende la main :
         // la priorité Link > MIDI > Tap > Audio > Manual est rétablie.
-        clockFromMidiClock(clock.bpm, clock.running);
+        clockFromMidiClock(clock.bpm, clock.running, clock.phase);
         if (!clock.running && useClockStore.getState().source === 'midi') {
           // Retour explicite à 'manual' : tant que source === 'midi', le BPM
           // clock continuerait d'écraser l'analysé (QuickShowView :2232).

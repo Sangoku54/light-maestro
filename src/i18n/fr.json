@@ -1295,7 +1295,18 @@
     "storeTitle": "Store Programmer ({{count}} ch)"
   },
   "masterClock": {
-    "abletonLink": "Ableton Link ↔ sync avec logiciel DJ"
+    "abletonLink": "Ableton Link — synchronisation avec un logiciel DJ",
+    "linkUnavailable": "Ableton Link n'est pas disponible dans cette version (aucun moteur Link installé). La source MIDI Clock, elle, fonctionne : dans l'onglet Performance → Périphériques MIDI, connectez la sortie MIDI de votre logiciel DJ, puis activez son horloge MIDI (MIDI Clock).",
+    "linkUnavailableShort": "Ableton Link indisponible",
+    "tempoMultiplier": "Multiplicateur de tempo (½ / ×1 / ×2)",
+    "halfTempo": "Tempo moitié",
+    "normalTempo": "Tempo normal",
+    "doubleTempo": "Tempo double",
+    "externalSource": "Source externe (logiciel DJ)",
+    "externalPaused": "Transport DJ en pause — show non verrouillé",
+    "baseBpm": "tempo reçu",
+    "beatLed": "LED de temps",
+    "lockedPhase": "Verrouillé sur la phase du DJ"
   },
   "safety": {
     "title": "⚠️ Sécurité — lisez avant de jouer",

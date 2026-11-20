@@ -84,7 +84,7 @@ contextBridge.exposeInMainWorld('lightMaestro', {
       ipcRenderer.on('midi:status', handler);
       return () => { ipcRenderer.removeListener('midi:status', handler); };
     },
-    onClock: (callback: (c: { bpm: number; running: boolean }) => void) => {
+    onClock: (callback: (c: { bpm: number; running: boolean; phase?: number }) => void) => {
       const handler = (_: any, data: any) => callback(data);
       ipcRenderer.on('midi:clock', handler);
       return () => { ipcRenderer.removeListener('midi:clock', handler); };

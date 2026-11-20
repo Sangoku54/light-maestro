@@ -11,7 +11,10 @@
  *  - The mapping is persisted to `userData/midi-mapping.json` on every
  *    mutation and restored at boot via `loadMapping()`.
  *  - MIDI clock (0xF8 / 0xFA / 0xFB / 0xFC) is parsed here and emitted
- *    as a throttled `clock` event - realtime messages never touch mappings.
+ *    as a throttled `clock` event { bpm, running, phase } — the phase
+ *    (position dans la noire, 0..1) permet au renderer de se VERROUILLER
+ *    sur le temps musical du logiciel DJ ; realtime messages never touch
+ *    mappings.
  *  - Never do synchronous I/O inside the RtMidi callback: `addMapping()`
  *    from learn mode defers the disk write via `setImmediate`.
  */
@@ -66,6 +69,12 @@ export class MidiManager extends EventEmitter {
   private clockIntervals: number[] = [];
   private clockBpm: number = 0;
   private clockLastEmit: number = 0;
+  /**
+   * Nombre de pulses 0xF8 reçus depuis le dernier START/CONTINUE.
+   * Sert à calculer la PHASE externe (position dans la noire) : le pulse n°1
+   * définit la frontière de temps (phase 0), le pulse n°25 la suivante.
+   */
+  private clockPulseCount: number = 0;
 
   // ─── MTC (lot #15) ────────────────────────────────────────
   private mtcDecoder = new MtcDecoder();
@@ -231,6 +240,7 @@ export class MidiManager extends EventEmitter {
     this.clockRunning = false;
     this.clockLastPulse = 0;
     this.clockIntervals = [];
+    this.clockPulseCount = 0;
     // Reset the MTC decoder (lot #15) — no stale timecode after reconnect
     this.stopMtcCheck();
     this.mtcDecoder.reset();
@@ -539,6 +549,12 @@ export class MidiManager extends EventEmitter {
    * Parse realtime clock messages:
    *   0xF8 timing clock (24 pulses per quarter note)
    *   0xFA start / 0xFB continue / 0xFC stop
+   *
+   * PHASE : chaque pulse 0xF8 = 1/24 de noire. On compte les pulses depuis
+   * le dernier START/CONTINUE → la phase externe (0..1 dans la noire) est
+   * connue à ±1 pulse. Sans cette phase, le renderer ne peut que DEVINER la
+   * position dans le temps musical (phase libre) → les lumières derivent par
+   * rapport au logiciel DJ. C'est cette phase qui permet le verrouillage.
    */
   private handleClockMessage(status: number): void {
     const now = Date.now();
@@ -558,35 +574,58 @@ export class MidiManager extends EventEmitter {
           }
         }
         this.clockLastPulse = now;
+        this.clockPulseCount++;
         this.clockRunning = true;
         this.emitClock(now, false);
         break;
       }
-      case 0xFA: // start
+      case 0xFA: // start — nouveau point de référence de phase
         this.clockRunning = true;
         this.clockLastPulse = now;
         this.clockIntervals = [];
+        this.clockPulseCount = 0;
         this.emitClock(now, true);
         break;
-      case 0xFB: // continue
+      case 0xFB: // continue — la phase absolue est perdue : nouveau repère
         this.clockRunning = true;
         this.clockLastPulse = now;
+        this.clockPulseCount = 0;
         this.emitClock(now, true);
         break;
       case 0xFC: // stop
         this.clockRunning = false;
         this.clockLastPulse = 0;
         this.clockIntervals = [];
+        this.clockPulseCount = 0;
         this.emitClock(now, true);
         break;
     }
+  }
+
+  /**
+   * Phase externe (0..1 dans la noire) à l'instant `now`.
+   * Le pulse n°1 (après START) = phase 0, le n°25 = phase 0 suivante.
+   * L'écart depuis le dernier pulse est ajouté (borné à une noire pour qu'un
+   * clock en retard ne fasse pas sauter la phase de plusieurs temps).
+   */
+  private computeClockPhase(now: number): number {
+    if (!this.clockRunning || this.clockPulseCount === 0) return 0;
+    const beatMs = 60000 / Math.max(20, this.clockBpm || 120);
+    const phaseAtLastPulse = ((this.clockPulseCount - 1) % 24) / 24;
+    const elapsed = Math.min(Math.max(0, now - this.clockLastPulse), beatMs);
+    const phase = phaseAtLastPulse + elapsed / beatMs;
+    return phase - Math.floor(phase);
   }
 
   /** Throttled `clock` emission (~4 Hz max); forced on start/stop. */
   private emitClock(now: number, force: boolean): void {
     if (!force && now - this.clockLastEmit < CLOCK_EMIT_INTERVAL_MS) return;
     this.clockLastEmit = now;
-    this.emit('clock', { bpm: this.clockBpm, running: this.clockRunning });
+    this.emit('clock', {
+      bpm: this.clockBpm,
+      running: this.clockRunning,
+      phase: this.computeClockPhase(now),
+    });
   }
 
   private normalizeMidiValue(rawValue: number, range: [number, number]): number {
