@@ -13,7 +13,7 @@ Quand on **patche une fixture**, ou qu'on **ouvre un nouveau projet / preset** :
 
 ## Release / auto-update LWS — runbook obligatoire
 
-Avant tout build de release, lire `.openclaw/notes/release-runbook.md`. En bref :
+Avant tout build de release, lire `.openclaw/notes/release-runbook.md`. La séquence est **automatisée** : `npm run check` → `npm run dist` → `npm run publish:github` → (upload LWS par l'utilisateur) → `npm run verify:release` (**0 échec** obligatoire). En bref :
 
 1. **Jamais d'instructions d'upload "au large"** — mesurer d'abord : `git diff --stat <commit-du-dernier-upload> HEAD -- site/`. Le résultat EST la liste d'upload.
 2. **`build.publish` : provider `generic` (LWS) en PREMIER** — `app-update.yml` embarqué prend `publishConfigs[0]`, sinon l'app cherche les MAJ sur GitHub au lieu de LWS.
@@ -24,8 +24,9 @@ Avant tout build de release, lire `.openclaw/notes/release-runbook.md`. En bref 
    - le canal d'une version **déjà installée** est figé dans son binaire (la 1.0.43/1.0.44 pointe GitHub, elle ne verra jamais LWS) ;
    - sans release GitHub, une version installée ne propose **jamais** la suivante ;
    - sans upload LWS, le canal principal est en 404 (boutons du site cassés) — le repli GitHub automatique (`electron/main.ts` → `fallbackToGithubFeed`) prend le relais pour les versions ≥ 1.0.46.
-7. **Le dépôt GitHub a été renommé** (`light-maestro` → `1.0.45`) : l'ancien nom redirige (lecture OK), mais pour **écrire** via l'API il faut résoudre `full_name` (un POST sur l'ancien nom suit le 301 et PowerShell transforme le POST en GET → rien n'est créé, silencieusement). Le tag doit pointer sur le commit du build.
-8. **Un texte i18n décrivant un comportement doit être validé contre le code du moteur**, pas contre une note ou un souvenir (piège : `mountGroundTipText` inversé alors que `clampTiltZone` interdit de tirer sous l'horizon).
+7. **`npm run publish:github` et `npm run verify:release` sont la référence** : le premier publie (tag + release + 4 assets, token lu dans le Credential Manager, **jamais dans le dépôt**) ; le second vérifie les **octets servis** sur les deux canaux + les boutons du site. Un build « parfait » ne vaut rien si le canal est en 404.
+8. **Le dépôt GitHub a été renommé** (`light-maestro` → `1.0.45`) : l'ancien nom redirige (lecture OK), mais pour **écrire** via l'API il faut résoudre `full_name` (un POST sur l'ancien nom suit le 301 et PowerShell transforme le POST en GET → rien n'est créé, silencieusement). Le tag doit pointer sur le commit du build.
+9. **Un texte i18n décrivant un comportement doit être validé contre le code du moteur**, pas contre une note ou un souvenir (piège : `mountGroundTipText` inversé alors que `clampTiltZone` interdit de tirer sous l'horizon).
 
 ## Contexte technique
 - OS : Windows / PowerShell 5.1. Pas de DMX réel sur ce PC — validation virtuelle uniquement (les tests réels se font sur le PC live).

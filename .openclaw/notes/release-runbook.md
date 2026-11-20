@@ -1,7 +1,29 @@
 # Runbook — Release Windows + auto-update LWS
 
-**Dernière release : 1.0.45 (2026-11-20).** Ce document encode les pièges
+**Dernière release : 1.0.46 (2026-11-20).** Ce document encode les pièges
 rencontrés sur cette release. À relire AVANT chaque build de release.
+
+---
+
+## 0 bis. Les DEUX commandes de release (ne rien faire à la main)
+
+```powershell
+npm run check           # porte : tsc (3x) + vitest
+npm run dist            # build NSIS + portable + blockmap
+npm run publish:github  # release GitHub (tag + latest.yml + setup + blockmap + portable)
+npm run verify:release  # verifie les DEUX canaux depuis l'internet (exit 1 si casse)
+```
+
+- `publish:github` lit le token dans le Credential Manager (`git credential
+  fill`) : **aucun secret dans le depot**. Il resout le nom reel du depot,
+  cree le tag, cree la release et televerse les assets, puis verifie.
+- `verify:release` compare les octets **servis** au binaire local (sha512 +
+  taille) : c'est le contrôle qui manquait en 1.0.45 (le build était parfait,
+  le canal principal était en 404, et personne ne l'a vu avant que
+  l'utilisateur ne le signale sur son PC).
+
+**Ordre impératif :** `check` → `dist` → `publish:github` → (upload LWS par
+l'utilisateur) → `verify:release` → 0 échec.
 
 ---
 
@@ -196,8 +218,9 @@ Chercher la fonction qui implémente le comportement, et lire ses tests.
 - [ ] Vérif 2b (latest.yml → fichier + blockmap existants)
 - [ ] Vérif 2c (pas de sous-dossier provider)
 - [ ] Vérif 3 (zéro placeholder)
-- [ ] **Release GitHub publiée** (tag + latest.yml + setup exe + blockmap + portable) → sans quoi les versions déjà installées ne voient JAMAIS la nouvelle version
+- [ ] `npm run publish:github` → release + tag + 4 assets, vérification incluse
 - [ ] **Upload LWS** (`/download/`) mesuré via `git diff --stat` → sans quoi le canal principal est en 404 et les boutons du site sont cassés
+- [ ] `npm run verify:release` → **0 échec** sur les deux canaux + les boutons du site
 - [ ] `git diff --stat <dernier-upload> HEAD -- site/` → liste d'upload exacte
 - [ ] SHA256 du site = SHA256 réel du fichier
 - [ ] Lister les fichiers à **supprimer** sur le serveur (obsolètes)
