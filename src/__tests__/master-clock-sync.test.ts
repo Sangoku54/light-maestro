@@ -40,7 +40,7 @@ import {
   resetMasterClock,
 } from '../stores/clockStore';
 import { useShowStore } from '../stores/showStore';
-import { midiPlayChaser, midiStopChaser, planLockedStep, __chaserEngineState } from '../engine/midi-actions';
+import { midiPlayChaser, midiStopChaser, planLockedStep, __chaserEngineState, midiRelockRunningChasers } from '../engine/midi-actions';
 import { autoloopElapsedBeats } from '../hooks/use-autoloop-engine';
 import { MidiManager } from '@electron/midi/manager';
 
@@ -379,6 +379,27 @@ describe('Chaser verrouillé sur l’horloge externe', () => {
       baseBpm: 128,
     });
     midiPlayChaser('ch-1');
+    expect(__chaserEngineState().free).not.toContain('ch-1');
+    expect(__chaserEngineState().locked).toContain('ch-1');
+  });
+
+  it('un chaser déjà en cours est re-verrouillé quand le clock démarre', () => {
+    vi.useFakeTimers();
+    // Chaser en cours sur le moteur libre (l'utilisateur l'a lancé AVANT que
+    // le logiciel DJ ne démarre).
+    useClockStore.setState({ source: 'manual', isPlaying: true, bpm: 120, baseBpm: 120 });
+    midiPlayChaser('ch-1');
+    expect(__chaserEngineState().free).toContain('ch-1');
+
+    // Le clock arrive : le chaser doit passer en mode verrouillé tout seul.
+    useClockStore.setState({
+      source: 'midi',
+      externalRunning: true,
+      isPlaying: true,
+      bpm: 128,
+      baseBpm: 128,
+    });
+    midiRelockRunningChasers();
     expect(__chaserEngineState().free).not.toContain('ch-1');
     expect(__chaserEngineState().locked).toContain('ch-1');
   });

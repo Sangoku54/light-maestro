@@ -33,6 +33,7 @@ import {
   midiCueListStop,
   midiPlayChaser,
   midiPlayScene,
+  midiRelockRunningChasers,
   midiSetClock,
   midiStopChaser,
   midiStopScene,
@@ -136,6 +137,12 @@ export function useMidiTriggers(): void {
         // pendant le transport. À l'arrêt (running=false) on rende la main :
         // la priorité Link > MIDI > Tap > Audio > Manual est rétablie.
         clockFromMidiClock(clock.bpm, clock.running, clock.phase);
+        if (clock.running) {
+          // L'horloge externe démarre : les chasers déjà en cours passent sur
+          // le moteur VERROUILLÉ (ils étaient sur leurs timers indépendants,
+          // donc en phase libre → ils dériveraient du beat du DJ).
+          midiRelockRunningChasers();
+        }
         if (!clock.running && useClockStore.getState().source === 'midi') {
           // Retour explicite à 'manual' : tant que source === 'midi', le BPM
           // clock continuerait d'écraser l'analysé (QuickShowView :2232).

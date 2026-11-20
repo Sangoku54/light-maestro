@@ -552,6 +552,24 @@ export function __chaserEngineState(): { free: string[]; locked: string[] } {
   return { free: [...activeChasers.keys()], locked: [...lockedChasers.keys()] };
 }
 
+/**
+ * Bascule les chasers DÉJÀ en cours vers le moteur verrouillé.
+ *
+ * Appelé quand l'horloge externe démarre (le logiciel DJ se met à jouer) :
+ * sans cela, un chaser lancé AVANT l'arrivée du MIDI clock continuerait sur
+ * ses timers indépendants (phase libre → dérive). On le relance donc sur la
+ * prochaine frontière de temps : il ré-entrent SUR le beat.
+ */
+export function midiRelockRunningChasers(): void {
+  if (!externalClockActive()) return;
+  for (const [chaserId, handle] of [...activeChasers.entries()]) {
+    cancelChaserStep(handle);
+    activeChasers.delete(chaserId);
+    startLockedChaser(chaserId, handle.stepIndex, handle.sourceId);
+    console.debug(`[midi] chaser "${chaserId}" re-verrouillé sur l'horloge externe`);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // Chaser VERROUILLÉ sur l'horloge externe (MIDI clock / Link)
 // ═══════════════════════════════════════════════════════════
