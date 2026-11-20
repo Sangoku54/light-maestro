@@ -1,7 +1,7 @@
 # Runbook — Release Windows + auto-update LWS
 
-**Dernière release : 1.0.46 (2026-11-20).** Ce document encode les pièges
-rencontrés sur cette release. À relire AVANT chaque build de release.
+**Dernière release : 1.0.47 (2026-11-20).** Ce document encode les pièges
+rencontrés sur les releases. À relire AVANT chaque build de release.
 
 ---
 
@@ -32,6 +32,10 @@ fonctionnelle sur tablette. Les tests automatisés ne disent pas si le
 téléchargement de ~99 Mo et le remplacement de l'exe fonctionnent : seul un
 test manuel sur le poste de l'utilisateur le prouve.
 
+**Release 1.0.47 (20/11/2026) :** `verify:release` → **0 échec** (21
+contrôles : 8 GitHub + 7 LWS + 6 site). Voir § 0 ter pour le piège rencontré
+sur cet upload.
+
 ---
 
 ## 0. Ne jamais donner d'instructions d'upload "au large"
@@ -50,6 +54,33 @@ Le résultat EST la liste d'upload. Ne jamais élargir à la main.
 
 De même pour `release/` : lister **exactement** les fichiers dont le nom ou le
 contenu a changé, et dire explicitement lesquels **supprimer** sur le serveur.
+
+### 0 ter. Piège (1.0.47) : upload « à moitié » — le site est à jour, `/download/` non
+
+Sur la 1.0.47, l'utilisateur a uploadé les 2 pages du site **et oublié les
+4 fichiers de `/download/`**. Résultat mesuré :
+
+- `telecharger.html` en ligne annonçait bien v1.0.47 (SHA256 conformes) ;
+- `/download/latest.yml` servait **encore** la 1.0.46 (`Last-Modified` de
+  l'upload précédent) ;
+- les 3 binaires 1.0.47 en **404**.
+
+Ce n'était **ni** un cache **ni** un mauvais dossier : les sondes sur
+`/download/`, `/downloads/`, `/dl/`, `/win/`, `/download/Win/`, `/fichiers/`,
+`/releases/`, la racine du site, un sous-dossier `1.0.47/`, un `/setup/` et
+3 variantes de casse de nom ont toutes répondu 404 → les fichiers n'étaient
+nulle part.
+
+**Règle :** un upload est « fait » quand **les 6 fichiers** sont posés
+(4 dans `/download/` + 2 pages à la racine). Ne pas se fier à « c'est fait » :
+relancer `npm run verify:release` et exiger **0 échec**. Le contrôle est
+fiable parce qu'il compare les **octets servis** (taille + sha512) aux
+binaires **locaux** : un `latest.yml` périmé qui reste en place est détecté
+immédiatement (taille et sha512 divergents).
+
+Symptôme caractéristique : le site annonce la bonne version, mais
+`latest.yml` pointe encore sur l'ancienne → « la page est à jour, la MAJ
+n'est pas proposée ».
 
 ---
 
