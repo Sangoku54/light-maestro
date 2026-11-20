@@ -25,6 +25,13 @@ npm run verify:release  # verifie les DEUX canaux depuis l'internet (exit 1 si c
 **Ordre impératif :** `check` → `dist` → `publish:github` → (upload LWS par
 l'utilisateur) → `verify:release` → 0 échec.
 
+**Validation terrain (20/11/2026, release 1.0.46) :** la chaîne complète a été
+validée **de bout en bout sur matériel réel** pour la première fois — MAJ
+automatique 1.0.44 → 1.0.46 proposée et installée sur le PC live, remote
+fonctionnelle sur tablette. Les tests automatisés ne disent pas si le
+téléchargement de ~99 Mo et le remplacement de l'exe fonctionnent : seul un
+test manuel sur le poste de l'utilisateur le prouve.
+
 ---
 
 ## 0. Ne jamais donner d'instructions d'upload "au large"
