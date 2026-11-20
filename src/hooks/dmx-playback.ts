@@ -16,6 +16,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { PatchedFixture, FixtureGroup, FixtureTier } from '../stores/showStore';
+import { useShowStore } from '../stores/showStore';
 import type { DmxFixtureDefinition, DmxFixtureCapability } from './dmx-cues';
 import { clampStrobeLimit, SECTION_MIN_INTENSITY } from './dmx-cues';
 import { resolveTrackTargets, computeEfxOverrides, type EfxTrackRef, type FixtureTrack, type MovementBlock } from './fixture-tracks';
@@ -2545,6 +2546,15 @@ export function computeDmxForCue(
    strobeLimit?: number,
 ): Array<{ universe: number; channelValues: Record<number, number> }> {
   const uniIds = universes.map(u => String(u.id));
+  // ─── TARES PHYSIQUES : source de verite unique ───
+  // Les positions (zeroPan / zeroTilt / centre capture / montage) sont
+  // INDISPENSABLES pour borner la zone de balayage : sans elles, le clamp
+  // moteur ignore la tare et ecrit des bytes HORS zone → la vue 3D (qui
+  // applique la meme zone) et le materiel designent des faisceaux
+  // DIFFERENTS (ecart mesure jusqu'a 89,6°).
+  // Si l'appelant ne les passe pas, on lit le store (source de verite en
+  // production) : impossible d'obtenir un pan/tilt hors zone par oubli.
+  const posById = fixturePositions ?? useShowStore.getState().fixturePositions;
   const analyses: ChannelAnalysis[] = [];
   for (const pf of patchedFixtures) {
     const def = fixtureDefs.get(pf.fixtureDefId);
@@ -2816,14 +2826,14 @@ export function computeDmxForCue(
               }
             }
           }
-          const phase = cue.time * Math.PI * 2 * speedMult + (spatialPattern && !trackMovement ? spatialPhaseFor(fixturePositions?.[pf.id], spatialPattern, mobileIdx) : 0);
+          const phase = cue.time * Math.PI * 2 * speedMult + (spatialPattern && !trackMovement ? spatialPhaseFor(posById?.[pf.id], spatialPattern, mobileIdx) : 0);
           // Boucle de mouvement section-aware (même kernel que le live) :
           // la matérialisation d'un preset suit donc exactement le rendu live.
           const moveLoop = !trackMovement ? sectionMoveFor(cue as any, motorCount) : null;
           const loopPhase01 = moveLoop ? sectionPhase01(cue as any, cue.time) : 0;
           const loopOffset = moveLoop
             ? phaseToIndexOffset(
-                spatialPattern && !trackMovement ? spatialPhaseFor(fixturePositions?.[pf.id], spatialPattern, mobileIdx) : 0,
+                spatialPattern && !trackMovement ? spatialPhaseFor(posById?.[pf.id], spatialPattern, mobileIdx) : 0,
                 moveLoop,
               )
             : 0;
@@ -2873,11 +2883,11 @@ export function computeDmxForCue(
               [px, py] = sampleSectionLoop(moveLoop, loopPhase01, m, loopOffset);
             }
             if (m < panCount) {
-              const rp = fixturePositions?.[pf.id];
+              const rp = posById?.[pf.id];
               const zPd = zeroDmxOffset(rp?.centerPan, 'pan');
               const ampPan = movementAmp(amplitude, 128 + zPd, 128);
               const raw = Math.max(0, Math.min(255, Math.round(128 + zPd + px * ampPan)));
-              const fp = fixturePositions?.[pf.id];
+              const fp = posById?.[pf.id];
               let pv = (zPd !== 0 && fp) ? raw : (fp ? clampPanToStage(raw, fp.x) : raw);
               // Zone 180° moteur (option B) — TOUJOURS appliquée (capté compris) :
               // le renderer 3D clampe aussi, un bypass montrait un faisceau 3D
@@ -2892,11 +2902,11 @@ export function computeDmxForCue(
               }
             }
             if (m < tiltCount) {
-              const rp = fixturePositions?.[pf.id];
+              const rp = posById?.[pf.id];
               const zTd = zeroDmxOffset(rp?.centerTilt, 'tilt');
               const ampTilt = movementAmp(amplitude, 128 + zTd, 128);
               const raw = Math.max(0, Math.min(255, Math.round(128 + zTd + py * ampTilt)));
-              const fp = fixturePositions?.[pf.id];
+              const fp = posById?.[pf.id];
               let tv = (zTd !== 0 && fp) ? raw : (fp ? clampTiltToStage(raw, fp.y) : raw);
               // Zone TILT moteur (miroir 3D) — TOUJOURS appliquée (capté compris).
               tv = clampTiltZoneDmx(tv, fa.tiltMaxDeg ?? 180, fp?.mountMode, fp?.tilt, fp?.zeroTilt);
@@ -2914,7 +2924,7 @@ export function computeDmxForCue(
           // centre capture (ou le neutre) en respectant la zone moteur.
           // Avant : 128/128 en dur, sans zone → une fixture au sol capteree
           // visait le sol alors que la vue 3D montrait un faisceau horizontal.
-          const fp = fixturePositions?.[pf.id];
+          const fp = posById?.[pf.id];
           const zPd = zeroDmxOffset(fp?.centerPan, 'pan');
           const zTd = zeroDmxOffset(fp?.centerTilt, 'tilt');
           const panLo = clampPanZoneDmx(0, fa.panMaxDeg ?? 540, fp?.zeroPan);

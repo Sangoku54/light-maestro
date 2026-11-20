@@ -175,6 +175,35 @@ export function poseFromPos(
 }
 
 /**
+ * Zone d'eclairage utile — clamp du cone de balayage (relatif a la direction
+ * par defaut de la fixture, cf. headingRadForPos) :
+ *   - PAN  : +/-90 deg « face a eux » — une fixture rear ne balaye jamais le mur
+ *     derriere elle, un cote jamais le hors-scene oppose.
+ *   - TILT : +/-90 deg (de la verticale basse a la verticale haute) pour les
+ *     fixtures en hauteur ; au SOL ('ground'), jamais sous l'horizon —
+ *     rien a eclairer dans le plancher.
+ *
+ * SOURCE UNIQUE : ces deux clamps sont utilises par le renderer 3D
+ * (Stage3D.tsx) ET par l'audit generique (engine/fixture-audit.ts), qui
+ * compare la vue 3D au DMX reellement ecrit. Les deplacer ici garantit que
+ * les deux comparent literally le meme code.
+ */
+export function clampPanZone(absRad: number, headingRad: number): number {
+  // Clamp absolute angle to +/-90 deg around the heading (never point behind).
+  let diff = absRad - headingRad;
+  while (diff > Math.PI) diff -= 2 * Math.PI;
+  while (diff < -Math.PI) diff += 2 * Math.PI;
+  diff = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, diff));
+  return headingRad + diff;
+}
+
+export function clampTiltZone(elevRad: number, mountMode: string): number {
+  let e = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, elevRad));
+  if (mountMode === 'ground' && e < 0) e = 0;
+  return e;
+}
+
+/**
  * Direction du faisceau telle que le renderer 3D la calcule.
  * Fonction de reference : sert aux tests ET a la validation croisee.
  */

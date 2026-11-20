@@ -27,8 +27,14 @@ import {
   headingRadForPos,
   hasPanTiltChannels,
   mountTiltForMode,
+  clampPanZone,
+  clampTiltZone,
   type FixtureAimPose,
 } from '../utils/fixture-pose';
+// Re-export : les clamps de zone vivent dans utils/fixture-pose (source unique
+// partagee avec l'audit generique engine/fixture-audit.ts), mais le renderer
+// 3D les a historiquement exportes d'ici — on garde l'API publique.
+export { clampPanZone, clampTiltZone } from '../utils/fixture-pose';
 import { generateEfxPanTilt } from '../hooks/fixture-tracks';
 import { useAppStore } from '../stores/appStore';
 import { dmxBridge } from '../utils/dmx-bridge';
@@ -6126,29 +6132,4 @@ function updateFixtureSupport(
 /** Re-export : les definitions canoniques vivent dans utils/fixture-pose.ts
  *  (partagees par le renderer 3D, l'outil Target et le playback DMX). */
 export { headingRadForPos, hasPanTiltChannels };
-
-
-/**
- * Zone d'éclairage utile — clamp du cône de balayage (relatif à la direction
- * par défaut de la fixture, cf. headingRadForPos) :
- *   - PAN  : ±90° « face à eux » — une fixture rear ne balaye jamais le mur
- *     derrière elle, un côté jamais le hors-scène opposé.
- *   - TILT : ±90° (de la verticale basse à la verticale haute) pour les
- *     fixtures en hauteur ; au SOL ('ground'), jamais sous l'horizon —
- *     rien à éclairer dans le plancher.
- */
-export function clampPanZone(absRad: number, headingRad: number): number {
-  // Clamp absolute angle to ±90° around the heading (never point behind).
-  let diff = absRad - headingRad;
-  while (diff > Math.PI) diff -= 2 * Math.PI;
-  while (diff < -Math.PI) diff += 2 * Math.PI;
-  diff = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, diff));
-  return headingRad + diff;
-}
-
-export function clampTiltZone(elevRad: number, mountMode: string): number {
-  let e = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, elevRad));
-  if (mountMode === 'ground' && e < 0) e = 0;
-  return e;
-}
 
