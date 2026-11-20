@@ -68,10 +68,10 @@ import { setSceneAim, clearSceneAim, hasSceneAim } from '../utils/sceneAim';
 const STAGE_WIDTH = 10;  // meters
 const STAGE_DEPTH = 8;   // meters
 const TRUSS_HEIGHT = 3;  // meters
-const STAGE_HEIGHT = 1.5;  // meters � stage elevation above ground
-const STAGE_THICKNESS = 0.3;  // meters � stage platform thickness
-const DMX_POLL_INTERVAL = 1000 / 60; // 60fps � synchronis� avec le moteur DMX
-const PREVIEW_INTENSITY = 0.45;       // fixtures s�lectionn�es : niveau de pr�visualisation des faisceaux
+const STAGE_HEIGHT = 1.5;  // meters — stage elevation above ground
+const STAGE_THICKNESS = 0.3;  // meters — stage platform thickness
+const DMX_POLL_INTERVAL = 1000 / 60; // 60fps — synchronisé avec le moteur DMX
+const PREVIEW_INTENSITY = 0.45;       // fixtures sélectionnées : niveau de prévisualisation des faisceaux
 const MAX_TRAIL_POINTS = 80;
 const TRAIL_ADD_INTERVAL = 100; // ms between trail samples
 const GRID_SIZE = 1; // 1m grid squares
@@ -83,7 +83,7 @@ const snapToGrid = (valueM: number, gridSize: number = GRID_SIZE) =>
 // The 3D view often lives in a narrow dock, so the default camera can crop
 // the stage and force the user to zoom out. This extends the camera along
 // its current direction just enough to fit the whole stage volume
-// (width � truss height � depth) with the current aspect � angles unchanged.
+// (width × truss height × depth) with the current aspect — angles unchanged.
 function ensureStageFits(
   camera: THREE.PerspectiveCamera,
   width: number,
@@ -125,20 +125,20 @@ const MUSICIAN_HEIGHTS: Record<MusicianKind, number> = {
   clavier: 1.65,
   batteur: 1.6,
   cuivre: 1.7,
-  dj: 1.8, // debout derri�re sa cabine (cabine incluse dans la silhouette)
+  dj: 1.8, // debout derrière sa cabine (cabine incluse dans la silhouette)
 };
 
-// Beam cone length (m) � petit c�ne de lumi�re : s'arr�te � la sc�ne depuis la poutre (TRUSS_HEIGHT),
-// au lieu de l'ancien 12.5 m qui traversait le sol et descendait ~9 m sous la sc�ne.
-const BEAM_LENGTH = 4.5; // +50 % par rapport � 3.0 (demande utilisateur)
+// Beam cone length (m) — petit cône de lumière : s'arrête à la scène depuis la poutre (TRUSS_HEIGHT),
+// au lieu de l'ancien 12.5 m qui traversait le sol et descendait ~9 m sous la scène.
+const BEAM_LENGTH = 4.5; // +50 % par rapport à 3.0 (demande utilisateur)
 /** Longueur max d'un faisceau qui ne touche aucun sol (pointe vers le ciel). */
 const BEAM_SKY_LENGTH = 9;
 
 /**
- * Texture de fondu le long du faisceau : blanc opaque � la lentille ?
- * transparent au bout. En AdditiveBlending, le noir n'ajoute rien ? le
- * faisceau s'�vanouit au lieu de finir par un cercle tranch� en plein air.
- * v=1 = haut du cylindre = c�t� lentille (flipY=true par d�faut).
+ * Texture de fondu le long du faisceau : blanc opaque à la lentille →
+ * transparent au bout. En AdditiveBlending, le noir n'ajoute rien → le
+ * faisceau s'évanouit au lieu de finir par un cercle tranché en plein air.
+ * v=1 = haut du cylindre = côté lentille (flipY=true par défaut).
  */
 let _beamFadeTex: THREE.CanvasTexture | null = null;
 function getBeamFadeTexture(): THREE.CanvasTexture {
@@ -150,7 +150,7 @@ function getBeamFadeTexture(): THREE.CanvasTexture {
   g.addColorStop(0, '#ffffff');     // v=1 (lentille) : plein
   g.addColorStop(0.3, 'rgba(255,255,255,0.55)');
   g.addColorStop(0.7, 'rgba(255,255,255,0.18)');
-  g.addColorStop(1, 'rgba(255,255,255,0)'); // v=0 (bout) : �teint
+  g.addColorStop(1, 'rgba(255,255,255,0)'); // v=0 (bout) : éteint
   ctx.fillStyle = g; ctx.fillRect(0, 0, 2, 64);
   _beamFadeTex = new THREE.CanvasTexture(c);
   _beamFadeTex.wrapS = THREE.ClampToEdgeWrapping;
@@ -159,9 +159,9 @@ function getBeamFadeTexture(): THREE.CanvasTexture {
 }
 
 /**
- * Longueur R�ALISTE d'un faisceau : raycast depuis la lentille jusqu'au sol
- * touch� (plateau de sc�ne, sinon plancher 0) � le c�ne s'arr�te SUR le sol
- * au lieu de flotter. Pointe vers le ciel ? longueur max avec fondu.
+ * Longueur RÉALISTE d'un faisceau : raycast depuis la lentille jusqu'au sol
+ * touché (plateau de scène, sinon plancher 0) — le cône s'arrête SUR le sol
+ * au lieu de flotter. Pointe vers le ciel → longueur max avec fondu.
  */
 function beamHitLength(
   originY: number, dir: THREE.Vector3, floorY: number,
@@ -174,9 +174,9 @@ function beamHitLength(
 }
 
 /**
- * Textures gobo proc�durales (cache par slot). Blanc sur noir : en blending
- * additif, le noir n'ajoute rien ? le motif � d�coupe � le faisceau.
- * Classification par mots-cl�s du nom de cap (dot/line/star/tunnel/heart�).
+ * Textures gobo procédurales (cache par slot). Blanc sur noir : en blending
+ * additif, le noir n'ajoute rien → le motif « découpe » le faisceau.
+ * Classification par mots-clés du nom de cap (dot/line/star/tunnel/heart…).
  */
 const _goboTexCache = new Map<string, THREE.CanvasTexture>();
 function getGoboTexture(slotName: string): THREE.CanvasTexture {
@@ -192,14 +192,14 @@ function getGoboTexture(slotName: string): THREE.CanvasTexture {
   ctx.fillStyle = '#fff';
   const n = key;
   if (/open|clear|white|blank|no gobo/.test(n)) {
-    ctx.fillRect(0, 0, S, S); // plein (disque masqu� de toute fa�on)
+    ctx.fillRect(0, 0, S, S); // plein (disque masqué de toute façon)
   } else if (/dot|point|ball|circle/.test(n)) {
     for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) {
       ctx.beginPath(); ctx.arc(18 + i * 23, 18 + j * 23, 7, 0, Math.PI * 2); ctx.fill();
     }
   } else if (/line|stripe|bar|slot/.test(n)) {
     for (let i = 0; i < 6; i++) ctx.fillRect(0, 8 + i * 20, S, 9);
-  } else if (/star|�toile/.test(n)) {
+  } else if (/star|étoile/.test(n)) {
     ctx.beginPath();
     for (let i = 0; i < 10; i++) {
       const r = i % 2 === 0 ? 56 : 22;
@@ -214,7 +214,7 @@ function getGoboTexture(slotName: string): THREE.CanvasTexture {
     for (let r = 10; r <= 56; r += 15) {
       ctx.beginPath(); ctx.arc(S / 2, S / 2, r, 0, Math.PI * 2); ctx.lineWidth = 9; ctx.strokeStyle = '#fff'; ctx.stroke();
     }
-  } else if (/heart|c�ur|coeur/.test(n)) {
+  } else if (/heart|cœur|coeur/.test(n)) {
     ctx.beginPath();
     ctx.arc(S / 2 - 18, S / 2 - 12, 22, 0, Math.PI * 2);
     ctx.arc(S / 2 + 18, S / 2 - 12, 22, 0, Math.PI * 2);
@@ -236,7 +236,7 @@ function getGoboTexture(slotName: string): THREE.CanvasTexture {
       ctx.lineWidth = 8; ctx.strokeStyle = '#fff'; ctx.stroke();
     }
   } else {
-    // Fallback : quatre quartiers d�coup�s (motif g�n�rique reconnaissable)
+    // Fallback : quatre quartiers découpés (motif générique reconnaissable)
     ctx.fillRect(S / 4, 8, S / 2 - 16, S - 16);
     ctx.fillRect(8, S / 4, S - 16, S / 2 - 16);
   }
@@ -292,7 +292,7 @@ function removeBackground(imageData: ImageData) {
   const { data, width, height } = imageData;
   const w = width, h = height;
 
-  // Already a transparent cutout? (corners transparent) ? leave as-is
+  // Already a transparent cutout? (corners transparent) → leave as-is
   const cornerAlpha = [
     data[3],
     data[(w - 1) * 4 + 3],
@@ -398,9 +398,9 @@ async function loadCutoutTexture(url: string): Promise<THREE.CanvasTexture> {
 // FixtureChannelMap is now FixtureChannelAnalysis from fixture-analyzer.ts
 type FixtureChannelMap = FixtureChannelAnalysis;
 
-// --- Color wheel ? hex (simplified) --------------------------
+// --- Color wheel → hex (simplified) --------------------------
 
-/** Roue couleur ? hex (partag� live/3D/tests). */
+/** Roue couleur → hex (partagé live/3D/tests). */
 export function wheelValueToColor(
   value: number,
   caps: DmxFixtureCapability[] | null,
@@ -424,8 +424,8 @@ export function wheelValueToColor(
       }
     }
   }
-  // Fallback : blanc neutre � l'arc-en-ciel calcul� depuis la valeur DMX brute
-  // rendait du jaune stable pour les valeurs 60-85 (roues non analys�es).
+  // Fallback : blanc neutre — l'arc-en-ciel calculé depuis la valeur DMX brute
+  // rendait du jaune stable pour les valeurs 60-85 (roues non analysées).
   void value;
   return new THREE.Color(0xffffff);
 }
@@ -464,30 +464,30 @@ interface Fixture3D {
   channelMap: FixtureChannelMap;
   universeIndex: number;        // Index into channelData map
   mountMode: 'top' | 'ground' | 'rear' | 'hanging'; // beam default direction
-  supportGroup?: THREE.Group;   // Support physique (totem/tr�pied), null si pont/sol
-  supportKey?: string;          // kind:position:hauteur � �vite les reconstructions
+  supportGroup?: THREE.Group;   // Support physique (totem/trépied), null si pont/sol
+  supportKey?: string;          // kind:position:hauteur — évite les reconstructions
   beamAngle: number;            // beam opening angle in radians
   _staticTilt: number;          // static tilt offset from panel
   _mountTilt: number;           // mount-mode head tilt compensation (p for ground, 0 otherwise)
   _baseTilt: number;            // base tilt set at creation from mount mode
-  _zeroPanDeg: number;          // point z�ro pan VISUEL (degr�s) : d�calage du faisceau dans la 3D
-  _zeroTiltDeg: number;         // point z�ro tilt VISUEL (degr�s) : d�calage du faisceau dans la 3D
+  _zeroPanDeg: number;          // point zéro pan PHYSIQUE (degrés) : décalage du zéro mécanique du moteur
+  _zeroTiltDeg: number;         // point zéro tilt PHYSIQUE (degrés) : décalage du zéro mécanique du moteur
   _headingRad: number;          // heading initial (phi) stocké séparément pour le DMX pan
-  lastPan?: number;             // dernier byte pan vu (pour � capturer le centre du mouvement �)
-  lastTilt?: number;            // dernier byte tilt vu (pour � capturer le centre du mouvement �)
-  _smoothI?: number;            // intensit� liss�e 0..1 (anti-marches de fade, cf. updateDmxState)
+  lastPan?: number;             // dernier byte pan vu (pour « capturer le centre du mouvement »)
+  lastTilt?: number;            // dernier byte tilt vu (pour « capturer le centre du mouvement »)
+  _smoothI?: number;            // intensité lissée 0..1 (anti-marches de fade, cf. updateDmxState)
 }
 
 // --- Component ------------------------------------------------
 
 /**
- * Snapshot de pose compl�te pour � Rec Scene � / � Rec Show � : fusionne les
- * canaux touch�s du programmer (prioritaires) avec l'�tat DMX R�EL en cours de
- * chaque fixture (dernier buffer pouss� ? pan/tilt/dimmer/couleurs actuels).
- * Sans �a, une sc�ne ne figeait que les canaux TOUCH�S (faders actionn�s) :
- * le tilt/l'axe non enregistr� continuait d'�tre anim� par l'autoscript.
- * Une fixture enti�rement �teinte (tout � 0) n'est pas captur�e ? la section
- * la laisse dans son �tat par ailleurs (�vite un black-out forc�).
+ * Snapshot de pose complète pour « Rec Scene » / « Rec Show » : fusionne les
+ * canaux touchés du programmer (prioritaires) avec l'état DMX RÉEL en cours de
+ * chaque fixture (dernier buffer poussé → pan/tilt/dimmer/couleurs actuels).
+ * Sans ça, une scène ne figeait que les canaux TOUCHÉS (faders actionnés) :
+ * le tilt/l'axe non enregistré continuait d'être animé par l'autoscript.
+ * Une fixture entièrement éteinte (tout à 0) n'est pas capturée → la section
+ * la laisse dans son état par ailleurs (évite un black-out forcé).
  */
 function livePoseChannels(prog: Record<number, number>, f3dMap: Map<string, any> | undefined): Record<number, number> {
   const channels = { ...prog };
@@ -495,19 +495,19 @@ function livePoseChannels(prog: Record<number, number>, f3dMap: Map<string, any>
   const fixtures = state.patchedFixtures;
   const universes = state.universes;
   const positions = state.fixturePositions as Record<string, { heading?: number; tilt?: number }> | undefined;
-  // 0. Look minimal (dimmer/couleur) pour chaque fixture TOUCH�E par le
-  //    programmer � sinon Rec fige pan/tilt sans intensit� ? sc�ne muette.
+  // 0. Look minimal (dimmer/couleur) pour chaque fixture TOUCHÉE par le
+  //    programmer — sinon Rec fige pan/tilt sans intensité → scène muette.
   //    Capture AVANT le merge live pour que ensureFixtureLook voie le touch.
   for (const pf of fixtures ?? []) {
     const cm = (f3dMap?.get(pf.id)?.channelMap ?? null) as LookChannelMap | null;
     if (!cm) continue;
     ensureFixtureLook(channels, pf, cm);
   }
-  // 1. Pose visuelle (tare fixturePositions) ? DMX pour les axes non touch�s au
-  //    programmer. Le drag � normal � et les sliders Pan/Tilt tare sont VISUELS
+  // 1. Pose visuelle (tare fixturePositions) → DMX pour les axes non touchés au
+  //    programmer. Le drag « normal » et les sliders Pan/Tilt tare sont VISUELS
   //    uniquement (ne touchent pas le programmer) : c'est ici qu'ils deviennent
-  //    r�ellement capturables. Conversion inverse du rendu 3D
-  //    (tilt : DMX 0..255 = -90�..+90� relatif, pan : DMX 128 = centre sur 360�).
+  //    réellement capturables. Conversion inverse du rendu 3D
+  //    (tilt : DMX 0..255 = -90°..+90° relatif, pan : DMX 128 = centre sur 360°).
   for (const pf of fixtures ?? []) {
     const pos = positions?.[pf.id];
     const cm = f3dMap?.get(pf.id)?.channelMap;
@@ -523,9 +523,9 @@ function livePoseChannels(prog: Record<number, number>, f3dMap: Map<string, any>
       for (const off of tiltOffsets) if (channels[pf.startAddress + off] === undefined) channels[pf.startAddress + off] = tilt;
     }
   }
-  // 2. �tat DMX R�EL � buffer arbitr� dmxBridge d'abord (programmer LTP 85,
-  //    design-test�), miroir appStore en secours. Le miroir seul ne voyait
-  //    JAMAIS le look Target (useProgrammerSync n'�crit pas setUniverseData).
+  // 2. État DMX RÉEL — buffer arbitré dmxBridge d'abord (programmer LTP 85,
+  //    design-test…), miroir appStore en secours. Le miroir seul ne voyait
+  //    JAMAIS le look Target (useProgrammerSync n'écrit pas setUniverseData).
   for (const pf of fixtures ?? []) {
     const uniIdx = universes.findIndex((u) => String(u.id) === String(pf.universeId));
     if (uniIdx < 0) continue;
@@ -547,7 +547,7 @@ function livePoseChannels(prog: Record<number, number>, f3dMap: Map<string, any>
       if (channels[addr] === undefined) channels[addr] = range[addr];
     }
   }
-  // 3. Re-forcer le look apr�s merge (le live peut avoir remis intensity=0).
+  // 3. Re-forcer le look après merge (le live peut avoir remis intensity=0).
   for (const pf of fixtures ?? []) {
     const cm = (f3dMap?.get(pf.id)?.channelMap ?? null) as LookChannelMap | null;
     if (!cm) continue;
@@ -557,11 +557,11 @@ function livePoseChannels(prog: Record<number, number>, f3dMap: Map<string, any>
 }
 
 /**
- * Faders Pan/Tilt r�els de la modale 3D : �crivent DIRECTEMENT sur le
- * programmer, aux adresses DMX r�elles de la fixture (panOffset/panOffsets
- * et tiltOffset/tiltOffsets), comme le drag � mode Direct �. C'est ce qui
- * permet � � Rec Scene � / � Rec Show � de capturer la position r�elle.
- * Souscrit r�activement au programmer ? valeurs � jour en direct.
+ * Faders Pan/Tilt réels de la modale 3D : écrivent DIRECTEMENT sur le
+ * programmer, aux adresses DMX réelles de la fixture (panOffset/panOffsets
+ * et tiltOffset/tiltOffsets), comme le drag « mode Direct ». C'est ce qui
+ * permet à « Rec Scene » / « Rec Show » de capturer la position réelle.
+ * Souscrit réactivement au programmer → valeurs à jour en direct.
  */
 function DirectPTFaders({ panAddrs, tiltAddrs }: { panAddrs: number[]; tiltAddrs: number[] }) {
   const { t } = useTranslation();
@@ -595,11 +595,11 @@ function DirectPTFaders({ panAddrs, tiltAddrs }: { panAddrs: number[]; tiltAddrs
 }
 
 /**
- * Fader Dimmer contr�l� (r�actif programmeur) : `defaultValue` ne se
- * r�appliquait pas au changement de fixture ? le curseur restait coll� �
- * droite (valeur de la fixture pr�c�dente). Ici on lit la/les adresses
- * intensity (ou RGB en fallback) de TOUTES les fixtures s�lectionn�es :
- * �criture multi-cibles via `onSet` quand fourni.
+ * Fader Dimmer contrôlé (réactif programmeur) : `defaultValue` ne se
+ * réappliquait pas au changement de fixture → le curseur restait collé à
+ * droite (valeur de la fixture précédente). Ici on lit la/les adresses
+ * intensity (ou RGB en fallback) de TOUTES les fixtures sélectionnées :
+ * écriture multi-cibles via `onSet` quand fourni.
  */
 function DirectDimmerFader({ intensityAddrs, rgbAddrs, onSet }: { intensityAddrs: number[]; rgbAddrs: number[]; onSet?: (v: number) => void }) {
   const { t } = useTranslation();
@@ -637,13 +637,13 @@ export const Stage3D: React.FC<{
    *  When provided, Stage3D uses it as the source of truth for those values
    *  and emits updates through `onView3DChange` whenever the user drags the
    *  camera or toggles a flag. When omitted, the component falls back to
-   *  internal state (ephemeral UI chrome � old behavior). */
+   *  internal state (ephemeral UI chrome — old behavior). */
   view3D?: View3DState;
   onView3DChange?: (state: View3DState) => void;
-  /** N'affiche l'option EFX Snapshot que si true � uniquement onglet Sc�nes (Design) */
+  /** N'affiche l'option EFX Snapshot que si true — uniquement onglet Scènes (Design) */
   enableEfxApply?: boolean;
-  /** Cache le panneau modal d'�dition de fixture (fix� au centre, recouvre la
-   *  vue) pendant une modification de sc�ne/show/chaser � seul l'aper�u 3D
+  /** Cache le panneau modal d'édition de fixture (fixé au centre, recouvre la
+   *  vue) pendant une modification de scène/show/chaser — seul l'aperçu 3D
    *  reste visible pour suivre les changements en direct. La sauvegarde se
    *  fait alors via le bouton de la page, pas via la 3D. */
   hideFixturePanel?: boolean;
@@ -678,7 +678,7 @@ export const Stage3D: React.FC<{
   const lastDmxFrameRef = useRef(performance.now());
 
   // -- Stage scene config ----------------------------
-  // Neuf = sc�ne vide ; une config charg�e (props) prend toujours le dessus.
+  // Neuf = scène vide ; une config chargée (props) prend toujours le dessus.
   const [stageSceneInternal, setStageSceneInternal] = useState<StageScene>('empty');
 
   // Controlled stage config (host supplies props) vs internal default
@@ -690,17 +690,17 @@ export const Stage3D: React.FC<{
   const handleMusiciansChange = (roster: MusicianRoster) => {
     const next = normalizeRoster(roster);
     setMusiciansInternal(next);
-    // TOUJOURS persister au niveau projet (survit changement de page + r�ouverture)
+    // TOUJOURS persister au niveau projet (survit changement de page + réouverture)
     onMusiciansChange?.(next);
     useShowStore.getState().setMusicians(next);
   };
   const handleStageSceneChange = (cfg: StageScene) => {
     setStageSceneInternal(cfg);
-    // ?? NE PAS r�initialiser fixturePositions ici � les positions de fixtures
-    // appartiennent au projet en cours et doivent persister d'une page � l'autre.
-    // Le nettoyage des meshes Three.js est g�r� s�par�ment (useEffect ci-dessous).
+    // ⚠️ NE PAS réinitialiser fixturePositions ici — les positions de fixtures
+    // appartiennent au projet en cours et doivent persister d'une page à l'autre.
+    // Le nettoyage des meshes Three.js est géré séparément (useEffect ci-dessous).
     onStageSceneChange?.(cfg);
-    // TOUJOURS persister au niveau projet (survit changement de page + r�ouverture)
+    // TOUJOURS persister au niveau projet (survit changement de page + réouverture)
     useShowStore.getState().setProjectStageScene(cfg);
   };
 
@@ -716,7 +716,7 @@ export const Stage3D: React.FC<{
   const showBeams = view3DToggles.showBeams;
   const showSmoke = view3DToggles.showSmoke;
   const showLabels = view3DToggles.showLabels;
-  // Direct mode is below � but expose the setter wrapper here for symmetry.
+  // Direct mode is below — but expose the setter wrapper here for symmetry.
   const setShowBeams = (v: boolean | ((prev: boolean) => boolean)) => {
     const cur = view3DToggles.showBeams;
     const next = typeof v === 'function' ? (v as (p: boolean) => boolean)(cur) : v;
@@ -760,7 +760,7 @@ export const Stage3D: React.FC<{
   };
   const emitPendingRef = useRef(false);
   const emitView3DCameraCoalesced = useCallback(() => {
-    // Microtask coalescing � OrbitControls fires 'change' on every pointer
+    // Microtask coalescing — OrbitControls fires 'change' on every pointer
     // move, but we only want one emission per drag gesture.
     if (emitPendingRef.current) return;
     emitPendingRef.current = true;
@@ -770,7 +770,7 @@ export const Stage3D: React.FC<{
     });
   }, []);
 
-  // Preserve custom positions across roster/page changes � only fill in defaults
+  // Preserve custom positions across roster/page changes — only fill in defaults
   // for new roster entries, never overwrite already-placed musicians.
   useEffect(() => {
     const defaults = buildRosterPositions(musicians);
@@ -798,7 +798,7 @@ export const Stage3D: React.FC<{
 
   const trussBeamsRef = useRef<{ back: THREE.Object3D | null; front: THREE.Object3D | null; left: THREE.Object3D | null; right: THREE.Object3D | null; poles: THREE.Object3D[] }>({ back: null, front: null, left: null, right: null, poles: [] });
   const [selectedFixtureId, setSelectedFixtureId] = useState<string | null>(null);
-  // -- S�lection multiple 3D + mode Target -----------------
+  // -- Sélection multiple 3D + mode Target -----------------
   const selectedFixtureIdRef = useRef<string | null>(null);
   const [multiSelectedIds, setMultiSelectedIds] = useState<Set<string>>(new Set());
   const multiSelectedIdsRef = useRef<Set<string>>(new Set());
@@ -811,7 +811,7 @@ export const Stage3D: React.FC<{
   const [targetsVersion, setTargetsVersion] = useState(0);
   const bumpTargets = useCallback(() => setTargetsVersion((v) => v + 1), []);
 
-  // Miroirs du s�lection courante pour les callbacks (pas de re-cr�ation).
+  // Miroirs du sélection courante pour les callbacks (pas de re-création).
   useEffect(() => { selectedFixtureIdRef.current = selectedFixtureId; }, [selectedFixtureId]);
   useEffect(() => {
     targetModeRef.current = targetMode;
@@ -843,7 +843,7 @@ export const Stage3D: React.FC<{
     if (targetMarkerRef.current) targetMarkerRef.current.visible = false;
   }, []);
 
-  /** IDs cibl�s par une action Direct de la modale : multi-s�lection si >0, sinon la fixture active. */
+  /** IDs ciblés par une action Direct de la modale : multi-sélection si >0, sinon la fixture active. */
   const getActionFixtureIds = useCallback((): string[] => {
     if (multiSelectedIdsRef.current.size > 0) return [...multiSelectedIdsRef.current];
     if (selectedFixtureIdRef.current) return [selectedFixtureIdRef.current];
@@ -910,14 +910,14 @@ export const Stage3D: React.FC<{
    const [fixtureSearch, setFixtureSearch] = useState('');
    // Panneau fixtures RETRACTÉ par défaut (toujours fermé au démarrage)
    const [leftDockCollapsed, setLeftDockCollapsed] = useState(true);
-  // Dock droit "Sc�ne & EFX" repliable (mode Sc�nes), repli� par d�faut comme
-  // celui des fixtures : la sc�ne physique reste centr�e et lisible, et on
-  // ne d�plie un panneau que pour s'en servir.
+  // Dock droit "Scène & EFX" repliable (mode Scènes), replié par défaut comme
+  // celui des fixtures : la scène physique reste centrée et lisible, et on
+  // ne déplie un panneau que pour s'en servir.
   const [rightDockCollapsed, setRightDockCollapsed] = useState(true);
-  // Recadre la sc�ne quand un dock lat�ral se (d�)plie : le ResizeObserver
-  // ajuste d�j� le ratio/canvas, ici on recule la cam�ra juste assez pour que
-  // toute la sc�ne reste visible et lisible. Premier rendu saut� pour ne pas
-  // �craser une cam�ra sauvegard�e (view3D du preset).
+  // Recadre la scène quand un dock latéral se (dé)plie : le ResizeObserver
+  // ajuste déjà le ratio/canvas, ici on recule la caméra juste assez pour que
+  // toute la scène reste visible et lisible. Premier rendu sauté pour ne pas
+  // écraser une caméra sauvegardée (view3D du preset).
   const dockFitSkipFirst = useRef(true);
   useEffect(() => {
     if (dockFitSkipFirst.current) { dockFitSkipFirst.current = false; return; }
@@ -932,7 +932,7 @@ export const Stage3D: React.FC<{
   }, [leftDockCollapsed, rightDockCollapsed]);
 
   // Shift+G : bascule snap grid
-  // Ctrl+C : copier fixture s�lectionn�e
+  // Ctrl+C : copier fixture sélectionnée
   // Ctrl+V : coller (dupliquer) fixture du presse-papier
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -945,11 +945,11 @@ export const Stage3D: React.FC<{
         if (tag === 'input' || tag === 'textarea' || tag === 'select' || tgt.isContentEditable) return;
       }
       const st = useShowStore.getState();
-      // Ctrl+C : copier la fixture s�lectionn�e
+      // Ctrl+C : copier la fixture sélectionnée
       if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C') && selectedFixtureId) {
         e.preventDefault();
         st.copyFixtureId(selectedFixtureId);
-        try { (window as any).__lm_toast?.('Copi�', 'info'); } catch {}
+        try { (window as any).__lm_toast?.('Copié', 'info'); } catch {}
         return;
       }
       // Ctrl+V : coller/dupliquer
@@ -961,7 +961,7 @@ export const Stage3D: React.FC<{
         } else {
           setSelectedFixtureId(result.id);
           focusFixture(result.id);
-          try { (window as any).__lm_toast?.('Coll�', 'info'); } catch {}
+          try { (window as any).__lm_toast?.('Collé', 'info'); } catch {}
         }
         return;
       }
@@ -983,23 +983,23 @@ export const Stage3D: React.FC<{
   const [musiciansMenuOpen, setMusiciansMenuOpen] = useState(false);
   const musiciansBtnRef = useRef<HTMLButtonElement>(null);
   const [supportsMenuOpen, setSupportsMenuOpen] = useState(false);
-  /** Cible d'application des supports : la s�lection (Ctrl+clic) ou toutes. */
+  /** Cible d'application des supports : la sélection (Ctrl+clic) ou toutes. */
   const [supportsTarget, setSupportsTarget] = useState<'selection' | 'all'>('selection');
   const [decksMenuOpen, setDecksMenuOpen] = useState(false);
-  // Drag d'un plateau au clic gauche (�diteur Plateaux ouvert uniquement :
-  // sinon le clic gauche reste r�serv� � l'orbite et aux fixtures).
+  // Drag d'un plateau au clic gauche (éditeur Plateaux ouvert uniquement :
+  // sinon le clic gauche reste réservé à l'orbite et aux fixtures).
   const deckDragRef = useRef<{ id: string } | null>(null);
-  // Drag d'un support (rig) au clic gauche (�diteur Supports ouvert).
+  // Drag d'un support (rig) au clic gauche (éditeur Supports ouvert).
   const rigDragRef = useRef<{ id: string } | null>(null);
   // Drag d'une fixture au clic simple (quand le panneau fixtures est ouvert).
   const fixtureDragRef = useRef<{ id: string; startX: number; startY: number; prevX: number; prevY: number } | null>(null);
-  // Brouillons d'�dition des plateaux (commit au blur/Entr�e : �vite de
-  // reconstruire la sc�ne 3D � chaque frappe, comme draftDims).
+  // Brouillons d'édition des plateaux (commit au blur/Entrée : évite de
+  // reconstruire la scène 3D à chaque frappe, comme draftDims).
   const [deckDrafts, setDeckDrafts] = useState<Record<string, { name: string; x: number | string; y: number | string; w: number | string; d: number | string; h: number | string; r: number | string }>>({});
   const [musiciansMenuPos, setMusiciansMenuPos] = useState<{ top: number; left: number } | null>(null);
   const stageDims = useShowStore((s) => s.stageDims);
   const setStageDims = useShowStore((s) => s.setStageDims);
-  // -- Plateaux multi-rects (podium, runway en T�) --
+  // -- Plateaux multi-rects (podium, runway en T°) --
   const stageDecks = useShowStore((s) => s.stageDecks);
   const addStageDeck = useShowStore((s) => s.addStageDeck);
   const updateStageDeck = useShowStore((s) => s.updateStageDeck);
@@ -1027,7 +1027,7 @@ export const Stage3D: React.FC<{
   const rigGroupsRef = useRef<Map<string, { group: THREE.Group; top: THREE.Mesh; geoKey: string }>>(new Map());
   // Which rigs are currently in the scene (added dynamically).
   const rigInSceneRef = useRef<Set<string>>(new Set());
-  // Brouillons d'�dition des supports (rigs) � m�mes principes que les decks.
+  // Brouillons d'édition des supports (rigs) — mêmes principes que les decks.
   const [rigDrafts, setRigDrafts] = useState<Record<string, { name: string; x: number | string; y: number | string; w: number | string; d: number | string; h: number | string; r: number | string }>>({});
   // Sync des brouillons rigs quand stageRigs/stageDims changent.
   useEffect(() => {
@@ -1036,15 +1036,15 @@ export const Stage3D: React.FC<{
     setRigDrafts(next);
   }, [stageRigs, stageDims.width, stageDims.depth]);
   selectedDeckIdRef.current = selectedDeckId;
-  // Ar�tes des plateaux (surlignage du plateau s�lectionn� sans rebuild).
+  // Arêtes des plateaux (surlignage du plateau sélectionné sans rebuild).
   const deckEdgesRef = useRef<Array<{ id: string; line: THREE.LineSegments }>>([]);
-  // Ar�tes des supports (rigs) (surlignage sans rebuild).
+  // Arêtes des supports (rigs) (surlignage sans rebuild).
   const rigEdgesRef = useRef<Array<{ id: string; line: THREE.LineSegments }>>([]);
-  // Groupes des plateaux (d�placement/rotation sans rebuild g�om�trie).
+  // Groupes des plateaux (déplacement/rotation sans rebuild géométrie).
   const deckGroupsRef = useRef(new Map<string, { group: THREE.Group; top: THREE.Mesh }>());
-  // Signature g�om�trique des plateaux : la sc�ne ne se reconstruit que si
-  // elle change (taille/hauteur/ajout/suppression). D�placement et rotation
-  // passent par l'effet de synchro (fluide, cam�ra conserv�e).
+  // Signature géométrique des plateaux : la scène ne se reconstruit que si
+  // elle change (taille/hauteur/ajout/suppression). Déplacement et rotation
+  // passent par l'effet de synchro (fluide, caméra conservée).
   const deckGeoKey = useMemo(
     () => stageDecks.map((d) => [d.id, d.w, d.d, d.h].join(':')).join('|'),
     [stageDecks],
@@ -1058,10 +1058,10 @@ export const Stage3D: React.FC<{
     for (const { id, line } of deckEdgesRef.current) {
       try {
         (line.material as THREE.LineBasicMaterial).color.setHex(id === selectedDeckId ? 0xa855f7 : 0x3a3a5e);
-      } catch { /* ar�te d�j� dispos�e */ }
+      } catch { /* arête déjà disposée */ }
     }
   }, [selectedDeckId]);
-  // -- Resizable stage dimensions (width � depth, meters) --
+  // -- Resizable stage dimensions (width × depth, meters) --
   // Fixture positions are normalized (0-1), so resizing scales hardware spacing proportionally.
   const stageDimsRef = useRef(stageDims);
   stageDimsRef.current = stageDims;
@@ -1099,7 +1099,7 @@ export const Stage3D: React.FC<{
   const initFixturePosition = useShowStore((s) => s.initFixturePosition);
   // Universes come from the showStore (the source of truth every DMX writer
   // keys `channelData` by). `appStore.dmx.universes` is a stale default that
-  // is never synced � using it here broke the 3D mirror whenever showStore
+  // is never synced — using it here broke the 3D mirror whenever showStore
   // universes differed (multi-universe shows, renamed universes).
   const universes = useShowStore((s) => s.universes);
 
@@ -1132,7 +1132,7 @@ export const Stage3D: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patchedFixtures.map(f => f.id).join(',')]);
 
-  // -- Universe ID ? index mapping ------------------------
+  // -- Universe ID → index mapping ------------------------
   const universeIndexMap = useMemo(() => {
     const map = new Map<string, number>();
     universes.forEach((u, i) => map.set(u.id, i));
@@ -1153,7 +1153,7 @@ export const Stage3D: React.FC<{
     return () => { cancelled = true; };
   }, [patchedFixtures.map(f => f.fixtureDefId).join(',')]);
 
-  // Thumbnails cache (same source as Stage2DEditor) � id ? dataUrl
+  // Thumbnails cache (same source as Stage2DEditor) — id → dataUrl
   const thumbDataUrlMap = useMemo(() => {
     const m = new Map<string, string>();
     try { for (const v of generateAllThumbnails()) m.set(v.id, v.dataUrl); } catch { /* SSR */ }
@@ -1184,11 +1184,11 @@ export const Stage3D: React.FC<{
     const group = new THREE.Group();
     const stageX = (pos.x - 0.5) * stageDimsRef.current.width;
     const stageZ = (pos.y - 0.5) * stageDimsRef.current.depth;
-    // Map h (0-1) to actual meters above the deck below: 0 ? deck top, 1 ? +5m
+    // Map h (0-1) to actual meters above the deck below: 0 → deck top, 1 → +5m
     const stageY = deckTopAt(stageDecksRef.current, pos.x, pos.y) + pos.h;
     group.position.set(stageX, stageY, stageZ);
-    // Apply heading rotation (degrees ? radians, Y axis rotation).
-    // R�gle de zone (vue audience) pour les motoris�es ; heading = secours sans pan/tilt.
+    // Apply heading rotation (degrees → radians, Y axis rotation).
+    // Règle de zone (vue audience) pour les motorisées ; heading = secours sans pan/tilt.
     const phi = headingRadForPos(pos, pos.mountMode || 'top', stageDimsRef.current, hasPanTiltChannels(channelMap));
     group.rotation.y = phi;
     // User data for raycasting identification
@@ -1213,10 +1213,10 @@ export const Stage3D: React.FC<{
       roughness: 0.4,
       metalness: 0.5,
       emissive: tierColor,
-      emissiveIntensity: 0, // off by default � render loop sets it based on DMX
+      emissiveIntensity: 0, // off by default — render loop sets it based on DMX
     });
 
-      // Normalize: "Moving Head" ? "moving_head", "LED Bar (Beams)" ? "led_bar_(beams)", etc.
+      // Normalize: "Moving Head" → "moving_head", "LED Bar (Beams)" → "led_bar_(beams)", etc.
       const normalized = type.toLowerCase().replace(/[\s-]+/g, '_');
       const key = normalized.startsWith('led_bar') ? 'led_bar' : normalized;
       switch (key) {
@@ -1266,7 +1266,7 @@ export const Stage3D: React.FC<{
         headGroup.position.y = 0.34;
         headGroup.name = 'head';
 
-        // T�te moving_head : sph�re (orientation-agnostic, beam exits at bottom point)
+        // Tête moving_head : sphère (orientation-agnostic, beam exits at bottom point)
         const headBody = new THREE.Mesh(
           new THREE.SphereGeometry(0.08, 24, 16), headMat);
         headBody.position.set(0, 0, 0);
@@ -1494,7 +1494,7 @@ export const Stage3D: React.FC<{
         headGroup.position.y = 0;
         headGroup.name = 'head';
 
-        // Move bodyMesh and lightTarget into head ? arm ? group
+        // Move bodyMesh and lightTarget into head → arm → group
         group.remove(bodyMesh);
         if (lightTarget !== bodyMesh) group.remove(lightTarget);
         headGroup.add(bodyMesh);
@@ -1589,7 +1589,7 @@ export const Stage3D: React.FC<{
     group.castShadow = false;
     group.receiveShadow = false;
 
-    // -- Thumbnail sprite: remplace la sph�re / body par l'ic�ne fixture --
+    // -- Thumbnail sprite: remplace la sphère / body par l'icône fixture --
     let thumbSprite: THREE.Sprite | undefined;
     const tex = getThumbTexture(fixture.thumbnailId, fixture.fixtureType);
     if (tex) {
@@ -1658,7 +1658,7 @@ export const Stage3D: React.FC<{
     const W = container.clientWidth;
     const H = container.clientHeight;
 
-    // Local stage dimensions (shadow module defaults) � scene rebuilds on resize
+    // Local stage dimensions (shadow module defaults) — scene rebuilds on resize
     const STAGE_WIDTH = stageDims.width;
     const STAGE_DEPTH = stageDims.depth;
 
@@ -1666,9 +1666,9 @@ export const Stage3D: React.FC<{
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setSize(W, H);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  // Ombres d�sactiv�es : aucune light ne projette d'ombres (pas de
-  // SpotLight/DirectionalLight avec castShadow) � PCFSoft ne co�terait
-  // que du temps GPU pour z�ro pixel diff�rent.
+  // Ombres désactivées : aucune light ne projette d'ombres (pas de
+  // SpotLight/DirectionalLight avec castShadow) — PCFSoft ne coûterait
+  // que du temps GPU pour zéro pixel différent.
   renderer.shadowMap.enabled = false;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
@@ -1687,7 +1687,7 @@ export const Stage3D: React.FC<{
     pmrem.dispose();
     sceneRef.current = scene;
 
-    // Camera � audience view by default, pulled back so the whole stage fits
+    // Camera — audience view by default, pulled back so the whole stage fits
     // (a saved preset camera, if any, is applied right after by the view3D effect)
     const camera = new THREE.PerspectiveCamera(50, W / H, 0.5, Math.max(80, STAGE_WIDTH + STAGE_DEPTH + 60));
     const defaultTarget = new THREE.Vector3(0, STAGE_HEIGHT + 1.5, 0);
@@ -1748,9 +1748,9 @@ export const Stage3D: React.FC<{
     gridHelper.position.set(0, 0.005, -4);
     scene.add(gridHelper);
 
-    // Stage decks (multi-rects : podium, runway en T�) � un groupe par plateau
+    // Stage decks (multi-rects : podium, runway en T…) — un groupe par plateau
     // (position/rotation modifiables sans rebuild, voir l'effet de synchro).
-    // Par d�faut un seul plateau identique � l'ancien rectangle (rendu inchang�).
+    // Par défaut un seul plateau identique à l'ancien rectangle (rendu inchangé).
     deckEdgesRef.current = [];
     deckGroupsRef.current = new Map();
     for (const deck of stageDecksRef.current) {
@@ -1786,7 +1786,7 @@ export const Stage3D: React.FC<{
       deckTop.userData.deckId = deck.id;
       g.add(deckTop);
 
-      // Deck edge line (violet si s�lectionn� dans l'�diteur)
+      // Deck edge line (violet si sélectionné dans l'éditeur)
       const deckEdgeGeo = new THREE.EdgesGeometry(deckGeo);
       const deckEdgeLine = new THREE.LineSegments(
         deckEdgeGeo,
@@ -1797,7 +1797,7 @@ export const Stage3D: React.FC<{
       );
       deckEdgeLine.rotation.x = -Math.PI / 2;
       deckEdgeLine.position.set(0, deck.h + 0.015, 0);
-      // Ar�tes exclues du picking (seuils des Lines fausseraient la vis�e).
+      // Arêtes exclues du picking (seuils des Lines fausseraient la visée).
       deckEdgeLine.raycast = () => {};
       g.add(deckEdgeLine);
       scene.add(g);
@@ -1805,9 +1805,9 @@ export const Stage3D: React.FC<{
       deckGroupsRef.current.set(deck.id, { group: g, top: deckTop });
     }
 
-    // -- Structures libres (supports) : g�r�s par l'effet dynamique
-    // (ajout/suppression � chaud via rigInSceneRef). Pas de build ici
-    // pour �viter les doublons.
+    // -- Structures libres (supports) : gérés par l'effet dynamique
+    // (ajout/suppression à chaud via rigInSceneRef). Pas de build ici
+    // pour éviter les doublons.
     rigEdgesRef.current = [];
     rigGroupsRef.current = new Map();
     rigInSceneRef.current = new Set();
@@ -1928,9 +1928,9 @@ export const Stage3D: React.FC<{
       scene.add(pole);
       trussBeamsRef.current.poles.push(pole);
     }
-    // Poutres n�es avec la BONNE visibilit� : le rebuild de sc�ne (dims/plateaux)
-    // recr�e les beams en visible=true en dur ; sans ceci, les ponts avant/arri�re
-    // � r�apparaissent � tant que stageScene ne change pas.
+    // Poutres nées avec la BONNE visibilité : le rebuild de scène (dims/plateaux)
+    // recrée les beams en visible=true en dur ; sans ceci, les ponts avant/arrière
+    // « réapparaissent » tant que stageScene ne change pas.
     applyTrussVisibility(trussBeamsRef.current, stageScene);
 
     // -- Smoke/Haze particles -----------------------
@@ -2064,7 +2064,7 @@ export const Stage3D: React.FC<{
   }, [stageDims, deckGeoKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // -- Overlay gizmo (axes) --------------------------
-  // Minimal gizmo via HTML (�vite 2e renderer) � coin bas-gauche
+  // Minimal gizmo via HTML (évite 2e renderer) — coin bas-gauche
   const Gizmo: React.FC = () => (
     <div className="absolute bottom-2 left-2 w-10 h-10 rounded bg-black/40 border border-white/10 flex items-center justify-center text-[8px] text-white/60 pointer-events-none select-none">XYZ</div>
   );
@@ -2116,12 +2116,12 @@ export const Stage3D: React.FC<{
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    // Utilisation d'un flag et de requestAnimationFrame pour �viter la boucle
+    // Utilisation d'un flag et de requestAnimationFrame pour éviter la boucle
     // ResizeObserver "loop completed with undelivered notifications" qui survient
-    // quand le redimensionnement du conteneur d�clenche � nouveau le observateur.
+    // quand le redimensionnement du conteneur déclenche à nouveau le observateur.
     let rafId = null;
     const callBack = (entries) => {
-      if (rafId) return; // �vite les appels en boucle
+      if (rafId) return; // évite les appels en boucle
       rafId = requestAnimationFrame(() => {
         rafId = null;
         const el = containerRef.current;
@@ -2342,7 +2342,7 @@ export const Stage3D: React.FC<{
       if (m) {
         m.sprite.position.x = (nx - 0.5) * dims.width;
         m.sprite.position.z = (nz - 0.5) * dims.depth;
-        // Remonte sur le plateau d'arriv�e (runway vs podium�).
+        // Remonte sur le plateau d'arrivée (runway vs podium…).
         m.baseY = deckTopAt(stageDecksRef.current, nx, nz) + m.sprite.scale.y / 2;
         m.sprite.position.y = m.baseY;
       }
@@ -2378,8 +2378,8 @@ export const Stage3D: React.FC<{
   }, [stageDims, stageDecks]);
 
   // -- Truss visibility by stage scene ----------------
-  // deps �largies (stageDims, deckGeoKey) : le rebuild de sc�ne recr�e les
-  // beams en visible=true en dur ? re-synchroniser apr�s CHAQUE reconstruction,
+  // deps élargies (stageDims, deckGeoKey) : le rebuild de scène recrée les
+  // beams en visible=true en dur → re-synchroniser après CHAQUE reconstruction,
   // pas seulement quand stageScene change.
   useEffect(() => {
     applyTrussVisibility(trussBeamsRef.current, stageScene);
@@ -2454,10 +2454,10 @@ export const Stage3D: React.FC<{
           side: THREE.DoubleSide,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
-          map: getBeamFadeTexture(), // fondu le long du faisceau (r�alisme)
+          map: getBeamFadeTexture(), // fondu le long du faisceau (réalisme)
         });
         const cone = new THREE.Mesh(coneGeo, coneMat);
-        cone.raycast = () => {}; // beam is visual only � never a pick target
+        cone.raycast = () => {}; // beam is visual only — never a pick target
         f3d.mountMode = pos.mountMode || 'top';
         f3d.beamAngle = pos.beamAngle ?? 0.15;
         // Cone starts at origin (lens) and extends down in local space
@@ -2468,8 +2468,8 @@ export const Stage3D: React.FC<{
         f3d.beamCone = cone;
 
         // -- Gobo disc : disque de projection dans le faisceau --
-        // Positionn� pr�s de la lentille, texture proc�durale par slot gobo.
-        // Orient� face au faisceau (normal -Y locale, comme le c�ne).
+        // Positionné près de la lentille, texture procédurale par slot gobo.
+        // Orienté face au faisceau (normal -Y locale, comme le cône).
         if (channelMap.goboOffset !== null && channelMap.goboOffset !== undefined && (channelMap.goboCaps?.length ?? 0) > 0) {
           const goboGeo = new THREE.CircleGeometry(0.30, 28);
           const goboMat = new THREE.MeshBasicMaterial({
@@ -2483,8 +2483,8 @@ export const Stage3D: React.FC<{
           });
           const goboDisc = new THREE.Mesh(goboGeo, goboMat);
           goboDisc.raycast = () => {};
-          goboDisc.rotation.x = -Math.PI / 2; // face align�e au faisceau (-Y)
-          goboDisc.position.y = -0.55;        // ~12 % le long du c�ne
+          goboDisc.rotation.x = -Math.PI / 2; // face alignée au faisceau (-Y)
+          goboDisc.position.y = -0.55;        // ~12 % le long du cône
           goboDisc.visible = false;
           f3d.lightTarget.add(goboDisc);
           f3d.goboDisc = goboDisc;
@@ -2497,17 +2497,17 @@ export const Stage3D: React.FC<{
           eh.lightTarget.add(ehLight);
           eh.pointLight = ehLight;
           const ehCone = new THREE.Mesh(coneGeo, coneMat.clone());
-          ehCone.raycast = () => {}; // beam is visual only � never a pick target
+          ehCone.raycast = () => {}; // beam is visual only — never a pick target
           ehCone.position.set(0, -coneHeight / 2, 0);
           ehCone.visible = showBeams;
            eh.lightTarget.add(ehCone);
            eh.beamCone = ehCone;
          }
 
-          // LED Bar : un PointLight + c�ne par pixel (faisceaux ind�pendants).
-          // On r�utilise les meshes de segments cr��s dans createFixtureGeometry
-          // (pas de doublons) et on supprime le faisceau g�n�rique pour �viter
-          // un 13e faisceau superpos� au pixel 0.
+          // LED Bar : un PointLight + cône par pixel (faisceaux indépendants).
+          // On réutilise les meshes de segments créés dans createFixtureGeometry
+          // (pas de doublons) et on supprime le faisceau générique pour éviter
+          // un 13e faisceau superposé au pixel 0.
           const pixelTargets = (f3d.group as any).__ledPixelTargets as THREE.Group[] | undefined;
           if (pixelTargets && pixelTargets.length > 0) {
             const n = pixelTargets.length;
@@ -2637,8 +2637,8 @@ export const Stage3D: React.FC<{
         updateFixtureSupport(scene, f3d, pos, stageDimsRef.current, stageDecksRef.current);
       }
 
-      // Publie les channelMaps apr�s sync compl�te (add + remove) pour
-      // ensureFixtureLook c�t� Store / Rec � pas seulement au premier add.
+      // Publie les channelMaps après sync complète (add + remove) pour
+      // ensureFixtureLook côté Store / Rec — pas seulement au premier add.
       try {
         const maps = new Map<string, LookChannelMap>();
         for (const [fid, f] of fixturesRef.current) {
@@ -2728,8 +2728,8 @@ export const Stage3D: React.FC<{
     }
   }, [fixturePositions, patchedFixtures, stageDecks]);
 
-  // -- Deck transforms (drag/rotation) : positions sans rebuild g�om�trie --
-  // La cam�ra est conserv�e et le drag reste fluide (la g�om�trie ne se
+  // -- Deck transforms (drag/rotation) : positions sans rebuild géométrie --
+  // La caméra est conservée et le drag reste fluide (la géométrie ne se
   // reconstruit que si w/d/h changent, via deckGeoKey).
    useEffect(() => {
      if (deckGroupsRef.current.size === 0) return;
@@ -2743,8 +2743,8 @@ export const Stage3D: React.FC<{
      }
    }, [stageDecks, stageDims]);
 
-   // -- Rig transforms (drag/rotation) : positions sans rebuild g�om�trie --
-   // La cam�ra est conserv�e et le drag reste fluide (la g�om�trie ne se
+   // -- Rig transforms (drag/rotation) : positions sans rebuild géométrie --
+   // La caméra est conservée et le drag reste fluide (la géométrie ne se
    // reconstruit que si w/d/h changent, via rigGeoKey).
    useEffect(() => {
      if (rigGroupsRef.current.size === 0) return;
@@ -2775,7 +2775,7 @@ export const Stage3D: React.FC<{
           rigGroupsRef.current.delete(id);
           inScene.delete(id);
         }
-        // Nettoyer l'ar�te de s�lection
+        // Nettoyer l'arête de sélection
         rigEdgesRef.current = rigEdgesRef.current.filter((e) => e.id !== id);
       }
     }
@@ -2793,8 +2793,8 @@ export const Stage3D: React.FC<{
         group.add(g);
         scene.add(group);
 
-        // Selection edge outline � resserr� autour de la g�om�trie r�elle,
-        // visible uniquement quand le rig est s�lectionn�
+        // Selection edge outline — resserré autour de la géométrie réelle,
+        // visible uniquement quand le rig est sélectionné
         const isBar = rig.kind === 'truss' || rig.kind === 'frontBar' || rig.kind === 'backBar';
         const edgeW = isBar ? Math.max(0.5, rig.span) : 0.6;
         const edgeH = isBar ? 0.8 : Math.max(0.5, rig.h);
@@ -2822,8 +2822,8 @@ export const Stage3D: React.FC<{
         const entry = rigGroupsRef.current.get(rig.id);
         const geoKey = [rig.kind, rig.span, rig.h, rig.hung].join(':');
         if (entry && entry.geoKey !== geoKey) {
-          // G�om�trie modifi�e (hauteur, longueur, type, suspendu/pos�) :
-          // reconstruit le visuel au lieu de juste d�placer.
+          // Géométrie modifiée (hauteur, longueur, type, suspendu/posé) :
+          // reconstruit le visuel au lieu de juste déplacer.
           scene.remove(entry.group);
           rigGroupsRef.current.delete(rig.id);
           rigEdgesRef.current = rigEdgesRef.current.filter((e) => e.id !== rig.id);
@@ -2873,7 +2873,7 @@ export const Stage3D: React.FC<{
     }
   }, [stageRigs, stageDims]);
 
-  // -- Met � jour la couleur/visibilit� des outlines quand la s�lection change --
+  // -- Met à jour la couleur/visibilité des outlines quand la sélection change --
   useEffect(() => {
     selectedRigIdRef.current = selectedRigId;
     for (const { id, line } of rigEdgesRef.current) {
@@ -2897,10 +2897,10 @@ export const Stage3D: React.FC<{
   // -- DMX update function (called from render loop) ---
   const updateDmxState = useCallback(() => {
     const dmxState = useAppStore.getState().dmx;
-    // Use arbitrated buffer (LTP fid�le: auto-loop LTP75 > quickshow HTP40) au lieu de channelData brut
+    // Use arbitrated buffer (LTP fidèle: auto-loop LTP75 > quickshow HTP40) au lieu de channelData brut
     const bridged: Record<number, Uint8Array | number[]> = {};
     // Records creux 1-based par univers : l'ABSENCE d'une adresse = jamais
-    // �crite par aucune source ? pan/tilt neutres (128), pas 0 (fond gauche/bas).
+    // écrite par aucune source → pan/tilt neutres (128), pas 0 (fond gauche/bas).
     const bridgedSparse: Record<number, Record<number, number>> = {};
     const uniCount = universesRef.current.length || 1;
     for (let u = 0; u < uniCount; u++) {
@@ -2915,7 +2915,7 @@ export const Stage3D: React.FC<{
     const hasBridged = Object.keys(bridged).length > 0;
     let channelData = hasBridged ? bridged : (dmxState.channelData as Record<number, Uint8Array | number[]>);
     // Fallback par univers : si le pont n'a rien pour CET univers (ex. envoi
-    // miroir-only), on retombe sur le miroir appStore au lieu d'�teindre.
+    // miroir-only), on retombe sur le miroir appStore au lieu d'éteindre.
     const mirrorData = dmxState.channelData as Record<number, Uint8Array | number[]> | undefined;
     const blackout = dmxState.blackout ?? false;
     const grandMaster = dmxState.grandMaster ?? 255;
@@ -2947,7 +2947,7 @@ export const Stage3D: React.FC<{
           if (idx >= 0 && idx < 512) buf[idx] = v;
         }
         rawData = buf;
-        // Les valeurs de test sont explicites : elles comptent comme � �crites �
+        // Les valeurs de test sont explicites : elles comptent comme « écrites »
         sparseUni = { ...(sparseUni ?? {}), ...testVals };
       }
        if (!rawData) {
@@ -2987,7 +2987,7 @@ export const Stage3D: React.FC<{
           f3d.armGroup.rotation.y += (sweepRelative - f3d.armGroup.rotation.y) * 0.15;
           f3d.headGroup.rotation.x += (tiltTarget - f3d.headGroup.rotation.x) * 0.15;
            (f3d.extraHeads ?? []).forEach((eh, k) => {
-             // Skip rgbSegment-based extra heads (no tilt) � only tilt-based heads auto-sweep
+             // Skip rgbSegment-based extra heads (no tilt) — only tilt-based heads auto-sweep
              if (eh.rgbSegmentIdx !== undefined) return;
              const ehTarget = f3d._baseTilt + Math.sin(t * 0.35 + 1.2 + (k + 1) * 1.1) * 0.35 * Math.PI + (f3d._staticTilt ?? 0);
              eh.headGroup.rotation.x += (ehTarget - eh.headGroup.rotation.x) * 0.15;
@@ -2995,9 +2995,9 @@ export const Stage3D: React.FC<{
         }
         continue;
       }
-      // Normalize to 0-based Uint8Array access (DMX addr ch ? index ch-1).
+      // Normalize to 0-based Uint8Array access (DMX addr ch → index ch-1).
       // Bridge buffers are Records keyed by 1-based address and may be sparse
-      // (a few faders moved) � Object.values() would compact them and shift
+      // (a few faders moved) — Object.values() would compact them and shift
       // every index, muting fixtures. Expand explicitly instead.
       const data = normalizeDmxBuffer(rawData);
 
@@ -3007,14 +3007,14 @@ export const Stage3D: React.FC<{
       const baseAddr = pf.startAddress - 1;
       const cm = f3d.channelMap;
 
-      // Lecture pan/tilt � jamais �crit ? neutre 128 �. Le buffer dense ne
-      // distingue pas 0 �crit d'un canal absent : on interroge le record creux
-      // du bridge (1-based). Sans �a, tout allumage sans autoscript/Target lit
-      // pan=tilt=0 ? faisceau fond gauche + vers le sol.
-      // Une valeur 0 STOCK�E (vieilles sc�nes enregistr�es avant le fix du
-      // neutre) est trait�e comme non-vis�e ? 128 : pan=0 en sc�ne statique
-      // signifiait � buffer frais �, pas � fond gauche volontaire �. Le DMX
-      // r�el continue de transmettre la valeur d'origine.
+      // Lecture pan/tilt « jamais écrit → neutre 128 ». Le buffer dense ne
+      // distingue pas 0 écrit d'un canal absent : on interroge le record creux
+      // du bridge (1-based). Sans ça, tout allumage sans autoscript/Target lit
+      // pan=tilt=0 → faisceau fond gauche + vers le sol.
+      // Une valeur 0 STOCKÉE (vieilles scènes enregistrées avant le fix du
+      // neutre) est traitée comme non-visée → 128 : pan=0 en scène statique
+      // signifiait « buffer frais », pas « fond gauche volontaire ». Le DMX
+      // réel continue de transmettre la valeur d'origine.
       const panTiltRead = (off: number | null | undefined): number | null => {
         if (off === null || off === undefined || off < 0) return null;
         const idx = baseAddr + off;
@@ -3033,12 +3033,12 @@ export const Stage3D: React.FC<{
          const b = cm.rgbOffsets[2] !== undefined ? (data[baseAddr + cm.rgbOffsets[2]] ?? 0) : 0;
          intensity = Math.max(r, g, b);
        } else if (cm.isLaser && cm.wheelOffset !== null) {
-         // Laser � roue (IODA�) : pas de dimmer � allum� d�s que la roue porte
-         // une couleur (la lecture �crit toujours une valeur > 0).
+         // Laser à roue (IODA…) : pas de dimmer — allumé dès que la roue porte
+         // une couleur (la lecture écrit toujours une valeur > 0).
          const w = data[baseAddr + cm.wheelOffset] ?? 0;
          intensity = w > 2 ? 255 : 0;
        } else if (cm.isLaser && cm.laserModeOffset !== null) {
-         // Laser simple (mode DMX toujours > 0 en lecture) : allum� = mode �crit.
+         // Laser simple (mode DMX toujours > 0 en lecture) : allumé = mode écrit.
          const m = data[baseAddr + cm.laserModeOffset] ?? 0;
          intensity = m > 2 ? 255 : 0;
        } else if (cm.strobeOffset !== null && (cm.panOffset !== null || cm.tiltOffset !== null)) {
@@ -3065,19 +3065,19 @@ export const Stage3D: React.FC<{
           shutterClosed = true;
           intensity = 0;
         } else if (shutterVal >= 180 && shutterVal < 255) {
-          // DMX formula: speed = (val - 180) / 3 Hz � exclude 255 which means "shutter open"
+          // DMX formula: speed = (val - 180) / 3 Hz — exclude 255 which means "shutter open"
           strobeHz = Math.max(1, (shutterVal - 180) / 3);
         } else if (shutterVal >= 32 && shutterVal <= 63) {
-          // Open � leave intensity as-is
+          // Open — leave intensity as-is
         } else if (shutterVal >= 64 && shutterVal <= 179) {
           // Standard strobe range with rate ramp
           strobeHz = Math.max(1, (shutterVal - 64) / 6);
         }
       }
 
-      // Canal Strobe d�di� (strobeOffset) : 0 = pas de strobe, valeurs hautes =
-      // strobe (m�mes formules DMX que le shutter). Ne ferme JAMAIS la lumi�re
-      // (pas de shutterClosed : 0 = off, pas � closed �).
+      // Canal Strobe dédié (strobeOffset) : 0 = pas de strobe, valeurs hautes =
+      // strobe (mêmes formules DMX que le shutter). Ne ferme JAMAIS la lumière
+      // (pas de shutterClosed : 0 = off, pas « closed »).
       if (cm.strobeOffset !== null && cm.strobeOffset >= 0) {
         const strobeVal = data[baseAddr + cm.strobeOffset] ?? 0;
         if (strobeVal >= 180 && strobeVal < 255) {
@@ -3093,10 +3093,10 @@ export const Stage3D: React.FC<{
       if (disabledRef.current.has(f3d.id)) intensity = 0;
       intensity = intensity * (grandMaster / 255);
 
-      // Lissage d'intensit� : la 3D lit le DMX par pas (poll 60 Hz d�synchro
-      // des �critures) � un fade appara�t en marches sans �a, comme le
-      // pan/tilt avant le settle. M�me constante de temps que le settle
-      // (�3 frames de retard, imperceptible) ; d�sactiv� sous strobe pour
+      // Lissage d'intensité : la 3D lit le DMX par pas (poll 60 Hz désynchro
+      // des écritures) — un fade apparaît en marches sans ça, comme le
+      // pan/tilt avant le settle. Même constante de temps que le settle
+      // (≈3 frames de retard, imperceptible) ; désactivé sous strobe pour
       // ne pas ramollir le blink 50%.
       const smoothK = strobeHz > 0 ? 1 : Math.min(1, dt * 25);
       const prevI = typeof f3d._smoothI === 'number' ? f3d._smoothI : intensity / 255;
@@ -3111,8 +3111,8 @@ export const Stage3D: React.FC<{
       }
       const normIntensity = intensity / 255;
 
-      // Fixtures s�lectionn�es : allume un niveau de pr�visualisation pour
-      // voir o� pointe le faisceau (indispensable pour v�rifier le Target).
+      // Fixtures sélectionnées : allume un niveau de prévisualisation pour
+      // voir où pointe le faisceau (indispensable pour vérifier le Target).
       const isAimSelected = selectedFixtureIdRef.current === f3d.id || multiSelectedIdsRef.current.has(f3d.id);
       const visIntensity = isAimSelected ? Math.max(normIntensity, PREVIEW_INTENSITY) : normIntensity;
 
@@ -3124,9 +3124,9 @@ export const Stage3D: React.FC<{
         const b = (data[baseAddr + cm.rgbOffsets[2]] ?? 0) / 255;
         if (r > 0 || g > 0 || b > 0) color.setRGB(r, g, b);
       } else if (cm.wheelOffset !== null) {
-        // Roue jamais �crite (ou 0 stock� h�rit�) ? position physique par
-        // d�faut = open/BLANC. Ne pas mapper 0 sur la premi�re cap (AFX :
-        // Red 0-29 ? tout le statique �tait rouge).
+        // Roue jamais écrite (ou 0 stocké hérité) → position physique par
+        // défaut = open/BLANC. Ne pas mapper 0 sur la première cap (AFX :
+        // Red 0-29 → tout le statique était rouge).
         const wIdx = baseAddr + cm.wheelOffset;
         const wSp = sparseUni ? (sparseUni as Record<string, number>)[String(wIdx + 1)] : undefined;
         if (wSp === undefined || wSp === 0) {
@@ -3136,32 +3136,32 @@ export const Stage3D: React.FC<{
         }
       }
 
-      // --- Pan/Tilt (QLC+ model: arm=pan/Y, head=tilt/X) � les lasers sans
-      // pan/tilt typ�s utilisent leurs axes scan X/Y (IODA�) en �quivalent. ---
+      // --- Pan/Tilt (QLC+ model: arm=pan/Y, head=tilt/X) — les lasers sans
+      // pan/tilt typés utilisent leurs axes scan X/Y (IODA…) en équivalent. ---
       const panVal = cm.panOffset !== null ? panTiltRead(cm.panOffset)
         : (cm.scanXOffset !== null ? panTiltRead(cm.scanXOffset) : null);
       const tiltVal = cm.tiltOffset !== null ? panTiltRead(cm.tiltOffset)
         : (cm.scanYOffset !== null ? panTiltRead(cm.scanYOffset) : null);
       dmxLastActivityRef.current = performance.now();
-      // Derniers bytes vus � pour � capturer l'orientation actuelle � (le bouton
+      // Derniers bytes vus — pour « capturer l'orientation actuelle » (le bouton
       // lit ces valeurs depuis le panneau).
       f3d.lastPan = panVal ?? 128;
       f3d.lastTilt = tiltVal ?? 128;
 
       // Rate-limited tracking: beam cannot turn faster than the real fixture motor
-      // (maxPanTiltSpeed in �/s), so the 3D view matches the physical movement speed.
-      // Deux r�gimes : grands deltas ? slew � vitesse moteur ; petits deltas ?
+      // (maxPanTiltSpeed in °/s), so the 3D view matches the physical movement speed.
+      // Deux régimes : grands deltas → slew à vitesse moteur ; petits deltas →
       // settle exponentiel (au lieu du snap exact) pour absorber la gigue de la
-      // source DMX (tick setInterval non synchronis� avec le rendu ? aliasing
-      // = micro-saccades visibles, critique en capture vid�o).
+      // source DMX (tick setInterval non synchronisé avec le rendu → aliasing
+      // = micro-saccades visibles, critique en capture vidéo).
       const settleK = Math.min(1, dt * 25);
-      // Plages R�ELLES de la fixture (QXF <Physical> PanMax/TiltMax) � le
-      // mapping 3D suit la m�canique vraie (540� pan ACCU ? 360� d'un autre).
-      // D�fauts = convention historique de l'app : 540� pan / 180� tilt.
+      // Plages RÉELLES de la fixture (QXF <Physical> PanMax/TiltMax) — le
+      // mapping 3D suit la mécanique vraie (540° pan ACCU ≠ 360° d'un autre).
+      // Défauts = convention historique de l'app : 540° pan / 180° tilt.
       const panRangeRad = ((cm.panMaxDeg ?? 540) * Math.PI) / 180;
       const tiltRangeRad = ((cm.tiltMaxDeg ?? 180) * Math.PI) / 180;
-      // Si aucune valeur DMX n'a �t� lue (buffer frais), ne pas �craser le
-      // heading de zone : conserver l'orientation par d�faut de la fixture.
+      // Si aucune valeur DMX n'a été lue (buffer frais), ne pas écraser le
+      // heading de zone : conserver l'orientation par défaut de la fixture.
       const freeAim = targetModeRef.current && (selectedFixtureIdRef.current === f3d.id || multiSelectedIdsRef.current.has(f3d.id));
       // PARITE MOTEUR : `applyAimTarget` ecrit une visee MANUELLE ou de SCENE
       // SANS clamp de zone (c'est une visee deliberee, libre). Si la vue 3D
@@ -3169,12 +3169,12 @@ export const Stage3D: React.FC<{
       // materiel (ecart mesure jusqu'a 90° sur une fixture captee).
       const aimed = hasManualTarget(f3d.id) || hasSceneAim(f3d.id);
       if (panVal !== null && tiltVal !== null) {
-        // Mode Target : PRIORITAIRE sur tout blocage de zone � la fixture suit
-        // librement le marqueur (pleine course pan/tilt, m�me derri�re/au sol).
+        // Mode Target : PRIORITAIRE sur tout blocage de zone — la fixture suit
+        // librement le marqueur (pleine course pan/tilt, même derrière/au sol).
         if (f3d.armGroup) {
-          // Z�ro VISUEL (rendu) : d�calage persistant du faisceau (tare � DMX=128).
-          // Zone PAN : �90� autour de la direction par d�faut (jamais derri�re)
-          // � SAUF en mode Target (libre).
+          // Zéro VISUEL (rendu) : décalage persistant du faisceau (tare à DMX=128).
+          // Zone PAN : ±90° autour de la direction par défaut (jamais derrière)
+          // — SAUF en mode Target (libre).
           const rawPan = ((panVal / 255) - 0.5) * panRangeRad + (f3d._zeroPanDeg * Math.PI) / 180;
           const panAbs = f3d._headingRad + rawPan;
           const panTarget = (freeAim || aimed) ? panAbs : clampPanZone(panAbs, f3d._headingRad);
@@ -3190,9 +3190,9 @@ export const Stage3D: React.FC<{
             : panDelta * settleK;
         }
         if (f3d.headGroup) {
-          // Zone TILT : �l�vation ? [-90�, +90�] ; au sol, jamais sous l'horizon
-          // � SAUF en mode Target (libre).
-          // head = _mountTilt + �l�vation (invariant valid� pour les 3 modes).
+          // Zone TILT : élévation ∈ [-90°, +90°] ; au sol, jamais sous l'horizon
+          // — SAUF en mode Target (libre).
+          // head = _mountTilt + élévation (invariant validé pour les 3 modes).
           const dmxTilt = ((tiltVal / 255) - 0.5) * tiltRangeRad;
           const rawElev = dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180;
           const elevation = (freeAim || aimed) ? rawElev : clampTiltZone(rawElev, f3d.mountMode);
@@ -3240,8 +3240,8 @@ export const Stage3D: React.FC<{
         if (eh.pointLight) {
           eh.pointLight.color.copy(ehColor);
           eh.pointLight.intensity = visIntensity * 55;
-          // �teinte = retir�e du setup de lights (le forward renderer paie
-          // chaque PointLight sur chaque fragment, m�me � intensit� 0).
+          // Éteinte = retirée du setup de lights (le forward renderer paie
+          // chaque PointLight sur chaque fragment, même à intensité 0).
           eh.pointLight.visible = showBeamsRef.current && visIntensity > 0.005;
         }
         if (eh.beamCone) {
@@ -3308,8 +3308,8 @@ export const Stage3D: React.FC<{
          f3d.pointLight.visible = showBeamsRef.current && visIntensity > 0.005;
        }
 
-        // --- LED Bar : un faisceau ind�pendant par pixel ---
-        // Les sc�nes pr�-programm�es n'�crivent souvent que la couleur globale
+        // --- LED Bar : un faisceau indépendant par pixel ---
+        // Les scènes pré-programmées n'écrivent souvent que la couleur globale
         // (rgbOffsets = pixel 0) : dans ce cas on miroite la couleur globale sur
         // tous les pixels pour que la barre s'allume en entier. Quand plusieurs
         // segments portent des valeurs distinctes (chase pixel), chaque pixel
@@ -3359,12 +3359,12 @@ export const Stage3D: React.FC<{
 
 
       // --- Update beam cone ---
-      // Opacit� 0.75 (au lieu de 0.35) : � DMX 255 le faisceau doit sembler
-      // plein, pas � � peine � moiti� � � AdditiveBlending + 0.35 plafonnait
+      // Opacité 0.75 (au lieu de 0.35) : à DMX 255 le faisceau doit sembler
+      // plein, pas « à peine à moitié » — AdditiveBlending + 0.35 plafonnait
       // trop bas sur fond sombre.
-      // R�ALISME : longueur dynamique � le c�ne s'arr�te SUR le sol touch�
+      // RÉALISME : longueur dynamique — le cône s'arrête SUR le sol touché
       // (plateau/plancher) au lieu d'un cercle flottant en plein air, et la
-      // texture de fondu (map) �teint le faisceau progressivement.
+      // texture de fondu (map) éteint le faisceau progressivement.
       const fixFloorY = (() => {
         const posNow = fixturePositionsRef.current[pf.id];
         try { return Math.max(0, deckTopAt(stageDecksRef.current, posNow?.x ?? 0.5, posNow?.y ?? 0.5)); }
@@ -3376,8 +3376,8 @@ export const Stage3D: React.FC<{
         const origin = cone.getWorldPosition(new THREE.Vector3());
         const len = beamHitLength(origin.y, dir, fixFloorY);
         const k = len / BEAM_LENGTH;
-        cone.scale.set(k, k, k);           // angle du c�ne pr�serv�
-        cone.position.y = -len / 2;        // sommet (lentille) reste � l'exit
+        cone.scale.set(k, k, k);           // angle du cône préservé
+        cone.position.y = -len / 2;        // sommet (lentille) reste à l'exit
       };
       if (f3d.beamCone) {
         const mat = f3d.beamCone.material as THREE.MeshBasicMaterial;
@@ -3387,7 +3387,7 @@ export const Stage3D: React.FC<{
         applyBeamLength(f3d.beamCone);
       }
 
-      // T�tes extra + pixels LED bar : m�me longueur r�aliste
+      // Têtes extra + pixels LED bar : même longueur réaliste
       for (const eh of f3d.extraHeads ?? []) {
         if (eh.beamCone) applyBeamLength(eh.beamCone);
       }
@@ -3395,7 +3395,7 @@ export const Stage3D: React.FC<{
         applyBeamLength(px.cone);
       }
 
-      // -- Gobo : slot actif depuis le buffer (jamais �crit ? open) --
+      // -- Gobo : slot actif depuis le buffer (jamais écrit → open) --
       if (f3d.goboDisc && cm.goboOffset !== null && cm.goboOffset !== undefined) {
         const gIdx = baseAddr + cm.goboOffset;
         const gSp = sparseUni ? (sparseUni as Record<string, number>)[String(gIdx + 1)] : undefined;
@@ -3536,7 +3536,7 @@ export const Stage3D: React.FC<{
     requestAnimationFrame(animateCamera);
   }, [fixturePositions]);
 
-  // -- Mode Target : pick du point vis� (raycast d�cor complet) ----
+  // -- Mode Target : pick du point visé (raycast décor complet) ----
   const pickTargetPoint = useCallback((e: React.MouseEvent<HTMLDivElement>): THREE.Vector3 | null => {
     const container = containerRef.current;
     const camera = cameraRef.current;
@@ -3546,8 +3546,8 @@ export const Stage3D: React.FC<{
     mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     mouseRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     raycasterRef.current.setFromCamera(mouseRef.current, camera);
-    // Tout ce qui est pickable : meshes + sprites de la sc�ne, en excluant
-    // les fixtures (et le ciel : gridHelper est une Line, d�j� exclue).
+    // Tout ce qui est pickable : meshes + sprites de la scène, en excluant
+    // les fixtures (et le ciel : gridHelper est une Line, déjà exclue).
     const pick: THREE.Object3D[] = [];
     scene.traverse((obj) => {
       let p: THREE.Object3D | null = obj;
@@ -3597,7 +3597,7 @@ export const Stage3D: React.FC<{
     return mk;
   }, []);
 
-  // -- Vise toutes les fixtures s�lectionn�es vers un point (pan/tilt DMX) --
+  // -- Vise toutes les fixtures sélectionnées vers un point (pan/tilt DMX) --
   const aimFixturesAtPoint = useCallback((point: THREE.Vector3) => {
     const ids: string[] = multiSelectedIdsRef.current.size > 0
       ? [...multiSelectedIdsRef.current]
@@ -3608,7 +3608,7 @@ export const Stage3D: React.FC<{
     for (const fid of ids) {
       const f3d = fixturesRef.current.get(fid);
       const pf = patchedFixtures.find((f) => f.id === fid);
-      // Seules les fixtures qui tournent r�ellement en 3D (arm = pan) sont vis�es.
+      // Seules les fixtures qui tournent réellement en 3D (arm = pan) sont visées.
       if (!f3d || !pf) continue;
       const cm = f3d.channelMap;
       const panCh = cm.panOffset ?? cm.panOffsets?.[0] ?? null;
@@ -3646,7 +3646,7 @@ export const Stage3D: React.FC<{
         },
       );
       if (!solved) continue;
-      // �criture programmeur (LTP 85) � m�me signature que le drag Direct.
+      // Écriture programmeur (LTP 85) — même signature que le drag Direct.
       const writePan = (v: number) => {
         for (const off of (cm.panOffsets ?? [])) setCh(pf.startAddress + off, v);
         if (cm.panOffset !== null && !(cm.panOffsets ?? []).includes(cm.panOffset)) setCh(pf.startAddress + cm.panOffset, v);
@@ -3670,13 +3670,13 @@ export const Stage3D: React.FC<{
       setSceneAim(fid, point.x, point.y, point.z);
 
       // Capture le look (dimmer/couleur/strobe/shutter) DANS le programmer
-      // via setCh � un simple objet snapshot ne met pas � jour le store.
-      // Sans �a, Rec/Store fige uniquement pan/tilt ? sc�ne � muette �
-      // (intensity 0, faisceau invisible en 3D et sur le mat�riel).
+      // via setCh — un simple objet snapshot ne met pas à jour le store.
+      // Sans ça, Rec/Store fige uniquement pan/tilt → scène « muette »
+      // (intensity 0, faisceau invisible en 3D et sur le matériel).
       const lookCm = cm as unknown as LookChannelMap;
-      // � live � = programmer courant + buffer arbitr� (captureFixtureLook).
-      // Ne PAS �craser une couleur/dimmer d�j� programm�(>0) : seul un canal
-      // absent (ou intensity � 0) re�oit le look minimal forc� (255/blanc).
+      // « live » = programmer courant + buffer arbitré (captureFixtureLook).
+      // Ne PAS écraser une couleur/dimmer déjà programmé(>0) : seul un canal
+      // absent (ou intensity à 0) reçoit le look minimal forcé (255/blanc).
       const lookVals: Record<number, number> = {};
       captureFixtureLook(lookVals, pf, lookCm, { ...prog });
       const intensityAddr = lookCm.intensityOffset != null && lookCm.intensityOffset >= 0
@@ -3724,7 +3724,7 @@ export const Stage3D: React.FC<{
     const camera = cameraRef.current;
     if (!container || !camera) return;
 
-    // Mode Target : un clic vise TOUTES les fixtures s�lectionn�es.
+    // Mode Target : un clic vise TOUTES les fixtures sélectionnées.
     // Agit uniquement sur le clic (pas le mousedown) pour laisser OrbitControls
     // dragger librement sans re-viser pendant l'orbite.
     if (targetModeRef.current) {
@@ -3741,9 +3741,9 @@ export const Stage3D: React.FC<{
       return;
     }
 
-    // La s�lection/direct-drag est trait�e UNE fois, sur mousedown : le
-    // conteneur est aussi bind� sur onClick ? les deux �v�nements (mousedown
-    // puis click) d�clencheraient un double toggle avec Ctrl+clic.
+    // La sélection/direct-drag est traitée UNE fois, sur mousedown : le
+    // conteneur est aussi bindé sur onClick → les deux événements (mousedown
+    // puis click) déclencheraient un double toggle avec Ctrl+clic.
     if (e.type !== 'mousedown') return;
 
     const rect = container.getBoundingClientRect();
@@ -3762,8 +3762,8 @@ export const Stage3D: React.FC<{
     const intersects = raycasterRef.current.intersectObjects(targets, false);
 
     // Panneau Supports ouvert + clic simple (sans Maj/Ctrl) : les rigs sont
-    // prioritaires � clic sur un support = s�lection + drag imm�diat.
-    // Clic ailleurs (fixture ou vide) : comportement normal inchang�.
+    // prioritaires — clic sur un support = sélection + drag immédiat.
+    // Clic ailleurs (fixture ou vide) : comportement normal inchangé.
     if (supportsMenuOpen && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       const rigRoots: THREE.Object3D[] = [];
       for (const { group } of rigGroupsRef.current.values()) rigRoots.push(group);
@@ -3830,9 +3830,9 @@ export const Stage3D: React.FC<{
         }
       }
     } else if (e.shiftKey || e.ctrlKey || e.metaKey) {
-      // Maj/Ctrl + clic gauche : attraper un plateau (dessus ET c�t�s),
-      // �diteur ouvert ou non. Les fixtures restent prioritaires
-      // (multi-s�lection, test�e ci-dessus) ; sinon, orbite normale.
+      // Maj/Ctrl + clic gauche : attraper un plateau (dessus ET côtés),
+      // éditeur ouvert ou non. Les fixtures restent prioritaires
+      // (multi-sélection, testée ci-dessus) ; sinon, orbite normale.
       raycasterRef.current.setFromCamera(mouseRef.current, camera);
       const deckRoots: THREE.Object3D[] = [];
       for (const { group } of deckGroupsRef.current.values()) deckRoots.push(group);
@@ -3849,8 +3849,8 @@ export const Stage3D: React.FC<{
         }
       }
       // Maj/Ctrl + clic gauche sur un support (rig) : attraper le support.
-      // Les fixtures restent prioritaires (multi-s�lection test�e ci-dessus).
-      // L'�diteur Supports n'a pas besoin d'�tre ouvert.
+      // Les fixtures restent prioritaires (multi-sélection testée ci-dessus).
+      // L'éditeur Supports n'a pas besoin d'être ouvert.
       else {
         raycasterRef.current.setFromCamera(mouseRef.current, camera);
         const rigRoots: THREE.Object3D[] = [];
@@ -3869,9 +3869,9 @@ export const Stage3D: React.FC<{
         }
       }
     } else {
-      // Clic � c�t� du panneau : on ne d�s�lectionne PAS � la modale reste
+      // Clic à côté du panneau : on ne désélectionne PAS — la modale reste
       // ouverte (fermeture via le X du panneau). Sinon le moindre clic sur le
-      // canvas faisait dispara�tre la modale en cours d'�dition.
+      // canvas faisait disparaître la modale en cours d'édition.
     }
   }, [selectedFixtureId, directMode, patchedFixtures, pickTargetPoint, aimFixturesAtPoint, ensureTargetMarker, supportsMenuOpen, leftDockCollapsed]);
 
@@ -3909,8 +3909,8 @@ export const Stage3D: React.FC<{
   // -- Rotate selected fixture on drag (position) + Direct Pan/Tilt via programmer --
   useEffect(() => {
     const onMove = (ev: MouseEvent) => {
-      // Drag de plateau (Maj/Ctrl + clic, arm� au mousedown) : prioritaire
-      // sur l'orbite, apr�s les fixtures (test�es au mousedown).
+      // Drag de plateau (Maj/Ctrl + clic, armé au mousedown) : prioritaire
+      // sur l'orbite, après les fixtures (testées au mousedown).
       if (deckDragRef.current) {
         const { id } = deckDragRef.current;
         const st = useShowStore.getState();
@@ -3932,8 +3932,8 @@ export const Stage3D: React.FC<{
         if (controlsRef.current) controlsRef.current.enabled = false;
         return;
       }
-      // Drag de support (rig) : Maj/Ctrl + clic, �diteur Supports ouvert.
-      // M�me principe que les plateaux : plan � la hauteur du support.
+      // Drag de support (rig) : Maj/Ctrl + clic, éditeur Supports ouvert.
+      // Même principe que les plateaux : plan à la hauteur du support.
       if (rigDragRef.current) {
         const { id } = rigDragRef.current;
         const st = useShowStore.getState();
@@ -3994,7 +3994,7 @@ export const Stage3D: React.FC<{
         const dy = ev.clientY - startY;
         const pan = Math.max(0, Math.min(255, Math.round(startPan + dx * 0.7)));
         const tilt = Math.max(0, Math.min(255, Math.round(startTilt - dy * 0.7)));
-        // Push to programmer (LTP 85) � visible en 3D + hardware, enregistrable via Store
+        // Push to programmer (LTP 85) — visible en 3D + hardware, enregistrable via Store
         const cm = f3d.channelMap;
         const setProg = useProgrammerStore.getState().setChannel;
         for (const off of (cm.panOffsets ?? [])) setProg(pf.startAddress + off, pan);
@@ -4089,7 +4089,7 @@ export const Stage3D: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFixture?.id]);
 
-  // -- Historique / reset de la modale 3D (undo + baseline sc�nes) --
+  // -- Historique / reset de la modale 3D (undo + baseline scénes) --
   type UndoEntry =
     | { type: 'efx-snapshot'; sceneId: string; created: boolean; selectBefore?: string | null; prevName?: string; prevChannels?: Record<number, number>; prevEfxId?: string | null }
     | { type: 'scene-create'; sceneId: string }
@@ -4239,7 +4239,7 @@ export const Stage3D: React.FC<{
     try { (window as any).__lm_toast?.(t('stage3D.toastEfxCancelled'), 'info'); } catch {}
   }, [applyUndoEntry, restoreSceneState, clearEfxSnapshotFlag, t]);
 
-  // -- EFX snapshot � uniquement si enableEfxApply (onglet Sc�nes) --
+  // -- EFX snapshot → uniquement si enableEfxApply (onglet Scénes) --
   const effects = useShowStore((s) => s.effects);
   const [selectedEfxId, setSelectedEfxId] = useState<string>('');
   const handleApplyEfxSnapshot = useCallback(async () => {
@@ -4247,14 +4247,14 @@ export const Stage3D: React.FC<{
     if (!efx) return;
     const sceneId = (window as any).__lm_selectedSceneId as string | null;
     const store = useShowStore.getState();
-    // Snapshot : fige le pattern EFX � phase 0 (centre du pattern) comme valeurs DMX statiques � pr�visualisable en 3D dans l'onglet Sc�ne
+    // Snapshot : fige le pattern EFX à phase 0 (centre du pattern) comme valeurs DMX statiques — prévisualisable en 3D dans l'onglet Scène
     const targetIds = efx.fixtureIds.length > 0 ? new Set(efx.fixtureIds) : selectedFixtureId ? new Set([selectedFixtureId]) : new Set<string>();
     if (targetIds.size === 0) return;
-    // Points du pattern via la math EXACTE du moteur (fixture-tracks.ts) �
-    // phase 0 + d�calage � vague � par fixture pour figer la forme r�elle.
+    // Points du pattern via la math EXACTE du moteur (fixture-tracks.ts) —
+    // phase 0 + décalage « vague » par fixture pour figer la forme réelle.
     const snapIds = Array.from(targetIds);
     const snapSpread = (efx as any).spread ?? 0;
-    // Construit les canaux DMX du snapshot (pan/tilt + dimmer 255 pour visibilit� 3D)
+    // Construit les canaux DMX du snapshot (pan/tilt + dimmer 255 pour visibilité 3D)
     const snapshot: Record<number, number> = {};
     for (let sni = 0; sni < snapIds.length; sni++) {
       const fid = snapIds[sni];
@@ -4264,7 +4264,7 @@ export const Stage3D: React.FC<{
       );
       const pf = store.patchedFixtures.find((f) => f.id === fid);
       if (!pf) continue;
-      // R�sout les offsets pan/tilt via la d�finition du fixture (comme l'aper�u live)
+      // Résout les offsets pan/tilt via la définition du fixture (comme l'aperçu live)
       try {
         const def = await window.lightMaestro.fixtures.getDefinition(pf.fixtureDefId);
         const mode = def?.modes?.[pf.modeIndex];
@@ -4277,7 +4277,7 @@ export const Stage3D: React.FC<{
           else if (ch.type === 'Intensity') snapshot[addr] = 255;
         }
       } catch {}
-      // Fallback via fixturePositions si pas de d�finition : on marque au moins le pan/tilt via le store 3D (visuel)
+      // Fallback via fixturePositions si pas de définition : on marque au moins le pan/tilt via le store 3D (visuel)
       const f3d = fixturesRef.current.get(fid);
       if (f3d?.channelMap) {
         if (f3d.channelMap.panOffset !== null && f3d.channelMap.panOffset !== undefined) snapshot[pf.startAddress + f3d.channelMap.panOffset] = dmxPan;
@@ -4285,8 +4285,8 @@ export const Stage3D: React.FC<{
         if (f3d.channelMap.intensityOffset !== null) snapshot[pf.startAddress + f3d.channelMap.intensityOffset] = 255;
       }
     }
-    // Applique l'EFX � la sc�ne : snapshot + lien dynamique (efxId) pour rejouer l'EFX en continu pendant la dur�e de la sc�ne
-    // Lib�re d'abord l'aper�u design-efx (LTP 70) sinon il masque scene-efx (LTP 75) pendant 3s
+    // Applique l'EFX à la scène : snapshot + lien dynamique (efxId) pour rejouer l'EFX en continu pendant la durée de la scène
+    // Libère d'abord l'aperçu design-efx (LTP 70) sinon il masque scene-efx (LTP 75) pendant 3s
     try { dmxBridge.release('design-efx'); } catch {}
     if (sceneId) {
       const sc = store.getScene(sceneId);
@@ -4303,17 +4303,17 @@ export const Stage3D: React.FC<{
           prevEfxId: (sc as any).efxId ?? null,
         });
         store.updateScene(sceneId, { name: sc.name.includes('[EFX:') ? sc.name : sc.name + tag, channels: merged, efxId: efx.id } as any);
-        // Push imm�diat + flag pour que l'aper�u EFX ne blackout pas ces fixtures dans les 2s qui suivent
+        // Push immédiat + flag pour que l'aperçu EFX ne blackout pas ces fixtures dans les 2s qui suivent
         (window as any).__lm_efxSnapshotApplied = { sceneId, efxId: efx.id, at: Date.now() };
         setEfxSnapshotActive(true);
         try { await sendChannelsToHardwareAndStore(merged, store.patchedFixtures, store.universes); } catch {}
       }
     } else {
-      // Nouvelle sc�ne : reprend la dur�e courante de l'�diteur si dispo, sinon 0 = infini (l'EFX ne doit pas s'arr�ter seul)
+      // Nouvelle scène : reprend la durée courante de l'éditeur si dispo, sinon 0 = infini (l'EFX ne doit pas s'arrêter seul)
       const curDur = (document.querySelector('input[data-scene-duration]') as HTMLInputElement)?.valueAsNumber ?? 0;
       const dur = Number.isFinite(curDur) && curDur > 0 ? curDur : 0;
-      // H�rite de la config 3D courante (musiciens + ponts) : sans �a, la sc�ne
-      // cr��e est vide ? DesignView default stageScene 'rear-front' = ponts en
+      // Hérite de la config 3D courante (musiciens + ponts) : sans ça, la scène
+      // créée est vide → DesignView default stageScene 'rear-front' = ponts en
       // trop, et musicians {} = musiciens perdus.
       const newId = store.createScene(`Scene + ${efx.name}`);
       store.updateScene(newId, {
@@ -4333,9 +4333,9 @@ export const Stage3D: React.FC<{
     try { (window as any).__lm_toast?.(t('stage3D.toastEfxApplied', { name: efx.name }), 'success'); } catch {}
   }, [effects, selectedEfxId, selectedFixtureId, captureSceneBaseline, pushUndo, musicians, stageScene, t]);
 
-  // -- Rec Sc�ne / Rec EFX / Rec Show � extraits du panneau modal pour �tre
-  //    r�utilisables par la barre compacte affich�e en mode �dition
-  //    (hideFixturePanel) o� l'on garde la vue 3D seule. --
+  // -- Rec Scène / Rec EFX / Rec Show → extraits du panneau modal pour être
+  //    réutilisables par la barre compacte affichée en mode édition
+  //    (hideFixturePanel) où l'on garde la vue 3D seule. --
   const handleRecSceneCb = useCallback(() => {
     let prog = useProgrammerStore.getState().channels;
     if (Object.keys(prog).length === 0) {
@@ -4352,12 +4352,12 @@ export const Stage3D: React.FC<{
     const s = useShowStore.getState();
     const scId = s.createScene(`Scene 3D ${s.scenes.length + 1}`);
     const channels = livePoseChannels(prog, fixturesRef.current);
-    // duration 0 = hold (8) : la capture doit rester jou�e, pas blackout apr�s 5 s.
+    // duration 0 = hold (8) : la capture doit rester jouée, pas blackout apràs 5 s.
     // Pas de name dans update : s est un snapshot AVANT createScene (off-by-one).
     s.updateScene(scId, { channels, fadeIn: 0, fadeOut: 0, duration: 0 });
     pushUndo({ type: 'scene-create', sceneId: scId });
-    // Auto-s�lection + handoff (comme Store) : la tuile se s�lectionne et la
-    // sc�ne joue imm�diatement � sans �a, Rec cr�e une tuile � muette �.
+    // Auto-sélection + handoff (comme Store) : la tuile se sélectionne et la
+    // scène joue immédiatement — sans ça, Rec crée une tuile « muette ».
     (window as any).__lm_selectedSceneId = scId;
     try {
       const show = useShowStore.getState();
@@ -4407,7 +4407,7 @@ export const Stage3D: React.FC<{
     const showChans = livePoseChannels(prog, fixturesRef.current);
     // duration 0 = hold ; pas de name (snapshot s AVANT createScene).
     s.updateScene(scId, { channels: showChans, fadeIn: 0, fadeOut: 0, duration: 0 });
-    // Auto-s�lection + handoff (idem Rec Sc�ne / Store)
+    // Auto-sélection + handoff (idem Rec Scène / Store)
     (window as any).__lm_selectedSceneId = scId;
     try {
       const show = useShowStore.getState();
@@ -4421,8 +4421,8 @@ export const Stage3D: React.FC<{
     } catch {}
     const shId = s.createShow(`Show 3D ${s.shows.length + 1}`);
     // getState() ci-dessus est un snapshot AVANT createShow : les
-    // r�f�rences s.shows/s.scenes sont p�rim�es. Re-snapshoter pour
-    // retrouver le show cr�� et lui attacher sa piste.
+    // références s.shows/s.scenes sont périmées. Re-snapshoter pour
+    // retrouver le show créé et lui attacher sa piste.
     const fresh = useShowStore.getState();
     const show = fresh.shows.find((sh) => sh.id === shId);
     if (show) fresh.updateShow(shId, { tracks: [{ id: `trk-${Date.now()}`, name: 'Scene Track', type: 'scene', items: [{ id: `tmi-${Date.now()}`, startTime: 0, duration: 5000, resourceId: scId, fadeIn: 0, fadeOut: 0, name: fresh.scenes.find((sc) => sc.id === scId)?.name || 'Scene 3D' }], muted: false, solo: false }] as any });
@@ -4439,7 +4439,7 @@ export const Stage3D: React.FC<{
 
   return (
     <div className="h-full flex flex-col bg-[#08080e]">
-      {/* Header pro � group�, lisible en r�gie */}
+      {/* Header pro — groupé, lisible en régie */}
       <div className="h-11 border-b border-gray-800/40 flex items-center px-3 gap-2 shrink-0 bg-[#0d0d14] overflow-x-auto">
         <div className="flex items-center gap-2 min-w-max">
           <span className="text-xs font-bold tracking-widest text-gray-300 flex items-center gap-1.5">
@@ -4485,7 +4485,7 @@ export const Stage3D: React.FC<{
 <div className="hidden md:flex items-center gap-1 bg-black/20 border border-gray-800/50 rounded-lg px-2 py-1">
               <Maximize2 size={11} className="text-gray-500" />
               <input type="number" min={1} step={0.5} value={draftDims.width} onChange={(e) => setDraftDims((prev) => ({ ...prev, width: e.target.value }))} onBlur={commitStageDims} onKeyDown={(e) => { if (e.key === 'Enter') commitStageDims(); }} className="w-11 bg-transparent text-gray-200 text-[10px] text-center focus:outline-none" aria-label={t('stage3D.stageWidthAria')} />
-              <span className="text-gray-600 text-[10px]">�</span>
+              <span className="text-gray-600 text-[10px]">×</span>
               <input type="number" min={1} step={0.5} value={draftDims.depth} onChange={(e) => setDraftDims((prev) => ({ ...prev, depth: e.target.value }))} onBlur={commitStageDims} onKeyDown={(e) => { if (e.key === 'Enter') commitStageDims(); }} className="w-11 bg-transparent text-gray-200 text-[10px] text-center focus:outline-none" aria-label={t('stage3D.stageDepthAria')} />
               <span className="text-gray-600 text-[10px]">m</span>
             </div>
@@ -4515,7 +4515,7 @@ export const Stage3D: React.FC<{
                 </div>
               </div>
       </div>
-      {/* Musiciens popup � centr�e comme toutes les modales */}
+      {/* Musiciens popup — centrée comme toutes les modales */}
       {musiciansMenuOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setMusiciansMenuOpen(false)}>
           <div className="w-64 rounded-lg border border-gray-700/60 bg-[#0d0d14] shadow-xl shadow-black/60 p-2" onClick={(e) => e.stopPropagation()}>
@@ -4539,9 +4539,9 @@ export const Stage3D: React.FC<{
           </div>
         </div>
       )}
-      {/* Supports � panneau lat�ral NON modal : �diteur de structures libres
-          (ponts, barres, totems, T). Le panneau reste ouvert : encha�ne
-          plusieurs supports pour des groupes diff�rents. */}
+      {/* Supports — panneau latéral NON modal : éditeur de structures libres
+          (ponts, barres, totems, T). Le panneau reste ouvert : enchaîne
+          plusieurs supports pour des groupes différents. */}
       {supportsMenuOpen && (() => {
         return (
         <div className="fixed right-3 top-16 w-[520px] z-40 flex flex-col rounded-lg border border-gray-700/60 bg-[#0d0d14]/95 shadow-xl shadow-black/60 p-2 max-h-[80vh] overflow-y-auto">
@@ -4557,7 +4557,7 @@ export const Stage3D: React.FC<{
                   Tout supprimer
                 </button>
               )}
-              <button onClick={() => setSupportsMenuOpen(false)} className="text-gray-500 hover:text-gray-300 text-sm px-1">?</button>
+              <button onClick={() => setSupportsMenuOpen(false)} className="text-gray-500 hover:text-gray-300 text-sm px-1">✕</button>
             </div>
           </div>
           {/* Ajout d'un nouveau support */}
@@ -4580,7 +4580,7 @@ export const Stage3D: React.FC<{
                 if (count === 0) return null;
                 return (
                   <span key={k} className="bg-gray-800/40 px-1.5 py-0.5 rounded">
-                    {t(`stage3D.support_${k}`)}�{count}
+                    {t(`stage3D.support_${k}`)}×{count}
                   </span>
                 );
               })}
@@ -4599,7 +4599,7 @@ export const Stage3D: React.FC<{
                 if (field === 'name') {
                   updateStageRig(rig.id, { name: String(cur.name).trim() || rig.name });
                 } else if (field === 'w') {
-                  // Longueur en m�tres ; le centre reste FIXE :
+                  // Longueur en mètres ; le centre reste FIXE :
                   // on le recalcule avec l'ANCIENNE largeur (cur.w), pas la nouvelle.
                   const oldCenter = Number(cur.x) + Number(cur.w) / 2;
                   const newW = Number(cur.w) > 0 ? Number(cur.w) : rig.span;
@@ -4637,7 +4637,7 @@ export const Stage3D: React.FC<{
                 </label>
               );
               // Commit fader avec la valeur DIRECTE (le draft React est async :
-              // commitF apr�s setF lirait l'ancienne valeur ? rig en retard d'un pas).
+              // commitF après setF lirait l'ancienne valeur → rig en retard d'un pas).
               const commitFader = (field: 'x' | 'y' | 'h', v: number) => {
                 const cur = rigDrafts[rig.id] ?? rigToMeters(rig, stageDims);
                 if (field === 'x') {
@@ -4698,19 +4698,19 @@ export const Stage3D: React.FC<{
                         className="text-gray-600 hover:text-red-400 text-xs px-1"
                         title={t('stage3D.rigDeleteTitle')}
                       >
-                        ?
+                        ✕
                       </button>
                     )}
                   </div>
-                  {/* Position faders : d�placement lat�ral, en profondeur, hauteur */}
+                  {/* Position faders : déplacement latéral, en profondeur, hauteur */}
                   <div className="space-y-1 mt-1">
-                    {rigFader('x', 'Lat�ral', t('stage3D.rigPosLeftTip'), -20, 40)}
+                    {rigFader('x', 'Latéral', t('stage3D.rigPosLeftTip'), -20, 40)}
                     {rigFader('y', 'Profondeur', t('stage3D.rigPosFrontTip'), -20, 40)}
-                    {rigFader('h', 'Hauteur', 'Hauteur du rig en m�tres', 0.5, 20)}
+                    {rigFader('h', 'Hauteur', 'Hauteur du rig en mètres', 0.5, 20)}
                   </div>
                   {/* Rotation + longueur de barre */}
                   <div className="grid grid-cols-2 gap-1 mt-1">
-                    {num('r', 'R�')}
+                    {num('r', 'R°')}
                     <label className="flex flex-col items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                       <span className="text-[8px] text-gray-600">Longueur (m)</span>
                       <input
@@ -4753,9 +4753,9 @@ export const Stage3D: React.FC<{
           </div>
         );
       })()}
-      {/* Decks popup � panneau lat�ral NON modal : le canvas reste cliquable
-          pour attraper les plateaux au clic gauche pendant l'�dition.
-          (Un backdrop plein �cran fermerait l'�diteur � chaque clic 3D.) */}
+      {/* Decks popup — panneau latéral NON modal : le canvas reste cliquable
+          pour attraper les plateaux au clic gauche pendant l'édition.
+          (Un backdrop plein écran fermerait l'éditeur à chaque clic 3D.) */}
       {decksMenuOpen && (
         <div className="fixed right-3 top-16 bottom-10 w-80 z-40 flex flex-col rounded-lg border border-gray-700/60 bg-[#0d0d14]/95 shadow-xl shadow-black/60 p-2 overflow-y-auto">
           <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-gray-800">
@@ -4782,7 +4782,7 @@ export const Stage3D: React.FC<{
                     {t('stage3D.resetDecks')}
                   </button>
                 )}
-                <button onClick={() => setDecksMenuOpen(false)} className="text-gray-500 hover:text-gray-300 text-sm px-1">?</button>
+                <button onClick={() => setDecksMenuOpen(false)} className="text-gray-500 hover:text-gray-300 text-sm px-1">✕</button>
               </div>
             </div>
             {stageDecks.map((deck) => {
@@ -4796,14 +4796,14 @@ export const Stage3D: React.FC<{
                   setDeckDrafts((prev) => ({ ...prev, [deck.id]: deckToMeters(deck, stageDims) }));
                 if (field === 'name') {
                   const name = String(cur.name).trim();
-                  // Nom vid� : on restaure l'affichage, on ne commite rien.
+                  // Nom vidé : on restaure l'affichage, on ne commite rien.
                   if (!name) { revert(); return; }
                   updateStageDeck(deck.id, { name });
                   return;
                 }
-                // Champ num�rique vid�/invalide (ex. en cours de frappe) :
+                // Champ numérique vidé/invalide (ex. en cours de frappe) :
                 // on restaure l'affichage au lieu de commiter 0/NaN
-                // (un H � 0 coule le plateau sous le sol ? � disparu �).
+                // (un H à 0 coule le plateau sous le sol → « disparu »).
                 for (const v of [cur.x, cur.y, cur.w, cur.d, cur.h, cur.r]) {
                   if (v === '' || v === null || v === undefined || !Number.isFinite(Number(v))) {
                     revert();
@@ -4861,12 +4861,12 @@ export const Stage3D: React.FC<{
                         className="text-gray-600 hover:text-red-400 text-xs px-1"
                         title={t('stage3D.deleteDeck')}
                       >
-                        ?
+                        ✕
                       </button>
                     )}
                   </div>
                   <div className="grid grid-cols-6 gap-1 mt-1">
-                    {num('x', 'X')}{num('y', 'Y')}{num('w', 'L')}{num('d', 'P')}{num('h', 'H')}{num('r', 'R�')}
+                    {num('x', 'X')}{num('y', 'Y')}{num('w', 'L')}{num('d', 'P')}{num('h', 'H')}{num('r', 'R°')}
                   </div>
                 </div>
               );
@@ -4874,7 +4874,7 @@ export const Stage3D: React.FC<{
             <p className="px-2 pt-1 text-[9px] text-gray-600">{t('stage3D.decksHint')}</p>
         </div>
       )}
-      {/* Toolbar legacy � conserv�e cach�e pour compat, le nouveau header la remplace */}
+      {/* Toolbar legacy — conservée cachée pour compat, le nouveau header la remplace */}
       <div className="hidden">
       {/* Toolbar */}
       <div className="h-10 border-b border-gray-800/30 flex items-center px-4 gap-3 shrink-0 bg-[#0d0d14] overflow-x-auto">
@@ -4942,7 +4942,7 @@ export const Stage3D: React.FC<{
 
         <div className="w-px h-4 bg-gray-800" />
 
-        {/* Stage size � resizable without upper limit; fixtures scale proportionally */}
+        {/* Stage size — resizable without upper limit; fixtures scale proportionally */}
         <div className="flex items-center gap-1" title={t('stage3D.stageDimsTitle')}>
           <Maximize2 size={12} className="text-gray-500" />
           <input
@@ -4956,7 +4956,7 @@ export const Stage3D: React.FC<{
             className="w-12 bg-gray-800/40 text-gray-200 text-[10px] px-1 py-0.5 rounded border border-gray-700/40 focus:outline-none focus:border-purple-500/50"
             aria-label={t('stage3D.stageWidthAria')}
           />
-          <span className="text-gray-600 text-[10px]">�</span>
+          <span className="text-gray-600 text-[10px]">×</span>
           <input
             type="number"
             min={1}
@@ -5011,11 +5011,11 @@ export const Stage3D: React.FC<{
         </span>
         </div>
       </div>
-      </div>{/* fin toolbar legacy cach�e */}
+      </div>{/* fin toolbar legacy cachée */}
 
-      {/* Corps pro : Left dock + Centre 3D + Right dock � toujours c�te � c�te */}
+      {/* Corps pro : Left dock + Centre 3D + Right dock — toujours côte à côte */}
       <div className="flex-1 flex flex-row flex-nowrap overflow-hidden min-h-0">
-        {/* Left dock � Fixtures (r�tractable) */}
+        {/* Left dock — Fixtures (rétractable) */}
         <FixturePanel
           patchedFixtures={patchedFixtures}
           selectedFixtureId={selectedFixtureId}
@@ -5069,7 +5069,7 @@ export const Stage3D: React.FC<{
           </div>
         )}
 
-        {/* Fixture quick-select list � search + click to select & zoom */}
+        {/* Fixture quick-select list — search + click to select & zoom */}
         {showFixtureList && (
           <div
             className="absolute top-3 left-3 z-20 w-72 max-h-[75%] bg-[#12121a] border border-gray-800 rounded-xl shadow-2xl flex flex-col overflow-hidden"
@@ -5117,7 +5117,7 @@ export const Stage3D: React.FC<{
                       <span className="min-w-0 flex-1">
                         <span className="block text-xs text-gray-200 truncate">{f.name}</span>
                         <span className="block text-[9px] text-gray-600 truncate">
-                          {f.fixtureType} � U{(uniIdx ?? 0) + 1} @ {f.startAddress}
+                          {f.fixtureType} · U{(uniIdx ?? 0) + 1} @ {f.startAddress}
                         </span>
                       </span>
                       <Crosshair size={12} className="text-gray-600 shrink-0" />
@@ -5130,9 +5130,9 @@ export const Stage3D: React.FC<{
         )}
 
         {/* Selected fixture editor - floating panel, draggable by header only.
-            Affich�e au clic sur un projecteur dans TOUTES les vues 3D (y compris
-            le mode �dition) : faders, Capturer, Target et snapshot EFX sont
-            indispensables partout. Refermable/d�pla�able, ne bloque jamais la vue. */}
+            Affichée au clic sur un projecteur dans TOUTES les vues 3D (y compris
+            le mode édition) : faders, Capturer, Target et snapshot EFX sont
+            indispensables partout. Refermable/déplaçable, ne bloque jamais la vue. */}
 
         {/* Selected fixture editor - floating panel, draggable by header only */}
         {selectedFixture && selectedPos && (
@@ -5146,7 +5146,7 @@ export const Stage3D: React.FC<{
               className="flex items-center justify-between px-4 py-3 cursor-grab active:cursor-grabbing border-b border-gray-800/50"
               onMouseDown={(e) => {
                 const panel = e.currentTarget.parentElement! as HTMLElement;
-                // Centre initial via transform ? passer en coordonn�es left/top fixes au premier drag
+                // Centre initial via transform → passer en coordonnées left/top fixes au premier drag
                 const rect = panel.getBoundingClientRect();
                 const ox = e.clientX - rect.left;
                 const oy = e.clientY - rect.top;
@@ -5382,7 +5382,7 @@ export const Stage3D: React.FC<{
               </div>
 
                {/* Longueur + suspension : pour tout support barre (frontBar/backBar).
-                   Longueur LIBRE en m�tres (1-12), jamais d�riv�e des plateaux. */}
+                   Longueur LIBRE en mètres (1-12), jamais dérivée des plateaux. */}
                {isBarSupport(resolveSupportKind(selectedPos.support)) && (
                 <div className="space-y-1 rounded-lg border border-gray-800/60 bg-black/20 p-2">
                   <div className="flex justify-between text-[10px]">
@@ -5423,7 +5423,7 @@ export const Stage3D: React.FC<{
                 </div>
               )}
 
-              {/* Direct DMX � intensity + couleur (programmer) */}
+              {/* Direct DMX — intensity + couleur (programmer) */}
               <div className="space-y-2 p-2 rounded-lg bg-violet-600/10 border border-violet-500/20">
                 <div className="text-[10px] font-semibold text-violet-300">{t('stage3D.directProgrammer')}</div>
                 {selectedFixture && (() => {
@@ -5511,8 +5511,9 @@ export const Stage3D: React.FC<{
                 </div>
               </div>
 
-              {/* Point z�ro DMX � offset VISUEL persistant du faisceau (seul r�glage visuel) ;
-                  le centre du mouvement autoscript est pos� par � Capturer � (centerPan/Tilt). */}
+              {/* Point zéro DMX — décalage PERSISTANT du zéro mécanique du pan/tilt
+                  (correction PHYSIQUE : montage, yoke inversé, tête pré-aimée) ;
+                  le centre du mouvement autoscript est posé par « Capturer » (centerPan/Tilt). */}
               {selectedFixture && selectedFixture.fixtureType && (() => {
                 const f3d = fixturesRef.current.get(selectedFixture.id);
                 const hasPan = f3d?.channelMap?.panOffset !== null && f3d?.channelMap?.panOffset !== undefined;
@@ -5523,7 +5524,7 @@ export const Stage3D: React.FC<{
               <div className="pt-2 border-t border-gray-800 space-y-1">
                 <div className="flex justify-between text-[10px]">
                   <RichTooltip content={{ title: t('stage3D.panZeroTipTitle'), text: t('stage3D.panZeroTipText'), example: t('stage3D.panZeroTipExample'), tone: 'info' }}><span className="text-gray-500 cursor-help">{t('stage3D.panZero')}</span></RichTooltip>
-                  <span className="text-gray-400 font-mono">{((selectedPos.zeroPan ?? 0)).toFixed(0)}�</span>
+                  <span className="text-gray-400 font-mono">{((selectedPos.zeroPan ?? 0)).toFixed(0)}°</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <button onClick={() => setFixturePosition(selectedFixture.id, { zeroPan: Math.max(-270, Math.min(270, (selectedPos.zeroPan ?? 0) - 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">-</button>
@@ -5539,11 +5540,11 @@ export const Stage3D: React.FC<{
                   <button onClick={() => setFixturePosition(selectedFixture.id, { zeroPan: Math.max(-270, Math.min(270, (selectedPos.zeroPan ?? 0) + 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
                 </div>
                 <div className="flex justify-between text-[8px] text-gray-700">
-                  <span>-270�</span><span>+270�</span>
+                  <span>-270°</span><span>+270°</span>
                 </div>
                 <div className="flex justify-between text-[10px] pt-1">
                   <RichTooltip content={{ title: t('stage3D.tiltZeroTipTitle'), text: t('stage3D.tiltZeroTipText'), example: t('stage3D.tiltZeroTipExample'), tone: 'info' }}><span className="text-gray-500 cursor-help">{t('stage3D.tiltZero')}</span></RichTooltip>
-                  <span className="text-gray-400 font-mono">{((selectedPos.zeroTilt ?? 0)).toFixed(0)}�</span>
+                  <span className="text-gray-400 font-mono">{((selectedPos.zeroTilt ?? 0)).toFixed(0)}°</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <button onClick={() => setFixturePosition(selectedFixture.id, { zeroTilt: Math.max(-90, Math.min(90, (selectedPos.zeroTilt ?? 0) - 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">-</button>
@@ -5559,15 +5560,15 @@ export const Stage3D: React.FC<{
                   <button onClick={() => setFixturePosition(selectedFixture.id, { zeroTilt: Math.max(-90, Math.min(90, (selectedPos.zeroTilt ?? 0) + 1)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
                 </div>
                 <div className="flex justify-between text-[8px] text-gray-700">
-                  <span>-90�</span><span>+90�</span>
+                  <span>-90°</span><span>+90°</span>
                 </div>
                 <div className="flex gap-1 pt-1">
                   <button onClick={() => {
-                    // Capture pour TOUTES les fixtures s�lectionn�es (multi + active).
+                    // Capture pour TOUTES les fixtures sélectionnées (multi + active).
                     // On pose centerPan/centerTilt (centre d'oscillation autoscript)
-                    // mais on ne purge JAMAIS le programmeur ici : apr�s Target,
-                    // purger pan/tilt/couleur faisait retomber la derni�re fixture
-                    // s�lectionn�e � sa pose initiale (blanc, face � 128).
+                    // mais on ne purge JAMAIS le programmeur ici : après Target,
+                    // purger pan/tilt/couleur faisait retomber la dernière fixture
+                    // sélectionnée à sa pose initiale (blanc, face à 128).
                     const setPos = useShowStore.getState().setFixturePosition;
                     const progSnap = useProgrammerStore.getState().channels;
                     for (const fid of getActionFixtureIds()) {
@@ -5602,7 +5603,7 @@ export const Stage3D: React.FC<{
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
                   <span className="text-gray-500">{t('stage3D.iconSize')}</span>
-                  <span className="text-gray-400 font-mono">{((selectedPos.thumbnailScale ?? 0.75)).toFixed(2)}�</span>
+                  <span className="text-gray-400 font-mono">{((selectedPos.thumbnailScale ?? 0.75)).toFixed(2)}×</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <button onClick={() => { const v = Math.max(0.2, Math.min(2.0, (selectedPos.thumbnailScale ?? 0.75) - 0.05)); setFixturePosition(selectedFixture.id, { thumbnailScale: v }); const f3d = fixturesRef.current.get(selectedFixture.id); if (f3d?.thumbSprite) { const s = 0.55 * v / 0.75; f3d.thumbSprite.scale.set(s,s,1); } }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">-</button>
@@ -5623,7 +5624,7 @@ export const Stage3D: React.FC<{
                   <button onClick={() => { const v = Math.max(0.2, Math.min(2.0, (selectedPos.thumbnailScale ?? 0.75) + 0.05)); setFixturePosition(selectedFixture.id, { thumbnailScale: v }); const f3d = fixturesRef.current.get(selectedFixture.id); if (f3d?.thumbSprite) { const s = 0.55 * v / 0.75; f3d.thumbSprite.scale.set(s,s,1); } }} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
                 </div>
                 <div className="flex justify-between text-[8px] text-gray-700">
-                  <span>0.2�</span><span>2.0�</span>
+                  <span>0.2×</span><span>2.0×</span>
                 </div>
               </div>
 
@@ -5631,7 +5632,7 @@ export const Stage3D: React.FC<{
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px]">
                   <span className="text-gray-500">{t('stage3D.beamAngle')}</span>
-                  <span className="text-gray-400 font-mono">{((selectedPos.beamAngle ?? 0.15) * 180 / Math.PI).toFixed(0)}�</span>
+                  <span className="text-gray-400 font-mono">{((selectedPos.beamAngle ?? 0.15) * 180 / Math.PI).toFixed(0)}°</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <button onClick={() => setFixturePosition(selectedFixture.id, { beamAngle: Math.max(0.02, Math.min(0.8, (selectedPos.beamAngle ?? 0.15) - 0.01)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">-</button>
@@ -5647,12 +5648,12 @@ export const Stage3D: React.FC<{
                   <button onClick={() => setFixturePosition(selectedFixture.id, { beamAngle: Math.max(0.02, Math.min(0.8, (selectedPos.beamAngle ?? 0.15) + 0.01)) })} className="w-6 h-6 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 text-[11px] shrink-0">+</button>
                 </div>
                 <div className="flex justify-between text-[8px] text-gray-700">
-                  <span>1�</span><span>46�</span>
+                  <span>1°</span><span>46°</span>
                 </div>
               </div>
 
             </div>
-            {/* EFX snapshot � uniquement si enableEfxApply (Sc�nes) */}
+            {/* EFX snapshot — uniquement si enableEfxApply (Scènes) */}
             {enableEfxApply && (
               <div className="mx-4 mb-3 p-3 rounded-xl bg-gradient-to-br from-violet-600/15 via-purple-600/10 to-cyan-600/10 border border-violet-500/20">
                 <div className="flex items-center gap-1.5 mb-2">
@@ -5663,7 +5664,7 @@ export const Stage3D: React.FC<{
                 <select value={selectedEfxId} onChange={(e) => setSelectedEfxId(e.target.value)} className="w-full bg-black/40 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-violet-500/50">
                   <option value="">{t('stage3D.chooseEfx')}</option>
                   {effects.map((efx) => (
-                    <option key={efx.id} value={efx.id} className="bg-[#0d0d14]">{efx.name} � {efx.pattern}</option>
+                    <option key={efx.id} value={efx.id} className="bg-[#0d0d14]">{efx.name} · {efx.pattern}</option>
                   ))}
                 </select>
                 <button onClick={handleApplyEfxSnapshot} disabled={!selectedEfxId} className="mt-2 w-full py-2 rounded-lg bg-gradient-to-r from-violet-600 to-purple-600 text-white text-xs font-bold hover:from-violet-500 hover:to-purple-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all">
@@ -5672,7 +5673,7 @@ export const Stage3D: React.FC<{
                 {effects.length === 0 && <p className="text-[9px] text-gray-600 mt-1 text-center">{t('stage3D.noEfx')}</p>}
               </div>
             )}
-            {/* Reset / Undo � efface la programmation en cours */}
+            {/* Reset / Undo — efface la programmation en cours */}
             <div className="mx-4 mb-3 grid grid-cols-2 gap-2">
               <button
                 onClick={handleUndoLast}
@@ -5712,9 +5713,9 @@ export const Stage3D: React.FC<{
           </div>
         )}
         </div>{/* fin Centre 3D */}
-        </div>{/* fin colonne Centre : le dock suit DANS la row, � droite */}
-        {/* Right dock � EFX uniquement si enableEfxApply (Sc�nes). Repliable
-            pour rendre toute la largeur � la sc�ne 3D. */}
+        </div>{/* fin colonne Centre : le dock suit DANS la row, à droite */}
+        {/* Right dock — EFX uniquement si enableEfxApply (Scènes). Repliable
+            pour rendre toute la largeur à la scène 3D. */}
         {enableEfxApply && !rightDockCollapsed && (
           <div className="order-3 w-[220px] xl:w-[264px] shrink-0 border-l border-gray-800/50 bg-[#0d0d14]/60 flex flex-col min-h-0">
             <div className="px-3 py-2 border-b border-gray-800/50 flex items-center justify-between">
@@ -5730,7 +5731,7 @@ export const Stage3D: React.FC<{
                 <select value={selectedEfxId} onChange={(e) => setSelectedEfxId(e.target.value)} className="w-full bg-black/40 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-violet-500/50">
                   <option value="">{t('stage3D.chooseEfx')}</option>
                   {effects.map((efx) => (
-                    <option key={efx.id} value={efx.id} className="bg-[#0d0d14]">{efx.name} � {efx.pattern}</option>
+                    <option key={efx.id} value={efx.id} className="bg-[#0d0d14]">{efx.name} · {efx.pattern}</option>
                   ))}
                 </select>
                 <button onClick={handleApplyEfxSnapshot} disabled={!selectedEfxId} className="mt-2 w-full py-2 rounded-lg bg-gradient-to-r from-violet-600 to-purple-600 text-white text-xs font-bold hover:from-violet-500 hover:to-purple-500 disabled:opacity-40 flex items-center justify-center gap-1.5">
@@ -5783,7 +5784,7 @@ export const Stage3D: React.FC<{
             <span className="text-[9px] text-gray-600 [writing-mode:vertical-lr] tracking-widest uppercase">{t('stage3D.scene')}</span>
           </div>
         )}
-        {/* Fermeture row principale (le centre est d�j� ferm� plus haut) */}
+        {/* Fermeture row principale (le centre est déjà fermé plus haut) */}
         </div>
       {/* Status bar pro */}
       <div className="h-6 border-t border-gray-800/50 bg-[#0d0d14] flex items-center px-3 gap-3 text-[10px] text-gray-500 shrink-0">
@@ -5843,15 +5844,15 @@ function disposeFixture3D(f3d: Fixture3D): void {
   }
 }
 
-// --- Supports physiques (totem / tr�pied) --------------------------
-// Mat�riaux partag�s (jamais dispos�s : clearFixtureSupport ne lib�re que
-// les g�om�tries). Le pont ('truss') et le sol ('floor') ne dessinent rien
-// (rendu historique : projets existants inchang�s).
+// --- Supports physiques (totem / trépied) --------------------------
+// Matériaux partagés (jamais disposés : clearFixtureSupport ne libère que
+// les géométries). Le pont ('truss') et le sol ('floor') ne dessinent rien
+// (rendu historique : projets existants inchangés).
 const supportMetalMat = new THREE.MeshStandardMaterial({ color: 0x23232e, roughness: 0.5, metalness: 0.7 });
 const supportBaseMat = new THREE.MeshStandardMaterial({ color: 0x14141c, roughness: 0.6, metalness: 0.5 });
-// -- Barres avant/arri�re : alu CLAIR + l�g�re �mission (le m�tal sombre
-// est invisible sur sc�ne sombre � � noir sur noir �). Partag�s, jamais
-// dispos�s (m�me convention que les autres mat�riaux supports).
+// -- Barres avant/arrière : alu CLAIR + légère émission (le métal sombre
+// est invisible sur scène sombre — « noir sur noir »). Partagés, jamais
+// disposés (même convention que les autres matériaux supports).
 const barMetalMat = new THREE.MeshStandardMaterial({
   color: 0xb9becb, roughness: 0.32, metalness: 0.85,
   emissive: 0x3a3f52, emissiveIntensity: 0.55,
@@ -5860,12 +5861,12 @@ const barCableMat = new THREE.MeshStandardMaterial({
   color: 0x9aa0b5, roughness: 0.4, metalness: 0.8,
   emissive: 0x2e3247, emissiveIntensity: 0.6,
 });
-// -- Truss du d�cor : alu clair + forte �mission (visible sur sc�ne sombre) --
+// -- Truss du décor : alu clair + forte émission (visible sur scène sombre) --
 const trussMat = new THREE.MeshStandardMaterial({
   color: 0xc8d0db, roughness: 0.22, metalness: 0.95,
 });
 
-/** Construit un tron�on de treillis triangulaire (3 cordes + entretoises). */
+/** Construit un tronçon de treillis triangulaire (3 cordes + entretoises). */
 function buildTriTruss(length: number, axis: 'x' | 'y' | 'z', mat?: THREE.Material): THREE.Group {
   const g = new THREE.Group();
   const m = mat ?? trussMat;
@@ -5927,8 +5928,8 @@ function buildSupportVisual(
   if (!needsSupportGeometry(kind, height)) return null;
   const g = new THREE.Group();
   if (isBarSupport(kind)) {
-    // Barre avant/arri�re : la fixture pend SOUS une barre horizontale
-    // (axe X), de longueur LIBRE (jamais d�riv�e des plateaux).
+    // Barre avant/arrière : la fixture pend SOUS une barre horizontale
+    // (axe X), de longueur LIBRE (jamais dérivée des plateaux).
     const span = Math.max(0.5, opts?.span ?? DEFAULT_BAR_SPAN);
     const hung = opts?.hung ?? BAR_HUNG_DEFAULT;
     const barY = height + BAR_DROP;
@@ -5936,20 +5937,20 @@ function buildSupportVisual(
     bar.rotation.z = Math.PI / 2;
     bar.position.y = barY;
     g.add(bar);
-    // Manchon : barre ? t�te de fixture.
+    // Manchon : barre → tête de fixture.
     const clamp = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, BAR_DROP, 8), barCableMat);
     clamp.position.y = height + BAR_DROP / 2;
     g.add(clamp);
     const ex = Math.max(0.2, span / 2 - 0.15);
     if (hung) {
-      // Suspendue : 2 c�bles vers le haut, aucun pied.
+      // Suspendue : 2 câbles vers le haut, aucun pied.
       for (const sx of [-ex, ex]) {
         const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, BAR_CABLE_LEN, 6), barCableMat);
         cable.position.set(sx, barY + BAR_CABLE_LEN / 2, 0);
         g.add(cable);
       }
     } else {
-      // Sur pied : 2 m�ts + embases jusqu'au plateau.
+      // Sur pied : 2 mâts + embases jusqu'au plateau.
       for (const sx of [-ex, ex]) {
         const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, barY, 8), barMetalMat);
         pole.position.set(sx, barY / 2, 0);
@@ -5970,7 +5971,7 @@ function buildSupportVisual(
     top.position.y = Math.max(0.06, height - 0.025);
     g.add(col, base, top);
   } else {
-    // Tr�pied : m�t central + barre en T + 3 jambes + embase.
+    // Trépied : mât central + barre en T + 3 jambes + embase.
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, height, 10), supportMetalMat);
     pole.position.y = height / 2;
     g.add(pole);
@@ -5996,9 +5997,9 @@ function buildSupportVisual(
 }
 
 /**
- * Construit le mesh 3D d'une structure de sc�ne (rig) ind�pendante.
+ * Construit le mesh 3D d'une structure de scène (rig) indépendante.
  * Pour les barres/pont : la barre est AU NIVEAU h (pas height+drop comme les fixtures).
- * Pour totem/T : la colonne monte de 0 � h.
+ * Pour totem/T : la colonne monte de 0 à h.
  */
 function buildStandaloneRigVisual(rig: StageRig): THREE.Group | null {
   const g = new THREE.Group();
@@ -6128,16 +6129,16 @@ export { headingRadForPos, hasPanTiltChannels };
 
 
 /**
- * Zone d'�clairage utile � clamp du c�ne de balayage (relatif � la direction
- * par d�faut de la fixture, cf. headingRadForPos) :
- *   - PAN  : �90� � face � eux � � une fixture rear ne balaye jamais le mur
- *     derri�re elle, un c�t� jamais le hors-sc�ne oppos�.
- *   - TILT : �90� (de la verticale basse � la verticale haute) pour les
- *     fixtures en hauteur ; au SOL ('ground'), jamais sous l'horizon �
- *     rien � �clairer dans le plancher.
+ * Zone d'éclairage utile — clamp du cône de balayage (relatif à la direction
+ * par défaut de la fixture, cf. headingRadForPos) :
+ *   - PAN  : ±90° « face à eux » — une fixture rear ne balaye jamais le mur
+ *     derrière elle, un côté jamais le hors-scène opposé.
+ *   - TILT : ±90° (de la verticale basse à la verticale haute) pour les
+ *     fixtures en hauteur ; au SOL ('ground'), jamais sous l'horizon —
+ *     rien à éclairer dans le plancher.
  */
 export function clampPanZone(absRad: number, headingRad: number): number {
-  // Clamp absolute angle to ±90� around the heading (never point behind).
+  // Clamp absolute angle to ±90° around the heading (never point behind).
   let diff = absRad - headingRad;
   while (diff > Math.PI) diff -= 2 * Math.PI;
   while (diff < -Math.PI) diff += 2 * Math.PI;

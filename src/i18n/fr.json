@@ -1128,7 +1128,7 @@
     "openSceneEfx": "Ouvrir le panneau Scène & EFX",
     "panZero": "Pan zéro DMX",
     "panZeroTipExample": "Pointe la tête (modale) puis clic sur « Capturer » : le mouvement autoscript tournera autour de cette pose.",
-    "panZeroTipText": "Décale le faisceau de la tête dans la vue 3D (réglage visuel persistant) : à DMX pan 128, le faisceau pointe ici. Le centre de l'oscillation autoscript est posé par « Capturer ».",
+    "panZeroTipText": "Décalage du zéro mécanique du pan : à DMX pan 128, le faisceau de la tête pointe ici. C'est une correction physique (montage, yoke inversé), pas un simple effet de rendu : les valeurs DMX restent relatives à ce zéro, et la zone de balayage (±90°) s'en déduit. « Capturer » pose le centre de l'oscillation autoscript.",
     "panZeroTipTitle": "Pan zéro DMX",
     "posH": "Height",
     "posX": "X Position",
@@ -1246,7 +1246,7 @@
     "targetTipTitle": "Target — viser un point",
     "tiltZero": "Tilt zéro DMX",
     "tiltZeroTipExample": "Compense un accrochage physique qui vise trop haut/bas.",
-    "tiltZeroTipText": "Décale verticalement le faisceau de la tête dans la vue 3D (tare visuelle persistante) : à DMX tilt 128, le faisceau pointe ici.",
+    "tiltZeroTipText": "Décalage du zéro mécanique du tilt : à DMX tilt 128, le faisceau de la tête pointe ici. C'est une correction physique (tête pré-aimée), pas un simple effet de rendu : les valeurs DMX restent relatives à ce zéro, et la zone de balayage s'en déduit (au sol, jamais sous l'horizon).",
     "tiltZeroTipTitle": "Tilt zéro DMX",
     "toastEfxApplied": "EFX \"{{name}}\" appliqué à la scène — prévisualisation 3D à jour",
     "toastEfxCancelled": "EFX snapshot annulé",
@@ -1261,7 +1261,7 @@
     "undoLast": "Dernière action",
     "undoTitle": "Effacer la dernière action (undo)",
     "zeroBtn": "Zéro (0°)",
-    "zeroHint": "Les faders décalent le faisceau (visuel, persistant). « Capturer » centre l'oscillation autoscript sur la pose actuelle de la tête.",
+    "zeroHint": "Les faders corrigent le zéro mécanique du pan/tilt (décalage physique persistant). « Capturer » centre l'oscillation autoscript sur la pose actuelle de la tête.",
     "zeroTitle": "Remet les faders point zéro et le centre de mouvement à 0°"
   },
   "showManager": {
@@ -1295,7 +1295,7 @@
     "storeTitle": "Store Programmer ({{count}} ch)"
   },
   "masterClock": {
-    "abletonLink": "Ableton Link �? sync avec logiciel DJ"
+    "abletonLink": "Ableton Link ↔ sync avec logiciel DJ"
   },
   "safety": {
     "title": "⚠️ Sécurité — lisez avant de jouer",

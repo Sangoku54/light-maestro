@@ -1128,7 +1128,7 @@
     "openSceneEfx": "Open the Scene & EFX panel",
     "panZero": "DMX pan zero",
     "panZeroTipExample": "Point the head (modal) then click “Capture”: the autoscript movement will swing around that pose.",
-    "panZeroTipText": "Shift the head beam in the 3D view (persistent visual setting): at DMX pan 128, the beam points here. The autoscript swing center is set via “Capture”.",
+    "panZeroTipText": "Pan mechanical zero offset: at DMX pan 128, the head beam points here. This is a physical correction (mounting, inverted yoke), not a rendering effect: DMX values stay relative to this zero, and the sweep zone (±90°) is derived from it. “Capture” sets the autoscript swing center.",
     "panZeroTipTitle": "DMX pan zero",
     "posH": "Height",
     "posX": "X Position",
@@ -1246,7 +1246,7 @@
     "targetTipTitle": "Target — aim at a point",
     "tiltZero": "DMX tilt zero",
     "tiltZeroTipExample": "Compensate a physical hang aiming too high/low.",
-    "tiltZeroTipText": "Vertically shift the head beam in the 3D view (persistent visual trim): at DMX tilt 128, the beam points here.",
+    "tiltZeroTipText": "Tilt mechanical zero offset: at DMX tilt 128, the head beam points here. This is a physical correction (pre-aimed head), not a rendering effect: DMX values stay relative to this zero, and the sweep zone is derived from it (on the floor, never below the horizon).",
     "tiltZeroTipTitle": "DMX tilt zero",
     "toastEfxApplied": "EFX \"{{name}}\" applied to the scene — 3D preview updated",
     "toastEfxCancelled": "EFX snapshot cancelled",
@@ -1261,7 +1261,7 @@
     "undoLast": "Last action",
     "undoTitle": "Undo the last action",
     "zeroBtn": "Zero (0°)",
-    "zeroHint": "The faders shift the beam (visual, persistent). “Capture” centers the autoscript swing on the head's current pose.",
+    "zeroHint": "The faders correct the pan/tilt mechanical zero (persistent physical offset). “Capture” centers the autoscript swing on the head's current pose.",
     "zeroTitle": "Reset zero-point faders and movement center to 0°"
   },
   "showManager": {
@@ -1295,7 +1295,7 @@
     "storeTitle": "Store Programmer ({{count}} ch)"
   },
   "masterClock": {
-    "abletonLink": "Ableton Link �? sync with DJ software"
+    "abletonLink": "Ableton Link ↔ sync with DJ software"
   },
   "safety": {
     "title": "⚠️ Safety — read before going live",
