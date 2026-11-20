@@ -57,7 +57,9 @@
         </div>
         <div class="meta" style="margin-top:10px">
           <div class="mono" style="font-size:12px; color:#a1a1aa">Light-Maestro-1.0.45.exe (portable)</div>
-          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 745321885BDA8A002EAC14C37A3D4DBF3C1607B03E3EE221247E017D371AF687</div>
+          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : 4CB18ADBA738F0B5CB34079D0A06324C661C76C9D15F1338F2A91BF7C4279F4A</div>
+          <div class="mono" style="font-size:12px; color:#a1a1aa; margin-top:8px">Light-Maestro-Setup-1.0.45.exe (installer)</div>
+          <div class="mono" style="font-size:11px; color:#6b7280; margin-top:4px">SHA256 : F010336B4BF2FDECA5D646CB87E966515DF704233E5A18A9F67C42E6889219B7</div>
         </div>
       </div>
     </div>
@@ -86,11 +88,12 @@
     <div class="card">
       <h3 class="h3">Release notes — v1.0.45</h3>
       <ul style="margin-top:8px; color:#d1d5db; font-size:13px; line-height:1.7; padding-left:18px">
-        <li><b style="color:white">Scene programming without scrolling:</b> horizontal tabs, one per fixture, in Configuration → Scenes (search, Alt+←/→, position counter)</li>
-        <li><b style="color:white">Reliable project loading:</b> streaming protocol — audio is no longer loaded into memory on open (no more crash on large projects)</li>
-        <li><b style="color:white">Reliable audio:</b> no more audio loss when saving (presets and audio-only widgets), re-assign an audio file straight from the widget</li>
-        <li><b style="color:white">Updates:</b> GitHub Releases channel operational, error badge fixed</li>
-        <li><b style="color:white">Blackout:</b> complete scene blackout track (create, pick fixtures, edit, drag)</li>
+        <li><b style="color:white">Manual aim aligned with the canonical DMX pose:</b> Target and playback now write the same pan/tilt channels — no more drift after a click.</li>
+        <li><b style="color:white">The 3D view shows exactly the real beam:</b> sweep limits (±90° pan, never below the horizon for floor fixtures) are now enforced in the engine AND in 3D, including fixtures with a captured center and at rest. Measured 3D ↔ real DMX gap: 0.00°.</li>
+        <li><b style="color:white">“Release the target” button</b> in the 3D modal to restore the autoscript/chaser.</li>
+        <li><b style="color:white">React bug fixed:</b> nested button removed from the virtual console (no more validateDOMNesting error).</li>
+        <li><b style="color:white">Lost characters restored:</b> the 3D view and the license messages were corrupted (missing accents and symbols).</li>
+        <li><b style="color:white">Translated toast:</b> messages of the i18n key type now shown in clear.</li>
       </ul>
     </div>
     <div class="notice" style="margin-top:16px">
