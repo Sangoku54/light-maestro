@@ -13,6 +13,7 @@
     "build": "tsc -p tsconfig.electron.json && vite build && node scripts/copy-static.cjs",
     "test": "vitest run",
     "probe": "node scripts/probe-fixtures.cjs",
+    "verify:release": "node scripts/verify-release.cjs",
     "bench:analysis": "vitest run --config scripts/vitest.bench.config.ts",
     "allinone": "python scripts/allinone_import.py --help",
     "start": "tsc -p tsconfig.electron.json && vite build && electron .",
