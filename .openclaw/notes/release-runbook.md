@@ -121,6 +121,40 @@ proposé aucune mise à jour. Diagnostic :
 - Et l'URL doit contenir `/releases` : un POST sur `/repos/<owner>/<repo>`
   ne crée rien.
 
+### Piège majeur : le NOM DU DOSSIER serveur est figé dans le binaire
+
+`app-update.yml` embarqué contient `url: https://light-maestro.com/download/`
+et les pages du site pointent vers `./download/…`. Donc **le dossier serveur
+doit s'appeler exactement `download`** (singulier), à la racine du site.
+
+Historique du piège (1.0.46) : l'ancienne config publishait vers
+`https://releases.lightmaestro.app/win` (section `build.win` de l'ancien
+`package.json`) → d'où le dossier **`Win`** sur le serveur. L'URL a ensuite
+été changée en `/download/`, mais **le dossier sur le serveur n'a pas été
+renommé** : les fichiers ont atterri dans `/downloads/` (le dossier du panel
+LWS) → 404 sur `/download/latest.yml` → auto-update muette et boutons du
+site cassés, alors que « l'upload était fait ».
+
+Constatée sur le serveur (release 1.0.46) :
+
+| URL | Contenu |
+|---|---|
+| `/download/latest.yml` | 404 ← **le code attend ici** |
+| `/downloads/latest.yml` | v1.0.46 + setup + blockmap + portable (les bons fichiers) |
+| `/win/latest.yml` | v1.0.45 **périmé** (size 98 961 500 ≠ 98 962 029 du build final), setup 404 |
+
+### Règle
+
+- **Renommer le dossier sur le serveur**, ne jamais changer l'URL dans le code :
+  l'URL est figée dans les binaires **déjà installés** (1.0.45, 1.0.46) et
+  dans les pages du site. Changer le code exigerait un rebuild **ET**
+  laisserait les versions installées sur `/download/` → plus aucune MAJ.
+- Nettoyer les dossiers obsolètes (`/win/`) : un `latest.yml` périmé qui
+  pointe vers un binaire absent fait échouer le téléchargement en silence.
+- `npm run verify:release` **sonde automatiquement** les emplacements
+  courants quand `/download/latest.yml` est en 404 et affiche où sont
+  vraiment les fichiers. Ne pas s'arrêter au « HTTP 404 ».
+
 ### Piège : `target_commitish` invalide
 
 Un SHA court (`161f527`) est refusé par GitHub (422 `invalid`). Si le tag

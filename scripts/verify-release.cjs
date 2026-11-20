@@ -132,12 +132,82 @@ async function checkGithub() {
   }
 }
 
+/**
+ * Emplacements ou le dossier de telechargement a deja ete pose sur le serveur.
+ * L'URL est FIGEE dans le binaire (app-update.yml) ET dans les liens du site :
+ * le code attend exactement LWS_BASE. Si les fichiers sont ailleurs, c'est le
+ * serveur qu'il faut corriger, pas le code.
+ */
+const LWS_CANDIDATES = [
+  LWS_BASE, // https://light-maestro.com/download/  <-- attendu
+  'https://light-maestro.com/downloads/',
+  'https://light-maestro.com/dl/',
+  'https://light-maestro.com/win/',
+  'https://light-maestro.com/download/Win/',
+  'https://light-maestro.com/fichiers/',
+  'https://light-maestro.com/releases/',
+];
+
+let locationDiagnosed = false;
+
+/**
+ * Quand le canal principal est en 404, cherche OU sont vraiment les fichiers
+ * (le classique : deposes dans « downloads » au lieu de « download »).
+ */
+async function diagnoseLwsLocation() {
+  if (locationDiagnosed) return;
+  locationDiagnosed = true;
+  console.log('           — ou sont les fichiers ? (sonde des emplacements courants) —');
+  let found = 0;
+  for (const base of LWS_CANDIDATES) {
+    let manifest = null;
+    try {
+      const res = await fetch(`${base}latest.yml`, { redirect: 'follow' });
+      if (!res.ok) {
+        console.log(`             ${base.padEnd(48)} latest.yml absent`);
+        continue;
+      }
+      manifest = yaml.load(await res.text());
+    } catch {
+      console.log(`             ${base.padEnd(48)} injoignable`);
+      continue;
+    }
+    found++;
+    const setupName = manifest?.files?.[0]?.url;
+    const expected = manifest?.files?.[0]?.size;
+    let setupStatus = '?';
+    try {
+      const h = await head(`${base}${encodeURIComponent(setupName || '')}`);
+      setupStatus =
+        h.status === 200
+          ? `HTTP 200 (${h.length} o${expected && h.length !== Number(expected) ? ' ≠ taille annoncée !' : ''})`
+          : `HTTP ${h.status}`;
+    } catch {
+      setupStatus = 'erreur';
+    }
+    console.log(`             ${base.padEnd(48)} latest.yml v${manifest?.version} | setup ${setupStatus}`);
+  }
+  console.log('');
+  if (found === 0) {
+    console.log('             >>> Aucun latest.yml trouve dans les emplacements connus.');
+  } else {
+    console.log(`             >>> Le code attend EXACTEMENT : ${LWS_BASE}`);
+    console.log('             >>> Action : renommer le dossier du serveur en « download »');
+    console.log('             >>> (sans « s »), ou re-deposer les 4 fichiers dans ce dossier-la.');
+    console.log('             >>> Ne PAS changer l URL dans le code : elle est figee dans');
+    console.log('             >>> les binaires installes (1.0.45 / 1.0.46) ET dans les');
+    console.log('             >>> liens du site -> les versions deja installees ne verraient');
+    console.log('             >>> plus aucune mise a jour.');
+  }
+}
+
 async function checkLws() {
   console.log('\n=== CANAL LWS (canal principal des versions >= 1.0.45) ===');
   const manifestRes = await getText(`${LWS_BASE}latest.yml`);
   if (manifestRes.status !== 200) {
     ko(`latest.yml : HTTP ${manifestRes.status} — le canal principal est INACTIF (upload LWS non fait ?)`);
     ko(`  les versions >= 1.0.45 ne proposeront aucune MAJ tant que ce fichier est absent`);
+    await diagnoseLwsLocation();
     return;
   }
   ok(`latest.yml : HTTP 200`);
@@ -164,15 +234,66 @@ async function checkLws() {
   }
 }
 
+/**
+ * SITE : les PAGES reellement en ligne, pas seulement les URL des boutons.
+ *
+ * Piege couvert : un utilisateur peut deposer les 4 fichiers dans /download/
+ * et oublier de re-uploader telecharger.html. La page en ligne continue
+ * alors d'annoncer l'ancienne version et ses boutons pointent vers des
+ * fichiers absents -> boutons CASSES alors que les fichiers sont la.
+ * On verifie donc :
+ *   1. la version APP_VERSION annoncee par la page en ligne ;
+ *   2. le SHA256 affiche sur la page = SHA256 du binaire local ;
+ *   3. les 2 URL de telechargement repondent 200.
+ */
 async function checkSite() {
-  console.log('\n=== SITE (boutons de telechargement) ===');
-  for (const name of [PORTABLE_NAME, SETUP_NAME]) {
-    try {
-      const h = await head(`${LWS_BASE}${encodeURIComponent(name)}`);
-      if (h.status === 200) ok(`bouton « ${name} » : HTTP 200`);
-      else ko(`bouton « ${name} » : HTTP ${h.status} (le bouton du site est CASSE)`);
-    } catch (e) {
-      ko(`bouton « ${name} » : erreur ${e.message}`);
+  console.log('\n=== SITE (pages de telechargement EN LIGNE) ===');
+  const localSetup = path.join(ROOT, 'release', SETUP_NAME);
+  const localPortable = path.join(ROOT, 'release', PORTABLE_NAME);
+  const sha256 = (f) =>
+    fs.existsSync(f) ? crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex').toUpperCase() : null;
+
+  for (const page of ['telecharger.html', 'telecharger-en.html']) {
+    const url = `https://light-maestro.com/${page}`;
+    const res = await getText(url);
+    if (res.status !== 200) {
+      ko(`${page} : HTTP ${res.status} — page introuvable sur le serveur`);
+      continue;
+    }
+    const html = res.text;
+
+    const vm = html.match(/APP_VERSION\s*=\s*'([^']+)'/);
+    if (!vm) {
+      ko(`${page} : APP_VERSION introuvable dans la page en ligne`);
+    } else if (vm[1] !== VERSION) {
+      ko(`${page} : la page EN LIGNE annonce v${vm[1]} au lieu de v${VERSION} — il faut re-uploader la page`);
+    } else {
+      ok(`${page} : version ${vm[1]}`);
+    }
+
+    // SHA256 affiches dans la page vs binaire local.
+    const displayed = [...html.matchAll(/SHA256\s*:\s*([0-9A-Fa-f]{64})/g)].map((m) => m[1].toUpperCase());
+    const expected = [sha256(localPortable), sha256(localSetup)].filter(Boolean);
+    if (displayed.length === 0) {
+      ko(`${page} : aucun SHA256 affiche sur la page`);
+    } else if (expected.length && !expected.every((e) => displayed.includes(e))) {
+      ko(`${page} : le SHA256 affiche ne correspond pas au binaire local (page obsolete ?)`);
+    } else {
+      ok(`${page} : SHA256 affiches conformes aux binaires locaux`);
+    }
+
+    // Les 2 boutons pointent sur /download/<fichier> : ils doivent repondre.
+    for (const name of [PORTABLE_NAME, SETUP_NAME]) {
+      try {
+        const h = await head(`${LWS_BASE}${encodeURIComponent(name)}`);
+        if (h.status === 200) ok(`bouton « ${name} » : HTTP 200`);
+        else {
+          ko(`bouton « ${name} » : HTTP ${h.status} (le bouton du site est CASSE)`);
+          await diagnoseLwsLocation();
+        }
+      } catch (e) {
+        ko(`bouton « ${name} » : erreur ${e.message}`);
+      }
     }
   }
 }
