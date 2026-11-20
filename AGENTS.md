@@ -43,4 +43,18 @@ Dans la vue 3D, le faisceau d'une fixture doit par défaut viser le public, en f
 3. **Sol, à gauche de la scène** (vue audience) : faisceau vers le **centre** par défaut (symétrique).
 4. **Sol, devant** (bord avant de la scène) : faisceau vers **l'arrière (back)**.
 
-Point d'implémentation repéré : `initFixturePosition` (`src/stores/showStore.ts:629`) pour les défauts de placement, et `fitMountRotation` / `createFixtureGeometry` dans (`src/scene/Stage3D.tsx`) pour l'orientation réelle du faisceau. À appliquer dès qu'on touche au placement 3D des fixtures.
+Point d'implémentation repéré : `initFixturePosition` (`src/stores/showStore.ts:899`) pour les défauts de placement, `headingRadForPos` + `mountTiltForMode` (`src/utils/fixture-pose.ts`) pour l'orientation, et la boucle de rendu de `src/views/Stage3D.tsx` (~l.3166-3200) pour le faisceau affiché. À appliquer dès qu'on touche au placement 3D des fixtures.
+
+### Invariant : la vue 3D doit montrer EXACTEMENT le faisceau réel
+
+Trois vues doivent désigner le même faisceau, sinon la 3D ment sur le matériel :
+
+1. **Vue 3D** (`Stage3D.tsx`) : `headingRadForPos` + `clampPanZone` / `clampTiltZone` (bornes ±90° / horizon).
+2. **DMX écrit** (`dmx-playback.ts`) : `clampPanZoneDmx` / `clampTiltZoneDmx` — **à appliquer TOUJOURS**, y compris sur une fixture au centre capturé et sur la branche « repos » (amplitude 0). Un bypass = jusqu'à 90° d'écart 3D/réel.
+3. **Physique** : mécanique + tare statique (`pos.tilt`) + tare zéro (`pos.zeroPan`/`pos.zeroTilt`) — ces deux tares sont **physiques** (le zéro mécanique du moteur), pas cosmétiques : `clampPanZoneDmx` déduit ses bornes de `zeroPan`, ce qui le prouve.
+
+Exceptions (visées délibérées, prioritaires) : `applyAimTarget` (cible manuelle ou de scène) et le mode Target de la 3D écrivent des bytes **hors zone** → la 3D doit alors ne pas clamper non plus (`hasManualTarget(id) || hasSceneAim(id)`).
+
+Les canaux DMX sont des octets : tout arrondi issu d'un clamp doit être passé par `Math.round` avant écriture (la trame `Uint8Array` tronque les floats).
+
+Sondes de référence : `src/__tests__/fixture-placement-default-probe.test.ts` (grille 6×6 : convention « vue audience ») et `src/__tests__/yolo-fixture-pose-probe.test.ts` (projet réel `LM/Yolo.lmproj` : positions + DMX réels + écart 3D/matériel qui doit rester à 0.00°).

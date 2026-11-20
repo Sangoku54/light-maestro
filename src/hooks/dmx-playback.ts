@@ -2013,9 +2013,11 @@ if (fa.isLaser) {
                   pv = Math.max(128 + zeroPd - panLimit, Math.min(128 + zeroPd + panLimit, pv));
                   // Zone 180° (option B) : le pan ÉCRIT reste dans ±90° de la
                   // direction par défaut → le matériel ne va jamais derrière.
-                  // Une visée délibérée (centre capturé) bypass le clamp.
-                  if (!(zeroPd !== 0 && fp)) pv = clampPanZoneDmx(pv, fa.panMaxDeg ?? 540, fp?.zeroPan);
-                  chVals[pf.startAddress+fa.panOffsets[m]] = pv;
+                  // Appliqué TOUJOURS (capté compris) : le renderer 3D clampe
+                  // lui aussi, donc un bypass ici montrait un faisceau 3D
+                  // différent du faisceau réel (jusqu'à 90° d'écart).
+                  pv = clampPanZoneDmx(pv, fa.panMaxDeg ?? 540, fp?.zeroPan);
+                  chVals[pf.startAddress+fa.panOffsets[m]] = Math.round(pv);
                   // Canal "fine" 16 bits : la fraction de la position cible
                   // part dans le canal fine (le coarse porte la partie entiere).
                   const panFineOff = fa.panFineOffsets[m] ?? null;
@@ -2026,7 +2028,7 @@ if (fa.isLaser) {
                       chVals[pf.startAddress+panFineOff] = 0;
                     }
                   }
-                  if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: pv, tilt: 128 }), pan: pv });
+                  if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: pv, tilt: 128 }), pan: Math.round(pv) });
                 }
                 if(m<tiltCount){
                   const ampTilt = movementAmp(blendAmp, 128 + zeroTd, tiltLimit);
@@ -2035,8 +2037,11 @@ if (fa.isLaser) {
                   let tv = (zeroTd !== 0 && fp) ? raw : (fp ? clampTiltToStage(raw, fp.y) : raw);
                   tv = Math.max(128 + zeroTd - tiltLimit, Math.min(128 + zeroTd + tiltLimit, tv));
                   // Zone TILT moteur (miroir 3D) : ground jamais sous l'horizon.
-                  if (!(zeroTd !== 0 && fp)) tv = clampTiltZoneDmx(tv, fa.tiltMaxDeg ?? 180, fp?.mountMode, fp?.tilt, fp?.zeroTilt);
-                  chVals[pf.startAddress+fa.tiltOffsets[m]] = tv;
+                  // TOUJOURS appliqué : le renderer 3D clampe également, un
+                  // bypass ici montrait un faisceau 3D sous l'horizon alors
+                  // que le matériel vise le sol (écart jusqu'à ~21°).
+                  tv = clampTiltZoneDmx(tv, fa.tiltMaxDeg ?? 180, fp?.mountMode, fp?.tilt, fp?.zeroTilt);
+                  chVals[pf.startAddress+fa.tiltOffsets[m]] = Math.round(tv);
                   // Canal "fine" 16 bits (idem pan).
                   const tiltFineOff = fa.tiltFineOffsets[m] ?? null;
                   if(tiltFineOff!==null){
@@ -2046,9 +2051,26 @@ if (fa.isLaser) {
                       chVals[pf.startAddress+tiltFineOff] = 0;
                     }
                   }
-                  if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: 128, tilt: tv }), tilt: tv });
+                  if (m === 0) chaserHoldRef.current.set(pf.id, { ...(chaserHoldRef.current.get(pf.id) ?? { pan: 128, tilt: tv }), tilt: Math.round(tv) });
                 }}
-              }else{const fp = fixturePositions?.[pf.id];for(const po of fa.panOffsets)chVals[pf.startAddress+po]=Math.round(Math.max(0,Math.min(255,128+zeroPd)));for(const pfo of fa.panFineOffsets)if(pfo!==null)chVals[pf.startAddress+pfo]=0;for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=Math.round(Math.max(0,Math.min(255,128+zeroTd)));for(const tfo of fa.tiltFineOffsets)if(tfo!==null)chVals[pf.startAddress+tfo]=0;}
+              }else{
+                // REPOS (amplitude 0) : on ecrit le centre capture (ou le
+                // neutre) MAIS en respectant la zone moteur — sans ce clamp,
+                // une fixture au sol capteree ecrivait un tilt sous
+                // l'horizon : la vue 3D (qui clampe) montrait un faisceau
+                // horizontal la ou le materiel visait le sol (~89° d'ecart).
+                const fp = fixturePositions?.[pf.id];
+                const panLo = clampPanZoneDmx(0, fa.panMaxDeg ?? 540, fp?.zeroPan);
+                const panHi = clampPanZoneDmx(255, fa.panMaxDeg ?? 540, fp?.zeroPan);
+                const tiltLo = clampTiltZoneDmx(0, fa.tiltMaxDeg ?? 180, fp?.mountMode, fp?.tilt, fp?.zeroTilt);
+                const tiltHi = clampTiltZoneDmx(255, fa.tiltMaxDeg ?? 180, fp?.mountMode, fp?.tilt, fp?.zeroTilt);
+                const restPan = Math.round(Math.max(0,Math.min(255,128+zeroPd)));
+                const restTilt = Math.round(Math.max(0,Math.min(255,128+zeroTd)));
+                for(const po of fa.panOffsets)chVals[pf.startAddress+po]=Math.round(Math.max(panLo,Math.min(panHi,restPan)));
+                for(const pfo of fa.panFineOffsets)if(pfo!==null)chVals[pf.startAddress+pfo]=0;
+                for(const to of fa.tiltOffsets)chVals[pf.startAddress+to]=Math.round(Math.max(tiltLo,Math.min(tiltHi,restTilt)));
+                for(const tfo of fa.tiltFineOffsets)if(tfo!==null)chVals[pf.startAddress+tfo]=0;
+              }
         } // fin else autoscript (chaser freeze ci-dessus)
             }
           }
@@ -2857,9 +2879,11 @@ export function computeDmxForCue(
               const raw = Math.max(0, Math.min(255, Math.round(128 + zPd + px * ampPan)));
               const fp = fixturePositions?.[pf.id];
               let pv = (zPd !== 0 && fp) ? raw : (fp ? clampPanToStage(raw, fp.x) : raw);
-              // Zone 180° moteur (option B) — bypass si centre capturé (visée délibérée)
-              if (!(zPd !== 0 && fp)) pv = clampPanZoneDmx(pv, fa.panMaxDeg ?? 540, fp?.zeroPan);
-              chVals[pf.startAddress + fa.panOffsets[m]] = pv;
+              // Zone 180° moteur (option B) — TOUJOURS appliquée (capté compris) :
+              // le renderer 3D clampe aussi, un bypass montrait un faisceau 3D
+              // différent du faisceau réel.
+              pv = clampPanZoneDmx(pv, fa.panMaxDeg ?? 540, fp?.zeroPan);
+              chVals[pf.startAddress + fa.panOffsets[m]] = Math.round(pv);
               // Canal "fine" 16 bits : la fraction de la cible part dans le fine.
               const pFine = fa.panFineOffsets[m] ?? null;
               if (pFine !== null) {
@@ -2874,9 +2898,9 @@ export function computeDmxForCue(
               const raw = Math.max(0, Math.min(255, Math.round(128 + zTd + py * ampTilt)));
               const fp = fixturePositions?.[pf.id];
               let tv = (zTd !== 0 && fp) ? raw : (fp ? clampTiltToStage(raw, fp.y) : raw);
-              // Zone TILT moteur (miroir 3D) — bypass si centre capturé
-              if (!(zTd !== 0 && fp)) tv = clampTiltZoneDmx(tv, fa.tiltMaxDeg ?? 180, fp?.mountMode, fp?.tilt, fp?.zeroTilt);
-              chVals[pf.startAddress + fa.tiltOffsets[m]] = tv;
+              // Zone TILT moteur (miroir 3D) — TOUJOURS appliquée (capté compris).
+              tv = clampTiltZoneDmx(tv, fa.tiltMaxDeg ?? 180, fp?.mountMode, fp?.tilt, fp?.zeroTilt);
+              chVals[pf.startAddress + fa.tiltOffsets[m]] = Math.round(tv);
               // Canal "fine" 16 bits (idem pan).
               const tFine = fa.tiltFineOffsets[m] ?? null;
               if (tFine !== null) {
@@ -2886,8 +2910,21 @@ export function computeDmxForCue(
             }
           }
         } else {
-          for (const po of fa.panOffsets) chVals[pf.startAddress + po] = 128;
-          for (const to of fa.tiltOffsets) chVals[pf.startAddress + to] = 128;
+          // REPOS (amplitude 0) — PARITE avec le tick live : on ecrit le
+          // centre capture (ou le neutre) en respectant la zone moteur.
+          // Avant : 128/128 en dur, sans zone → une fixture au sol capteree
+          // visait le sol alors que la vue 3D montrait un faisceau horizontal.
+          const fp = fixturePositions?.[pf.id];
+          const zPd = zeroDmxOffset(fp?.centerPan, 'pan');
+          const zTd = zeroDmxOffset(fp?.centerTilt, 'tilt');
+          const panLo = clampPanZoneDmx(0, fa.panMaxDeg ?? 540, fp?.zeroPan);
+          const panHi = clampPanZoneDmx(255, fa.panMaxDeg ?? 540, fp?.zeroPan);
+          const tiltLo = clampTiltZoneDmx(0, fa.tiltMaxDeg ?? 180, fp?.mountMode, fp?.tilt, fp?.zeroTilt);
+          const tiltHi = clampTiltZoneDmx(255, fa.tiltMaxDeg ?? 180, fp?.mountMode, fp?.tilt, fp?.zeroTilt);
+          const restPan = Math.round(Math.max(panLo, Math.min(panHi, Math.round(Math.max(0, Math.min(255, 128 + zPd))))));
+          const restTilt = Math.round(Math.max(tiltLo, Math.min(tiltHi, Math.round(Math.max(0, Math.min(255, 128 + zTd))))));
+          for (const po of fa.panOffsets) chVals[pf.startAddress + po] = restPan;
+          for (const to of fa.tiltOffsets) chVals[pf.startAddress + to] = restTilt;
           for (const pfo of fa.panFineOffsets) if (pfo !== null) chVals[pf.startAddress + pfo] = 0;
           for (const tfo of fa.tiltFineOffsets) if (tfo !== null) chVals[pf.startAddress + tfo] = 0;
         }

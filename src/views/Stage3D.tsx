@@ -3163,6 +3163,11 @@ export const Stage3D: React.FC<{
       // Si aucune valeur DMX n'a �t� lue (buffer frais), ne pas �craser le
       // heading de zone : conserver l'orientation par d�faut de la fixture.
       const freeAim = targetModeRef.current && (selectedFixtureIdRef.current === f3d.id || multiSelectedIdsRef.current.has(f3d.id));
+      // PARITE MOTEUR : `applyAimTarget` ecrit une visee MANUELLE ou de SCENE
+      // SANS clamp de zone (c'est une visee deliberee, libre). Si la vue 3D
+      // clampe quand meme, elle montre un faisceau different de celui du
+      // materiel (ecart mesure jusqu'a 90° sur une fixture captee).
+      const aimed = hasManualTarget(f3d.id) || hasSceneAim(f3d.id);
       if (panVal !== null && tiltVal !== null) {
         // Mode Target : PRIORITAIRE sur tout blocage de zone � la fixture suit
         // librement le marqueur (pleine course pan/tilt, m�me derri�re/au sol).
@@ -3172,7 +3177,7 @@ export const Stage3D: React.FC<{
           // � SAUF en mode Target (libre).
           const rawPan = ((panVal / 255) - 0.5) * panRangeRad + (f3d._zeroPanDeg * Math.PI) / 180;
           const panAbs = f3d._headingRad + rawPan;
-          const panTarget = freeAim ? panAbs : clampPanZone(panAbs, f3d._headingRad);
+          const panTarget = (freeAim || aimed) ? panAbs : clampPanZone(panAbs, f3d._headingRad);
           // panTarget est absolu (heading + offset). armGroup.rotation.y est RELATIF au
           // heading (commence à 0 à la création), donc on compare l'offset relatif.
           const panRelative = panTarget - f3d._headingRad;
@@ -3190,7 +3195,7 @@ export const Stage3D: React.FC<{
           // head = _mountTilt + �l�vation (invariant valid� pour les 3 modes).
           const dmxTilt = ((tiltVal / 255) - 0.5) * tiltRangeRad;
           const rawElev = dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180;
-          const elevation = freeAim ? rawElev : clampTiltZone(rawElev, f3d.mountMode);
+          const elevation = (freeAim || aimed) ? rawElev : clampTiltZone(rawElev, f3d.mountMode);
           const tiltTarget = (f3d._baseTilt ?? 0) + elevation;
           const tiltDelta = tiltTarget - f3d.headGroup.rotation.x;
           const tiltMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
@@ -3207,7 +3212,7 @@ export const Stage3D: React.FC<{
           const ehTiltVal = panTiltRead(eh.tiltOffset);
           const dmxTilt = ((ehTiltVal / 255) - 0.5) * tiltRangeRad;
           const rawEhElev = dmxTilt + (f3d._staticTilt ?? 0) + (f3d._zeroTiltDeg * Math.PI) / 180;
-          const ehElevation = freeAim ? rawEhElev : clampTiltZone(rawEhElev, f3d.mountMode);
+          const ehElevation = (freeAim || aimed) ? rawEhElev : clampTiltZone(rawEhElev, f3d.mountMode);
           const ehTarget = (eh._mountTilt ?? 0) + ehElevation;
           const ehDelta = ehTarget - eh.headGroup.rotation.x;
           const ehMaxStep = (maxPanTiltSpeed * Math.PI / 180) * dt;
