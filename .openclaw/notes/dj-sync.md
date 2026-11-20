@@ -67,10 +67,63 @@ ne tournerait pas au double du tempo du DJ.
 
 ## Tests
 
-`src/__tests__/master-clock-sync.test.ts` (23 tests) : phase externe,
+`src/__tests__/master-clock-sync.test.ts` (24 tests) : phase externe,
 correction minimale (pas de saut de mesure), multiplicateur (dont ×2 non
 tronqué), régression du bouton Link, phase du `MidiManager` (0xF8 × 24),
 quantification des steps, bascule libre → verrouillé (pas de double moteur),
-ancrage de l'autoloop.
+re-verrouillage automatique d'un chaser déjà en cours, ancrage de l'autoloop.
 
 Commande : `npm run check` (tsc ×3 + vitest).
+
+## Procédure VirtualDJ (vérifiée sur le manuel officiel)
+
+Manuel VirtualDJ → Settings → **Controllers** → section **MIDI CLOCK OUTPUT** :
+
+> « VirtualDJ's Master Tempo can be sent to other applications such as
+> Lighting or Digital Audio Workstations that accept a Midi Clock Input.
+> **Right-click any connected controller in the device window to assign it as
+> the Midi Clock Output.** Any defined Midi device can be used and will send
+> VirtualDJ's current master tempo to the other application. »
+
+Traduction opérationnelle :
+1. Réglages → onglet **Controllers**.
+2. **Clic droit** sur un périphérique MIDI dans la fenêtre des périphériques
+   → **MIDI Clock Output** (l'icône de connexion du périphérique propose la
+   même option : « reconnect / rescan / Midi Clock Output / Midi to VST »).
+3. Choisir le port de destination → VirtualDJ y envoie son **tempo master**.
+
+⚠️ **Le piège n°1 :** pour envoyer l'horloge à **un autre logiciel sur le même
+PC**, il faut un **port MIDI virtuel** (loopMIDI, MIDI-OX, LoopBe). Sans ça,
+VirtualDJ écrit sur la sortie MIDI **physique** d'un contrôleur, que LM ne peut
+pas lire. (Source : forum VirtualDJ — « If you wish to send the signal to
+other software then you'll also need a "virtual MIDI port" such as LoopBe » ;
+DMXDesktop recommande aussi loopMIDI / MIDI-OX.)
+
+Mode historique (VDJ 8) : valeur de registre `SendMidiClockTo` via le
+« VDJ registry tool » ; la valeur `- all -` envoie l'horloge à tous les
+périphériques MIDI. À garder en tête si le clic droit n'apparaît pas.
+
+⚠️ **Le piège n°2 :** LM n'écoute que le **flux entrant**. Choisir un port
+« Sortie seule » → LM refuse la connexion (« Échec de la connexion au
+périphérique MIDI »). Il faut le port « Entrée » (ou « Entrée/Sortie »).
+
+## Procédure Light Maestro (écrans vérifiés dans le code)
+
+1. Onglet **Performance** (barre du haut) → carte **Mappage MIDI** → encart
+   **Périphériques MIDI**.
+2. Chaque port est listé avec son type (**Entrée** / **Sortie** /
+   **Entrée/Sortie**) et un bouton **Connecter** (puis **Déconnecter**).
+3. Connecter le port **Entrée** qui correspond à la sortie MIDI du logiciel DJ.
+4. Vérification dans le bandeau **Clock** (haut de l'app, toujours visible) :
+   - le badge de source passe de `manual` à **`midi`** ;
+   - le BPM affiché = tempo master reçu ;
+   - le libellé **« Verrouillé sur la phase du DJ »** apparaît ;
+   - la LED de temps pulse sur le beat.
+5. Les boutons **½ / ×1 / ×2** font tourner le rig à moitié ou au double du
+   tempo reçu.
+6. Un chaser lancé **avant** l'arrivée du clock se re-verrouille tout seul
+   quand le DJ démarre (`midiRelockRunningChasers`) — il re-entre sur la
+   prochaine frontière de temps.
+
+Aucun réglage « activer l'horloge MIDI » n'existe dans LM : l'horloge est
+écouteée en permanence sur le port connecté.
